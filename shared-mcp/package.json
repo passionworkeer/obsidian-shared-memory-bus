@@ -1,0 +1,10 @@
+{
+  "name": "obsidian-shared-memory-bus-mcp",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@bitbonsai/mcpvault": "^0.11.0",
+    "@modelcontextprotocol/sdk": "^1.18.0",
+    "sqlite3": "^5.1.7"
+  }
+}
