@@ -44,9 +44,11 @@ function Resolve-ObsidianVaultRoot {
         }
     }
 
-    $fallback = Join-Path $env:USERPROFILE "Documents\Obsidian Vault"
-    if (Test-Path -LiteralPath $fallback -PathType Container) {
-        return (Get-Item -LiteralPath $fallback).FullName
+    $desktopFallback = Join-Path ([Environment]::GetFolderPath("Desktop")) "Obsidian Vault"
+    foreach ($fallback in @($desktopFallback, (Join-Path $env:USERPROFILE "Documents\Obsidian Vault"))) {
+        if (Test-Path -LiteralPath $fallback -PathType Container) {
+            return (Get-Item -LiteralPath $fallback).FullName
+        }
     }
 
     throw "No Obsidian vault directory found."
