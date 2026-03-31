@@ -33,6 +33,28 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
 8. Generates initial shared-memory artifacts and MCP config snippets
 
 ## After Install
+Start the shared MCP stack:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\shared-mcp\start-default-shared-mcp.ps1
+```
+
+That default starter brings up:
+- `context7`
+- `fetch`
+- `time`
+- `sequential-thinking`
+- `obsidian`
+- `memory`
+- `playwright`
+- `MiniMax` when its environment variables are configured
+
+If you want a narrower shared set and prefer to leave Playwright out, start an explicit subset instead:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\shared-mcp\start-shared-mcp.ps1 -Only context7,fetch,time,sequential-thinking,obsidian,memory
+```
+
 Register a client:
 
 ```powershell
@@ -85,4 +107,5 @@ Make sure `minimax-coding-plan-mcp.exe` is available on `PATH` before enabling t
 ## Notes
 - The default dense retrieval backend is offline `hashing-v1`
 - Remote embeddings are optional and should be tested with the probe and benchmark scripts first
-- `playwright` and `pencil` are intentionally not part of the default shared set
+- `pencil` stays isolated because it is tied to desktop UI state
+- `playwright` is shared by default in the starter script because it is usually the largest source of duplicated per-agent MCP processes, but you can omit it by starting an explicit subset

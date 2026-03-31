@@ -85,10 +85,13 @@ def resolve_vault_root() -> str:
             except Exception:
                 pass
 
-    fallback = os.path.join(os.path.expanduser("~"), "Documents", "Obsidian Vault")
-    if os.path.isdir(fallback):
-        return fallback
-    return fallback
+    for fallback in (
+        os.path.join(os.path.expanduser("~"), "Desktop", "Obsidian Vault"),
+        os.path.join(os.path.expanduser("~"), "Documents", "Obsidian Vault"),
+    ):
+        if os.path.isdir(fallback):
+            return fallback
+    return os.path.join(os.path.expanduser("~"), "Documents", "Obsidian Vault")
 
 
 VAULT_ROOT = resolve_vault_root()
