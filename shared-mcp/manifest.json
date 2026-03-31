@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "defaults": {
+    "host": "127.0.0.1",
+    "basePort": 9330,
+    "path": "/mcp",
+    "healthPath": "/healthz"
+  },
+  "servers": [
+    {
+      "id": "context7",
+      "displayName": "Context7",
+      "mode": "shared",
+      "port": 9331,
+      "stdioCommand": "cmd /c npx -y @upstash/context7-mcp",
+      "notes": "Stateless documentation/code search MCP. Strong candidate for one shared instance."
+    },
+    {
+      "id": "fetch",
+      "displayName": "Fetch",
+      "mode": "shared",
+      "port": 9332,
+      "stdioCommand": "uvx mcp-server-fetch",
+      "notes": "Stateless fetch MCP. Safe to centralize."
+    },
+    {
+      "id": "time",
+      "displayName": "Time",
+      "mode": "shared",
+      "port": 9333,
+      "stdioCommand": "uvx mcp-server-time",
+      "notes": "Stateless utility MCP. Safe to centralize."
+    },
+    {
+      "id": "sequential-thinking",
+      "displayName": "Sequential Thinking",
+      "mode": "shared",
+      "port": 9334,
+      "stdioCommand": "cmd /c npx -y @modelcontextprotocol/server-sequential-thinking",
+      "notes": "Mostly stateless reasoning helper. Safe to centralize."
+    },
+    {
+      "id": "obsidian",
+      "displayName": "Obsidian",
+      "mode": "shared",
+      "port": 9335,
+      "stdioCommand": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"%USERPROFILE%\\.ai-memory\\run-obsidian-mcp.ps1\"",
+      "notes": "Already points at one canonical vault. Shared mode avoids duplicated launch cost."
+    },
+    {
+      "id": "MiniMax",
+      "displayName": "MiniMax Coding Plan",
+      "mode": "shared",
+      "port": 9336,
+      "stdioCommand": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"%USERPROFILE%\\.ai-memory\\run-minimax-mcp.ps1\"",
+      "notes": "Optional shared MiniMax MCP. Requires MINIMAX_API_KEY and an installed minimax-coding-plan-mcp executable, or set MINIMAX_MCP_COMMAND explicitly."
+    },
+    {
+      "id": "memory",
+      "displayName": "Memory",
+      "mode": "shared",
+      "port": 9338,
+      "stdioCommand": "cmd /c node --experimental-default-type=module \"%USERPROFILE%\\.ai-memory\\shared-mcp\\omni-memory-server.js\"",
+      "notes": "Unified shared memory interface over canonical Obsidian structured memory with bm25/dense/hybrid retrieval, embeddings rebuild, claude-mem compatibility, and OpenClaw blackboard tools."
+    },
+    {
+      "id": "playwright",
+      "displayName": "Playwright",
+      "mode": "isolated",
+      "notes": "Uses playwright-stdio-proxy.js which bridges stdio to HTTP/SSE. Requires Playwright MCP HTTP server running on port 9337 first: npx @playwright/mcp --port 9337 --headless --allowed-origins * --allow-unrestricted-file-access --shared-browser-context"
+    },
+    {
+      "id": "pencil",
+      "displayName": "Pencil",
+      "mode": "isolated",
+      "notes": "Desktop design app state is UI-bound and should stay isolated per client."
+    }
+  ]
+}
