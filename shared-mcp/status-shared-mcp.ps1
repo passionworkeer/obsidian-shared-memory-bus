@@ -47,6 +47,87 @@ function Test-Health {
     }
 }
 
+function Test-McpInitialize {
+    param([string]$Url)
+
+    if ([string]::IsNullOrWhiteSpace($Url)) {
+        return $false
+    }
+
+    $payload = @{
+        jsonrpc = "2.0"
+        id = "health-check"
+        method = "initialize"
+        params = @{
+            protocolVersion = "2024-11-05"
+            capabilities = @{
+                roots = @{
+                    listChanged = $true
+                }
+                sampling = @{}
+            }
+            clientInfo = @{
+                name = "shared-mcp-health"
+                version = "1.0.0"
+            }
+        }
+    } | ConvertTo-Json -Depth 8 -Compress
+
+    try {
+        $response = Invoke-WebRequest -Uri $Url -Method Post -TimeoutSec 3 -ContentType "application/json" -Headers @{ Accept = "application/json, text/event-stream" } -Body $payload -UseBasicParsing
+        return $response.StatusCode -ge 200 -and $response.StatusCode -lt 300
+    } catch {
+        return $false
+    }
+}
+
+function Get-ServerUrl {
+    param($Server)
+
+    $path = if ($Server.PSObject.Properties.Name -contains "path" -and -not [string]::IsNullOrWhiteSpace([string]$Server.path)) {
+        [string]$Server.path
+    } else {
+        [string]$manifest.defaults.path
+    }
+
+    return "http://{0}:{1}{2}" -f $manifest.defaults.host, [int]$Server.port, $path
+}
+
+function Get-ServerHealthUrl {
+    param($Server)
+
+    $path = if ($Server.PSObject.Properties.Name -contains "healthPath" -and -not [string]::IsNullOrWhiteSpace([string]$Server.healthPath)) {
+        [string]$Server.healthPath
+    } else {
+        [string]$manifest.defaults.healthPath
+    }
+
+    return "http://{0}:{1}{2}" -f $manifest.defaults.host, [int]$Server.port, $path
+}
+
+function Test-ServerReady {
+    param(
+        $Server,
+        [string]$Url,
+        [string]$HealthUrl
+    )
+
+    $probeType = if ($Server.PSObject.Properties.Name -contains "probeType") {
+        [string]$Server.probeType
+    } else {
+        "http-get"
+    }
+
+    switch ($probeType) {
+        "mcp-initialize" {
+            return Test-McpInitialize -Url $Url
+        }
+        default {
+            return Test-Health -Url $HealthUrl
+        }
+    }
+}
+
 $manifest = Get-Content -Raw -LiteralPath $manifestPath -Encoding utf8 | ConvertFrom-Json
 $state = @{}
 if (Test-Path -LiteralPath $statePath) {
@@ -79,10 +160,10 @@ foreach ($server in @($manifest.servers)) {
     $healthUrl = if ($record -and $record.ContainsKey("healthUrl")) { [string]$record["healthUrl"] } else { $null }
     if ($server.PSObject.Properties.Name -contains "port") {
         if (-not $url) {
-            $url = "http://{0}:{1}{2}" -f $manifest.defaults.host, [int]$server.port, $manifest.defaults.path
+            $url = Get-ServerUrl -Server $server
         }
         if (-not $healthUrl) {
-            $healthUrl = "http://{0}:{1}{2}" -f $manifest.defaults.host, [int]$server.port, $manifest.defaults.healthPath
+            $healthUrl = Get-ServerHealthUrl -Server $server
         }
         if (-not $alive) {
             $listenerPid = Get-ListenerProcessId -Port ([int]$server.port)
@@ -92,7 +173,7 @@ foreach ($server in @($manifest.servers)) {
             }
         }
         if ($alive -and $healthUrl) {
-            $alive = Test-Health -Url $healthUrl
+            $alive = Test-ServerReady -Server $server -Url $url -HealthUrl $healthUrl
         }
     }
 

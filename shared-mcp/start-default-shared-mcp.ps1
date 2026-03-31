@@ -14,7 +14,8 @@ $defaultServers = @(
     "time",
     "sequential-thinking",
     "obsidian",
-    "memory"
+    "memory",
+    "playwright"
 )
 
 $minimaxApiKey = $env:MINIMAX_API_KEY
