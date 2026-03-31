@@ -49,4 +49,9 @@
 - `docs/MCP-DEDUP.md`
 - `docs/ARCHITECTURE.md`
 - `docs/FILES.md`
+- `docs/TROUBLESHOOTING.md`
 - `docs/SECURITY.md`
+
+## Repo Metadata
+- `LICENSE`
+- `.gitignore`
