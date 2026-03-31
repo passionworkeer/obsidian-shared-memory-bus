@@ -1,7 +1,11 @@
+node_modules/
 shared-mcp/node_modules/
 shared-mcp/logs/
 shared-mcp/generated/
 shared-mcp/state.json
+__pycache__/
+*.pyc
+.venv/
 cache/
 reports/
 *.bak.*

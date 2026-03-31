@@ -88,6 +88,9 @@ def resolve_vault_root() -> Path:
             except Exception:
                 pass
 
+    desktop_vault = Path.home() / "Desktop" / "Obsidian Vault"
+    if desktop_vault.is_dir():
+        return desktop_vault
     return Path.home() / "Documents" / "Obsidian Vault"
 
 
