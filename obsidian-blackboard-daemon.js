@@ -13,6 +13,15 @@ const VAULT_ROOT =
 const DB_PATH =
   process.env.OPENCLAW_BLACKBOARD_DB || path.join(OPENCLAW_HOME, 'workspace', 'ai-shrimp', 'blackboard', 'tasks.db');
 const MD_PATH = path.join(VAULT_ROOT, '02-KB', 'WORKING.md');
+
+// Uncaught exception handlers — crash loudly with useful log
+process.on('uncaughtException', (err) => {
+    console.error('[blackboard-daemon] uncaughtException:', err.message);
+    process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+    console.error('[blackboard-daemon] unhandledRejection:', reason);
+});
 const START_TAG = '<!-- OPENCLAW-BLACKBOARD:START -->';
 const END_TAG = '<!-- OPENCLAW-BLACKBOARD:END -->';
 
