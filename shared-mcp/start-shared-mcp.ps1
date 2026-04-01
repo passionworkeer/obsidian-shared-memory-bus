@@ -26,7 +26,8 @@ function Read-State {
     }
 
     try {
-        $parsed = Get-Content -Raw -LiteralPath $statePath -Encoding utf8 | ConvertFrom-Json
+        $content = Get-Content -Raw -LiteralPath $statePath -Encoding UTF8
+        $parsed = [System.Text.Json.JsonSerializer]::Parse($content)
         $map = @{}
         foreach ($property in @($parsed.PSObject.Properties)) {
             $entry = @{}
@@ -37,14 +38,23 @@ function Read-State {
         }
         return $map
     } catch {
+        # Backup corrupted state and return empty so the script starts fresh
+        # instead of silently skipping servers and allowing duplicate MCP servers
+        $backup = "$statePath.corrupt.$(Get-Date -Format 'yyyyMMddHHmmss')"
+        try { Move-Item -LiteralPath $statePath -Destination $backup -Force } catch {}
+        Write-Warning "[shared-mcp] state.json was corrupt, backed up to $backup"
         return @{}
     }
 }
 
 function Write-State {
     param([Parameter(Mandatory = $true)][hashtable]$State)
+    # Atomic write: write to temp file first, then rename.
+    # Prevents corruption if the script crashes mid-write.
+    $tempPath = "$statePath.tmp"
     $json = $State | ConvertTo-Json -Depth 8
-    [System.IO.File]::WriteAllText($statePath, $json, (New-Object System.Text.UTF8Encoding($false)))
+    [System.IO.File]::WriteAllText($tempPath, $json, (New-Object System.Text.UTF8Encoding($false)))
+    Move-Item -LiteralPath $tempPath -Destination $statePath -Force
 }
 
 function Test-ProcessAlive {
@@ -137,6 +147,9 @@ function Test-Health {
     }
 }
 
+# MCP protocol version: "2024-11-05"
+# Hardcoded in 3 places: manifest.json, start-shared-mcp.ps1 (here + line ~400), singleton-stdio-mcp-proxy.mjs.
+# Must update all 4 files together when the MCP protocol version changes.
 function Test-McpInitialize {
     param(
         [string]$Url,
@@ -387,6 +400,7 @@ try {
 
             $encodedCommand = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($resolvedCommand))
             $encodedEnv = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes((($resolvedEnv | ConvertTo-Json -Compress).Trim())))
+            # MCP protocol version — see comment above Test-McpInitialize for the full list of hardcoded locations.
             $argumentList = @(
                 $proxyScriptPath,
                 "--server-id", [string]$server.id,
