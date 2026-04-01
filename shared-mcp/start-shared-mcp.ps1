@@ -137,6 +137,91 @@ function Test-Health {
     }
 }
 
+function Test-McpInitialize {
+    param(
+        [string]$Url,
+        [int]$TimeoutSeconds = 5
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Url)) {
+        return $false
+    }
+
+    $payload = @{
+        jsonrpc = "2.0"
+        id = "health-check"
+        method = "initialize"
+        params = @{
+            protocolVersion = "2024-11-05"
+            capabilities = @{
+                roots = @{
+                    listChanged = $true
+                }
+                sampling = @{}
+            }
+            clientInfo = @{
+                name = "shared-mcp-health"
+                version = "1.0.0"
+            }
+        }
+    } | ConvertTo-Json -Depth 8 -Compress
+
+    try {
+        $response = Invoke-WebRequest -Uri $Url -Method Post -TimeoutSec $TimeoutSeconds -ContentType "application/json" -Headers @{ Accept = "application/json, text/event-stream" } -Body $payload -UseBasicParsing
+        return $response.StatusCode -ge 200 -and $response.StatusCode -lt 300
+    } catch {
+        return $false
+    }
+}
+
+function Get-ServerUrl {
+    param($Server)
+
+    $path = if ($Server.PSObject.Properties.Name -contains "path" -and -not [string]::IsNullOrWhiteSpace([string]$Server.path)) {
+        [string]$Server.path
+    } else {
+        [string]$manifest.defaults.path
+    }
+
+    return "http://{0}:{1}{2}" -f $manifest.defaults.host, [int]$Server.port, $path
+}
+
+function Get-ServerHealthUrl {
+    param($Server)
+
+    $path = if ($Server.PSObject.Properties.Name -contains "healthPath" -and -not [string]::IsNullOrWhiteSpace([string]$Server.healthPath)) {
+        [string]$Server.healthPath
+    } else {
+        [string]$manifest.defaults.healthPath
+    }
+
+    return "http://{0}:{1}{2}" -f $manifest.defaults.host, [int]$Server.port, $path
+}
+
+function Test-ServerReady {
+    param(
+        $Server,
+        [string]$Url,
+        [string]$HealthUrl,
+        [int]$TimeoutSeconds = 5
+    )
+
+    $probeType = if ($Server.PSObject.Properties.Name -contains "probeType") {
+        [string]$Server.probeType
+    } else {
+        "http-get"
+    }
+
+    switch ($probeType) {
+        "mcp-initialize" {
+            return Test-McpInitialize -Url $Url -TimeoutSeconds $TimeoutSeconds
+        }
+        default {
+            return Test-Health -Url $HealthUrl -TimeoutSeconds $TimeoutSeconds
+        }
+    }
+}
+
 function Resolve-StdioCommand {
     param($Server)
 
@@ -187,6 +272,21 @@ function Resolve-NodeExecutable {
     throw "Unable to find node.exe in PATH."
 }
 
+function Start-ManagedHttpProcess {
+    param(
+        [Parameter(Mandatory = $true)][string]$Command,
+        [Parameter(Mandatory = $true)][string]$StdoutPath,
+        [Parameter(Mandatory = $true)][string]$StderrPath
+    )
+
+    return Start-Process -FilePath "cmd.exe" `
+        -ArgumentList @("/d", "/s", "/c", $Command) `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput $StdoutPath `
+        -RedirectStandardError $StderrPath `
+        -PassThru
+}
+
 Ensure-Directory -Path $logRoot
 $manifest = Get-Content -Raw -LiteralPath $manifestPath -Encoding utf8 | ConvertFrom-Json
 $nodeExecutable = Resolve-NodeExecutable
@@ -204,16 +304,17 @@ try {
         if ($server.mode -eq "isolated") {
             continue
         }
-        if ($server.mode -eq "optional" -and -not $IncludeOptional) {
+        $isExplicitlyRequested = $requested.Count -gt 0 -and $requested -contains [string]$server.id
+        if ($server.mode -eq "optional" -and -not $IncludeOptional -and -not $isExplicitlyRequested) {
             continue
         }
-        if ($requested.Count -gt 0 -and $requested -notcontains [string]$server.id) {
+        if ($requested.Count -gt 0 -and -not $isExplicitlyRequested) {
             continue
         }
 
         $port = [int]$server.port
-        $url = "http://{0}:{1}{2}" -f $manifest.defaults.host, $port, $manifest.defaults.path
-        $healthUrl = "http://{0}:{1}{2}" -f $manifest.defaults.host, $port, $manifest.defaults.healthPath
+        $url = Get-ServerUrl -Server $server
+        $healthUrl = Get-ServerHealthUrl -Server $server
         $existing = $state[[string]$server.id]
         $existingPid = 0
         if ($existing -and $existing.ContainsKey("pid")) {
@@ -233,7 +334,7 @@ try {
         }
 
         if ($existing -and -not $ForceRestart) {
-            if ((Test-ProcessAlive -ProcessId $existingPid) -and (Test-Health -Url $healthUrl)) {
+            if ((Test-ProcessAlive -ProcessId $existingPid) -and (Test-ServerReady -Server $server -Url $url -HealthUrl $healthUrl)) {
                 $results.Add([pscustomobject]@{
                     id = [string]$server.id
                     status = "already-running"
@@ -244,7 +345,7 @@ try {
             }
         }
 
-        if ($listenerPid -gt 0 -and (Test-Health -Url $healthUrl)) {
+        if ($listenerPid -gt 0 -and (Test-ServerReady -Server $server -Url $url -HealthUrl $healthUrl)) {
             $state[[string]$server.id] = @{
                 id = [string]$server.id
                 pid = $listenerPid
@@ -266,43 +367,49 @@ try {
             continue
         }
 
-        $resolvedCommand = Resolve-StdioCommand -Server $server
-        $resolvedEnv = Resolve-StdioEnvironment -Server $server
-        if ([string]$server.id -eq "MiniMax" -and (-not $resolvedEnv.ContainsKey("MINIMAX_API_HOST") -or -not $resolvedEnv.ContainsKey("MINIMAX_API_KEY"))) {
-            $results.Add([pscustomobject]@{
-                id = [string]$server.id
-                status = "skipped"
-                reason = "Set MINIMAX_API_HOST and MINIMAX_API_KEY in your user or machine environment before starting this server."
-            }) | Out-Null
-            continue
-        }
-
         $stdoutPath = Join-Path $logRoot ("{0}.out.log" -f $server.id)
         $stderrPath = Join-Path $logRoot ("{0}.err.log" -f $server.id)
-        $encodedCommand = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($resolvedCommand))
-        $encodedEnv = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes((($resolvedEnv | ConvertTo-Json -Compress).Trim())))
-        $argumentList = @(
-            $proxyScriptPath,
-            "--server-id", [string]$server.id,
-            "--port", [string]$port,
-            "--path", [string]$manifest.defaults.path,
-            "--health-path", [string]$manifest.defaults.healthPath,
-            "--protocol-version", "2024-11-05",
-            "--stdio-command-b64", $encodedCommand,
-            "--env-json-b64", $encodedEnv
-        )
+        $process = $null
 
-        $process = Start-Process -FilePath $nodeExecutable `
-            -ArgumentList $argumentList `
-            -WindowStyle Hidden `
-            -RedirectStandardOutput $stdoutPath `
-            -RedirectStandardError $stderrPath `
-            -PassThru
+        if ($server.PSObject.Properties.Name -contains "launchCommand" -and -not [string]::IsNullOrWhiteSpace([string]$server.launchCommand)) {
+            $process = Start-ManagedHttpProcess -Command ([string]$server.launchCommand) -StdoutPath $stdoutPath -StderrPath $stderrPath
+        } else {
+            $resolvedCommand = Resolve-StdioCommand -Server $server
+            $resolvedEnv = Resolve-StdioEnvironment -Server $server
+            if ([string]$server.id -eq "MiniMax" -and (-not $resolvedEnv.ContainsKey("MINIMAX_API_HOST") -or -not $resolvedEnv.ContainsKey("MINIMAX_API_KEY"))) {
+                $results.Add([pscustomobject]@{
+                    id = [string]$server.id
+                    status = "skipped"
+                    reason = "Set MINIMAX_API_HOST and MINIMAX_API_KEY in your user or machine environment before starting this server."
+                }) | Out-Null
+                continue
+            }
+
+            $encodedCommand = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($resolvedCommand))
+            $encodedEnv = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes((($resolvedEnv | ConvertTo-Json -Compress).Trim())))
+            $argumentList = @(
+                $proxyScriptPath,
+                "--server-id", [string]$server.id,
+                "--port", [string]$port,
+                "--path", [string]$manifest.defaults.path,
+                "--health-path", [string]$manifest.defaults.healthPath,
+                "--protocol-version", "2024-11-05",
+                "--stdio-command-b64", $encodedCommand,
+                "--env-json-b64", $encodedEnv
+            )
+
+            $process = Start-Process -FilePath $nodeExecutable `
+                -ArgumentList $argumentList `
+                -WindowStyle Hidden `
+                -RedirectStandardOutput $stdoutPath `
+                -RedirectStandardError $stderrPath `
+                -PassThru
+        }
 
         $healthy = $false
         for ($attempt = 0; $attempt -lt 30; $attempt++) {
             Start-Sleep -Seconds 1
-            if (Test-Health -Url $healthUrl -TimeoutSeconds 3) {
+            if (Test-ServerReady -Server $server -Url $url -HealthUrl $healthUrl -TimeoutSeconds 3) {
                 $healthy = $true
                 break
             }

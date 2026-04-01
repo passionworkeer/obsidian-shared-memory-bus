@@ -8,6 +8,7 @@ This repository packages the architecture, runtime scripts, shared MCP server, o
 - One canonical long-term memory store in Obsidian
 - One shared `memory` MCP service instead of per-agent local memory processes
 - Shared `obsidian` MCP for direct note reads and writes
+- One shared `playwright` MCP backend so multi-agent browser tasks stop spawning one local Playwright server per client
 - Background watchdog sync from tool-native memory into structured shared memory
 - Hybrid retrieval with `bm25`, offline dense `hashing-v1`, and optional remote embeddings
 - Pressure-test and verification tooling for multi-agent setups
@@ -54,18 +55,20 @@ This repository packages the architecture, runtime scripts, shared MCP server, o
   - `package.json`
 
 ## Shared MCP Defaults
-Default shared services:
+Started by `shared-mcp/start-default-shared-mcp.ps1`:
 - `context7`
 - `fetch`
 - `time`
 - `sequential-thinking`
 - `obsidian`
 - `memory`
+- `playwright`
 - `MiniMax` only when `MINIMAX_API_HOST` and `MINIMAX_API_KEY` are present
 
-Keep isolated by default:
-- `playwright`
+Still isolated:
 - `pencil`
+
+The manifest keeps `playwright` marked as an optional server so advanced users can opt out or manage it separately, but the default starter opts into it because duplicated local Playwright MCP launches are usually the biggest process multiplier in multi-agent workflows.
 
 ## Install
 ```powershell
