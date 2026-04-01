@@ -15,9 +15,15 @@ import math
 import os
 import re
 import sys
+import time as time_module
 import urllib.error
 import urllib.request
 from typing import Dict, Iterable, List, Optional, Tuple
+
+# In-memory cache for the embeddings index with 30-second TTL.
+# Avoids re-reading ~50k lines from index.jsonl on every search.
+_INDEX_CACHE = {"data": None, "loaded_at": 0.0}
+_INDEX_CACHE_TTL = 30  # seconds
 
 try:
     from rank_bm25 import BM25Okapi  # type: ignore
@@ -91,7 +97,13 @@ def resolve_vault_root() -> str:
     ):
         if os.path.isdir(fallback):
             return fallback
-    return os.path.join(os.path.expanduser("~"), "Documents", "Obsidian Vault")
+    raise RuntimeError(
+        "no-obsidian-vault: Tried ["
+        + os.path.join(os.path.expanduser("~"), "Desktop", "Obsidian Vault")
+        + ", "
+        + os.path.join(os.path.expanduser("~"), "Documents", "Obsidian Vault")
+        + "]. Set AI_MEMORY_OBSIDIAN_VAULT or OBSIDIAN_VAULT_ROOT to your vault path."
+    )
 
 
 VAULT_ROOT = resolve_vault_root()
@@ -153,6 +165,14 @@ def tokenize(text: str) -> List[str]:
         add(piece)
     return tokens
 
+
+# =============================================================================
+# NOTE: This hashing logic (FNV-1a32 + buildHashFeatures) is duplicated in:
+#   - generate-embeddings.js (JS version, identical logic)
+#   - singleton-stdio-mcp-proxy.mjs (may also use it)
+# When modifying this, sync all copies.
+# See: https://github.com/.../issues/TWIN-BUG
+# =============================================================================
 
 def fnv1a32(value: str) -> int:
     hash_value = 0x811C9DC5
@@ -267,6 +287,20 @@ def load_entries() -> List[dict]:
 
 
 def load_embeddings_index() -> Dict[str, dict]:
+    """Load embeddings index with 30-second TTL cache to avoid repeated I/O."""
+    now = time_module.time()
+    if (_INDEX_CACHE["data"] is not None
+            and (now - _INDEX_CACHE["loaded_at"]) < _INDEX_CACHE_TTL):
+        return _INDEX_CACHE["data"]
+
+    data = _load_embeddings_index_uncached()
+    _INDEX_CACHE["data"] = data
+    _INDEX_CACHE["loaded_at"] = now
+    return data
+
+
+def _load_embeddings_index_uncached() -> Dict[str, dict]:
+    """Uncached implementation — use load_embeddings_index() instead."""
     records: Dict[str, dict] = {}
     if not os.path.isfile(EMBEDDINGS_INDEX):
         return records

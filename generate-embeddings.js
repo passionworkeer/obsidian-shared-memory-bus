@@ -43,7 +43,14 @@ function resolveVaultRoot() {
     "E:/desktop/Obsidian Vault",
     path.join(USER_HOME, "Documents", "Obsidian Vault"),
   ];
-  return defaults.find((candidate) => fs.existsSync(candidate)) || defaults[0];
+  const found = defaults.find((candidate) => fs.existsSync(candidate));
+  if (!found) {
+    throw new Error(
+      `no-obsidian-vault: Tried [${defaults.join(", ")}]. ` +
+      `Set AI_MEMORY_OBSIDIAN_VAULT or OBSIDIAN_VAULT_ROOT to your vault path.`
+    );
+  }
+  return found;
 }
 
 const VAULT_ROOT = resolveVaultRoot();
@@ -102,6 +109,14 @@ function buildSearchText(entry) {
     ].join(" ")
   ).slice(0, 6000);
 }
+
+// =============================================================================
+// NOTE: This hashing logic (FNV-1a32 + buildHashFeatures) is duplicated in:
+//   - semantic-search.py (Python version, identical logic)
+//   - singleton-stdio-mcp-proxy.mjs (may also use it)
+// When modifying this, sync all copies.
+// See: https://github.com/.../issues/TWIN-BUG
+// =============================================================================
 
 function fnv1a32(input) {
   let hash = 0x811c9dc5;
@@ -214,8 +229,9 @@ function collectDocuments() {
         if (document) {
           documents.set(document.id, document);
         }
-      } catch {
+      } catch (err) {
         // Ignore malformed records during rebuild.
+        console.error(`[generate-embeddings] JSON parse error (skipping line): ${err.message}`);
       }
     }
   }
@@ -239,8 +255,9 @@ function loadExistingIndex() {
       if (record && record.id) {
         existing.set(record.id, record);
       }
-    } catch {
+    } catch (err) {
       // Ignore malformed lines and continue rebuilding.
+      console.error(`[generate-embeddings] JSON parse error in index load (skipping line): ${err.message}`);
     }
   }
 
