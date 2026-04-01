@@ -1,8 +1,25 @@
 # Obsidian Shared AI Memory Bus
 
-Portable Windows bundle for building a shared, Obsidian-backed memory layer across multiple AI tools such as Codex, Claude Code, OpenCode, Cursor, Copilot, Trae, and OpenClaw.
+Portable Windows-first bundle for building a local-first, Obsidian-backed shared memory layer across multiple AI tools such as Codex, Claude Code, OpenCode, Cursor, Copilot, Trae, and OpenClaw.
 
-This repository packages the architecture, runtime scripts, shared MCP server, onboarding helpers, verification tools, and optional embedding utilities used to run a cross-tool memory bus on one machine.
+This repository packages the architecture, runtime scripts, shared MCP services, onboarding helpers, verification tools, and optional embedding utilities used to run a cross-tool memory bus on one machine.
+
+## Project Status
+- Ready for real local use on Windows
+- Local-first by default, with optional remote embeddings
+- Best suited for one machine hosting many agents and tools
+- Public template-quality bundle, but still opinionated and evolving
+
+## What This Is
+- A reusable local memory bus template for multi-agent setups
+- A process-deduplicated shared MCP stack for safe-to-share services
+- A canonical Obsidian-backed memory layer with hybrid retrieval
+
+## What This Is Not
+- Not a hosted SaaS
+- Not a single merged super-context for every agent
+- Not a guarantee that every MCP should or can be shared
+- Not a replacement for backup or sync hygiene in your Obsidian vault
 
 ## What This Gives You
 - One canonical long-term memory store in Obsidian
@@ -13,6 +30,58 @@ This repository packages the architecture, runtime scripts, shared MCP server, o
 - Hybrid retrieval with `bm25`, offline dense `hashing-v1`, and optional remote embeddings
 - Pressure-test and verification tooling for multi-agent setups
 
+## Who This Is For
+- People running multiple local AI agents on one Windows machine
+- Setups where Obsidian should be the durable source of truth
+- Users who want shared retrieval without blindly sharing every tool process
+
+## Who This Is Not For
+- Fully managed cloud deployments
+- Zero-touch cross-device sync stacks with no local operator
+- Setups that need every desktop/UI-bound tool to be globally shared
+
+## System Overview
+```mermaid
+flowchart LR
+    subgraph Clients["AI Clients"]
+        Codex["Codex"]
+        Claude["Claude Code"]
+        OpenCode["OpenCode"]
+        Others["Cursor / Copilot / Trae / Others"]
+        OpenClaw["OpenClaw"]
+    end
+
+    subgraph Shared["Shared MCP Layer"]
+        Memory["memory :9338"]
+        Obsidian["obsidian :9335"]
+        Utils["context7 / fetch / time / sequential-thinking"]
+        Playwright["playwright :9337 (shared process, isolated sessions)"]
+    end
+
+    subgraph Runtime["Local Runtime"]
+        Watchdog["memory-watchdog.ps1"]
+        Bus["memory-bus.ps1"]
+        Search["bm25 + dense + hybrid retrieval"]
+    end
+
+    subgraph Vault["Canonical Store"]
+        ObsidianVault["Obsidian Vault"]
+        Structured["structured/*.jsonl"]
+        Inbox["tool inboxes / generated context"]
+    end
+
+    Clients --> Shared
+    Shared --> Search
+    Runtime --> Search
+    Watchdog --> Bus
+    Bus --> Structured
+    Bus --> Inbox
+    Search --> Structured
+    Obsidian --> ObsidianVault
+    Bus --> ObsidianVault
+    OpenClaw --> Structured
+```
+
 ## High-Level Flow
 1. Install the bundle into `%USERPROFILE%\.ai-memory`
 2. Point it at your Obsidian vault
@@ -20,6 +89,28 @@ This repository packages the architecture, runtime scripts, shared MCP server, o
 4. Wire clients to shared HTTP MCP endpoints
 5. Let the watchdog keep shared memory fresh
 6. Verify with pressure tests before heavy multi-agent use
+
+## Trust Boundaries
+- Shared:
+  `memory`, `obsidian`, `context7`, `fetch`, `time`, `sequential-thinking`
+- Shared process, but session-isolated:
+  `playwright`
+- Intentionally isolated:
+  `pencil` and other UI-bound desktop tools
+
+Shared MCP deduplicates processes. It does not merge all agent state into one conversation. Each client still has its own session lifecycle and tool calls.
+
+## Support Matrix
+| Target | Status | Notes |
+| --- | --- | --- |
+| Codex | First-class | Shared MCP and Obsidian workflow are validated |
+| Claude Code | First-class | Shared MCP and claude-mem bridge are validated |
+| OpenCode | First-class | Shared MCP and memory recall are validated |
+| OpenClaw | Supported | Synced through structured memory and blackboard bridge |
+| Cursor | Supported | MCP config wiring supported |
+| VS Code / GitHub Copilot | Supported | Config wiring and snapshot import supported |
+| Trae | Portable target | Use the new-agent integration guide |
+| Other MCP-capable agents | Portable target | Prefer the onboarding flow in `docs/NEW-AGENT-INTEGRATION.md` |
 
 ## Included
 - Core runtime:
@@ -70,6 +161,14 @@ Still isolated:
 
 The manifest keeps `playwright` marked as an optional server so advanced users can opt out or manage it separately, but the default starter opts into it because duplicated local Playwright MCP launches are usually the biggest process multiplier in multi-agent workflows.
 
+## Verification Story
+- Shared MCP services for `context7`, `fetch`, `time`, `sequential-thinking`, `obsidian`, `MiniMax`, and `memory` were validated on `9331-9336` and `9338`
+- The shared Playwright backend was validated on `9337` with real MCP `initialize`, `tools/list`, `browser_navigate`, and `browser_snapshot` calls
+- Multi-wave pressure tests passed with stable shared listener PIDs
+- Client integration checks were validated for Codex, Claude Code, OpenCode, Cursor, and VS Code/Copilot paths
+
+See `docs/VALIDATION.md` for the current test story and reproduction flow.
+
 ## Install
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
@@ -118,10 +217,22 @@ Use the included probe and benchmark scripts before doing any full reindex.
 - Machine-specific absolute paths are resolved dynamically at install or runtime
 - Before publishing a fork, rescan for accidental credentials in configs or reports
 
-See:
+## Docs
 - [`docs/INSTALL.md`](docs/INSTALL.md)
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- [`docs/DEPLOYMENT-MATRIX.md`](docs/DEPLOYMENT-MATRIX.md)
 - [`docs/FILES.md`](docs/FILES.md)
+- [`docs/FAQ.md`](docs/FAQ.md)
+- [`docs/NEW-AGENT-INTEGRATION.md`](docs/NEW-AGENT-INTEGRATION.md)
+- [`docs/OPERATIONS.md`](docs/OPERATIONS.md)
+- [`docs/ROADMAP.md`](docs/ROADMAP.md)
 - [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)
 - [`docs/SECURITY.md`](docs/SECURITY.md)
+- [`docs/VALIDATION.md`](docs/VALIDATION.md)
+
+## Community
+- [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
+- [`SECURITY.md`](SECURITY.md)
+- [`SUPPORT.md`](SUPPORT.md)
 - [`LICENSE`](LICENSE)
