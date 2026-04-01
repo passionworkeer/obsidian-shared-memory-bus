@@ -8,7 +8,7 @@
 
 ## v0.3 (Next Quarter — target: Q3 2026)
 - [ ] Shared retrieval core module (extract FNV/hash logic from JS+Python)
-- [ ] Add caching layer to semantic-search.py (30s TTL)
+- [ ] Add caching layer to `retrieval/semantic-search.py` (30s TTL)
 - [ ] Windows Service registration for watchdog
 - [ ] Retention policy for structured/*.jsonl
 
