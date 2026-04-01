@@ -225,6 +225,7 @@ Use the included probe and benchmark scripts before doing any full reindex.
 - [`docs/FAQ.md`](docs/FAQ.md)
 - [`docs/NEW-AGENT-INTEGRATION.md`](docs/NEW-AGENT-INTEGRATION.md)
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md)
+- [`docs/RELEASING.md`](docs/RELEASING.md)
 - [`docs/ROADMAP.md`](docs/ROADMAP.md)
 - [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)
 - [`docs/SECURITY.md`](docs/SECURITY.md)

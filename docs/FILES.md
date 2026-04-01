@@ -53,6 +53,7 @@
 - `docs/FAQ.md`
 - `docs/NEW-AGENT-INTEGRATION.md`
 - `docs/OPERATIONS.md`
+- `docs/RELEASING.md`
 - `docs/ROADMAP.md`
 - `docs/TROUBLESHOOTING.md`
 - `docs/SECURITY.md`
