@@ -19,8 +19,8 @@ Core canonical notes:
 2. Shared structured memory
    - JSONL records under `00-System/ai-memory/structured/`
 3. Retrieval layer
-   - `semantic-search.py`
-   - `generate-embeddings.js`
+   - `retrieval/semantic-search.py`
+   - `bus/generate-embeddings.js`
    - default offline dense backend: `hashing-v1`
    - optional OpenAI-compatible remote embeddings
 4. Shared MCP access layer
@@ -41,16 +41,16 @@ The architecture uses local shared HTTP for safe-to-share services and leaves st
 
 ## Runtime Roles
 
-### `memory-bus.ps1`
+### `bus/memory-bus.ps1`
 Builds and refreshes shared derived artifacts for onboarding, global context, imported snapshots, and inbox notes.
 
-### `memory-watchdog.ps1`
+### `bus/memory-watchdog.ps1`
 Runs in the background, watches key native sources, triggers syncs, and keeps the shared memory layer fresh.
 
-### `run-obsidian-mcp.ps1`
+### `ops/run-obsidian-mcp.ps1`
 Finds the active Obsidian vault and launches the Obsidian MCP server from the bundle-local or global `mcpvault` install.
 
-### `run-minimax-mcp.ps1`
+### `ops/run-minimax-mcp.ps1`
 Starts the optional MiniMax MCP using environment-provided secrets and either an auto-detected executable or `MINIMAX_MCP_COMMAND`.
 
 ### `shared-mcp/start-default-shared-mcp.ps1`

@@ -58,25 +58,25 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-mem
 Register a client:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\register-agent.ps1 -AgentName cursor -Preset cursor
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\bus\register-agent.ps1 -AgentName cursor -Preset cursor
 ```
 
 Wire supported local clients:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\install-client-integrations.ps1 -WorkspaceRoot <your-project-root>
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\ops\verify-integrations.ps1 -WorkspaceRoot <your-project-root>
 ```
 
 Verify the setup:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\ops\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
 ```
 
 Pressure test before trusting a heavy multi-agent workflow:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\run-shared-stack-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\ops\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks
 ```
 
 ## Optional Secrets
