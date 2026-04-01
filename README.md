@@ -59,8 +59,8 @@ flowchart LR
     end
 
     subgraph Runtime["Local Runtime"]
-        Watchdog["memory-watchdog.ps1"]
-        Bus["memory-bus.ps1"]
+        Watchdog["bus/memory-watchdog.ps1"]
+        Bus["bus/memory-bus.ps1"]
         Search["bm25 + dense + hybrid retrieval"]
     end
 
@@ -113,26 +113,28 @@ Shared MCP deduplicates processes. It does not merge all agent state into one co
 | Other MCP-capable agents | Portable target | Prefer the onboarding flow in `docs/NEW-AGENT-INTEGRATION.md` |
 
 ## Included
-- Core runtime:
-  - `memory-bus.ps1`
-  - `memory-watchdog.ps1`
-  - `run-minimax-mcp.ps1`
-  - `run-obsidian-mcp.ps1`
-  - `register-agent.ps1`
-  - `install-client-integrations.ps1`
-  - `sync-shared-skills.ps1`
-  - `verify-client-integrations.ps1`
-  - `run-shared-stack-pressure-test.ps1`
-- Shared memory indexing and retrieval:
-  - `generate-embeddings.js`
-  - `semantic-search.py`
-  - `semantic-search.js`
-  - `probe-embedding-models.py`
-  - `benchmark-embedding-backends.py`
-- Sync bridges:
-  - `sync-claudemem-to-obsidian.ps1`
-  - `sync-openclaw-to-obsidian.js`
-  - `obsidian-blackboard-daemon.js`
+- Core bus runtime (`bus/`):
+  - `bus/memory-bus.ps1`
+  - `bus/memory-watchdog.ps1`
+  - `bus/register-agent.ps1`
+  - `bus/generate-embeddings.js`
+- Operations (`ops/`):
+  - `ops/run-obsidian-mcp.ps1`
+  - `ops/run-minimax-mcp.ps1`
+  - `ops/verify-integrations.ps1`
+  - `ops/verify-client-integrations.ps1`
+  - `ops/sync-shared-skills.ps1`
+  - `ops/run-pressure-test.ps1`
+  - `ops/cleanup-inbox.ps1`
+  - `ops/repair-codex-runtime.ps1`
+  - `ops/sync-claudemem-to-obsidian.ps1`
+  - `ops/sync-openclaw-to-obsidian.js`
+  - `ops/obsidian-blackboard-daemon.js`
+- Retrieval and embeddings (`retrieval/`):
+  - `retrieval/semantic-search.py`
+  - `retrieval/semantic-search.js`
+  - `retrieval/probe-models.py`
+  - `retrieval/benchmark-backends.py`
 - Shared MCP runtime under `shared-mcp/`:
   - `omni-memory-server.js`
   - `manifest.json`
@@ -185,22 +187,22 @@ The installer writes `AI_MEMORY_ROOT` into your user environment so shared MCP c
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\shared-mcp\start-default-shared-mcp.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\ops\verify-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
 ```
 
 Then wire supported clients:
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\install-client-integrations.ps1 -WorkspaceRoot <your-project-root>
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\ops\verify-integrations.ps1 -WorkspaceRoot <your-project-root>
 ```
 
 Then verify:
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\ops\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
 ```
 
 Then pressure test:
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\run-shared-stack-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\ops\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks
 ```
 
 **What to expect**: The pressure test runs 5 waves of concurrent MCP health checks against all shared endpoints (9331-9338). "passed" means every wave returned the expected responses with no crashes or duplicate PIDs. If you see failures, see [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) or the operational FAQ in [`docs/FAQ.md`](docs/FAQ.md).
@@ -241,6 +243,6 @@ Use the included probe and benchmark scripts before doing any full reindex.
 ## Community
 - [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
-- [`SECURITY.md`](SECURITY.md)
+- [`docs/SECURITY.md`](docs/SECURITY.md)
 - [`SUPPORT.md`](SUPPORT.md)
 - [`LICENSE`](LICENSE)

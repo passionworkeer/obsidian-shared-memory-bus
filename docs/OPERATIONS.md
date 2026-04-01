@@ -26,24 +26,24 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-mem
 
 ## Regenerate Shared Derived Context
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\memory-bus.ps1 -Action Generate
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\bus\memory-bus.ps1 -Action Generate
 ```
 
 ## Rebuild Memory Embeddings
 Use this only when you intentionally want to refresh dense retrieval artifacts.
 
 ```powershell
-node $env:USERPROFILE\.ai-memory\generate-embeddings.js
+node $env:USERPROFILE\.ai-memory\bus\generate-embeddings.js
 ```
 
 ## Run Validation
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\ops\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
 ```
 
 ## Run Pressure Tests
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\run-shared-stack-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\ops\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks
 ```
 
 ## Logs And Runtime State

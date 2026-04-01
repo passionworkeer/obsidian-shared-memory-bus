@@ -41,7 +41,7 @@ You can, but do not confuse sync strategy with memory architecture. Keep one can
 ### The watchdog stopped running. Is my memory still fresh?
 No. Without the watchdog, structured memory stops updating. Agent sessions will still work, but cross-agent shared memory will become stale. To restart:
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\memory-watchdog.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\bus\memory-watchdog.ps1
 ```
 
 ### My embeddings fell back to "hashing-v1". What happened?
@@ -51,7 +51,7 @@ The system tried to use OpenAI-compatible embeddings but the API returned an err
 The watchdog polls on a schedule. Embeddings rebuild runs every 15 minutes by default. For immediate indexing, call `rebuild_memory_embeddings` tool manually.
 
 ### What happens if two agents write to the same note simultaneously?
-The system uses last-write-wins at the note level. Chokidar events from obsidian-blackboard-daemon.js will fire for each save. Under high concurrency, some writes may be lost. This is a known limitation - there is no conflict detection yet.
+The system uses last-write-wins at the note level. Chokidar events from `ops/obsidian-blackboard-daemon.js` will fire for each save. Under high concurrency, some writes may be lost. This is a known limitation - there is no conflict detection yet.
 
 ### How do I customize the MCP ports (9331-9338)?
 Currently ports are not configurable via env var. Edit `shared-mcp/manifest.json` directly to change port numbers in the URL fields. Note: changing ports requires updating all client MCP configs.
