@@ -55,6 +55,26 @@ Force a clean restart:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\shared-mcp\start-default-shared-mcp.ps1 -ForceRestart
 ```
 
+## Playwright Shows Failed In A Client `mcp list`
+
+This can be a false negative.
+
+Some clients do shallow transport checks that do not perfectly match the shared Playwright HTTP backend, even when real MCP calls still work. The shared runtime probes Playwright with an actual MCP `initialize` request on `http://127.0.0.1:9337/mcp`, which is the stronger health signal.
+
+Check shared status first:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\shared-mcp\status-shared-mcp.ps1
+```
+
+If needed, force-restart just the shared Playwright backend:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\shared-mcp\start-shared-mcp.ps1 -Only playwright -ForceRestart
+```
+
+Then verify with a real browser task instead of relying only on `mcp list`.
+
 ## Verify Before Heavy Multi-Agent Use
 
 Run:
@@ -68,6 +88,9 @@ Good signs:
 - one listener per shared port
 - stable PIDs across waves
 - `memory` and `obsidian` MCP endpoints stay healthy
+- `playwright` shows `running=true` in `status-shared-mcp.ps1`
+
+If Playwright is the only noisy line in a client CLI health report but real browser tasks still succeed, treat that as a client-side health-check quirk rather than a blocker.
 
 ## `npm audit` Shows Vulnerabilities
 

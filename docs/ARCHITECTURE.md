@@ -23,6 +23,7 @@ Core canonical notes:
    - optional OpenAI-compatible remote embeddings
 4. Shared MCP access layer
    - `shared-mcp/omni-memory-server.js`
+   - shared HTTP endpoints for `context7`, `fetch`, `time`, `sequential-thinking`, `obsidian`, `memory`, and the managed `playwright` backend
    - exposes `memory_status`, `search_shared_memory`, embeddings rebuild tools, claude-mem compatibility tools, and OpenClaw blackboard tools
 5. Client integration layer
    - Codex, Claude, OpenCode, Cursor, Copilot, Trae, OpenClaw
@@ -42,10 +43,13 @@ Finds the active Obsidian vault and launches the Obsidian MCP server from the bu
 Starts the optional MiniMax MCP using environment-provided secrets and either an auto-detected executable or `MINIMAX_MCP_COMMAND`.
 
 ### `shared-mcp/start-default-shared-mcp.ps1`
-Starts the safe shared MCP default set.
+Starts the default shared MCP set: `context7`, `fetch`, `time`, `sequential-thinking`, `obsidian`, `memory`, `playwright`, and `MiniMax` when its environment is configured.
 
 ### `shared-mcp/start-shared-mcp.ps1`
 Starts or adopts shared singleton MCP listeners from `shared-mcp/manifest.json`.
+
+### `shared-mcp/manifest.json`
+Describes which servers are shared, isolated, or optional. `playwright` stays marked as `optional` in the manifest so advanced users can opt out or run their own backend, but the default starter deliberately opts into it because it is usually the biggest per-agent process multiplier.
 
 ### `shared-mcp/omni-memory-server.js`
 The shared `memory` MCP server.
@@ -61,5 +65,6 @@ The default recommendation is `hybrid`.
 - Obsidian stays canonical
 - memory retrieval is shared over HTTP, not duplicated per agent
 - stateless MCPs are centralized
-- noisy or UI-bound MCPs stay isolated
+- Playwright can be centralized because one HTTP backend can still serve isolated MCP sessions and isolated browser profiles
+- only UI-bound desktop MCPs such as `pencil` stay isolated
 - watchdog plus structured sync keeps the cross-tool memory layer current
