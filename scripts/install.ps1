@@ -24,30 +24,21 @@ $resolvedTargetRoot = (Get-Item -LiteralPath $TargetRoot).FullName
 $env:AI_MEMORY_ROOT = $resolvedTargetRoot
 [Environment]::SetEnvironmentVariable("AI_MEMORY_ROOT", $resolvedTargetRoot, "User")
 
-$copyFiles = @(
-    "benchmark-embedding-backends.py",
-    "cleanup-inbox.ps1",
-    "generate-embeddings.js",
-    "install-client-integrations.ps1",
-    "memory-bus.ps1",
-    "memory-watchdog.ps1",
-    "obsidian-blackboard-daemon.js",
-    "probe-embedding-models.py",
-    "register-agent.ps1",
-    "repair-codex-runtime.ps1",
-    "run-minimax-mcp.ps1",
-    "run-obsidian-mcp.ps1",
-    "run-shared-stack-pressure-test.ps1",
-    "semantic-search.js",
-    "semantic-search.py",
-    "sync-claudemem-to-obsidian.ps1",
-    "sync-openclaw-to-obsidian.js",
-    "sync-shared-skills.ps1",
-    "verify-client-integrations.ps1"
-)
+# Copy from bundle subdirs → flat .ai-memory root
+$dirMaps = @{
+    "bus"       = @("*.ps1","*.js")
+    "ops"       = @("*.ps1","*.js")
+    "retrieval" = @("*.py","*.js","*.json")
+}
 
-foreach ($name in $copyFiles) {
-    Copy-Item -LiteralPath (Join-Path $sourceRoot $name) -Destination (Join-Path $TargetRoot $name) -Force
+foreach ($dir in $dirMaps.Keys) {
+    $srcDir = Join-Path $sourceRoot $dir
+    if (Test-Path -LiteralPath $srcDir -PathType Container) {
+        $files = Get-ChildItem -LiteralPath $srcDir -Include $dirMaps[$dir] -Recurse -File -ErrorAction SilentlyContinue
+        foreach ($file in $files) {
+            Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $TargetRoot $file.Name) -Force
+        }
+    }
 }
 
 $sharedMcpFiles = @(
