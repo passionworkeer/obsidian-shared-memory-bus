@@ -41,6 +41,9 @@ const encodedEnvJson = args.get('env-json-b64');
 const childExtraEnv = encodedEnvJson
   ? JSON.parse(Buffer.from(encodedEnvJson, 'base64').toString('utf8'))
   : {};
+// MCP protocol version: "2024-11-05"
+// Hardcoded in 4 places: manifest.json, start-shared-mcp.ps1 (2x), singleton-stdio-mcp-proxy.mjs (here).
+// Must update all 4 files together when the MCP protocol version changes.
 const defaultProtocolVersion = args.get('protocol-version') || '2024-11-05';
 const startupTimeoutMs = Number(args.get('startup-timeout-ms') || 30000);
 const requestTimeoutMs = Number(args.get('request-timeout-ms') || 120000);
@@ -60,6 +63,16 @@ let restartTimer = null;
 let nextRequestId = 1;
 
 const pendingRequests = new Map();
+
+// Uncaught exception handlers — crash loudly with useful log
+process.on('uncaughtException', (err) => {
+  logError(`uncaughtException: ${err.stack || err.message}`);
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  const message = reason instanceof Error ? reason.stack || reason.message : String(reason);
+  logError(`unhandledRejection: ${message}`);
+});
 
 function log(message) {
   console.log(`[shared-mcp:${serverId}] ${message}`);
@@ -138,6 +151,13 @@ function scheduleRestart(reason) {
 }
 
 function handleChildExit(code, signal) {
+  // Reject all pending requests with a clear error so callers know why
+  for (const [id, pending] of pendingRequests) {
+    clearTimeout(pending.timeout);
+    pending.reject(new Error(`child process exited with code ${code}, signal ${signal}`));
+    pendingRequests.delete(id);
+  }
+
   const reason = `child exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`;
   logError(reason);
   teardownChild(reason);
@@ -530,13 +550,3 @@ function shutdown(signal) {
 
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('uncaughtException', (error) => {
-  logError(`uncaught exception: ${error.stack || error.message}`);
-  shutdown('uncaughtException');
-});
-process.on('unhandledRejection', (reason) => {
-  const message =
-    reason instanceof Error ? reason.stack || reason.message : String(reason);
-  logError(`unhandled rejection: ${message}`);
-  shutdown('unhandledRejection');
-});
