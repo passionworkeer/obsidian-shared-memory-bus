@@ -171,7 +171,14 @@ function Get-WatchStamp {
 function Invoke-BusSync {
     param([Parameter(Mandatory = $true)][string]$Reason)
 
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $BusScript -Action SyncAll -Tool system -Project "watchdog" -Quiet 2>$null | Out-Null
+    try {
+        $syncOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $BusScript -Action SyncAll -Tool system -Project "watchdog" -Quiet 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "[watchdog] BusSync failed with exit code $LASTEXITCODE"
+        }
+    } catch {
+        Write-Warning "[watchdog] BusSync threw: $_"
+    }
 
     # Sync claude-mem observations → Obsidian structured/ (every 5th sync)
     if (-not (Test-Path variable:script:ClaudeMemCounter)) {

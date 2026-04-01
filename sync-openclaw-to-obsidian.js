@@ -34,7 +34,10 @@ function parseSession(filePath) {
     if (!line.trim()) continue;
     try {
       events.push(JSON.parse(line));
-    } catch {}
+    } catch (err) {
+      console.error(`[sync-openclaw] JSON parse error on line (skipping): ${err.message}`);
+      continue;
+    }
   }
   return events;
 }
@@ -116,7 +119,9 @@ if (fs.existsSync(STRUCTURED_FILE)) {
     if (!line.trim()) continue;
     try {
       existingIds.add(JSON.parse(line).id);
-    } catch {}
+    } catch (err) {
+      console.error(`[sync-openclaw] JSON parse error in deduplication pass (skipping line): ${err.message}`);
+    }
   }
 }
 
@@ -180,7 +185,9 @@ const allStructured = [];
 if (fs.existsSync(STRUCTURED_FILE)) {
   for (const line of fs.readFileSync(STRUCTURED_FILE, 'utf8').split('\n')) {
     if (!line.trim()) continue;
-    try { allStructured.push(JSON.parse(line)); } catch {}
+    try { allStructured.push(JSON.parse(line)); } catch (err) {
+      console.error(`[sync-openclaw] JSON parse error in structured rebuild (skipping line): ${err.message}`);
+    }
   }
 }
 const cleanEntries = allStructured.filter(e => !isNoise(e.content));
