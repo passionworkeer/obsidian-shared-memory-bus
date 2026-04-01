@@ -45,13 +45,29 @@
 - `templates/agents.json`
 
 ## Docs
+- `docs/DEPLOYMENT-MATRIX.md`
 - `docs/INSTALL.md`
 - `docs/MCP-DEDUP.md`
 - `docs/ARCHITECTURE.md`
 - `docs/FILES.md`
+- `docs/FAQ.md`
+- `docs/NEW-AGENT-INTEGRATION.md`
+- `docs/OPERATIONS.md`
+- `docs/ROADMAP.md`
 - `docs/TROUBLESHOOTING.md`
 - `docs/SECURITY.md`
+- `docs/VALIDATION.md`
 
 ## Repo Metadata
+- `CHANGELOG.md`
+- `CODE_OF_CONDUCT.md`
+- `CONTRIBUTING.md`
 - `LICENSE`
+- `SECURITY.md`
+- `SUPPORT.md`
 - `.gitignore`
+
+## GitHub Community Files
+- `.github/ISSUE_TEMPLATE/bug_report.md`
+- `.github/ISSUE_TEMPLATE/feature_request.md`
+- `.github/pull_request_template.md`
