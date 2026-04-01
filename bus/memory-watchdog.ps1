@@ -65,7 +65,7 @@ function Resolve-ObsidianVaultRoot {
 
 $UserHome = $env:USERPROFILE
 $AiMemoryRoot = if (-not [string]::IsNullOrWhiteSpace($env:AI_MEMORY_ROOT)) { $env:AI_MEMORY_ROOT } else { $PSScriptRoot }
-$BusScript = Join-Path $AiMemoryRoot "memory-bus.ps1"
+$BusScript = Join-Path $AiMemoryRoot "bus\memory-bus.ps1"
 $StatePath = Join-Path $AiMemoryRoot "watchdog-state.json"
 $SharedMcpRoot = Join-Path $AiMemoryRoot "shared-mcp"
 $SharedMcpStartScript = Join-Path $SharedMcpRoot "start-default-shared-mcp.ps1"
@@ -73,9 +73,9 @@ $SharedMcpStatusScript = Join-Path $SharedMcpRoot "status-shared-mcp.ps1"
 $VaultRoot = Resolve-ObsidianVaultRoot -FallbackPath (Join-Path $UserHome "Documents\Obsidian Vault")
 $GlobalContextPath = Join-Path $VaultRoot "00-System\ai-memory\generated\GLOBAL-CONTEXT.md"
 $StructuredRoot = Join-Path $VaultRoot "00-System\ai-memory\structured"
-$BlackboardDaemonScript = Join-Path $AiMemoryRoot "obsidian-blackboard-daemon.js"
-$OpenClawSyncScript = Join-Path $AiMemoryRoot "sync-openclaw-to-obsidian.js"
-$EmbeddingsScript = Join-Path $AiMemoryRoot "generate-embeddings.js"
+$BlackboardDaemonScript = Join-Path $AiMemoryRoot "ops\obsidian-blackboard-daemon.js"
+$OpenClawSyncScript = Join-Path $AiMemoryRoot "ops\sync-openclaw-to-obsidian.js"
+$EmbeddingsScript = Join-Path $AiMemoryRoot "bus\generate-embeddings.js"
 $EmbeddingsIndexPath = Join-Path $VaultRoot "00-System\ai-memory\embeddings\index.jsonl"
 $EmbeddingsCooldownSeconds = 180
 $OpenClawWatchSpecNames = @("openclaw-sessions", "openclaw-memory", "openclaw-user", "openclaw-memory-md")
@@ -186,7 +186,7 @@ function Invoke-BusSync {
     }
     $script:ClaudeMemCounter++
     if ($script:ClaudeMemCounter % 5 -eq 0) {
-$syncScript = Join-Path $AiMemoryRoot "sync-claudemem-to-obsidian.ps1"
+$syncScript = Join-Path $AiMemoryRoot "ops\sync-claudemem-to-obsidian.ps1"
         if (Test-Path $syncScript) {
             & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $syncScript 2>$null | Out-Null
         }

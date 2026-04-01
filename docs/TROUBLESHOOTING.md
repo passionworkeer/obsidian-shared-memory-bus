@@ -16,7 +16,7 @@ npm -v
 
 ## Obsidian MCP Does Not Start
 
-`run-obsidian-mcp.ps1` looks for the vault in this order:
+`ops/run-obsidian-mcp.ps1` looks for the vault in this order:
 1. `AI_MEMORY_OBSIDIAN_VAULT`
 2. `OBSIDIAN_VAULT_ROOT`
 3. the active or most recent vault in `%APPDATA%\obsidian\obsidian.json`
@@ -80,8 +80,8 @@ Then verify with a real browser task instead of relying only on `mcp list`.
 Run:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\run-shared-stack-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\ops\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\ops\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks
 ```
 
 Good signs:
