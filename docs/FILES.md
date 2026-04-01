@@ -69,5 +69,6 @@
 
 ## GitHub Community Files
 - `.github/ISSUE_TEMPLATE/bug_report.md`
+- `.github/ISSUE_TEMPLATE/config.yml`
 - `.github/ISSUE_TEMPLATE/feature_request.md`
 - `.github/pull_request_template.md`
