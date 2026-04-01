@@ -1,28 +1,25 @@
 # Roadmap
 
-## Already Done
-- Canonical Obsidian-backed shared memory layer
-- Shared `memory` MCP
-- Shared `obsidian` MCP
-- Shared utility MCPs for `context7`, `fetch`, `time`, and `sequential-thinking`
-- Shared Playwright backend with isolated sessions
-- Client integration tooling for major local agent paths
-- Validation and pressure-test helpers
+## v0.2 (Next Release — target: Q2 2026)
+- [ ] Version-pin all external MCP dependencies in manifest.json (owner: TBD)
+- [ ] Add uncaughtException handlers to all daemons
+- [ ] Replace bare `catch {}` with logged error collection
+- [ ] Fix vault path silent fallback (throw instead of non-existent path)
 
-## Near Term
-- tighten public onboarding for more agents
-- improve validation reporting and reproducibility
-- keep documentation aligned with runtime behavior
-- reduce remaining client-specific MCP health noise where possible
+## v0.3 (Next Quarter — target: Q3 2026)
+- [ ] Shared retrieval core module (extract FNV/hash logic from JS+Python)
+- [ ] Add caching layer to semantic-search.py (30s TTL)
+- [ ] Windows Service registration for watchdog
+- [ ] Retention policy for structured/*.jsonl
 
-## Longer Term
-- stronger template-repo polish
-- cleaner new-agent onboarding packs
-- deeper comparison of offline versus remote embedding backends
-- broader support matrix for more local-first agent ecosystems
+## Backlog
+- Prometheus metrics endpoint
+- Slack/webhook alerting for watchdog failures
+- Tutorial document (30-min getting-started guide)
+- Offline install support
 
 ## Explicit Non-Goals
-- turning this repo into a hosted SaaS
-- claiming that every MCP should be shared
-- replacing backup strategy with memory indexing
-- pretending all agent sessions are one unified context
+- Turning this repo into a hosted SaaS
+- Claiming that every MCP should be shared
+- Replacing backup strategy with memory indexing
+- Pretending all agent sessions are one unified context

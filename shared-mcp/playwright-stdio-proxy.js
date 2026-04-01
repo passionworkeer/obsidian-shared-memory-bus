@@ -10,6 +10,23 @@ const readline = require('readline');
 const PLAYWRIGHT_HOST = 'localhost';
 const PLAYWRIGHT_PORT = 9337;
 
+// Safe stdout write queue — prevents concurrent writes from interleaving JSON
+const stdoutQueue = [];
+let stdoutWriting = false;
+const flushStdout = () => {
+    if (stdoutWriting || stdoutQueue.length === 0) return;
+    stdoutWriting = true;
+    const next = stdoutQueue.shift();
+    process.stdout.write(next, () => {
+        stdoutWriting = false;
+        flushStdout();
+    });
+};
+const safeWrite = (data) => {
+    stdoutQueue.push(data);
+    flushStdout();
+};
+
 let requestId = 1;
 let mcpSessionId = null;
 
@@ -28,7 +45,7 @@ function parseSSE(data, targetId) {
           result = json;
         } else if (json.method) {
           // Forward server-initiated notifications to stdout
-          process.stdout.write(JSON.stringify(json) + '\n');
+          safeWrite(JSON.stringify(json) + '\n');
         }
       } catch (e) {
         // skip malformed lines
@@ -111,7 +128,7 @@ async function initialize() {
     clientInfo: { name: 'playwright-stdio', version: '1.0.0' }
   }, 0);
 
-  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: '0', result: res.result || {} }) + '\n');
+  safeWrite(JSON.stringify({ jsonrpc: '2.0', id: '0', result: res.result || {} }) + '\n');
   process.stderr.write('[playwright-stdio-proxy] Server: ' + (res.result?.serverInfo?.name || 'unknown') + ' v' + (res.result?.serverInfo?.version || '') + '\n');
 
   // Send initialized notification
@@ -173,7 +190,7 @@ async function main() {
       }
 
       const response = await httpPost(httpMethod, httpParams, id);
-      process.stdout.write(JSON.stringify(response) + '\n');
+      safeWrite(JSON.stringify(response) + '\n');
     } catch (e) {
       process.stderr.write('[playwright-stdio-proxy] Error: ' + e.message + '\n');
     }

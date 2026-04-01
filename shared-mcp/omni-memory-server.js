@@ -30,7 +30,14 @@ function resolveVaultRoot() {
     "E:/desktop/Obsidian Vault",
     path.join(USER_HOME, "Documents", "Obsidian Vault"),
   ];
-  return defaults.find((candidate) => fs.existsSync(candidate)) || defaults[0];
+  const found = defaults.find((candidate) => fs.existsSync(candidate));
+  if (!found) {
+    throw new Error(
+      `no-obsidian-vault: Tried [${defaults.join(", ")}]. ` +
+      `Set AI_MEMORY_OBSIDIAN_VAULT or OBSIDIAN_VAULT_ROOT to your vault path.`
+    );
+  }
+  return found;
 }
 
 const VAULT_ROOT = resolveVaultRoot();
@@ -48,6 +55,15 @@ const server = new Server(
     },
   }
 );
+
+// Uncaught exception handlers — crash loudly with useful log
+process.on('uncaughtException', (err) => {
+  console.error('[omni-memory] uncaughtException:', err.message);
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[omni-memory] unhandledRejection:', reason);
+});
 
 function jsonResult(payload) {
   return {
@@ -132,8 +148,9 @@ function readEmbeddingsSummary() {
       count += 1;
       const tool = record.tool || "unknown";
       tools[tool] = (tools[tool] || 0) + 1;
-    } catch {
+    } catch (err) {
       // Ignore malformed lines and keep reporting readable data.
+      console.error(`[omni-memory-server] JSON parse error in embeddings index (skipping line): ${err.message}`);
     }
   }
 
@@ -198,7 +215,13 @@ function queryBlackboard({ limit = 10, states = [], state = "" }) {
       return;
     }
 
-    const db = new sqlite3.Database(BLACKBOARD_DB_PATH, sqlite3.OPEN_READONLY);
+    let db;
+    try {
+      db = new sqlite3.Database(BLACKBOARD_DB_PATH, sqlite3.OPEN_READONLY);
+    } catch (error) {
+      resolve({ ok: false, error: String(error) });
+      return;
+    }
     const normalizedStates = Array.isArray(states)
       ? states.map((value) => String(value || "").trim().toUpperCase()).filter(Boolean)
       : [];
@@ -474,7 +497,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     return errorResult(`tool-not-found: ${name}`);
   } catch (error) {
-    return errorResult(error && error.stack ? error.stack : String(error));
+    return errorResult(error instanceof Error ? error.message : String(error));
   }
 });
 
