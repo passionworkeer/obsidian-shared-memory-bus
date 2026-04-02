@@ -46,6 +46,18 @@ const OPENCLAW_BLACKBOARD_JSONL = path.join(STRUCTURED_ROOT, "openclaw-blackboar
 const OPENCLAW_RUNS_JSONL = path.join(STRUCTURED_ROOT, "openclaw-runs.jsonl");
 const OPENCLAW_JOBS_JSONL = path.join(STRUCTURED_ROOT, "openclaw-jobs.jsonl");
 const OPENCLAW_JOURNAL_JSONL = path.join(STRUCTURED_ROOT, "openclaw-journal.jsonl");
+const MIN_PROMOTION_CONFIDENCE = 0.6;
+const DURABLE_SCOPES = new Set(["user", "feedback", "project", "reference"]);
+const NON_PROMOTABLE_PROMOTION_TYPES = new Set([
+  "summary",
+  "session-summary",
+  "daily-summary",
+  "session-response",
+  "task-note",
+  "task-run",
+  "task-job",
+  "task-journal",
+]);
 
 function ensureDirectory(targetPath) {
   if (!fs.existsSync(targetPath)) {
@@ -106,6 +118,21 @@ function tokenize(text) {
   return (String(text || "").toLowerCase().match(/[a-z0-9\u4e00-\u9fff_./:-]{2,}/g) || []);
 }
 
+function buildPromotionKey({ durableType = "", project = "", workspace = "", title = "", content = "" } = {}) {
+  const normalizedProject = normalizeSpaces(project || workspace).toLowerCase();
+  const text = normalizeSpaces([title, content].filter(Boolean).join(" ")).toLowerCase();
+  const tokens = tokenize(text)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3)
+    .slice(0, 18);
+
+  if (!durableType || tokens.length === 0) {
+    return "";
+  }
+
+  return sha1(`${durableType}|${normalizedProject}|${tokens.join(" ")}`);
+}
+
 function classifyScope(text, toolName) {
   const lower = String(text || "").toLowerCase();
   const hasAny = (patterns) => patterns.some((pattern) => pattern.test(lower));
@@ -126,6 +153,64 @@ function classifyScope(text, toolName) {
     return { scope: "task", type: "task-note", visibility: "shared", confidence: 0.6 };
   }
   return { scope: "summary", type: "summary", visibility: "shared", confidence: 0.45 };
+}
+
+function buildPromotionMetadata({
+  scope = "",
+  type = "",
+  sourceKind = "",
+  memoryLevel = "",
+  confidence = 0,
+  project = "",
+  workspace = "",
+  title = "",
+  content = "",
+} = {}) {
+  const normalizedScope = normalizeSpaces(scope).toLowerCase();
+  const normalizedType = normalizeSpaces(type).toLowerCase();
+  const normalizedSourceKind = normalizeSpaces(sourceKind).toLowerCase();
+  const normalizedMemoryLevel = normalizeSpaces(memoryLevel).toLowerCase();
+  const normalizedText = normalizeSpaces([title, content].filter(Boolean).join(" "));
+  const numericConfidence = Number.isFinite(Number(confidence)) ? Number(confidence) : 0;
+  let durableType = "";
+
+  let reason = "";
+  if (!normalizedScope) {
+    reason = "missing-scope";
+  } else if (!normalizedText) {
+    reason = "missing-content";
+  } else if (!DURABLE_SCOPES.has(normalizedScope)) {
+    reason = `non-promotable-scope:${normalizedScope}`;
+  } else if (normalizedSourceKind === "writeback" || normalizedMemoryLevel === "durable") {
+    durableType = normalizedScope;
+    reason = `scope:${durableType}`;
+  } else if (!normalizedType) {
+    reason = "missing-type";
+  } else if (NON_PROMOTABLE_PROMOTION_TYPES.has(normalizedType)) {
+    reason = `non-promotable-type:${normalizedType}`;
+  } else if (numericConfidence > 0 && numericConfidence < MIN_PROMOTION_CONFIDENCE) {
+    reason = `low-confidence:${numericConfidence.toFixed(2)}`;
+  } else {
+    durableType = normalizedScope;
+    reason = `scope+type:${durableType}`;
+  }
+
+  const key = buildPromotionKey({
+    durableType,
+    project,
+    workspace,
+    title,
+    content,
+  });
+
+  return {
+    version: 1,
+    durable_type: durableType,
+    key,
+    reason,
+    source_type: normalizedType,
+    source_confidence: numericConfidence || 0,
+  };
 }
 
 function buildRecord({
@@ -153,6 +238,22 @@ function buildRecord({
 }) {
   const normalizedTitle = normalizeSpaces(title || content).slice(0, 140) || id;
   const normalizedContent = String(content || "").trim();
+  const normalizedWorkspace = normalizeSpaces(workspace || "");
+  const normalizedMetadata = metadata && typeof metadata === "object" ? { ...metadata } : {};
+  normalizedMetadata.promotion = {
+    ...(normalizedMetadata.promotion && typeof normalizedMetadata.promotion === "object" ? normalizedMetadata.promotion : {}),
+    ...buildPromotionMetadata({
+      scope,
+      type,
+      sourceKind: source_kind,
+      memoryLevel: memory_level,
+      confidence,
+      project,
+      workspace: normalizedWorkspace,
+      title: normalizedTitle,
+      content: normalizedContent,
+    }),
+  };
   return {
     schemaVersion: MEMORY_RECORD_SCHEMA_VERSION,
     id,
@@ -172,11 +273,11 @@ function buildRecord({
     visibility,
     source_kind,
     memory_level,
-    workspace,
+    workspace: normalizedWorkspace,
     task_state,
     freshness: getFreshness(t),
     confidence,
-    metadata,
+    metadata: normalizedMetadata,
   };
 }
 
@@ -281,7 +382,7 @@ function parseEventEntries() {
           source_kind: "hook",
           memory_level: "session",
           workspace: project,
-          confidence: 0.55,
+          confidence: classification.confidence,
           metadata: {
             origin_path: filePath,
           },
@@ -412,14 +513,37 @@ function coerceStructuredRecord(payload, defaults = {}) {
     normalizeSpaces(payload.id) ||
     `${defaults.prefix || "record"}-${sha1(`${defaults.source || ""}|${title}|${content.slice(0, 200)}`)}`;
 
+  const normalizedScope = normalizeSpaces(payload.scope || defaults.scope || "summary") || "summary";
+  const normalizedType = normalizeSpaces(payload.type || defaults.type || "summary") || "summary";
+  const normalizedProject = normalizeSpaces(payload.project || defaults.project || "");
+  const normalizedWorkspace = normalizeSpaces(payload.workspace || defaults.workspace || "");
+  const normalizedSourceKind = normalizeSpaces(payload.source_kind || payload.sourceKind || defaults.source_kind || "") || "";
+  const normalizedMemoryLevel = normalizeSpaces(payload.memory_level || payload.memoryLevel || defaults.memory_level || "task") || "task";
+  const normalizedConfidence = typeof payload.confidence === "number" ? payload.confidence : defaults.confidence ?? 0.65;
+  const normalizedMetadata = payload.metadata && typeof payload.metadata === "object" ? { ...payload.metadata } : {};
+  normalizedMetadata.promotion = {
+    ...(normalizedMetadata.promotion && typeof normalizedMetadata.promotion === "object" ? normalizedMetadata.promotion : {}),
+    ...buildPromotionMetadata({
+      scope: normalizedScope,
+      type: normalizedType,
+      sourceKind: normalizedSourceKind,
+      memoryLevel: normalizedMemoryLevel,
+      confidence: normalizedConfidence,
+      project: normalizedProject,
+      workspace: normalizedWorkspace,
+      title: title || recordId,
+      content,
+    }),
+  };
+
   return {
     schemaVersion: Number(payload.schemaVersion || MEMORY_RECORD_SCHEMA_VERSION),
     id: recordId,
     t: timestamp,
     tool: normalizeSpaces(payload.tool || defaults.tool || "system") || "system",
     session: normalizeSpaces(payload.session || ""),
-    type: normalizeSpaces(payload.type || defaults.type || "summary") || "summary",
-    project: normalizeSpaces(payload.project || defaults.project || ""),
+    type: normalizedType,
+    project: normalizedProject,
     title: title || recordId,
     content: content.slice(0, 6000),
     facts: Array.isArray(payload.facts) ? payload.facts : [],
@@ -427,15 +551,15 @@ function coerceStructuredRecord(payload, defaults = {}) {
     files_read: Array.isArray(payload.files_read) ? payload.files_read : [],
     files_modified: Array.isArray(payload.files_modified) ? payload.files_modified : [],
     source: normalizeSpaces(payload.source || defaults.source || "structured-record") || "structured-record",
-    scope: normalizeSpaces(payload.scope || defaults.scope || "summary") || "summary",
+    scope: normalizedScope,
     visibility: normalizeSpaces(payload.visibility || defaults.visibility || "shared") || "shared",
-    source_kind: normalizeSpaces(payload.source_kind || payload.sourceKind || defaults.source_kind || "") || "",
-    memory_level: normalizeSpaces(payload.memory_level || payload.memoryLevel || defaults.memory_level || "task") || "task",
-    workspace: normalizeSpaces(payload.workspace || defaults.workspace || ""),
+    source_kind: normalizedSourceKind,
+    memory_level: normalizedMemoryLevel,
+    workspace: normalizedWorkspace,
     task_state: normalizeSpaces(payload.task_state || payload.taskState || defaults.task_state || "") || "",
     freshness: normalizeSpaces(payload.freshness || getFreshness(timestamp)) || getFreshness(timestamp),
-    confidence: typeof payload.confidence === "number" ? payload.confidence : defaults.confidence ?? 0.65,
-    metadata: payload.metadata && typeof payload.metadata === "object" ? payload.metadata : {},
+    confidence: normalizedConfidence,
+    metadata: normalizedMetadata,
   };
 }
 
@@ -530,12 +654,61 @@ function writeJsonl(filePath, records) {
   writeText(filePath, body ? `${body}\n` : "");
 }
 
+function buildScopeCounts(records) {
+  const counts = {};
+  for (const record of records) {
+    const scope = normalizeSpaces(record.scope || "summary") || "summary";
+    counts[scope] = (counts[scope] || 0) + 1;
+  }
+
+  return Object.fromEntries(
+    Object.entries(counts).sort((left, right) => {
+      if (right[1] !== left[1]) {
+        return right[1] - left[1];
+      }
+      return left[0].localeCompare(right[0]);
+    })
+  );
+}
+
+function buildScopedHighlights(records, limitPerScope = 3) {
+  const grouped = {};
+  const ordered = [...records].sort((left, right) => String(right.t || "").localeCompare(String(left.t || "")));
+
+  for (const record of ordered) {
+    const scope = normalizeSpaces(record.scope || "summary") || "summary";
+    if (!grouped[scope]) {
+      grouped[scope] = [];
+    }
+    if (grouped[scope].length >= limitPerScope) {
+      continue;
+    }
+    grouped[scope].push({
+      tool: record.tool,
+      scope: record.scope,
+      title: record.title,
+      t: record.t,
+    });
+  }
+
+  return Object.fromEntries(
+    Object.entries(grouped).sort((left, right) => {
+      if (right[1].length !== left[1].length) {
+        return right[1].length - left[1].length;
+      }
+      return left[0].localeCompare(right[0]);
+    })
+  );
+}
+
 function buildLayerSummary(layers) {
   const generatedAt = new Date().toISOString();
   const artifactMetadata = buildGeneratedArtifactMetadata({
     structuredRoot: STRUCTURED_ROOT,
     generatedAt,
   });
+  const durableByScope = buildScopeCounts(layers.sharedInbox);
+  const durableHighlightsByScope = buildScopedHighlights(layers.sharedInbox, 3);
   const lines = [
     "# Memory Layers",
     "",
@@ -548,9 +721,24 @@ function buildLayerSummary(layers) {
     `- shared-events: ${layers.sharedEvents.length}`,
     `- task-memory: ${layers.taskMemory.length}`,
     "",
-    "## Durable Highlights",
+    "## Durable By Scope",
     "",
   ];
+
+  const durableScopeEntries = Object.entries(durableByScope);
+  if (durableScopeEntries.length === 0) {
+    lines.push("- No durable scope coverage yet.");
+  } else {
+    for (const [scope, count] of durableScopeEntries) {
+      lines.push(`- ${scope}: ${count}`);
+    }
+  }
+
+  lines.push(
+    "",
+    "## Durable Highlights",
+    ""
+  );
 
   const durableHighlights = layers.sharedInbox.slice(-8).reverse();
   if (durableHighlights.length === 0) {
@@ -558,6 +746,18 @@ function buildLayerSummary(layers) {
   } else {
     for (const record of durableHighlights) {
       lines.push(`- [${record.tool}] [${record.scope}] ${record.title}`);
+    }
+  }
+
+  lines.push("", "## Durable Highlights By Scope", "");
+  if (durableScopeEntries.length === 0) {
+    lines.push("- No typed durable scope highlights yet.");
+  } else {
+    for (const [scope, items] of Object.entries(durableHighlightsByScope)) {
+      lines.push(`- ${scope}: ${items.length} recent durable highlights`);
+      for (const item of items) {
+        lines.push(`- [${item.tool}] [${scope}] ${item.title}`);
+      }
     }
   }
 
@@ -601,6 +801,7 @@ function buildLayerSummary(layers) {
         sessionMemory: layers.sessionMemory.length,
         sharedEvents: layers.sharedEvents.length,
         taskMemory: layers.taskMemory.length,
+        durableByScope,
       },
       latest: {
         sharedInbox: durableHighlights.map((record) => ({
@@ -625,6 +826,7 @@ function buildLayerSummary(layers) {
           title: record.title,
           t: record.t,
         })),
+        durableByScope: durableHighlightsByScope,
       },
     },
   };

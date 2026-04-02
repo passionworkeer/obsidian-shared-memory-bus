@@ -26,10 +26,12 @@ This document records the current validation story for the public bundle.
 - layered memory generation succeeds through `ops/build-memory-layers.js`
 - bounded handoff pack generation succeeds through `ops/build-handoff-pack.js`
 - dream consolidation succeeds through `ops/run-memory-dream.ps1`
+- typed durable promotion metadata now appears on governed records, and `AUTO-DREAM` now emits typed promotion/refresh queues with source and target scope metadata plus source-type/confidence audit fields
 - imported `claude-code.jsonl` and `openclaw.jsonl` now participate in the same integrity-governed structured universe as the native shared layers
 - OpenClaw blackboard sync works both ways between SQLite and `02-KB/WORKING.md`
 - the shared memory core no longer requires native Node `sqlite3`
 - installed `install.sh` smoke runs now validate the flat runtime layout plus executable `shared-mcp/*.sh` wrappers on Windows, macOS, and Linux CI runners
+- `search_shared_memory` now returns route metadata (`queryIntent`, `queryRoute`, `layerCounts`) plus per-result `layer`, `freshness`, and `rankMeta`
 
 ## Validated Clients
 - Codex
@@ -49,6 +51,8 @@ Validated on this workstation on April 2, 2026:
 - a fresh installed-runtime integrity check passed after reinstalling the live runtime from source, confirming the watchdog no longer overwrites generated artifacts with an older contract shape
 - `run-pressure-test.ps1 -Waves 5 -RunCliChecks` passed `30/30` with `overallPass=true`, `singleListenerPerPort=true`, stable shared PIDs, and no fallback to duplicate local `memory/context7/fetch/time/sequential-thinking/obsidian` listeners
 - `run-pressure-test.ps1 -Waves 5 -RunCliChecks` passed `35/35` with `overallPass=true`, `singleListenerPerPort=true`, and stable shared PIDs
+- direct durable-route and task-route retrieval probes now return the expected routed metadata and top-layer bias, with durable queries surfacing `layer=durable` writeback records and task queries surfacing `layer=task` OpenClaw records
+- single-mode retrieval probes now also keep stable semantics after reranking: `bm25` and `dense` modes no longer receive the hybrid-only coverage bonus, while `hybrid` continues to surface coverage in `rankMeta.coverageWeight`
 - `scripts/validate-layout.sh` and `shared-mcp/status-shared-mcp.sh` were smoke-executed locally through Git Bash with `AI_MEMORY_PWSH=powershell.exe`
 - `scripts/install.sh -TargetRoot <temp> -RegisterStartup false -PersistUserEnvironment false` completed successfully, and the installed `shared-mcp/status-shared-mcp.sh` wrapper returned healthy shared services from that temporary flat runtime
 - installed `semantic-search.py --mode hybrid --json` succeeded from `~/.ai-memory` with the runtime config resolved from the installed flat layout

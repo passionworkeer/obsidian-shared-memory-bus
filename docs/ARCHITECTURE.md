@@ -56,7 +56,7 @@ This bundle intentionally combines the strongest ideas from two native memory st
 - Claude-style strengths folded in:
   - session memory for live task continuity
   - compaction and handoff style summaries
-  - durable promotion from short-term notes into cleaner long-term memory
+  - typed durable promotion from short-term notes into cleaner long-term memory buckets
   - dream-like consolidation into generated summaries
 - OpenClaw-style strengths folded in:
   - blackboard task layer
@@ -121,6 +121,7 @@ It should be rebuilt after `build-memory-layers.js`, not in parallel with it.
 
 ### `ops/run-memory-dream.ps1`
 Runs a consolidation pass over durable, session, and task layers to produce a cleaner handoff-oriented `AUTO-DREAM` summary.
+It now also builds a typed durable promotion and refresh queue, so downstream writeback can see `sourceLayer`, `sourceScope`, `targetScope`, `sourceKind`, `sourceRecordId`, and the recorded promotion reason instead of relying on untyped "newer than baseline" guesses.
 It should run after both `MEMORY-LAYERS` and `HANDOFF` so all generated outputs share the same `sourceStructuredSignature`.
 
 ### `ops/run-obsidian-mcp.ps1`
@@ -140,6 +141,7 @@ Describes which servers are shared, isolated, or optional. `playwright` stays ma
 
 ### `shared-mcp/omni-memory-server.js`
 The shared `memory` MCP server. It is intentionally the main shared operator endpoint today, but it is still a monolithic adapter: retrieval, embeddings rebuilds, handoff generation, dream runs, claude-mem bridge calls, and OpenClaw blackboard access still meet here.
+`search_shared_memory` now accepts an explicit `route` profile (`auto / mixed / durable / task / recent / reference`) and returns route metadata plus per-result ranking factors so operators can see why a result surfaced.
 
 ## Sharing Boundaries
 - Shared:
@@ -159,6 +161,30 @@ This is process deduplication with per-client session isolation, not one merged 
 The default recommendation is `hybrid`.
 Embedding provider selection is now decoupled into `defaults + providers + profiles`, but dense retrieval is still not truly hot-swapped. After changing adapter, model, or base URL, rebuild the stored embeddings index so query and stored vectors share the same fingerprint.
 The shared retrieval path now avoids per-request Python cold starts by keeping a long-lived worker behind the `memory` MCP. Cache invalidation is file-signature-driven, so structured JSONL or embeddings changes trigger a refresh without requiring manual restarts. The worker now also keeps query-embedding and bounded result caches in memory, which improves repeated-query latency without pretending the cache is durable truth.
+
+## Typed Durable Promotion
+Typed durable promotion now exists in the structured record contract instead of only inside the generated dream summary.
+
+- `ops/build-memory-layers.js` stamps `metadata.promotion` onto governed records
+- the current typed durable buckets are `user`, `feedback`, `project`, and `reference`
+- `metadata.promotion` currently carries `version`, `durable_type`, `key`, `reason`, `source_type`, and `source_confidence`
+- promotion keys are token-fingerprint based rather than full-text exact hashes, so refresh matching tolerates light wording drift better than exact-text identity
+- summary-like and task-journal/task-run style records are explicitly blocked with reasons such as `non-promotable-type:summary`, and low-confidence candidates are held back with `low-confidence:*`
+- `ops/run-memory-dream.ps1` consumes that metadata first and only falls back to heuristic scope inference for older records that do not yet carry promotion metadata
+- typed promotion and refresh queue items now surface `sourceType`, `sourceConfidence`, `sourceRecordId`, `promotionKey`, and `promotionReason` for downstream auditability
+
+This is intentionally auditable rather than magical. The system prefers explicit typed promotion metadata over hidden writeback behavior.
+
+## Query Routing And Layered Hybrid Ranking
+`retrieval/semantic-search.py` now performs route-aware layered reranking instead of only returning the raw `bm25` or dense order.
+
+- the route can be explicitly set to `durable`, `task`, `recent`, `reference`, or `mixed`
+- `auto` infers the route from query text plus explicit filters such as `scope`, `sourceKind`, and `taskState`, with task filters winning over generic durable scope hints and `scope=reference` mapping directly to the reference route
+- ranking combines retrieval score with route-specific weights for `layer`, `scope`, `sourceKind`, `freshness`, task state, and hybrid coverage
+- search responses now expose `queryIntent`, `queryRoute`, `candidateCount`, `layerCounts`, and per-result `layer`, `freshness`, and `rankMeta`
+- single-mode `bm25` and `dense` queries keep their retrieval semantics; hybrid-only coverage bonus is applied only when both retrievers contribute to the same candidate
+
+The current weights are still hand-tuned. They improve operator control and inspectability, but they are not a learned or benchmark-calibrated ranker yet.
 
 ## Portability Boundary
 - Windows:
@@ -186,7 +212,8 @@ The shared retrieval path now avoids per-request Python cold starts by keeping a
 - runtime behavior is spread across PowerShell, Node.js, and Python helpers, so duplicated logic must stay aligned
 - the memory contract is now versioned and validated in Node, but it is still not a fully shared cross-language schema contract
 - retrieval is now warmer and less restart-heavy, but it still favors local simplicity over large-scale indexing sophistication
-- durable promotion is still largely heuristic; the next architectural step should be a typed promotion layer (`user / feedback / project / reference`) instead of further widening raw session/task recall
+- typed durable promotion now exists, but promotion and refresh decisions are still heuristic and not yet benchmark-calibrated or user-tunable
+- query routing and layered reranking now exist, but the weight tables are still hand-tuned and need better evaluation data before they should be treated as settled policy
 
 See [`docs/MEMORY-ARCHITECTURE-CRITIQUE.md`](MEMORY-ARCHITECTURE-CRITIQUE.md) for the fuller critique and next refactor targets.
 
