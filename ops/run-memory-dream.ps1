@@ -125,7 +125,10 @@ function Normalize-RecordText {
 }
 
 function Get-RecordSimilarityKey {
-    param([Parameter(Mandatory = $true)][object]$Record)
+    param(
+        [Parameter(Mandatory = $true)][object]$Record,
+        [AllowEmptyString()][string]$ScopeOverride = ""
+    )
 
     $normalized = Normalize-RecordText -Record $Record
     if ([string]::IsNullOrWhiteSpace($normalized)) {
@@ -137,7 +140,8 @@ function Get-RecordSimilarityKey {
         return ""
     }
 
-    $prefix = "{0}|{1}" -f ([string]$Record.project).ToLowerInvariant(), ([string]$Record.scope).ToLowerInvariant()
+    $effectiveScope = if ([string]::IsNullOrWhiteSpace($ScopeOverride)) { [string]$Record.scope } else { $ScopeOverride }
+    $prefix = "{0}|{1}" -f ([string]$Record.project).ToLowerInvariant(), ([string]$effectiveScope).ToLowerInvariant()
     return (Get-StringHash -Text ($prefix + "|" + ($tokens -join " ")))
 }
 
@@ -160,7 +164,12 @@ function New-KeyRecordMap {
 
     $map = @{}
     foreach ($record in @($Records | Sort-Object { [string]$_.t } -Descending)) {
-        $key = Get-RecordSimilarityKey -Record $record
+        $targetScope = Get-DurableTargetScope -Record $record
+        $key = if ([string]::IsNullOrWhiteSpace($targetScope)) {
+            Get-RecordSimilarityKey -Record $record
+        } else {
+            Get-RecordPromotionKey -Record $record -TargetScope $targetScope
+        }
         if ([string]::IsNullOrWhiteSpace($key) -or $map.ContainsKey($key)) {
             continue
         }
@@ -251,6 +260,358 @@ function Select-RecentUniqueRecords {
     }
 
     return @($selected.ToArray())
+}
+
+function Get-RecordSourceLayer {
+    param([Parameter(Mandatory = $true)][object]$Record)
+
+    $memoryLevel = ([string]$Record.memory_level).Trim().ToLowerInvariant()
+    $sourceKind = ([string]$Record.source_kind).Trim().ToLowerInvariant()
+    $scope = ([string]$Record.scope).Trim().ToLowerInvariant()
+
+    if ($memoryLevel -eq "durable" -or $sourceKind -eq "writeback") {
+        return "durable"
+    }
+    if ($sourceKind -in @("hook", "event") -or $memoryLevel -eq "event") {
+        return "event"
+    }
+    if ($memoryLevel -eq "task" -or $sourceKind -in @("blackboard", "run", "cron", "task") -or $scope -in @("task", "run")) {
+        return "task"
+    }
+    return "session"
+}
+
+function Get-RecordPromotionMetadata {
+    param([Parameter(Mandatory = $true)][object]$Record)
+
+    if ($null -ne $Record.metadata -and $Record.metadata.PSObject.Properties.Name -contains "promotion") {
+        return $Record.metadata.promotion
+    }
+
+    return $null
+}
+
+function Get-RecordType {
+    param([Parameter(Mandatory = $true)][object]$Record)
+
+    return ([string]$Record.type).Trim().ToLowerInvariant()
+}
+
+function Get-RecordConfidence {
+    param([Parameter(Mandatory = $true)][object]$Record)
+
+    try {
+        return [double]$Record.confidence
+    } catch {
+        return 0.0
+    }
+}
+
+function Get-DurableScopeFromType {
+    param([Parameter(Mandatory = $true)][object]$Record)
+
+    switch (Get-RecordType -Record $Record) {
+        "preference" { return "user" }
+        "workflow-rule" { return "feedback" }
+        "project-context" { return "project" }
+        "reference" { return "reference" }
+        default { return "" }
+    }
+}
+
+function Test-NonPromotableRecordType {
+    param([Parameter(Mandatory = $true)][object]$Record)
+
+    return (Get-RecordType -Record $Record) -in @(
+        "summary",
+        "session-summary",
+        "daily-summary",
+        "session-response",
+        "task-note",
+        "task-run",
+        "task-job",
+        "task-journal"
+    )
+}
+
+function Test-AnyPattern {
+    param(
+        [AllowEmptyString()][string]$Text,
+        [Parameter(Mandatory = $true)][string[]]$Patterns
+    )
+
+    foreach ($pattern in $Patterns) {
+        if ($Text -match $pattern) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Get-DurableTargetScope {
+    param([Parameter(Mandatory = $true)][object]$Record)
+
+    $promotion = Get-RecordPromotionMetadata -Record $Record
+    if ($null -ne $promotion) {
+        $durableType = ([string]$promotion.durable_type).Trim().ToLowerInvariant()
+        if ($durableType -in @("user", "feedback", "project", "reference")) {
+            return $durableType
+        }
+        return ""
+    }
+
+    $scope = ([string]$Record.scope).Trim().ToLowerInvariant()
+    $sourceKind = ([string]$Record.source_kind).Trim().ToLowerInvariant()
+    $memoryLevel = ([string]$Record.memory_level).Trim().ToLowerInvariant()
+    $typedScope = Get-DurableScopeFromType -Record $Record
+    $confidence = Get-RecordConfidence -Record $Record
+    if (($sourceKind -eq "writeback" -or $memoryLevel -eq "durable") -and $scope -in @("user", "feedback", "project", "reference")) {
+        return $scope
+    }
+    if (-not [string]::IsNullOrWhiteSpace($typedScope)) {
+        if (([string]::IsNullOrWhiteSpace($scope) -or $scope -eq $typedScope) -and ($confidence -le 0 -or $confidence -ge 0.6)) {
+            return $typedScope
+        }
+        return ""
+    }
+    if (Test-NonPromotableRecordType -Record $Record) {
+        return ""
+    }
+    if ($confidence -gt 0 -and $confidence -lt 0.6) {
+        return ""
+    }
+    if ($scope -in @("user", "feedback", "project", "reference")) {
+        return $scope
+    }
+
+    $text = @(
+        [string]$Record.project,
+        [string]$Record.title,
+        [string]$Record.content,
+        [string]$Record.scope,
+        [string]$Record.source_kind,
+        [string]$Record.task_state
+    ) -join " "
+    $text = $text.ToLowerInvariant()
+
+    if (Test-AnyPattern -Text $text -Patterns @("偏好", "喜欢", "语言", "风格", "回复", "\bpreference\b", "\blanguage\b", "\bstyle\b", "\breply\b", "user prefers")) {
+        return "user"
+    }
+    if (Test-AnyPattern -Text $text -Patterns @("必须", "不要", "避免", "\balways\b", "\bnever\b", "\bmust\b", "\bshould\b", "workflow", "\brule\b", "约定", "规范")) {
+        return "feedback"
+    }
+    if (Test-AnyPattern -Text $text -Patterns @("\bpath\b", "\burl\b", "\blink\b", "\bdashboard\b", "\blinear\b", "\bslack\b", "路径", "链接", "位置")) {
+        return "reference"
+    }
+    if (Test-AnyPattern -Text $text -Patterns @("\bissue\b", "\bpr\b", "\brepo\b", "\bproject\b", "\btask\b", "cron", "blackboard", "queue", "workspace", "任务", "项目")) {
+        return "project"
+    }
+
+    return ""
+}
+
+function Get-RecordPromotionKey {
+    param(
+        [Parameter(Mandatory = $true)][object]$Record,
+        [AllowEmptyString()][string]$TargetScope = ""
+    )
+
+    $promotion = Get-RecordPromotionMetadata -Record $Record
+    if ($null -ne $promotion) {
+        $promotionScope = ([string]$promotion.durable_type).Trim().ToLowerInvariant()
+        $promotionKey = ([string]$promotion.key).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($promotionKey) -and ([string]::IsNullOrWhiteSpace($TargetScope) -or $promotionScope -eq $TargetScope)) {
+            return $promotionKey
+        }
+    }
+
+    return (Get-RecordSimilarityKey -Record $Record -ScopeOverride $TargetScope)
+}
+
+function Get-PromotionReason {
+    param(
+        [Parameter(Mandatory = $true)][object]$Record,
+        [Parameter(Mandatory = $true)][string]$TargetScope,
+        [Parameter(Mandatory = $true)][string]$SourceLayer,
+        [switch]$Refresh
+    )
+
+    $recordScope = ([string]$Record.scope).Trim().ToLowerInvariant()
+    $promotion = Get-RecordPromotionMetadata -Record $Record
+    if ($null -ne $promotion -and -not [string]::IsNullOrWhiteSpace([string]$promotion.reason)) {
+        $promotionReason = [string]$promotion.reason
+        if ($Refresh) {
+            return "refresh:{0}" -f $promotionReason
+        }
+        return $promotionReason
+    }
+
+    if ($recordScope -eq $TargetScope) {
+        if ($Refresh) {
+            return "scope-aligned-durable-refresh"
+        }
+        return "scope-aligned-durable-promotion"
+    }
+    if ($recordScope -eq "summary") {
+        if ($Refresh) {
+            return "summary-routed-to-durable-refresh"
+        }
+        return "summary-routed-to-durable-scope"
+    }
+    if ($SourceLayer -eq "task") {
+        if ($Refresh) {
+            return "task-layer-refresh"
+        }
+        return "task-layer-promotion"
+    }
+    if ($SourceLayer -eq "event") {
+        if ($Refresh) {
+            return "event-layer-refresh"
+        }
+        return "event-layer-promotion"
+    }
+    if ($Refresh) {
+        return "session-layer-refresh"
+    }
+    return "session-layer-promotion"
+}
+
+function New-TypedDurableQueueItems {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$CandidateRecords,
+        [Parameter(Mandatory = $true)][hashtable]$BaselineMap,
+        [int]$MaxPromotions = 8,
+        [int]$MaxRefresh = 8
+    )
+
+    $promotions = New-Object System.Collections.Generic.List[object]
+    $refresh = New-Object System.Collections.Generic.List[object]
+    $seenPromotions = @{}
+    $seenRefresh = @{}
+
+    foreach ($record in @($CandidateRecords | Sort-Object { [string]$_.t } -Descending)) {
+        $targetScope = Get-DurableTargetScope -Record $record
+        if ([string]::IsNullOrWhiteSpace($targetScope)) {
+            continue
+        }
+
+        $key = Get-RecordPromotionKey -Record $record -TargetScope $targetScope
+        if ([string]::IsNullOrWhiteSpace($key)) {
+            continue
+        }
+
+        $sourceLayer = Get-RecordSourceLayer -Record $record
+        $sourceType = [string]$record.type
+        $sourceConfidence = [math]::Round((Get-RecordConfidence -Record $record), 4)
+        $candidateTs = Get-RecordTimestampUtc -Record $record
+        $baseline = if ($BaselineMap.ContainsKey($key)) { $BaselineMap[$key] } else { $null }
+
+        if ($null -eq $baseline) {
+            if ($promotions.Count -ge $MaxPromotions -or $seenPromotions.ContainsKey($key)) {
+                continue
+            }
+
+            $seenPromotions[$key] = $true
+            $promotions.Add([ordered]@{
+                tool = [string]$record.tool
+                title = [string]$record.title
+                t = [string]$record.t
+                sourceLayer = $sourceLayer
+                sourceScope = [string]$record.scope
+                targetScope = $targetScope
+                sourceKind = [string]$record.source_kind
+                sourceType = $sourceType
+                sourceConfidence = $sourceConfidence
+                sourceRecordId = [string]$record.id
+                promotionKey = $key
+                promotionReason = Get-PromotionReason -Record $record -TargetScope $targetScope -SourceLayer $sourceLayer
+            }) | Out-Null
+            continue
+        }
+
+        if ($refresh.Count -ge $MaxRefresh -or $seenRefresh.ContainsKey($key)) {
+            continue
+        }
+
+        $baselineTs = Get-RecordTimestampUtc -Record $baseline
+        if ($candidateTs -le $baselineTs) {
+            continue
+        }
+
+        $seenRefresh[$key] = $true
+        $refresh.Add([ordered]@{
+            tool = [string]$record.tool
+            title = [string]$record.title
+            t = [string]$record.t
+            sourceLayer = $sourceLayer
+            sourceScope = [string]$record.scope
+            targetScope = $targetScope
+            sourceKind = [string]$record.source_kind
+            sourceType = $sourceType
+            sourceConfidence = $sourceConfidence
+            sourceRecordId = [string]$record.id
+            promotionKey = $key
+            promotionReason = Get-PromotionReason -Record $record -TargetScope $targetScope -SourceLayer $sourceLayer -Refresh
+            refreshOf = [ordered]@{
+                id = [string]$baseline.id
+                title = [string]$baseline.title
+                scope = [string]$baseline.scope
+                t = [string]$baseline.t
+            }
+        }) | Out-Null
+    }
+
+    return [ordered]@{
+        promotions = @($promotions.ToArray())
+        refresh = @($refresh.ToArray())
+    }
+}
+
+function New-TypedQueueBulletLine {
+    param([Parameter(Mandatory = $true)][object]$Item)
+
+    $tool = if ([string]::IsNullOrWhiteSpace([string]$Item.tool)) { "unknown" } else { [string]$Item.tool }
+    $sourceLayer = if ([string]::IsNullOrWhiteSpace([string]$Item.sourceLayer)) { "unknown" } else { [string]$Item.sourceLayer }
+    $targetScope = if ([string]::IsNullOrWhiteSpace([string]$Item.targetScope)) { "unknown" } else { [string]$Item.targetScope }
+    $sourceScope = if ([string]::IsNullOrWhiteSpace([string]$Item.sourceScope)) { "unknown" } else { [string]$Item.sourceScope }
+    $title = if ([string]::IsNullOrWhiteSpace([string]$Item.title)) { [string]$Item.sourceRecordId } else { [string]$Item.title }
+    $auditParts = New-Object System.Collections.Generic.List[string]
+    if (-not [string]::IsNullOrWhiteSpace([string]$Item.sourceType)) {
+        $auditParts.Add(("type={0}" -f [string]$Item.sourceType)) | Out-Null
+    }
+    if ($null -ne $Item.sourceConfidence -and [double]$Item.sourceConfidence -gt 0) {
+        $auditParts.Add(("conf={0}" -f ([double]$Item.sourceConfidence).ToString("0.00"))) | Out-Null
+    }
+    $auditTag = if ($auditParts.Count -gt 0) { " [{0}]" -f ($auditParts.ToArray() -join " ") } else { "" }
+    $reason = if ([string]::IsNullOrWhiteSpace([string]$Item.promotionReason)) { "" } else { " ({0})" -f [string]$Item.promotionReason }
+    return "- [$tool] [$targetScope <- $sourceLayer/$sourceScope] $($title.Trim())$auditTag$reason"
+}
+
+function Build-CountMap {
+    param(
+        [AllowEmptyCollection()][object[]]$Records = @(),
+        [Parameter(Mandatory = $true)][string]$PropertyName
+    )
+
+    $counts = [ordered]@{}
+    foreach ($record in $Records) {
+        $name = ([string]$record.$PropertyName).Trim()
+        if ([string]::IsNullOrWhiteSpace($name)) {
+            continue
+        }
+        if (-not $counts.Contains($name)) {
+            $counts[$name] = 0
+        }
+        $counts[$name] = [int]$counts[$name] + 1
+    }
+
+    $sorted = [ordered]@{}
+    foreach ($entry in @($counts.GetEnumerator() | Sort-Object { -[int]$_.Value }, { [string]$_.Key })) {
+        $sorted[$entry.Key] = [int]$entry.Value
+    }
+
+    return $sorted
 }
 
 function Acquire-DreamLock {
@@ -387,8 +748,12 @@ try {
     $sessionHighlights = @(Select-RecentUniqueRecords -Records ($sessionRecords + $eventRecords) -MaxItems 8)
     $taskHighlights = @(Select-RecentUniqueRecords -Records $taskMemoryRecords -MaxItems 10)
     $durableMap = New-KeyRecordMap -Records $durableRecords
-    $promotionCandidates = @(Select-NovelRecordsAgainstBaseline -CandidateRecords ($sessionRecords + $eventRecords + $taskMemoryRecords) -BaselineMap $durableMap -MaxItems 8)
-    $refreshTargets = @(Select-RefreshTargets -CandidateRecords ($sessionRecords + $eventRecords + $taskMemoryRecords) -BaselineMap $durableMap -MaxItems 8)
+    $typedDurableQueue = New-TypedDurableQueueItems -CandidateRecords ($sessionRecords + $eventRecords + $taskMemoryRecords) -BaselineMap $durableMap -MaxPromotions 8 -MaxRefresh 8
+    $promotionCandidates = @($typedDurableQueue.promotions)
+    $refreshTargets = @($typedDurableQueue.refresh)
+    $durableByScope = Build-CountMap -Records $durableRecords -PropertyName "scope"
+    $promotionTargetCounts = Build-CountMap -Records $promotionCandidates -PropertyName "targetScope"
+    $refreshTargetCounts = Build-CountMap -Records $refreshTargets -PropertyName "targetScope"
 
     $generatedAt = (Get-Date).ToString("o")
     $markdownLines = New-Object System.Collections.Generic.List[string]
@@ -429,24 +794,41 @@ try {
     }
 
     $markdownLines.Add("") | Out-Null
-    $markdownLines.Add("## Promotion Candidates") | Out-Null
+    $markdownLines.Add("## Durable Scope Coverage") | Out-Null
     $markdownLines.Add("") | Out-Null
-    if ($promotionCandidates.Count -eq 0) {
-        $markdownLines.Add("- No fresh cross-layer signals need promotion right now.") | Out-Null
+    if ($durableByScope.Count -eq 0) {
+        $markdownLines.Add("- No durable scope coverage yet.") | Out-Null
     } else {
-        foreach ($record in $promotionCandidates) {
-            $markdownLines.Add((New-BulletLine -Record $record)) | Out-Null
+        foreach ($entry in $durableByScope.GetEnumerator()) {
+            $markdownLines.Add(("- {0}: {1}" -f [string]$entry.Key, [int]$entry.Value)) | Out-Null
         }
     }
 
     $markdownLines.Add("") | Out-Null
-    $markdownLines.Add("## Refresh Targets") | Out-Null
+    $markdownLines.Add("## Typed Durable Promotion Queue") | Out-Null
+    $markdownLines.Add("") | Out-Null
+    if ($promotionCandidates.Count -eq 0) {
+        $markdownLines.Add("- No fresh cross-layer signals need typed durable promotion right now.") | Out-Null
+    } else {
+        foreach ($entry in $promotionTargetCounts.GetEnumerator()) {
+            $markdownLines.Add(("- target={0}: {1}" -f [string]$entry.Key, [int]$entry.Value)) | Out-Null
+        }
+        foreach ($record in $promotionCandidates) {
+            $markdownLines.Add((New-TypedQueueBulletLine -Item $record)) | Out-Null
+        }
+    }
+
+    $markdownLines.Add("") | Out-Null
+    $markdownLines.Add("## Typed Durable Refresh Queue") | Out-Null
     $markdownLines.Add("") | Out-Null
     if ($refreshTargets.Count -eq 0) {
-        $markdownLines.Add("- No older durable signals appear to need refresh right now.") | Out-Null
+        $markdownLines.Add("- No older durable signals appear to need typed refresh right now.") | Out-Null
     } else {
+        foreach ($entry in $refreshTargetCounts.GetEnumerator()) {
+            $markdownLines.Add(("- target={0}: {1}" -f [string]$entry.Key, [int]$entry.Value)) | Out-Null
+        }
         foreach ($record in $refreshTargets) {
-            $markdownLines.Add((New-BulletLine -Record $record)) | Out-Null
+            $markdownLines.Add((New-TypedQueueBulletLine -Item $record)) | Out-Null
         }
     }
 
@@ -456,8 +838,9 @@ try {
     $markdownLines.Add("- Durable signals should usually come from `shared-inbox.jsonl` and be promoted carefully into human-edited notes.") | Out-Null
     $markdownLines.Add("- Session handoff combines session memory and recent bus events, so long-running work can restart with less context decay.") | Out-Null
     $markdownLines.Add("- OpenClaw task, run, job, and journal records are treated as first-class recall targets, not just prompt snippets.") | Out-Null
-    $markdownLines.Add("- Promotion candidates are recent non-durable signals that do not yet have a matching durable memory fingerprint.") | Out-Null
-    $markdownLines.Add("- Refresh targets are newer task/session signals that appear to overlap with an older durable memory and may deserve a writeback update.") | Out-Null
+    $markdownLines.Add("- Typed durable promotion only routes into `user`, `feedback`, `project`, and `reference`, so durable writeback targets stay auditable.") | Out-Null
+    $markdownLines.Add("- Typed promotion queue items now carry source layer, source scope, target scope, source type, source confidence, source record id, and a promotion reason for downstream writeback decisions.") | Out-Null
+    $markdownLines.Add("- Typed refresh targets are newer task/session/event signals that overlap an older durable memory after target-scope routing and may deserve a writeback update.") | Out-Null
 
     $markdown = ($markdownLines.ToArray() -join "`n").Trim() + "`n"
     Write-Text -Path $DreamMarkdownPath -Content $markdown
@@ -477,6 +860,9 @@ try {
             jobs = $jobRecords.Count
             journal = $journalRecords.Count
             taskMemory = $taskMemoryRecords.Count
+            durableByScope = $durableByScope
+            typedPromotionTargets = $promotionTargetCounts
+            typedRefreshTargets = $refreshTargetCounts
             total = $totalRecords
         }
         highlights = [ordered]@{
@@ -503,10 +889,19 @@ try {
                     t = $_.t
                 }
             })
+            durableByScope = $durableByScope
             promotions = @($promotionCandidates | ForEach-Object {
                 [ordered]@{
                     tool = $_.tool
-                    scope = $_.scope
+                    sourceLayer = $_.sourceLayer
+                    sourceScope = $_.sourceScope
+                    targetScope = $_.targetScope
+                    sourceKind = $_.sourceKind
+                    sourceType = $_.sourceType
+                    sourceConfidence = $_.sourceConfidence
+                    sourceRecordId = $_.sourceRecordId
+                    promotionKey = $_.promotionKey
+                    promotionReason = $_.promotionReason
                     title = $_.title
                     t = $_.t
                 }
@@ -514,7 +909,16 @@ try {
             refresh = @($refreshTargets | ForEach-Object {
                 [ordered]@{
                     tool = $_.tool
-                    scope = $_.scope
+                    sourceLayer = $_.sourceLayer
+                    sourceScope = $_.sourceScope
+                    targetScope = $_.targetScope
+                    sourceKind = $_.sourceKind
+                    sourceType = $_.sourceType
+                    sourceConfidence = $_.sourceConfidence
+                    sourceRecordId = $_.sourceRecordId
+                    promotionKey = $_.promotionKey
+                    promotionReason = $_.promotionReason
+                    refreshOf = $_.refreshOf
                     title = $_.title
                     t = $_.t
                 }

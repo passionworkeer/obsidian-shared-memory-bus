@@ -9,6 +9,8 @@ This document is intentionally more skeptical than the rest of the docs. The goa
 - The source tree and the flat installed runtime now have an explicit contract.
 - Windows, macOS, and Linux all have a real install/start/stop path instead of Windows-only scripts plus wishful docs.
 - The shared retrieval path now keeps a warm Python worker alive, so BM25 state, entry caches, and transformer model caches can survive across repeated searches.
+- Typed durable promotion now exists in the structured record contract through `metadata.promotion` instead of living only in generated markdown summaries.
+- Shared retrieval now has explicit query routing and layered hybrid reranking, so operators can bias toward durable memory, task state, recent activity, or reference material without changing the underlying store.
 
 ## Main Weaknesses
 
@@ -72,6 +74,28 @@ The docs are right that Obsidian is the durable source of truth, but the live ar
 
 That means "canonical" currently means canonical storage and recall layer, not that every client writes through one unified transactional boundary.
 
+### 5.2 Query Routing Is Inspectable, But Still Hand-Tuned
+The new route-aware reranker is a real improvement over flat hybrid output, but it is still a rule-and-weight system rather than an evaluated ranking policy.
+
+Current limits:
+- route inference depends on regex and filter hints, so ambiguous prompts can still route poorly
+- `layer`, `scope`, `sourceKind`, freshness, and task-state weights are hand-tuned rather than learned from judgments
+- `candidateCount` still reflects the full scored union, not a route-pruned candidate pool
+- there is no offline relevance benchmark yet for comparing route profiles or tuning weights safely
+
+This is a good operator-friendly step, not the final ranking architecture.
+
+### 5.3 Typed Promotion Is Better, But Still Not A Full Durable Policy Engine
+Typed durable promotion closes an important gap, but it does not magically solve memory quality.
+
+Current limits:
+- promotion typing is still driven by heuristics and source text classification
+- queue generation does not yet model conflicts between overlapping durable candidates
+- refresh decisions are timestamp-based once keys overlap, not semantic diff aware
+- there is no approval policy layer or learned promotion scoring yet
+
+This means the system is now auditable and much less ad hoc, but not yet a trustworthy autopilot for long-term writeback.
+
 ### 6. Extension Contracts Are Moving Toward Schema-First, But Not There Yet
 The project now has a versioned memory-contract validator and integrity status surface, which is a real improvement over pure generator-first onboarding. Even so, the overall contract is still only partially schema-first.
 
@@ -120,6 +144,8 @@ This means "shared MCP" is an optimization boundary, not a claim that every tool
 - Move duplicated embedding/runtime logic behind one versioned contract shared by Node.js and Python.
 - Add a persistent retrieval cache or index layer so BM25 corpus construction is not repeated on every query.
 - Add a long-lived embedding worker or query-time model cache for transformer mode.
+- Add an evaluation harness for query routing and layered rerank weight tuning.
+- Add conflict-aware durable promotion scoring instead of only typed queue generation.
 - Formalize a versioned adapter schema for new agents, skills, and plugin bridges.
 - Improve observability with structured metrics and staleness reporting, not only logs and last-run reports.
 
