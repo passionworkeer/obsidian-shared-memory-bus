@@ -140,6 +140,29 @@ jobs:
             throw 'hybrid retrieval returned no indexed entries'
           }
 
+      - name: Run semantic-search wrapper unit tests
+        shell: pwsh
+        run: |
+          node --test ./retrieval/semantic-search-cli.test.js
+
+      - name: Run OpenClaw routed retrieval smoke
+        shell: pwsh
+        run: |
+          $json = node ./retrieval/semantic-search.js --json --mode hybrid --route task --tool openclaw --source-kind blackboard --top-k 3 "shrimp intel queue"
+          $result = $json | ConvertFrom-Json
+          if ($result.results.Count -lt 1) {
+            throw 'OpenClaw routed retrieval returned no results'
+          }
+          if ($result.results[0].tool -ne 'openclaw') {
+            throw 'OpenClaw routed retrieval did not keep the tool filter'
+          }
+          if ($result.results[0].sourceKind -ne 'blackboard') {
+            throw 'OpenClaw routed retrieval did not keep the source-kind filter'
+          }
+          if ($result.queryRoute.intent -ne 'task') {
+            throw 'OpenClaw routed retrieval did not resolve to task intent'
+          }
+
       - name: Portable install wrapper smoke
         shell: bash
         run: |
