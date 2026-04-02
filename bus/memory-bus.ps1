@@ -69,6 +69,27 @@ function Resolve-ObsidianVaultRoot {
 
 $Script:UserHome = $env:USERPROFILE
 $Script:BusHome = if (-not [string]::IsNullOrWhiteSpace($env:AI_MEMORY_ROOT)) { $env:AI_MEMORY_ROOT } else { $PSScriptRoot }
+$Script:BundleHome = Split-Path -Parent $PSScriptRoot
+
+function Resolve-BusScriptPath {
+    param([Parameter(Mandatory = $true)][string[]]$Candidates)
+
+    foreach ($root in @($Script:BusHome, $Script:BundleHome)) {
+        if ([string]::IsNullOrWhiteSpace($root)) {
+            continue
+        }
+
+        foreach ($candidate in @($Candidates)) {
+            $path = Join-Path $root $candidate
+            if (Test-Path -LiteralPath $path -PathType Leaf) {
+                return (Get-Item -LiteralPath $path).FullName
+            }
+        }
+    }
+
+    return (Join-Path $Script:BusHome $Candidates[0])
+}
+
 $Script:LegacyVaultRoot = Join-Path $Script:UserHome "Documents\Obsidian Vault"
 $Script:VaultRoot = Resolve-ObsidianVaultRoot -FallbackPath $Script:LegacyVaultRoot
 $Script:BusRoot = Join-Path $Script:VaultRoot "00-System\ai-memory"
@@ -102,18 +123,22 @@ $Script:CopilotCliSessionRoot = Join-Path $Script:CopilotHome "session-state"
 $Script:VsCodeUserRoot = Join-Path $env:APPDATA "Code\User"
 $Script:CopilotGlobalStorage = Join-Path $Script:VsCodeUserRoot "globalStorage\github.copilot-chat"
 $Script:CopilotWorkspaceStorageRoot = Join-Path $Script:VsCodeUserRoot "workspaceStorage"
-$Script:WatchdogScript = Join-Path $Script:BusHome "memory-watchdog.ps1"
+$Script:WatchdogScript = Resolve-BusScriptPath -Candidates @("memory-watchdog.ps1", "bus\memory-watchdog.ps1")
 $Script:WatchdogStatePath = Join-Path $Script:BusHome "watchdog-state.json"
 $Script:WatchdogStartupVbs = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Startup\AI Memory Watchdog.vbs"
 $Script:GlobalContextPath = Join-Path $Script:GeneratedRoot "GLOBAL-CONTEXT.md"
 $Script:GlobalJsonPath = Join-Path $Script:GeneratedRoot "GLOBAL-CONTEXT.json"
+$Script:MemoryLayersGuidePath = Join-Path $Script:GeneratedRoot "MEMORY-LAYERS.md"
+$Script:MemoryLayersJsonPath = Join-Path $Script:GeneratedRoot "MEMORY-LAYERS.json"
+$Script:AutoDreamGuidePath = Join-Path $Script:GeneratedRoot "AUTO-DREAM.md"
+$Script:AutoDreamJsonPath = Join-Path $Script:GeneratedRoot "AUTO-DREAM.json"
 $Script:SharedSkillsGuidePath = Join-Path $Script:GeneratedRoot "SHARED-SKILLS.md"
 $Script:SharedSkillsJsonPath = Join-Path $Script:GeneratedRoot "SHARED-SKILLS.json"
 $Script:AgentRegistryPath = Join-Path $Script:BusHome "agents.json"
 $Script:OnboardingRoot = Join-Path $Script:GeneratedRoot "onboarding"
 $Script:UniversalArchitecturePath = Join-Path $Script:OnboardingRoot "ARCHITECTURE.md"
 $Script:UniversalBootstrapPath = Join-Path $Script:OnboardingRoot "UNIVERSAL-AGENT-BOOTSTRAP.md"
-$Script:SharedSkillsSyncScript = Join-Path $Script:BusHome "sync-shared-skills.ps1"
+$Script:SharedSkillsSyncScript = Resolve-BusScriptPath -Candidates @("sync-shared-skills.ps1", "ops\sync-shared-skills.ps1")
 $Script:ClaudeMemApiBase = "http://127.0.0.1:37778/api"
 $Script:BusLockTimeoutMs = 180000
 $Script:StaleSyncSeconds = 20
@@ -415,7 +440,7 @@ function Get-AgentStartupPath {
 }
 
 function Build-OnboardingMcpConfigJson {
-    $obsidianMcpScript = ((Join-Path $Script:BusHome "run-obsidian-mcp.ps1") -replace "\\", "/")
+    $obsidianMcpScript = ((Resolve-BusScriptPath -Candidates @("run-obsidian-mcp.ps1", "ops\run-obsidian-mcp.ps1")) -replace "\\", "/")
     $payload = [ordered]@{
         mcpServers = [ordered]@{
             obsidian = [ordered]@{
@@ -2662,8 +2687,10 @@ Read in this order before doing substantive work:
 2. $Script:CanonicalMemory
 3. $Script:CanonicalWorking
 4. $Script:GlobalContextPath
-5. $Script:SharedSkillsGuidePath
-6. $ExtraReadPath
+5. $Script:MemoryLayersGuidePath
+6. $Script:AutoDreamGuidePath
+7. $Script:SharedSkillsGuidePath
+8. $ExtraReadPath
 
 Writeback rules:
 - Durable user preferences, cross-project facts, and reusable decisions go to $WritebackPath
@@ -3339,6 +3366,8 @@ function Generate-Artifacts {
     $memoryText = Read-Text -Path $Script:CanonicalMemory
     $workingText = Read-Text -Path $Script:CanonicalWorking
     $vaultAgentsText = Read-Text -Path $Script:VaultAgents
+    $memoryLayersText = Read-Text -Path $Script:MemoryLayersGuidePath
+    $autoDreamText = Read-Text -Path $Script:AutoDreamGuidePath
     $sharedSkillsText = Read-Text -Path $Script:SharedSkillsGuidePath
     $imported = Get-ImportedHighlights
     $inboxes = Get-InboxHighlights
@@ -3389,6 +3418,12 @@ $(Clip-Lines -Text $memoryText -MaxLines 120)
 ## Current Working Context
 $(Clip-Lines -Text $workingText -MaxLines 80)
 
+## Memory Layers
+$(if ([string]::IsNullOrWhiteSpace($memoryLayersText)) { "(memory layers summary not generated yet)" } else { Clip-Lines -Text $memoryLayersText -MaxLines 80 })
+
+## Auto Dream
+$(if ([string]::IsNullOrWhiteSpace($autoDreamText)) { "(auto dream summary not generated yet)" } else { Clip-Lines -Text $autoDreamText -MaxLines 80 })
+
 ## Shared Skills
 $(if ([string]::IsNullOrWhiteSpace($sharedSkillsText)) { "(shared skills guide not generated yet)" } else { Clip-Lines -Text $sharedSkillsText -MaxLines 120 })
 
@@ -3411,6 +3446,8 @@ $(if ($inboxSections.Count -gt 0) { [string]::Join("`n`n", $inboxSections) } els
             memory = $Script:CanonicalMemory
             working = $Script:CanonicalWorking
             globalContext = $Script:GlobalContextPath
+            memoryLayers = $Script:MemoryLayersGuidePath
+            autoDream = $Script:AutoDreamGuidePath
             sharedSkills = $Script:SharedSkillsGuidePath
         }
         registry = $Script:AgentRegistryPath
@@ -3534,6 +3571,8 @@ function Get-StatusObject {
     return [ordered]@{
         generatedAt = if (Test-Path -LiteralPath $Script:GlobalContextPath) { (Get-Item -LiteralPath $Script:GlobalContextPath).LastWriteTime.ToString("o") } else { $null }
         globalContext = $Script:GlobalContextPath
+        memoryLayers = $Script:MemoryLayersGuidePath
+        autoDream = $Script:AutoDreamGuidePath
         sharedSkillsGuide = $Script:SharedSkillsGuidePath
         sharedSkillsJson = $Script:SharedSkillsJsonPath
         claudeMirror = $Script:ClaudeMirror

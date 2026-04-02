@@ -3,7 +3,7 @@ Slow, low-cost probe for OpenAI-compatible embedding models.
 
 Example:
   set AI_MEMORY_EMBED_API_KEY=...
-  python probe-embedding-models.py ^
+  python probe-models.py ^
       --base-url https://api-inference.modelscope.cn/v1 ^
       --models Qwen/Qwen3-Embedding-0.6B Qwen/Qwen3-Embedding-4B ^
       --delay-seconds 6

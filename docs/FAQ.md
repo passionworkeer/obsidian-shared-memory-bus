@@ -15,6 +15,16 @@ The shared Playwright backend still supports isolated sessions and browser profi
 ## What Is The Relationship Between `claude-mem` And Shared Memory?
 `claude-mem` remains a native source. The shared memory bus bridges or syncs durable signals into the canonical Obsidian-backed layer instead of pretending native memory never exists.
 
+## Should I Integrate Via MCP, Skills, Or Plugins?
+- MCP:
+  - best for shared runtime access, process deduplication, and tool transport
+- skills:
+  - best for portable onboarding, read order, writeback policy, and task decomposition habits
+- plugins:
+  - best only when a host app needs native lifecycle hooks or UI
+
+The default recommendation is MCP plus skills. Add plugins only as a host-specific last mile.
+
 ## When Should I Use `bm25`, `dense`, Or `hybrid`?
 - `bm25`: exact or keyword-heavy queries
 - `dense`: semantic similarity
@@ -29,6 +39,9 @@ No. Offline `hashing-v1` is the default dense path.
 ## Can I Use This Across Multiple Devices?
 You can, but do not confuse sync strategy with memory architecture. Keep one canonical vault and understand sync conflict behavior before layering more systems on top.
 
+## Is This Really Cross-Platform?
+Partly, and intentionally so. The full control plane is still Windows-first. The core memory engine now avoids native Node `sqlite3`, auto-detects Python across common Windows/macOS/Linux locations, and is smoke-validated in CI on all three platforms.
+
 ## Operational Troubleshooting
 
 ### My memory retrieval returns empty results. What do I do?
@@ -41,7 +54,7 @@ You can, but do not confuse sync strategy with memory architecture. Keep one can
 ### The watchdog stopped running. Is my memory still fresh?
 No. Without the watchdog, structured memory stops updating. Agent sessions will still work, but cross-agent shared memory will become stale. To restart:
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\bus\memory-watchdog.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\memory-watchdog.ps1
 ```
 
 ### My embeddings fell back to "hashing-v1". What happened?
