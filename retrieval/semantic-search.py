@@ -16,14 +16,36 @@ import os
 import re
 import sys
 import time as time_module
-import urllib.error
-import urllib.request
 from typing import Dict, Iterable, List, Optional, Tuple
+
+from embedding_providers import (
+    DEFAULT_MODEL,
+    HASH_MODEL,
+    build_embedding_config_hash,
+    embed_query_with_runtime,
+    get_transformer_model_name,
+    normalize_embedding_adapter,
+)
+from runtime_support import first_non_empty_env, normalize_bool, normalize_int, resolve_embedding_runtime, resolve_vault_root
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 # In-memory cache for the embeddings index with 30-second TTL.
 # Avoids re-reading ~50k lines from index.jsonl on every search.
-_INDEX_CACHE = {"data": None, "loaded_at": 0.0}
-_INDEX_CACHE_TTL = 30  # seconds
+_INDEX_CACHE = {"data": None, "loaded_at": 0.0, "signature": ""}
+_ENTRIES_CACHE = {"data": None, "loaded_at": 0.0, "version": 0, "signature": ""}
+_BM25_CACHE: Dict[str, dict] = {}
+_QUERY_EMBEDDING_CACHE: Dict[str, dict] = {}
+_SEARCH_RESULT_CACHE: Dict[str, dict] = {}
+_CACHE_METRICS = {
+    "queryEmbeddingHits": 0,
+    "queryEmbeddingMisses": 0,
+    "searchResultHits": 0,
+    "searchResultMisses": 0,
+}
 
 try:
     from rank_bm25 import BM25Okapi  # type: ignore
@@ -36,14 +58,20 @@ try:
     jieba.setLogLevel(20)
 except Exception:
     jieba = None
-
-
-DEFAULT_MODEL = "all-MiniLM-L6-v2"
-HASH_MODEL = "hashing-v1"
-HASH_DIM = 384
-OPENAI_BASE_URL = os.environ.get("AI_MEMORY_EMBED_BASE_URL", "").strip().rstrip("/")
-OPENAI_API_KEY = os.environ.get("AI_MEMORY_EMBED_API_KEY", "").strip()
-OPENAI_TIMEOUT_SECONDS = max(1, int(os.environ.get("AI_MEMORY_EMBED_TIMEOUT_SECONDS", "120") or "120"))
+_CACHE_TTL = float(normalize_int(first_non_empty_env("AI_MEMORY_BM25_CACHE_TTL_SECONDS"), fallback=600, minimum=30))
+_QUERY_EMBEDDING_CACHE_TTL = float(
+    normalize_int(first_non_empty_env("AI_MEMORY_QUERY_EMBED_CACHE_TTL_SECONDS"), fallback=600, minimum=30)
+)
+_SEARCH_RESULT_CACHE_TTL = float(
+    normalize_int(first_non_empty_env("AI_MEMORY_SEARCH_RESULT_CACHE_TTL_SECONDS"), fallback=300, minimum=30)
+)
+_QUERY_EMBEDDING_CACHE_MAX_ENTRIES = normalize_int(
+    first_non_empty_env("AI_MEMORY_QUERY_EMBED_CACHE_MAX_ENTRIES"), fallback=128, minimum=8
+)
+_SEARCH_RESULT_CACHE_MAX_ENTRIES = normalize_int(
+    first_non_empty_env("AI_MEMORY_SEARCH_RESULT_CACHE_MAX_ENTRIES"), fallback=128, minimum=8
+)
+_BM25_CACHE_MAX_ENTRIES = normalize_int(first_non_empty_env("AI_MEMORY_BM25_CACHE_MAX_ENTRIES"), fallback=8, minimum=1)
 NOISE_PATTERNS = [
     re.compile(r"^Sender\s*\(", re.I),
     re.compile(r"^System:", re.I),
@@ -57,56 +85,214 @@ NOISE_PATTERNS = [
 ]
 
 
-def resolve_vault_root() -> str:
-    for env_key in ("AI_MEMORY_OBSIDIAN_VAULT", "OBSIDIAN_VAULT_ROOT"):
-        candidate = os.environ.get(env_key, "").strip()
-        if candidate and os.path.isdir(candidate):
-            return candidate
-
-    appdata = os.environ.get("APPDATA", "").strip()
-    if appdata:
-        config_path = os.path.join(appdata, "obsidian", "obsidian.json")
-        if os.path.isfile(config_path):
-            try:
-                with open(config_path, "r", encoding="utf-8") as handle:
-                    config = json.load(handle)
-                records = []
-                for vault in (config.get("vaults") or {}).values():
-                    path = str(vault.get("path", "")).strip()
-                    if not path or not os.path.isdir(path):
-                        continue
-                    records.append(
-                        {
-                            "path": path,
-                            "open": bool(vault.get("open")),
-                            "ts": int(vault.get("ts") or 0),
-                        }
-                    )
-                open_records = sorted((item for item in records if item["open"]), key=lambda item: item["ts"], reverse=True)
-                if open_records:
-                    return open_records[0]["path"]
-                recent_records = sorted(records, key=lambda item: item["ts"], reverse=True)
-                if recent_records:
-                    return recent_records[0]["path"]
-            except Exception:
-                pass
-
-    for fallback in (
-        os.path.join(os.path.expanduser("~"), "Desktop", "Obsidian Vault"),
-        os.path.join(os.path.expanduser("~"), "Documents", "Obsidian Vault"),
-    ):
-        if os.path.isdir(fallback):
-            return fallback
-    raise RuntimeError(
-        "no-obsidian-vault: Tried ["
-        + os.path.join(os.path.expanduser("~"), "Desktop", "Obsidian Vault")
-        + ", "
-        + os.path.join(os.path.expanduser("~"), "Documents", "Obsidian Vault")
-        + "]. Set AI_MEMORY_OBSIDIAN_VAULT or OBSIDIAN_VAULT_ROOT to your vault path."
-    )
+def build_file_stamp(file_path: str) -> str:
+    if not os.path.exists(file_path):
+        return "__missing__"
+    try:
+        stat = os.stat(file_path)
+        return f"{os.path.basename(file_path)}:{stat.st_mtime_ns}:{stat.st_size}"
+    except Exception:
+        return f"{os.path.basename(file_path)}:__unreadable__"
 
 
-VAULT_ROOT = resolve_vault_root()
+def build_structured_signature() -> str:
+    if not os.path.isdir(STRUCTURED_DIR):
+        return "__missing__"
+    parts: List[str] = []
+    try:
+        for file_name in sorted(os.listdir(STRUCTURED_DIR)):
+            if not file_name.endswith(".jsonl"):
+                continue
+            parts.append(build_file_stamp(os.path.join(STRUCTURED_DIR, file_name)))
+    except Exception:
+        return "__unreadable__"
+    return "|".join(parts) if parts else "__empty__"
+
+
+def build_embeddings_signature() -> str:
+    return build_file_stamp(EMBEDDINGS_INDEX)
+
+
+def invalidate_entries_cache() -> None:
+    _ENTRIES_CACHE["data"] = None
+    _ENTRIES_CACHE["loaded_at"] = 0.0
+    _ENTRIES_CACHE["signature"] = ""
+    _ENTRIES_CACHE["version"] = int(_ENTRIES_CACHE.get("version", 0)) + 1
+    _BM25_CACHE.clear()
+    _SEARCH_RESULT_CACHE.clear()
+
+
+def invalidate_embeddings_cache() -> None:
+    _INDEX_CACHE["data"] = None
+    _INDEX_CACHE["loaded_at"] = 0.0
+    _INDEX_CACHE["signature"] = ""
+
+    _QUERY_EMBEDDING_CACHE.clear()
+    _SEARCH_RESULT_CACHE.clear()
+
+
+def clear_search_runtime_caches(include_data_caches: bool = False) -> Dict[str, object]:
+    _BM25_CACHE.clear()
+    _QUERY_EMBEDDING_CACHE.clear()
+    _SEARCH_RESULT_CACHE.clear()
+    _CACHE_METRICS["queryEmbeddingHits"] = 0
+    _CACHE_METRICS["queryEmbeddingMisses"] = 0
+    _CACHE_METRICS["searchResultHits"] = 0
+    _CACHE_METRICS["searchResultMisses"] = 0
+
+    if include_data_caches:
+        _ENTRIES_CACHE["data"] = None
+        _ENTRIES_CACHE["loaded_at"] = 0.0
+        _ENTRIES_CACHE["signature"] = ""
+        _ENTRIES_CACHE["version"] = int(_ENTRIES_CACHE.get("version", 0)) + 1
+        _INDEX_CACHE["data"] = None
+        _INDEX_CACHE["loaded_at"] = 0.0
+        _INDEX_CACHE["signature"] = ""
+
+    return build_cache_state(search_result_cache_hit=False, query_embedding_cache_hit=False)
+
+
+def prune_timed_cache(cache: Dict[str, dict], ttl_seconds: float, max_entries: int) -> None:
+    now = time_module.time()
+    stale_keys = [key for key, payload in cache.items() if (now - float(payload.get("created_at", 0.0))) >= ttl_seconds]
+    for key in stale_keys:
+        cache.pop(key, None)
+
+    if len(cache) <= max_entries:
+        return
+
+    ordered_keys = sorted(cache.keys(), key=lambda key: float(cache[key].get("created_at", 0.0)))
+    for key in ordered_keys[: max(0, len(cache) - max_entries)]:
+        cache.pop(key, None)
+
+
+def build_cache_state(search_result_cache_hit: bool = False, query_embedding_cache_hit: bool = False) -> Dict[str, object]:
+    prune_timed_cache(_QUERY_EMBEDDING_CACHE, _QUERY_EMBEDDING_CACHE_TTL, _QUERY_EMBEDDING_CACHE_MAX_ENTRIES)
+    prune_timed_cache(_SEARCH_RESULT_CACHE, _SEARCH_RESULT_CACHE_TTL, _SEARCH_RESULT_CACHE_MAX_ENTRIES)
+    prune_timed_cache(_BM25_CACHE, _CACHE_TTL, _BM25_CACHE_MAX_ENTRIES)
+    current_structured_signature = build_structured_signature()
+    current_embeddings_signature = build_embeddings_signature()
+    return {
+        "entryCacheVersion": int(_ENTRIES_CACHE.get("version", 0)),
+        "structuredSignature": current_structured_signature,
+        "embeddingsSignature": current_embeddings_signature,
+        "bm25CacheEntries": len(_BM25_CACHE),
+        "queryEmbeddingCacheEntries": len(_QUERY_EMBEDDING_CACHE),
+        "searchResultCacheEntries": len(_SEARCH_RESULT_CACHE),
+        "transformerModel": get_transformer_model_name(),
+        "bm25Available": BM25Okapi is not None,
+        "jiebaAvailable": jieba is not None,
+        "queryEmbeddingCacheHit": bool(query_embedding_cache_hit),
+        "searchResultCacheHit": bool(search_result_cache_hit),
+        "metrics": {
+            "queryEmbeddingHits": int(_CACHE_METRICS["queryEmbeddingHits"]),
+            "queryEmbeddingMisses": int(_CACHE_METRICS["queryEmbeddingMisses"]),
+            "searchResultHits": int(_CACHE_METRICS["searchResultHits"]),
+            "searchResultMisses": int(_CACHE_METRICS["searchResultMisses"]),
+        },
+    }
+
+
+def clone_json_payload(payload: Dict[str, object]) -> Dict[str, object]:
+    return json.loads(json.dumps(payload, ensure_ascii=False))
+
+
+def build_query_embedding_cache_key(query: str, backend: str, model_name: str, base_url: str = "") -> str:
+    payload = {
+        "query": normalize_spaces(query),
+        "backend": normalize_embedding_adapter(backend, model_name),
+        "model": (model_name or "").strip(),
+        "baseUrl": (base_url or "").strip().rstrip("/").lower(),
+    }
+    return hashlib.sha1(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8", errors="ignore")).hexdigest()
+
+
+def get_cached_query_embedding(cache_key: str) -> Optional[List[float]]:
+    prune_timed_cache(_QUERY_EMBEDDING_CACHE, _QUERY_EMBEDDING_CACHE_TTL, _QUERY_EMBEDDING_CACHE_MAX_ENTRIES)
+    cached = _QUERY_EMBEDDING_CACHE.get(cache_key)
+    if cached is None:
+        _CACHE_METRICS["queryEmbeddingMisses"] = int(_CACHE_METRICS["queryEmbeddingMisses"]) + 1
+        return None
+
+    _CACHE_METRICS["queryEmbeddingHits"] = int(_CACHE_METRICS["queryEmbeddingHits"]) + 1
+    return [float(value) for value in cached.get("embedding", [])]
+
+
+def store_query_embedding(cache_key: str, embedding: List[float]) -> None:
+    _QUERY_EMBEDDING_CACHE[cache_key] = {
+        "created_at": time_module.time(),
+        "embedding": [float(value) for value in embedding],
+    }
+    prune_timed_cache(_QUERY_EMBEDDING_CACHE, _QUERY_EMBEDDING_CACHE_TTL, _QUERY_EMBEDDING_CACHE_MAX_ENTRIES)
+
+
+def build_search_result_cache_key(parsed: Dict[str, object], entries_signature: str, embeddings_signature: str) -> str:
+    runtime_backend = str(EMBEDDING_RUNTIME.get("adapter", EMBEDDING_RUNTIME.get("backend", ""))).strip()
+    runtime_model = str(EMBEDDING_RUNTIME.get("model", "")).strip()
+    runtime_hash = build_embedding_config_hash(runtime_backend, runtime_model, str(EMBEDDING_RUNTIME.get("baseUrl", "")))
+    payload = {
+        "request": parsed,
+        "entriesSignature": entries_signature,
+        "embeddingsSignature": embeddings_signature,
+        "runtimeHash": runtime_hash,
+    }
+    return hashlib.sha1(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8", errors="ignore")).hexdigest()
+
+
+def get_cached_search_result(cache_key: str) -> Optional[Dict[str, object]]:
+    prune_timed_cache(_SEARCH_RESULT_CACHE, _SEARCH_RESULT_CACHE_TTL, _SEARCH_RESULT_CACHE_MAX_ENTRIES)
+    cached = _SEARCH_RESULT_CACHE.get(cache_key)
+    if cached is None:
+        _CACHE_METRICS["searchResultMisses"] = int(_CACHE_METRICS["searchResultMisses"]) + 1
+        return None
+
+    _CACHE_METRICS["searchResultHits"] = int(_CACHE_METRICS["searchResultHits"]) + 1
+    return clone_json_payload(cached.get("response", {}))
+
+
+def store_search_result(cache_key: str, payload: Dict[str, object]) -> None:
+    _SEARCH_RESULT_CACHE[cache_key] = {
+        "created_at": time_module.time(),
+        "response": clone_json_payload(payload),
+    }
+    prune_timed_cache(_SEARCH_RESULT_CACHE, _SEARCH_RESULT_CACHE_TTL, _SEARCH_RESULT_CACHE_MAX_ENTRIES)
+EMBEDDING_RUNTIME = resolve_embedding_runtime(
+    __file__,
+    defaults={
+        "adapter": "hash",
+        "model": DEFAULT_MODEL,
+        "timeoutMs": 120000,
+        "requestDelayMs": 0,
+        "batchSize": 0,
+        "allowBatchFallback": False,
+    },
+)
+
+
+def build_embedding_runtime_summary() -> Dict[str, object]:
+    return {
+        "profile": str(EMBEDDING_RUNTIME.get("profileName", "")),
+        "provider": str(EMBEDDING_RUNTIME.get("providerName", "")),
+        "adapter": str(EMBEDDING_RUNTIME.get("adapter", EMBEDDING_RUNTIME.get("backend", "hash")) or "hash"),
+        "backend": str(EMBEDDING_RUNTIME.get("backend", EMBEDDING_RUNTIME.get("adapter", "hash")) or "hash"),
+        "model": str(EMBEDDING_RUNTIME.get("model", DEFAULT_MODEL) or DEFAULT_MODEL),
+        "baseUrl": str(EMBEDDING_RUNTIME.get("baseUrl", "")),
+        "apiKeyEnv": str(EMBEDDING_RUNTIME.get("apiKeyEnv", "")),
+        "apiKeyConfigured": bool(EMBEDDING_RUNTIME.get("apiKey")),
+        "timeoutMs": int(EMBEDDING_RUNTIME.get("timeoutMs", 120000) or 120000),
+        "requestDelayMs": int(EMBEDDING_RUNTIME.get("requestDelayMs", 0) or 0),
+        "batchSize": int(EMBEDDING_RUNTIME.get("batchSize", 0) or 0),
+        "allowBatchFallback": bool(EMBEDDING_RUNTIME.get("allowBatchFallback")),
+        "resolutionMode": str(EMBEDDING_RUNTIME.get("resolutionMode", "")),
+        "availableProfiles": list(EMBEDDING_RUNTIME.get("availableProfiles", []) or []),
+        "availableProviders": list(EMBEDDING_RUNTIME.get("availableProviders", []) or []),
+        "configPath": str(EMBEDDING_RUNTIME.get("configPath", "")),
+        "configExists": bool(EMBEDDING_RUNTIME.get("configExists")),
+        "configError": str(EMBEDDING_RUNTIME.get("configError", "")),
+    }
+
+
+VAULT_ROOT = str(resolve_vault_root())
 AI_MEMORY_ROOT = os.path.join(VAULT_ROOT, "00-System", "ai-memory")
 STRUCTURED_DIR = os.path.join(AI_MEMORY_ROOT, "structured")
 EMBEDDINGS_INDEX = os.path.join(AI_MEMORY_ROOT, "embeddings", "index.jsonl")
@@ -166,60 +352,6 @@ def tokenize(text: str) -> List[str]:
     return tokens
 
 
-# =============================================================================
-# NOTE: This hashing logic (FNV-1a32 + buildHashFeatures) is duplicated in:
-#   - generate-embeddings.js (JS version, identical logic)
-#   - singleton-stdio-mcp-proxy.mjs (may also use it)
-# When modifying this, sync all copies.
-# See: https://github.com/.../issues/TWIN-BUG
-# =============================================================================
-
-def fnv1a32(value: str) -> int:
-    hash_value = 0x811C9DC5
-    for character in value:
-        hash_value ^= ord(character)
-        hash_value = (hash_value * 0x01000193) & 0xFFFFFFFF
-    return hash_value
-
-
-def build_hash_features(text: str) -> List[str]:
-    source = normalize_spaces(text).lower()
-    compact = re.sub(r"\s+", "", source)
-    features: List[str] = []
-
-    for token in re.findall(r"[a-z0-9][a-z0-9_\-./:]{1,}", source):
-        features.append(f"w:{token}")
-
-    for chunk in re.findall(r"[\u4e00-\u9fff]{2,}", source):
-        features.append(f"c:{chunk}")
-        for index in range(max(0, len(chunk) - 1)):
-            features.append(f"c2:{chunk[index:index + 2]}")
-        for index in range(max(0, len(chunk) - 2)):
-            features.append(f"c3:{chunk[index:index + 3]}")
-
-    max_gram_count = max(0, min(len(compact) - 2, 400))
-    for index in range(max_gram_count):
-        features.append(f"g3:{compact[index:index + 3]}")
-
-    if not features and compact:
-        features.append(f"raw:{compact}")
-    return features
-
-
-def build_hash_embedding(text: str, dimension: int = HASH_DIM) -> List[float]:
-    vector = [0.0] * dimension
-    for feature in build_hash_features(text):
-        hash_value = fnv1a32(feature)
-        slot = hash_value % dimension
-        sign = 1.0 if ((hash_value >> 1) & 1) == 0 else -1.0
-        vector[slot] += sign
-
-    norm = math.sqrt(sum(value * value for value in vector))
-    if norm > 0:
-        vector = [round(value / norm, 8) for value in vector]
-    return vector
-
-
 def build_entry(payload: dict) -> Optional[dict]:
     title = normalize_spaces(str(payload.get("title", "")))
     content = normalize_spaces(str(payload.get("content", "")))
@@ -255,10 +387,16 @@ def build_entry(payload: dict) -> Optional[dict]:
         "excerpt": excerpt[:240],
         "text": search_text,
         "tokens": tokenize(search_text),
+        "scope": str(payload.get("scope", "")).strip(),
+        "visibility": str(payload.get("visibility", "")).strip(),
+        "sourceKind": str(payload.get("source_kind", "")).strip(),
+        "memoryLevel": str(payload.get("memory_level", "")).strip(),
+        "workspace": str(payload.get("workspace", "")).strip(),
+        "taskState": str(payload.get("task_state", "")).strip(),
     }
 
 
-def load_entries() -> List[dict]:
+def _load_entries_uncached() -> List[dict]:
     entries: Dict[str, dict] = {}
     if not os.path.isdir(STRUCTURED_DIR):
         return []
@@ -286,16 +424,35 @@ def load_entries() -> List[dict]:
     return list(entries.values())
 
 
+def load_entries() -> List[dict]:
+    current_signature = build_structured_signature()
+    if (
+        _ENTRIES_CACHE["data"] is not None
+        and str(_ENTRIES_CACHE.get("signature", "")) == current_signature
+    ):
+        return _ENTRIES_CACHE["data"]
+
+    invalidate_entries_cache()
+    data = _load_entries_uncached()
+    _ENTRIES_CACHE["data"] = data
+    _ENTRIES_CACHE["loaded_at"] = time_module.time()
+    _ENTRIES_CACHE["signature"] = current_signature
+    return data
+
+
 def load_embeddings_index() -> Dict[str, dict]:
-    """Load embeddings index with 30-second TTL cache to avoid repeated I/O."""
-    now = time_module.time()
-    if (_INDEX_CACHE["data"] is not None
-            and (now - _INDEX_CACHE["loaded_at"]) < _INDEX_CACHE_TTL):
+    current_signature = build_embeddings_signature()
+    if (
+        _INDEX_CACHE["data"] is not None
+        and str(_INDEX_CACHE.get("signature", "")) == current_signature
+    ):
         return _INDEX_CACHE["data"]
 
+    invalidate_embeddings_cache()
     data = _load_embeddings_index_uncached()
     _INDEX_CACHE["data"] = data
-    _INDEX_CACHE["loaded_at"] = now
+    _INDEX_CACHE["loaded_at"] = time_module.time()
+    _INDEX_CACHE["signature"] = current_signature
     return data
 
 
@@ -323,15 +480,6 @@ def _load_embeddings_index_uncached() -> Dict[str, dict]:
     return records
 
 
-def normalize_backend(backend: str, model_name: str) -> str:
-    normalized = (backend or "").strip().lower()
-    if normalized:
-        return normalized
-    if (model_name or "").strip().lower().startswith("hashing-"):
-        return "hash"
-    return "transformer"
-
-
 def keyword_overlap_scores(entries: List[dict], query_tokens: List[str]) -> Dict[str, float]:
     scores: Dict[str, float] = {}
     query_set = set(query_tokens)
@@ -342,13 +490,41 @@ def keyword_overlap_scores(entries: List[dict], query_tokens: List[str]) -> Dict
     return scores
 
 
-def bm25_scores(entries: List[dict], query_tokens: List[str]) -> Dict[str, float]:
+def get_bm25_model(entries: List[dict], cache_key: str = ""):
+    if not entries:
+        return None
+
+    prune_timed_cache(_BM25_CACHE, _CACHE_TTL, _BM25_CACHE_MAX_ENTRIES)
+    now = time_module.time()
+    if cache_key:
+        cached = _BM25_CACHE.get(cache_key)
+        if cached is not None and (now - cached["created_at"]) < _CACHE_TTL and cached["size"] == len(entries):
+            return cached["model"]
+
+    corpus = [entry["tokens"] if entry["tokens"] else ["_empty_"] for entry in entries]
+    model = BM25Okapi(corpus)
+
+    if cache_key:
+        if len(_BM25_CACHE) >= _BM25_CACHE_MAX_ENTRIES:
+            oldest_key = min(_BM25_CACHE, key=lambda key: _BM25_CACHE[key]["created_at"])
+            _BM25_CACHE.pop(oldest_key, None)
+        _BM25_CACHE[cache_key] = {
+            "model": model,
+            "created_at": now,
+            "size": len(entries),
+        }
+
+    return model
+
+
+def bm25_scores(entries: List[dict], query_tokens: List[str], cache_key: str = "") -> Dict[str, float]:
     if not entries or not query_tokens:
         return {}
     if BM25Okapi is None:
         return keyword_overlap_scores(entries, query_tokens)
-    corpus = [entry["tokens"] if entry["tokens"] else ["_empty_"] for entry in entries]
-    model = BM25Okapi(corpus)
+    model = get_bm25_model(entries, cache_key)
+    if model is None:
+        return {}
     raw_scores = model.get_scores(query_tokens)
     scores: Dict[str, float] = {}
     for index, score in enumerate(raw_scores):
@@ -375,85 +551,71 @@ def cosine_similarity(left: Iterable[float], right: Iterable[float]) -> float:
     return numerator / math.sqrt(left_norm * right_norm)
 
 
-def embed_query_openai_compatible(query: str, model_name: str) -> Tuple[Optional[List[float]], Optional[str]]:
-    if not OPENAI_BASE_URL:
-        return None, "missing-openai-base-url"
-    if not OPENAI_API_KEY:
-        return None, "missing-openai-api-key"
-
-    payload = json.dumps(
-        {
-            "model": model_name,
-            "input": query,
-            "encoding_format": "float",
-        }
-    ).encode("utf-8")
-    request = urllib.request.Request(
-        f"{OPENAI_BASE_URL}/embeddings",
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-        },
-        method="POST",
+def embed_query(query: str, runtime: Dict[str, object], model_name: str = "") -> Tuple[Optional[List[float]], Optional[str], bool]:
+    effective_model = str(model_name or runtime.get("model", DEFAULT_MODEL) or DEFAULT_MODEL).strip() or DEFAULT_MODEL
+    effective_adapter = normalize_embedding_adapter(runtime.get("adapter") or runtime.get("backend"), effective_model) or "hash"
+    cache_key = build_query_embedding_cache_key(
+        query,
+        effective_adapter,
+        effective_model,
+        str(runtime.get("baseUrl", "")),
     )
+    cached_embedding = get_cached_query_embedding(cache_key)
+    if cached_embedding is not None:
+        return cached_embedding, None, True
 
-    try:
-        with urllib.request.urlopen(request, timeout=OPENAI_TIMEOUT_SECONDS) as response:
-            body = response.read().decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
-        return None, f"openai-compatible-http-{exc.code}: {detail[:500]}"
-    except Exception as exc:
-        return None, f"openai-compatible-query-embedding-failed: {exc}"
-
-    try:
-        parsed = json.loads(body)
-        data = parsed.get("data") or []
-        if not data:
-            return None, "openai-compatible-empty-response"
-        vector = data[0].get("embedding")
-        if not isinstance(vector, list) or not vector:
-            return None, "openai-compatible-empty-vector"
-        return [float(value) for value in vector], None
-    except Exception as exc:
-        return None, f"openai-compatible-invalid-json: {exc}"
+    vector, error, _, resolved_model = embed_query_with_runtime(query, runtime, effective_model)
+    if vector is not None and error is None:
+        store_query_embedding(cache_key, vector)
+    if resolved_model and resolved_model != effective_model:
+        runtime["model"] = resolved_model
+    return vector, error, False
 
 
-def embed_query(query: str, model_name: str, backend: str = "") -> Tuple[Optional[List[float]], Optional[str]]:
-    if model_name == HASH_MODEL:
-        return build_hash_embedding(query), None
-
-    normalized_backend = normalize_backend(backend, model_name)
-    if normalized_backend in {"openai", "openai-compatible"}:
-        return embed_query_openai_compatible(query, model_name)
-
-    try:
-        from sentence_transformers import SentenceTransformer  # type: ignore
-    except Exception as exc:
-        return None, f"sentence-transformers-unavailable: {exc}"
-
-    try:
-        model = SentenceTransformer(model_name)
-        encoded = model.encode([query], show_progress_bar=False, convert_to_numpy=True)
-        vector = encoded[0].tolist() if hasattr(encoded[0], "tolist") else list(encoded[0])
-        return [float(value) for value in vector], None
-    except Exception as exc:
-        return None, f"query-embedding-failed: {exc}"
-
-
-def dense_scores(entries_by_id: Dict[str, dict], query: str) -> Tuple[Dict[str, float], Optional[str]]:
+def dense_scores(entries_by_id: Dict[str, dict], query: str) -> Tuple[Dict[str, float], Optional[str], Dict[str, object]]:
     index_records = load_embeddings_index()
     if not index_records:
-        return {}, "missing-embeddings-index"
+        return {}, "missing-embeddings-index", {"queryEmbeddingCacheHit": False}
     first_record = next(iter(index_records.values()))
     model_name = str(first_record.get("model", DEFAULT_MODEL)).strip() or DEFAULT_MODEL
-    backend = normalize_backend(str(first_record.get("backend", "")).strip(), model_name)
+    backend = normalize_embedding_adapter(str(first_record.get("backend", "")).strip(), model_name) or "hash"
     if model_name.startswith("hashing-"):
         model_name = HASH_MODEL
-    query_vector, error = embed_query(query, model_name, backend)
+    record_config_hash = str(first_record.get("configHash", "")).strip()
+    query_runtime = dict(EMBEDDING_RUNTIME)
+    if record_config_hash:
+        active_adapter = normalize_embedding_adapter(
+            EMBEDDING_RUNTIME.get("adapter") or EMBEDDING_RUNTIME.get("backend"),
+            str(EMBEDDING_RUNTIME.get("model", DEFAULT_MODEL) or DEFAULT_MODEL),
+        ) or "hash"
+        active_model_name = (
+            HASH_MODEL
+            if active_adapter == "hash"
+            else str(EMBEDDING_RUNTIME.get("model", DEFAULT_MODEL) or DEFAULT_MODEL).strip() or DEFAULT_MODEL
+        )
+        active_config_hash = build_embedding_config_hash(
+            active_adapter,
+            active_model_name,
+            str(EMBEDDING_RUNTIME.get("baseUrl", "")),
+        )
+        if record_config_hash != active_config_hash:
+            return {}, "embedding-config-mismatch:rebuild-memory-embeddings-required", {"queryEmbeddingCacheHit": False}
+        query_runtime["adapter"] = active_adapter
+        query_runtime["backend"] = active_adapter
+        query_runtime["model"] = active_model_name
+    else:
+        query_runtime["adapter"] = backend
+        query_runtime["backend"] = backend
+        query_runtime["model"] = model_name
+
+    query_vector, error, query_embedding_cache_hit = embed_query(query, query_runtime, model_name)
     if error is not None or query_vector is None:
-        return {}, error
+        return {}, error, {"queryEmbeddingCacheHit": bool(query_embedding_cache_hit)}
+    first_embedding = first_record.get("embedding", [])
+    if isinstance(first_embedding, list) and first_embedding and len(first_embedding) != len(query_vector):
+        return {}, f"embedding-dimension-mismatch:index={len(first_embedding)},query={len(query_vector)}", {
+            "queryEmbeddingCacheHit": bool(query_embedding_cache_hit)
+        }
 
     scores: Dict[str, float] = {}
     for record_id, payload in index_records.items():
@@ -462,7 +624,7 @@ def dense_scores(entries_by_id: Dict[str, dict], query: str) -> Tuple[Dict[str, 
         score = cosine_similarity(query_vector, payload.get("embedding", []))
         if score > 0:
             scores[record_id] = score
-    return scores, None
+    return scores, None, {"queryEmbeddingCacheHit": bool(query_embedding_cache_hit)}
 
 
 def ranked_pairs(scores: Dict[str, float], limit: int) -> List[Tuple[str, float]]:
@@ -492,6 +654,12 @@ def format_results(
                 "t": entry["t"][:19] if entry["t"] else "",
                 "title": entry["title"][:140],
                 "excerpt": entry["excerpt"][:240],
+                "scope": entry.get("scope", ""),
+                "visibility": entry.get("visibility", ""),
+                "sourceKind": entry.get("sourceKind", ""),
+                "memoryLevel": entry.get("memoryLevel", ""),
+                "workspace": entry.get("workspace", ""),
+                "taskState": entry.get("taskState", ""),
                 "sources": sources.get(entry_id, []),
                 "bm25Score": round(float(bm25_map.get(entry_id, 0.0)), 6) if entry_id in bm25_map else None,
                 "denseScore": round(float(dense_map.get(entry_id, 0.0)), 6) if entry_id in dense_map else None,
@@ -500,13 +668,54 @@ def format_results(
     return results
 
 
-def parse_args() -> Tuple[str, int, str]:
+def normalize_request_payload(payload: Dict[str, object]) -> Dict[str, object]:
+    query = normalize_spaces(str(payload.get("query", "")))
+    if not query:
+        raise ValueError("query is required")
+
+    raw_mode = normalize_spaces(str(payload.get("mode", "hybrid"))).lower()
+    mode = "hybrid" if raw_mode == "auto" else raw_mode
+    if mode not in {"bm25", "dense", "hybrid"}:
+        mode = "hybrid"
+
+    top_k = normalize_int(
+        payload.get("top_k", payload.get("topK", payload.get("limit", 10))),
+        fallback=10,
+        minimum=1,
+    )
+
+    return {
+        "query": query,
+        "top_k": top_k,
+        "mode": mode,
+        "tool": normalize_spaces(str(payload.get("tool", ""))).lower(),
+        "project": normalize_spaces(str(payload.get("project", ""))).lower(),
+        "scope": normalize_spaces(str(payload.get("scope", ""))).lower(),
+        "source_kind": normalize_spaces(str(payload.get("source_kind", payload.get("sourceKind", "")))).lower(),
+        "workspace": normalize_spaces(str(payload.get("workspace", ""))).lower(),
+        "task_state": normalize_spaces(str(payload.get("task_state", payload.get("taskState", "")))).lower(),
+        "prefer_summaries": normalize_bool(payload.get("prefer_summaries", payload.get("preferSummaries", False)), fallback=False),
+    }
+
+
+def parse_args() -> Dict[str, object]:
     parser = argparse.ArgumentParser(description="Search shared Obsidian memory")
     parser.add_argument("query", nargs="*", help="search query")
     parser.add_argument("--mode", choices=("bm25", "dense", "hybrid", "auto"), default="bm25")
     parser.add_argument("--top-k", type=int, default=10)
+    parser.add_argument("--tool", default="")
+    parser.add_argument("--project", default="")
+    parser.add_argument("--scope", default="")
+    parser.add_argument("--source-kind", default="")
+    parser.add_argument("--workspace", default="")
+    parser.add_argument("--task-state", default="")
+    parser.add_argument("--prefer-summaries", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--server", action="store_true", help="Run persistent JSONL server mode.")
     args = parser.parse_args()
+
+    if bool(args.server):
+        return {"server": True}
 
     query_parts = list(args.query)
     top_k = args.top_k
@@ -525,20 +734,99 @@ def parse_args() -> Tuple[str, int, str]:
     query = normalize_spaces(" ".join(query_parts))
     if not query:
         raise SystemExit('Usage: python semantic-search.py "query" [topK] [strategy]')
-    return query, top_k, "hybrid" if mode == "auto" else mode
+    return normalize_request_payload(
+        {
+            "query": query,
+            "top_k": top_k,
+            "mode": mode,
+            "tool": args.tool,
+            "project": args.project,
+            "scope": args.scope,
+            "source_kind": args.source_kind,
+            "workspace": args.workspace,
+            "task_state": args.task_state,
+            "prefer_summaries": bool(args.prefer_summaries),
+        }
+    )
 
 
-def main() -> None:
-    query, top_k, requested_mode = parse_args()
-    entries = load_entries()
+def apply_filters(entries: List[dict], filters: Dict[str, object]) -> List[dict]:
+    def matches(entry: dict) -> bool:
+        tool = str(filters.get("tool", ""))
+        if tool and entry.get("tool", "").lower() != tool:
+            return False
+        project = str(filters.get("project", ""))
+        if project and project not in entry.get("project", "").lower():
+            return False
+        scope = str(filters.get("scope", ""))
+        if scope and entry.get("scope", "").lower() != scope:
+            return False
+        source_kind = str(filters.get("source_kind", ""))
+        if source_kind and entry.get("sourceKind", "").lower() != source_kind:
+            return False
+        workspace = str(filters.get("workspace", ""))
+        if workspace and workspace not in entry.get("workspace", "").lower():
+            return False
+        task_state = str(filters.get("task_state", ""))
+        if task_state and entry.get("taskState", "").lower() != task_state:
+            return False
+        return True
+
+    return [entry for entry in entries if matches(entry)]
+
+
+def build_bm25_cache_key(filters: Dict[str, object], entry_count: int) -> str:
+    version = int(_ENTRIES_CACHE.get("version", 0))
+    parts = [
+        str(filters.get("tool", "")),
+        str(filters.get("project", "")),
+        str(filters.get("scope", "")),
+        str(filters.get("source_kind", "")),
+        str(filters.get("workspace", "")),
+        str(filters.get("task_state", "")),
+        str(bool(filters.get("prefer_summaries"))).lower(),
+        str(entry_count),
+        str(version),
+    ]
+    return "|".join(parts)
+
+
+def apply_summary_boost(scores: Dict[str, float], entries_by_id: Dict[str, dict]) -> Dict[str, float]:
+    boosted: Dict[str, float] = {}
+    for entry_id, score in scores.items():
+        entry = entries_by_id.get(entry_id, {})
+        bonus = 0.0
+        if entry.get("scope", "").lower() == "summary":
+            bonus += 0.05
+        if entry.get("memoryLevel", "").lower() == "session":
+            bonus += 0.03
+        boosted[entry_id] = score + bonus
+    return boosted
+
+
+def execute_search(parsed: Dict[str, object]) -> Dict[str, object]:
+    query = str(parsed["query"])
+    top_k = int(parsed["top_k"])
+    requested_mode = str(parsed["mode"])
+    current_entries_signature = build_structured_signature()
+    current_embeddings_signature = build_embeddings_signature()
+    search_result_cache_key = build_search_result_cache_key(parsed, current_entries_signature, current_embeddings_signature)
+    cached_response = get_cached_search_result(search_result_cache_key)
+    if cached_response is not None:
+        cached_response["cacheState"] = build_cache_state(search_result_cache_hit=True, query_embedding_cache_hit=False)
+        return cached_response
+
+    entries = apply_filters(load_entries(), parsed)
     entries_by_id = {entry["id"]: entry for entry in entries}
     query_tokens = tokenize(query)
+    bm25_cache_key = build_bm25_cache_key(parsed, len(entries))
 
-    bm25_map = bm25_scores(entries, query_tokens)
+    bm25_map = bm25_scores(entries, query_tokens, bm25_cache_key)
     dense_map: Dict[str, float] = {}
     dense_error: Optional[str] = None
+    dense_meta: Dict[str, object] = {"queryEmbeddingCacheHit": False}
     if requested_mode in {"dense", "hybrid"}:
-        dense_map, dense_error = dense_scores(entries_by_id, query)
+        dense_map, dense_error, dense_meta = dense_scores(entries_by_id, query)
 
     effective_mode = requested_mode
     fallback_reason = None
@@ -546,6 +834,8 @@ def main() -> None:
         ranked = ranked_pairs(bm25_map, top_k)
     elif requested_mode == "dense":
         if dense_map:
+            if bool(parsed.get("prefer_summaries")):
+                dense_map = apply_summary_boost(dense_map, entries_by_id)
             ranked = ranked_pairs(dense_map, top_k)
         else:
             effective_mode = "bm25"
@@ -553,6 +843,9 @@ def main() -> None:
             ranked = ranked_pairs(bm25_map, top_k)
     else:
         if dense_map:
+            if bool(parsed.get("prefer_summaries")):
+                bm25_map = apply_summary_boost(bm25_map, entries_by_id)
+                dense_map = apply_summary_boost(dense_map, entries_by_id)
             combined: Dict[str, float] = {}
             for rank, (entry_id, _) in enumerate(ranked_pairs(bm25_map, max(top_k * 5, 20)), start=1):
                 combined[entry_id] = combined.get(entry_id, 0.0) + (1.0 / (60 + rank))
@@ -562,6 +855,8 @@ def main() -> None:
         else:
             effective_mode = "bm25"
             fallback_reason = dense_error or "hybrid-dense-unavailable"
+            if bool(parsed.get("prefer_summaries")):
+                bm25_map = apply_summary_boost(bm25_map, entries_by_id)
             ranked = ranked_pairs(bm25_map, top_k)
 
     sources: Dict[str, List[str]] = {}
@@ -570,16 +865,119 @@ def main() -> None:
     for entry_id in dense_map:
         sources.setdefault(entry_id, []).append("dense")
 
+    embeddings_index = load_embeddings_index()
+    embedding_backend = None
+    if embeddings_index:
+        first_embedding = next(iter(embeddings_index.values()))
+        embedding_backend = normalize_embedding_adapter(
+            str(first_embedding.get("backend", "")).strip(),
+            str(first_embedding.get("model", DEFAULT_MODEL)).strip() or DEFAULT_MODEL,
+        )
+
     payload = {
         "ok": True,
         "requestedMode": requested_mode,
         "effectiveMode": effective_mode,
         "fallbackReason": fallback_reason,
         "query": query,
+        "filters": {
+            "tool": parsed.get("tool"),
+            "project": parsed.get("project"),
+            "scope": parsed.get("scope"),
+            "sourceKind": parsed.get("source_kind"),
+            "workspace": parsed.get("workspace"),
+            "taskState": parsed.get("task_state"),
+            "preferSummaries": parsed.get("prefer_summaries"),
+        },
         "entryCount": len(entries),
-        "hasEmbeddings": bool(load_embeddings_index()),
+        "hasEmbeddings": bool(embeddings_index),
+        "embeddingRuntime": build_embedding_runtime_summary(),
+        "embeddingBackend": embedding_backend,
+        "embeddingAdapter": str(EMBEDDING_RUNTIME.get("adapter", EMBEDDING_RUNTIME.get("backend", "hash")) or "hash"),
+        "embeddingProvider": str(EMBEDDING_RUNTIME.get("providerName", "")),
+        "embeddingProfile": str(EMBEDDING_RUNTIME.get("profileName", "")),
+        "embeddingResolutionMode": str(EMBEDDING_RUNTIME.get("resolutionMode", "")),
+        "embeddingConfigPath": str(EMBEDDING_RUNTIME.get("configPath", "")),
+        "embeddingConfigError": str(EMBEDDING_RUNTIME.get("configError", "")),
+        "cacheState": build_cache_state(
+            search_result_cache_hit=False,
+            query_embedding_cache_hit=bool(dense_meta.get("queryEmbeddingCacheHit")),
+        ),
         "results": format_results(ranked, entries_by_id, sources, bm25_map, dense_map),
     }
+    store_search_result(search_result_cache_key, payload)
+    return payload
+
+
+def write_server_response(payload: Dict[str, object]) -> None:
+    sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    sys.stdout.flush()
+
+
+def run_server() -> None:
+    for raw_line in sys.stdin:
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        request_id = ""
+        try:
+            payload = json.loads(line)
+            request_id = normalize_spaces(str(payload.get("id", "")))
+            action = normalize_spaces(str(payload.get("action", "search"))).lower() or "search"
+
+            if action == "health":
+                write_server_response(
+                    {
+                        "id": request_id,
+                        "ok": True,
+                        "action": "health",
+                        "workerMode": "persistent-jsonl",
+                        "embeddingRuntime": build_embedding_runtime_summary(),
+                        "cacheState": build_cache_state(search_result_cache_hit=False, query_embedding_cache_hit=False),
+                    }
+                )
+                continue
+
+            if action == "clear_cache":
+                include_data_caches = normalize_bool(
+                    payload.get("include_data_caches", payload.get("includeDataCaches", False)), fallback=False
+                )
+                write_server_response(
+                    {
+                        "id": request_id,
+                        "ok": True,
+                        "action": "clear_cache",
+                        "includeDataCaches": include_data_caches,
+                        "cacheState": clear_search_runtime_caches(include_data_caches),
+                    }
+                )
+                continue
+
+            if action != "search":
+                raise ValueError(f"unsupported-action:{action}")
+
+            response = execute_search(normalize_request_payload(payload))
+            if request_id:
+                response["id"] = request_id
+            write_server_response(response)
+        except Exception as exc:
+            error_payload: Dict[str, object] = {
+                "ok": False,
+                "error": str(exc),
+            }
+            if request_id:
+                error_payload["id"] = request_id
+            write_server_response(error_payload)
+
+
+def main() -> None:
+    parsed = parse_args()
+    if bool(parsed.get("server")):
+        run_server()
+        return
+
+    payload = execute_search(parsed)
     sys.stdout.write(json.dumps(payload, ensure_ascii=False, indent=2))
 
 

@@ -1,0 +1,234 @@
+name: Portable Core Smoke
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  portable-core:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - ubuntu-latest
+          - macos-latest
+    env:
+      AI_MEMORY_OBSIDIAN_VAULT: ${{ runner.temp }}/vault-smoke
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Validate portable shell wrappers
+        shell: bash
+        run: |
+          sh -n ./scripts/install.sh
+          sh -n ./scripts/upgrade.sh
+          sh -n ./scripts/validate-layout.sh
+          sh -n ./shared-mcp/start-default-shared-mcp.sh
+          sh -n ./shared-mcp/start-shared-mcp.sh
+          sh -n ./shared-mcp/status-shared-mcp.sh
+          sh -n ./shared-mcp/stop-shared-mcp.sh
+
+      - name: Seed portable smoke vault
+        shell: pwsh
+        run: |
+          $vault = $env:AI_MEMORY_OBSIDIAN_VAULT
+          $paths = @(
+            (Join-Path $vault '00-System/ai-memory/generated'),
+            (Join-Path $vault '00-System/ai-memory/structured'),
+            (Join-Path $vault '00-System/ai-memory/events'),
+            (Join-Path $vault '00-System/ai-memory/inbox'),
+            (Join-Path $vault '00-System/ai-memory/state'),
+            (Join-Path $vault '00-System/ai-memory/embeddings'),
+            (Join-Path $vault '02-KB')
+          )
+          foreach ($path in $paths) {
+            New-Item -ItemType Directory -Force -Path $path | Out-Null
+          }
+
+          Set-Content -LiteralPath (Join-Path $vault '02-KB/OBSIDIAN.md') -Encoding UTF8 -Value '# Portable Smoke Vault'
+          Set-Content -LiteralPath (Join-Path $vault '02-KB/MEMORY.md') -Encoding UTF8 -Value '# Durable Memory'
+          Set-Content -LiteralPath (Join-Path $vault '02-KB/WORKING.md') -Encoding UTF8 -Value '# Working Memory'
+
+          @'
+          {"schemaVersion":2,"id":"durable-1","t":"2026-04-02T00:00:00.000Z","tool":"codex","type":"workflow-rule","project":"portable-smoke","title":"Shared MCP is the default runtime layer","content":"Shared MCP is the default runtime layer for portable smoke validation.","source":"shared-inbox","scope":"feedback","visibility":"shared","source_kind":"writeback","memory_level":"durable","workspace":"portable-smoke","task_state":"","freshness":"warm","confidence":0.8,"metadata":{}}
+          {"schemaVersion":2,"id":"durable-2","t":"2026-04-02T00:10:00.000Z","tool":"claude-code","type":"project-context","project":"portable-smoke","title":"Session memory should stay concise","content":"Session memory should stay concise and handoff-oriented.","source":"shared-inbox","scope":"project","visibility":"shared","source_kind":"writeback","memory_level":"durable","workspace":"portable-smoke","task_state":"","freshness":"warm","confidence":0.8,"metadata":{}}
+          '@ | Set-Content -LiteralPath (Join-Path $vault '00-System/ai-memory/structured/shared-inbox.jsonl') -Encoding UTF8
+
+          @'
+          {"schemaVersion":2,"id":"session-1","t":"2026-04-02T01:00:00.000Z","tool":"claude-code","type":"summary","project":"portable-smoke","title":"Portable session handoff","content":"Portable session handoff notes remain available for the next agent.","source":"session-memory","scope":"summary","visibility":"shared","source_kind":"session","memory_level":"session","workspace":"portable-smoke","task_state":"","freshness":"hot","confidence":0.7,"metadata":{}}
+          '@ | Set-Content -LiteralPath (Join-Path $vault '00-System/ai-memory/structured/session-memory.jsonl') -Encoding UTF8
+
+          @'
+          {"schemaVersion":2,"id":"event-1","t":"2026-04-02T02:00:00.000Z","tool":"opencode","type":"summary","project":"portable-smoke","title":"Shared memory smoke event","content":"Portable smoke event confirms the memory bus keeps current context fresh.","source":"shared-events","scope":"summary","visibility":"shared","source_kind":"event","memory_level":"event","workspace":"portable-smoke","task_state":"","freshness":"hot","confidence":0.6,"metadata":{}}
+          '@ | Set-Content -LiteralPath (Join-Path $vault '00-System/ai-memory/structured/shared-events.jsonl') -Encoding UTF8
+
+          @'
+          {"schemaVersion":2,"id":"task-1","t":"2026-04-02T03:00:00.000Z","tool":"openclaw","type":"task-note","project":"portable-smoke","title":"OpenClaw blackboard portable task","content":"OpenClaw blackboard portable task","source":"openclaw-blackboard","scope":"task","visibility":"shared","source_kind":"task","memory_level":"task","workspace":"portable-smoke","task_state":"PROCESSING","freshness":"hot","confidence":0.8,"metadata":{}}
+          '@ | Set-Content -LiteralPath (Join-Path $vault '00-System/ai-memory/structured/openclaw-blackboard.jsonl') -Encoding UTF8
+
+          @'
+          {"schemaVersion":2,"id":"run-1","t":"2026-04-02T03:10:00.000Z","tool":"openclaw","type":"task-note","project":"portable-smoke","title":"OpenClaw run ledger portable record","content":"OpenClaw run ledger portable record","source":"openclaw-runs","scope":"task","visibility":"shared","source_kind":"run","memory_level":"task","workspace":"portable-smoke","task_state":"ok","freshness":"hot","confidence":0.8,"metadata":{}}
+          '@ | Set-Content -LiteralPath (Join-Path $vault '00-System/ai-memory/structured/openclaw-runs.jsonl') -Encoding UTF8
+
+          @'
+          {"schemaVersion":2,"id":"job-1","t":"2026-04-02T03:20:00.000Z","tool":"openclaw","type":"task-note","project":"portable-smoke","title":"OpenClaw cron portable job","content":"OpenClaw cron portable job","source":"openclaw-jobs","scope":"task","visibility":"shared","source_kind":"job","memory_level":"task","workspace":"portable-smoke","task_state":"ok","freshness":"hot","confidence":0.8,"metadata":{}}
+          '@ | Set-Content -LiteralPath (Join-Path $vault '00-System/ai-memory/structured/openclaw-jobs.jsonl') -Encoding UTF8
+
+      - name: Build memory layers
+        shell: pwsh
+        run: |
+          node ./ops/build-memory-layers.js | Out-Null
+          if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_OBSIDIAN_VAULT '00-System/ai-memory/generated/MEMORY-LAYERS.md') -PathType Leaf)) {
+            throw 'MEMORY-LAYERS.md was not generated'
+          }
+
+      - name: Build handoff pack
+        shell: pwsh
+        run: |
+          node ./ops/build-handoff-pack.js | Out-Null
+          if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_OBSIDIAN_VAULT '00-System/ai-memory/generated/HANDOFF.md') -PathType Leaf)) {
+            throw 'HANDOFF.md was not generated'
+          }
+
+      - name: Run auto dream consolidation
+        shell: pwsh
+        run: |
+          ./ops/run-memory-dream.ps1 -Force | Out-Null
+          if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_OBSIDIAN_VAULT '00-System/ai-memory/generated/AUTO-DREAM.md') -PathType Leaf)) {
+            throw 'AUTO-DREAM.md was not generated'
+          }
+
+      - name: Build embeddings
+        shell: pwsh
+        run: |
+          node ./bus/generate-embeddings.js | Out-Null
+          if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_OBSIDIAN_VAULT '00-System/ai-memory/embeddings/index.jsonl') -PathType Leaf)) {
+            throw 'embeddings index was not generated'
+          }
+
+      - name: Run hybrid retrieval smoke
+        shell: pwsh
+        run: |
+          $json = node ./retrieval/semantic-search.js --json --mode hybrid --top-k 3 "openclaw blackboard portable task"
+          $result = $json | ConvertFrom-Json
+          if ($result.entryCount -lt 1) {
+            throw 'hybrid retrieval returned no indexed entries'
+          }
+
+      - name: Portable install wrapper smoke
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            export AI_MEMORY_PWSH="powershell.exe"
+          else
+            export AI_MEMORY_PWSH="pwsh"
+          fi
+          TARGET_ROOT="$(python - <<'PY'
+import os
+from pathlib import Path
+print(Path(os.environ["RUNNER_TEMP"]) / "ai-memory-smoke")
+PY
+)"
+          ./scripts/install.sh -TargetRoot "$TARGET_ROOT" -RegisterStartup false -PersistUserEnvironment false
+          TARGET_ROOT="$TARGET_ROOT" python - <<'PY'
+import os
+from pathlib import Path
+target = Path(os.environ["TARGET_ROOT"])
+          expected = [
+              target / "memory-bus.ps1",
+              target / "memory-bus.sh",
+              target / "memory-watchdog.ps1",
+              target / "memory-watchdog.sh",
+              target / "verify-client-integrations.ps1",
+              target / "verify-client-integrations.sh",
+              target / "run-pressure-test.ps1",
+              target / "run-pressure-test.sh",
+              target / "run-memory-dream.sh",
+              target / "runtime-config.js",
+              target / "runtime_support.py",
+              target / "install-manifest.json",
+              target / "config" / "runtime.json",
+              target / "shared-mcp" / "start-default-shared-mcp.sh",
+              target / "shared-mcp" / "start-default-shared-mcp.ps1",
+          ]
+missing = [str(path) for path in expected if not path.exists()]
+          if missing:
+              raise SystemExit("Missing expected installed files:\n" + "\n".join(missing))
+          if os.name != "nt":
+              executables = [
+                  target / "shared-mcp" / "start-default-shared-mcp.sh",
+                  target / "run-pressure-test.sh",
+              ]
+              for executable in executables:
+                  if not os.access(executable, os.X_OK):
+                      raise SystemExit(f"Installed shell wrapper is not executable: {executable}")
+PY
+
+      - name: Portable shared MCP wrapper smoke
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            export AI_MEMORY_PWSH="powershell.exe"
+          else
+            export AI_MEMORY_PWSH="pwsh"
+          fi
+          TARGET_ROOT="$(python - <<'PY'
+import os
+from pathlib import Path
+print(Path(os.environ["RUNNER_TEMP"]) / "ai-memory-smoke")
+PY
+)"
+          export AI_MEMORY_ROOT="$TARGET_ROOT"
+          "$TARGET_ROOT/shared-mcp/start-default-shared-mcp.sh"
+          "$TARGET_ROOT/shared-mcp/status-shared-mcp.sh" > "$RUNNER_TEMP/shared-status.json"
+          python - <<'PY'
+import json
+import os
+from pathlib import Path
+status_path = Path(os.environ["RUNNER_TEMP"]) / "shared-status.json"
+status = json.loads(status_path.read_text(encoding="utf-8"))
+required = {"context7", "fetch", "time", "sequential-thinking", "obsidian", "memory"}
+running = {item.get("id") for item in status if item.get("running")}
+missing = sorted(required - running)
+if missing:
+    raise SystemExit("Shared MCP runtime did not start cleanly for: " + ", ".join(missing))
+PY
+
+      - name: Portable shared MCP wrapper shutdown
+        if: always()
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            export AI_MEMORY_PWSH="powershell.exe"
+          else
+            export AI_MEMORY_PWSH="pwsh"
+          fi
+          TARGET_ROOT="$(python - <<'PY'
+import os
+from pathlib import Path
+print(Path(os.environ["RUNNER_TEMP"]) / "ai-memory-smoke")
+PY
+)"
+          if [ -f "$TARGET_ROOT/shared-mcp/stop-shared-mcp.sh" ]; then
+            bash "$TARGET_ROOT/shared-mcp/stop-shared-mcp.sh"
+          fi

@@ -15,6 +15,16 @@ The shared Playwright backend still supports isolated sessions and browser profi
 ## What Is The Relationship Between `claude-mem` And Shared Memory?
 `claude-mem` remains a native source. The shared memory bus bridges or syncs durable signals into the canonical Obsidian-backed layer instead of pretending native memory never exists.
 
+## Should I Integrate Via MCP, Skills, Or Plugins?
+- MCP:
+  - best for shared runtime access, process deduplication, and tool transport
+- skills:
+  - best for portable onboarding, read order, writeback policy, and task decomposition habits
+- plugins:
+  - best only when a host app needs native lifecycle hooks or UI
+
+The default recommendation is MCP plus skills. Add plugins only as a host-specific last mile.
+
 ## When Should I Use `bm25`, `dense`, Or `hybrid`?
 - `bm25`: exact or keyword-heavy queries
 - `dense`: semantic similarity
@@ -26,14 +36,27 @@ Some clients do shallow or transport-specific checks that can produce false nega
 ## Does This Require Remote Embeddings?
 No. Offline `hashing-v1` is the default dense path.
 
+## Are Embedding Providers Truly Hot-Swappable?
+Not in the strict dense-index sense. You can switch the active profile or provider without editing code, but if the adapter, model, or base URL changes, rebuild the stored embeddings index so the query side and stored vectors match.
+
+The new control surface makes that less opaque:
+- `list_embedding_runtimes` shows what is configured
+- `set_embedding_runtime` persists the active selection
+- `memory_status.embeddingIndexState` tells you whether the index is aligned or needs a rebuild
+
 ## Can I Use This Across Multiple Devices?
 You can, but do not confuse sync strategy with memory architecture. Keep one canonical vault and understand sync conflict behavior before layering more systems on top.
+
+## Is This Really Cross-Platform?
+Yes for the shipped runtime contract, with one caveat: Windows still has the deepest live acceptance coverage. The public bundle now includes `pwsh` plus `.sh` entrypoints for install/start/status/stop flows on macOS and Linux, while the core memory engine avoids native Node `sqlite3`, auto-detects Python across common Windows/macOS/Linux locations, and is smoke-validated in CI on all three platforms.
 
 ## Operational Troubleshooting
 
 ### My memory retrieval returns empty results. What do I do?
-1. Check that your Obsidian vault path is set: `echo $env:AI_MEMORY_OBSIDIAN_VAULT`
-2. Verify the watchdog is running: `powershell ...\status-shared-mcp.ps1`
+1. Check that `AI_MEMORY_OBSIDIAN_VAULT` or `OBSIDIAN_VAULT_ROOT` points at the right vault, or that Obsidian config detection can find it
+2. Verify the shared stack is running:
+   - Windows: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\status-shared-mcp.ps1`
+   - macOS/Linux: `~/.ai-memory/shared-mcp/status-shared-mcp.sh`
 3. Check that structured memory has data: look for `00-System/ai-memory/structured/*.jsonl`
 4. Try a BM25-only search (bypass dense): use `mode: "bm25"` in search_shared_memory
 5. Rebuild embeddings: call `rebuild_memory_embeddings` tool
@@ -41,7 +64,11 @@ You can, but do not confuse sync strategy with memory architecture. Keep one can
 ### The watchdog stopped running. Is my memory still fresh?
 No. Without the watchdog, structured memory stops updating. Agent sessions will still work, but cross-agent shared memory will become stale. To restart:
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\bus\memory-watchdog.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\memory-watchdog.ps1
+```
+
+```bash
+~/.ai-memory/memory-watchdog.sh
 ```
 
 ### My embeddings fell back to "hashing-v1". What happened?
@@ -54,8 +81,8 @@ The watchdog polls on a schedule. Embeddings rebuild runs every 15 minutes by de
 The system uses last-write-wins at the note level. Chokidar events from `ops/obsidian-blackboard-daemon.js` will fire for each save. Under high concurrency, some writes may be lost. This is a known limitation - there is no conflict detection yet.
 
 ### How do I customize the MCP ports (9331-9338)?
-Currently ports are not configurable via env var. Edit `shared-mcp/manifest.json` directly to change port numbers in the URL fields. Note: changing ports requires updating all client MCP configs.
+Currently ports are not configurable via env var. Edit `shared-mcp/manifest.json` directly to change each server's `port` field. Note: changing ports requires updating all client MCP configs.
 
 ### My vault is on a different drive or path. How do I configure it?
-Set the `AI_MEMORY_OBSIDIAN_VAULT` environment variable to your vault root path. The system also auto-detects from `obsidian.json` in the vault directory.
+Set the `AI_MEMORY_OBSIDIAN_VAULT` environment variable to your vault root path. The system also auto-detects from Obsidian's app config on Windows, macOS, and Linux.
 

@@ -21,10 +21,12 @@ import tempfile
 from pathlib import Path
 from typing import Dict, List
 
+from runtime_support import resolve_runtime_file, resolve_runtime_root, resolve_vault_root
 
-ROOT = Path(os.environ.get("AI_MEMORY_ROOT", Path(__file__).resolve().parent))
-GENERATE_SCRIPT = ROOT / "generate-embeddings.js"
-SEARCH_SCRIPT = ROOT / "semantic-search.py"
+
+ROOT = resolve_runtime_root(__file__)
+GENERATE_SCRIPT = resolve_runtime_file(__file__, "generate-embeddings.js", os.path.join("bus", "generate-embeddings.js"))
+SEARCH_SCRIPT = resolve_runtime_file(__file__, "semantic-search.py", os.path.join("retrieval", "semantic-search.py"))
 PYTHON = os.environ.get("AI_MEMORY_PYTHON") or sys.executable or "python"
 
 try:
@@ -50,48 +52,6 @@ def parse_args() -> argparse.Namespace:
 
 def tokenize(text: str) -> List[str]:
     return re.findall(r"[a-z0-9\u4e00-\u9fff_./:-]{2,}", (text or "").lower())
-
-
-def resolve_vault_root() -> Path:
-    for env_key in ("AI_MEMORY_OBSIDIAN_VAULT", "OBSIDIAN_VAULT_ROOT"):
-        candidate = os.environ.get(env_key, "").strip()
-        if candidate and Path(candidate).is_dir():
-            return Path(candidate)
-
-    appdata = os.environ.get("APPDATA", "").strip()
-    if appdata:
-        config_path = Path(appdata) / "obsidian" / "obsidian.json"
-        if config_path.is_file():
-            try:
-                config = json.loads(config_path.read_text(encoding="utf-8"))
-                records = []
-                for vault in (config.get("vaults") or {}).values():
-                    path = str(vault.get("path", "")).strip()
-                    if not path:
-                        continue
-                    candidate = Path(path)
-                    if not candidate.is_dir():
-                        continue
-                    records.append(
-                        {
-                            "path": candidate,
-                            "open": bool(vault.get("open")),
-                            "ts": int(vault.get("ts") or 0),
-                        }
-                    )
-                open_records = sorted((item for item in records if item["open"]), key=lambda item: item["ts"], reverse=True)
-                if open_records:
-                    return open_records[0]["path"]
-                recent_records = sorted(records, key=lambda item: item["ts"], reverse=True)
-                if recent_records:
-                    return recent_records[0]["path"]
-            except Exception:
-                pass
-
-    desktop_vault = Path.home() / "Desktop" / "Obsidian Vault"
-    if desktop_vault.is_dir():
-        return desktop_vault
-    return Path.home() / "Documents" / "Obsidian Vault"
 
 
 VAULT_ROOT = resolve_vault_root()

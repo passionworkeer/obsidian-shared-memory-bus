@@ -8,14 +8,41 @@ Use this checklist when publishing a new public revision of the bundle.
 - rescan for secrets and personal paths
 - confirm installer and runtime paths are still dynamic
 
+For public template safety, tracked overlay files must also stay free of workstation-specific absolute paths.
+
+Recommended scan:
+```powershell
+git grep -n -I -e "C:\\Users\\" -e "E:\\" -e "/Users/" -e "/home/" -e "/Volumes/" -- .
+```
+
+Expected result for a clean public branch:
+- no hits in tracked files, or only clearly documented placeholder/examples that are not personal paths
+
 ## Minimum Validation
 ```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-layout.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\shared-mcp\start-default-shared-mcp.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\start-default-shared-mcp.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
+```
+
+```bash
+./scripts/validate-layout.sh
+./scripts/install.sh
+~/.ai-memory/shared-mcp/start-default-shared-mcp.sh
+pwsh -NoProfile -File ~/.ai-memory/verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
 ```
 
 Run the pressure test if anything changed in shared MCP behavior, agent wiring, or memory indexing.
+
+If the change touched tracked overlays or generator code, also replay the installed runtime against the repo and verify it does not reintroduce machine-specific paths:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\memory-bus.ps1 -Action SyncAll -Project <repo-root> -Quiet
+git grep -n -I -e "C:\\Users\\" -e "E:\\" -e "/Users/" -e "/home/" -e "/Volumes/" -- .
+```
+
+If the change touched file layout or installer behavior, also confirm `.github/workflows/windows-validate.yml` and `.github/workflows/portable-core.yml` still reflect the expected smoke-install story and wrapper validation chain.
 
 ## Public Repo Hygiene
 - `README.md` explains what changed and what the project is for

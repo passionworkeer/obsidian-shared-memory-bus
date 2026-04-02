@@ -3,59 +3,19 @@
 Set-StrictMode -Version 3.0
 $ErrorActionPreference = "Stop"
 
-function Resolve-ObsidianVaultRoot {
-    foreach ($overridePath in @($env:AI_MEMORY_OBSIDIAN_VAULT, $env:OBSIDIAN_VAULT_ROOT)) {
-        if (-not [string]::IsNullOrWhiteSpace($overridePath) -and (Test-Path -LiteralPath $overridePath -PathType Container)) {
-            return (Get-Item -LiteralPath $overridePath).FullName
-        }
-    }
+$helperPath = @(
+    (Join-Path $PSScriptRoot "runtime-platform.ps1"),
+    (Join-Path $PSScriptRoot "../bus/runtime-platform.ps1")
+) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
 
-    $obsidianConfigPath = Join-Path $env:APPDATA "obsidian\obsidian.json"
-    if (Test-Path -LiteralPath $obsidianConfigPath) {
-        try {
-            $config = Get-Content -Raw -LiteralPath $obsidianConfigPath -Encoding utf8 | ConvertFrom-Json
-            $records = New-Object System.Collections.Generic.List[object]
-            if ($config.vaults) {
-                foreach ($property in $config.vaults.PSObject.Properties) {
-                    $vault = $property.Value
-                    $path = [string]$vault.path
-                    if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Container)) {
-                        continue
-                    }
-
-                    $records.Add([pscustomobject]@{
-                        path = (Get-Item -LiteralPath $path).FullName
-                        open = [bool]$vault.open
-                        ts = if ($null -ne $vault.ts) { [int64]$vault.ts } else { 0 }
-                    }) | Out-Null
-                }
-            }
-
-            $openVault = @($records | Where-Object { $_.open } | Sort-Object ts -Descending | Select-Object -First 1)
-            if ($openVault.Count -gt 0) {
-                return $openVault[0].path
-            }
-
-            $recentVault = @($records | Sort-Object ts -Descending | Select-Object -First 1)
-            if ($recentVault.Count -gt 0) {
-                return $recentVault[0].path
-            }
-        } catch {
-        }
-    }
-
-    $desktopFallback = Join-Path ([Environment]::GetFolderPath("Desktop")) "Obsidian Vault"
-    foreach ($fallback in @($desktopFallback, (Join-Path $env:USERPROFILE "Documents\Obsidian Vault"))) {
-        if (Test-Path -LiteralPath $fallback -PathType Container) {
-            return (Get-Item -LiteralPath $fallback).FullName
-        }
-    }
-
-    throw "No Obsidian vault directory found."
+if (-not $helperPath) {
+    throw "Unable to locate runtime-platform.ps1 from $PSScriptRoot"
 }
 
-$VBase = Join-Path (Resolve-ObsidianVaultRoot) "00-System\ai-memory"
-$InboxDir = Join-Path $VBase "inbox"
+. $helperPath
+
+$VBase = Join-SharedPath @((Resolve-SharedObsidianVaultRoot -ThrowIfMissing), "00-System", "ai-memory")
+$InboxDir = Join-SharedPath @($VBase, "inbox")
 
 $NoisePatterns = @(
     'stress-round-',
@@ -135,13 +95,13 @@ foreach ($f in $inboxFiles) {
 Write-Host ""
 Write-Host "Total removed: $totalRemoved" -ForegroundColor Cyan
 
-$StructuredDir = Join-Path $VBase "structured"
+$StructuredDir = Join-SharedPath @($VBase, "structured")
 if (-not (Test-Path $StructuredDir)) {
     New-Item -ItemType Directory -Path $StructuredDir -Force | Out-Null
     Write-Host "Created structured/ directory" -ForegroundColor Green
 }
 
-$SchemaFile = Join-Path $VBase "MEMORY-SCHEMA.md"
+$SchemaFile = Join-SharedPath @($VBase, "MEMORY-SCHEMA.md")
 $SchemaContent = @"
 # Memory Schema
 

@@ -1,21 +1,21 @@
 # Roadmap
 
-## v0.2 (Next Release — target: Q2 2026)
-- [ ] Version-pin all external MCP dependencies in manifest.json (owner: TBD)
-- [ ] Add uncaughtException handlers to all daemons
-- [ ] Replace bare `catch {}` with logged error collection
-- [ ] Fix vault path silent fallback (throw instead of non-existent path)
+## v0.2 (Next Release - target: Q2 2026)
+- [ ] Add rerank after `bm25 + dense` hybrid retrieval
+- [ ] Add conflict-safe blackboard event log or lease semantics
+- [ ] Promote the current dream pass into a stronger consolidation pipeline with dedupe and promotion scoring
+- [ ] Import richer Claude compact/session boundary data instead of only snapshot-style session notes
 
-## v0.3 (Next Quarter — target: Q3 2026)
-- [ ] Shared retrieval core module (extract FNV/hash logic from JS+Python)
-- [ ] Add caching layer to `retrieval/semantic-search.py` (30s TTL)
-- [ ] Windows Service registration for watchdog
-- [ ] Retention policy for structured/*.jsonl
+## v0.3 (Next Quarter - target: Q3 2026)
+- [ ] Shared retrieval core module to remove duplicated hash logic from JS and Python
+- [ ] Add stronger retention and compaction policy for `structured/*.jsonl`
+- [ ] Windows Service registration for the watchdog
+- [ ] Broader live acceptance parity beyond the current Windows-heavy validation depth
 
 ## Backlog
 - Prometheus metrics endpoint
-- Slack/webhook alerting for watchdog failures
-- Tutorial document (30-min getting-started guide)
+- Slack or webhook alerting for watchdog failures
+- Tutorial document with a 30-minute getting-started flow
 - Offline install support
 
 ## Explicit Non-Goals

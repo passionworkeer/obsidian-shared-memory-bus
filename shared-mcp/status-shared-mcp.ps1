@@ -2,35 +2,20 @@ Set-StrictMode -Version 3.0
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$sourceRoot = Split-Path -Parent $root
+$helperPath = @(
+    (Join-Path $sourceRoot "runtime-platform.ps1"),
+    (Join-Path $sourceRoot (Join-Path "bus" "runtime-platform.ps1"))
+) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+
+if (-not $helperPath) {
+    throw "Unable to locate runtime-platform.ps1 from $root"
+}
+
+. $helperPath
+
 $manifestPath = Join-Path $root "manifest.json"
 $statePath = Join-Path $root "state.json"
-
-function Get-ListenerProcessId {
-    param([int]$Port)
-
-    if ($Port -le 0) {
-        return 0
-    }
-
-    try {
-        $tcp = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction Stop | Select-Object -First 1
-        if ($tcp -and $tcp.OwningProcess) {
-            return [int]$tcp.OwningProcess
-        }
-    } catch {
-    }
-
-    try {
-        $pattern = ":{0}\s+.*LISTENING\s+(\d+)\s*$" -f $Port
-        $line = netstat -ano -p tcp | Select-String -Pattern $pattern | Select-Object -First 1
-        if ($line -and ([string]$line.Line -match "LISTENING\s+(\d+)\s*$")) {
-            return [int]$Matches[1]
-        }
-    } catch {
-    }
-
-    return 0
-}
 
 function Test-Health {
     param([string]$Url)
@@ -151,6 +136,7 @@ foreach ($server in @($manifest.servers)) {
     $record = $state[$id]
     $procId = 0
     $alive = $false
+
     if ($record -and $record.ContainsKey("pid")) {
         $procId = [int]$record["pid"]
         $alive = $null -ne (Get-Process -Id $procId -ErrorAction SilentlyContinue)
@@ -166,7 +152,7 @@ foreach ($server in @($manifest.servers)) {
             $healthUrl = Get-ServerHealthUrl -Server $server
         }
         if (-not $alive) {
-            $listenerPid = Get-ListenerProcessId -Port ([int]$server.port)
+            $listenerPid = Get-SharedListeningProcessId -Port ([int]$server.port)
             if ($listenerPid -gt 0) {
                 $procId = $listenerPid
                 $alive = $null -ne (Get-Process -Id $procId -ErrorAction SilentlyContinue)
