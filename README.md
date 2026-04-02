@@ -32,13 +32,14 @@ The source tree is grouped by responsibility (`bus/`, `ops/`, `retrieval/`, `sha
 - One shared `playwright` MCP backend so multi-agent browser tasks stop spawning one local Playwright server per client
 - Background watchdog sync from tool-native memory into structured shared memory
 - Watchdog heavy refresh gating based on real structured-memory signature changes instead of every observed source change
-- Auto-built `MEMORY-LAYERS` and `AUTO-DREAM` summaries for handoff, compaction, and durable promotion
+- Auto-built `MEMORY-LAYERS` and `AUTO-DREAM` summaries for handoff, compaction, and typed durable promotion
 - Auto-built `HANDOFF` pack with bounded `goal / done / next / blocked / files / open_threads / tool_invariants`
 - Generated artifacts now carry explicit `contractVersion`, `recordSchemaVersion`, and content-hash-based `sourceStructuredSignature` metadata instead of relying only on timestamps
 - The governed structured-memory universe now explicitly includes imported `claude-code.jsonl` and `openclaw.jsonl`, not just local session/event/task layers
 - Generated onboarding packs that bundle shared HTTP MCP snippets, a portable skill template, and a thin plugin-adapter contract for new agents
 - OpenClaw session, job, run, blackboard, and journal sync into shared structured memory
-- Hybrid retrieval with `bm25`, offline dense `hashing-v1`, and optional remote embeddings
+- Hybrid retrieval with `bm25`, offline dense `hashing-v1`, optional remote embeddings, and route-aware layered reranking
+- Typed durable promotion metadata (`metadata.promotion`) that classifies durable writeback candidates into `user / feedback / project / reference` and preserves `source_type / source_confidence` for auditable queue generation
 - Installer-side Python runtime auto-detection, including uv-managed Python, so shared retrieval does not depend on `python` being on `PATH`
 - Installer-side bootstrap of lightweight retrieval dependencies (`rank-bm25`, `jieba`) so BM25 scoring and Chinese tokenization do not silently degrade on fresh machines
 - Shared `fetch` / `time` startup now prefers a managed Python 3.10+ runtime through `AI_MEMORY_MCP_PYTHON` instead of cold-starting `uvx` on every launch
@@ -47,6 +48,7 @@ The source tree is grouped by responsibility (`bus/`, `ops/`, `retrieval/`, `sha
 - A warm shared Python retrieval worker behind the `memory` MCP so BM25 state and model caches can be reused across requests
 - Shared retrieval worker cache introspection and cache-reset control through `memory_status` and `clear_shared_memory_search_cache`
 - Runtime embedding catalog and selection controls through `list_embedding_runtimes` and `set_embedding_runtime`, with drift detection exposed as `memory_status.embeddingIndexState`
+- Query-intent routing controls through `search_shared_memory.route`, with live route metadata surfaced as `queryIntent`, `queryRoute`, `layerCounts`, and per-result `rankMeta`
 - Versioned memory-contract validation through `ops/check-memory-integrity.js` and live integrity reporting through `memory_status.memoryIntegrity`
 - Pressure-test and verification tooling for multi-agent setups
 - An explicit source-to-install contract with stale runtime cleanup plus Windows and portable-core CI validation
