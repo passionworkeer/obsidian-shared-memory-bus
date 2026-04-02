@@ -13,6 +13,7 @@ Thanks for helping improve this project.
 2. Install the bundle locally:
 
 ```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-layout.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
 ```
 
@@ -26,7 +27,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-mem
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\run-shared-stack-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 3 -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 3 -RunCliChecks
 ```
 
 ## Good First Contributions
@@ -69,6 +70,7 @@ At minimum, document:
 
 ## Before Opening A Pull Request
 - Run the basic validation commands above
+- If you changed file layout, install behavior, or startup entrypoints, make sure `scripts/validate-layout.ps1` still passes
 - Check that new docs match actual script behavior
 - Rescan for secrets and accidental personal paths
 - Keep changes focused; split unrelated work into separate PRs when possible
