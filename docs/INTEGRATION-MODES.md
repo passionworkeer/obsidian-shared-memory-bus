@@ -24,6 +24,17 @@ Add plugins only if:
 - the host needs native UI or menu actions
 - you need app-specific startup hooks that cannot be expressed through config plus skills
 
+## Best Packaged Bundle
+The default bundle for a new agent should be:
+- shared HTTP MCP snippets for the safe default server set
+- one portable skill or rule file that carries read order, writeback policy, and multi-agent defaults
+- one thin plugin adapter guide for the cases where the host needs native lifecycle hooks or UI
+
+That is the strongest default because:
+- MCP solves transport and process deduplication
+- the skill layer keeps behavior portable across hosts
+- the plugin layer stays intentionally small and host-native
+
 ## Why This Split Works
 - MCP centralizes safe shared processes
 - skills stay portable across Codex, Claude Code, OpenCode, Copilot, Cursor, Trae, and future agents
@@ -34,14 +45,33 @@ Add plugins only if:
   - `shared-mcp/manifest.json`
   - `shared-mcp/start-default-shared-mcp.ps1`
   - `shared-mcp/omni-memory-server.js`
+  - generated onboarding pack files such as `codex.shared-mcp.toml`, `cursor.shared-mcp.json`, and `copilot.shared-mcp.json`
 - skill and instruction layer:
   - `docs/NEW-AGENT-INTEGRATION.md`
   - `docs/FAQ.md`
   - repo or global `AGENTS.md`
   - portable shared skills mirrored through the shared-skills flow
+  - generated onboarding skill template under `generated/onboarding/<agent>/generic/skills/shared-memory/SKILL.md`
 - plugin layer:
   - host-specific config files outside the canonical memory store
   - only thin adapters should live here
+  - generated plugin adapter guide under `generated/onboarding/<agent>/generic/plugin/README.md`
+
+## Platform Strategy
+- Windows:
+  - best place for the full control plane
+  - use shared HTTP MCP plus skills by default
+- macOS:
+  - use shared HTTP MCP plus skills first
+  - keep plugins thin and host-native
+- Linux:
+  - use shared HTTP MCP plus skills first
+  - keep plugins thin and host-native
+
+Across all three platforms, the preferred order is still:
+- MCP first
+- skill second
+- plugin last
 
 ## Agent Onboarding Rule Of Thumb
 - Codex / Claude Code / OpenCode / Cursor / Copilot:

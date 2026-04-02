@@ -106,6 +106,7 @@ $Script:AgentRegistryPath = Join-Path $Script:BusHome "agents.json"
 $Script:OnboardingRoot = Join-Path $Script:GeneratedRoot "onboarding"
 $Script:UniversalArchitecturePath = Join-Path $Script:OnboardingRoot "ARCHITECTURE.md"
 $Script:UniversalBootstrapPath = Join-Path $Script:OnboardingRoot "UNIVERSAL-AGENT-BOOTSTRAP.md"
+$Script:SharedMcpManifestCache = $null
 $Script:PortableVaultPlaceholder = "<obsidian-vault>"
 $Script:PortableProjectRootPlaceholder = "<repo-root>"
 $Script:PortableTraeUserRulesPath = "~/.trae/user_rules.md"
@@ -482,7 +483,7 @@ function Get-OnboardingSharedMcpUrl {
 }
 
 function Build-OnboardingObsidianStdioConfigJson {
-    $obsidianMcpScript = ((Resolve-BusScriptPath -Candidates @("run-obsidian-mcp.ps1", "ops/run-obsidian-mcp.ps1")) -replace "\\", "/")
+    $obsidianMcpScript = ((Resolve-BusScriptPath -Candidates @("run-obsidian-mcp.ps1", "ops\run-obsidian-mcp.ps1")) -replace "\\", "/")
     $payload = [ordered]@{
         mcpServers = [ordered]@{
             obsidian = [ordered]@{
@@ -493,6 +494,94 @@ function Build-OnboardingObsidianStdioConfigJson {
     }
 
     return (($payload | ConvertTo-Json -Depth 8).Trim() + "`n")
+}
+
+function Build-OnboardingMcpConfigJson {
+    return (Build-OnboardingObsidianStdioConfigJson)
+}
+
+function Build-OnboardingSharedMcpCodexToml {
+    param([switch]$IncludeOptional)
+
+    $title = if ($IncludeOptional) {
+        "# Shared MCP HTTP snippets for Codex (safe default set + optional services)"
+    } else {
+        "# Shared MCP HTTP snippets for Codex (safe default set)"
+    }
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add($title) | Out-Null
+
+    foreach ($server in @(Get-OnboardingSharedMcpServers -IncludeOptional:$IncludeOptional)) {
+        $lines.Add("") | Out-Null
+        $lines.Add(("[mcp_servers.{0}]" -f [string]$server.id)) | Out-Null
+        $lines.Add(('url = "{0}"' -f (Get-OnboardingSharedMcpUrl -Server $server))) | Out-Null
+        $lines.Add("startup_timeout_sec = 60") | Out-Null
+    }
+
+    return (($lines -join "`n").Trim() + "`n")
+}
+
+function Build-OnboardingSharedMcpCursorJson {
+    param([switch]$IncludeOptional)
+
+    $payload = [ordered]@{ mcpServers = [ordered]@{} }
+    foreach ($server in @(Get-OnboardingSharedMcpServers -IncludeOptional:$IncludeOptional)) {
+        $payload.mcpServers[[string]$server.id] = [ordered]@{
+            url = (Get-OnboardingSharedMcpUrl -Server $server)
+        }
+    }
+
+    return (($payload | ConvertTo-Json -Depth 8).Trim() + "`n")
+}
+
+function Build-OnboardingSharedMcpCopilotJson {
+    param([switch]$IncludeOptional)
+
+    $payload = [ordered]@{ servers = [ordered]@{} }
+    foreach ($server in @(Get-OnboardingSharedMcpServers -IncludeOptional:$IncludeOptional)) {
+        $payload.servers[[string]$server.id] = [ordered]@{
+            type = "http"
+            url = (Get-OnboardingSharedMcpUrl -Server $server)
+        }
+    }
+
+    return (($payload | ConvertTo-Json -Depth 8).Trim() + "`n")
+}
+
+function Build-OnboardingSharedMcpGuide {
+    $safeServers = @(Get-OnboardingSharedMcpServers)
+    $optionalServers = @(Get-OnboardingSharedMcpServers -IncludeOptional | Where-Object { [string]$_.id -eq "MiniMax" })
+    $safeLines = @($safeServers | ForEach-Object {
+        "- ``{0}`` -> ``{1}``" -f [string]$_.id, (Get-OnboardingSharedMcpUrl -Server $_)
+    })
+    $optionalLines = @($optionalServers | ForEach-Object {
+        "- ``{0}`` -> ``{1}``" -f [string]$_.id, (Get-OnboardingSharedMcpUrl -Server $_)
+    })
+
+    return @"
+# Shared MCP Bundle
+
+Use the HTTP snippets in this folder as the default MCP transport on Windows, macOS, and Linux.
+
+## Recommended Default Set
+$(if ($safeLines.Count -gt 0) { $safeLines -join "`n" } else { "- (none)" })
+
+## Optional Set
+$(if ($optionalLines.Count -gt 0) { $optionalLines -join "`n" } else { "- (none)" })
+
+## File Map
+- ``codex.shared-mcp.toml``: Codex HTTP MCP config
+- ``cursor.shared-mcp.json``: Cursor HTTP MCP config
+- ``copilot.shared-mcp.json``: GitHub Copilot HTTP MCP config
+- ``*.optional.*``: optional services such as MiniMax
+- ``obsidian-stdio.json``: fallback only for hosts that still need a local stdio launcher instead of the shared HTTP layer
+
+## Rule Of Thumb
+- Prefer the HTTP shared MCP snippets first
+- Keep ``obsidian-stdio.json`` only as a compatibility fallback
+- Add plugins only after MCP plus skill integration already works
+"@.Trim() + "`n"
 }
 
 function Build-OnboardingAgentRules {
@@ -559,6 +648,97 @@ Defaults:
 "@.Trim() + "`n"
 }
 
+function Build-OnboardingSkillTemplate {
+    param([Parameter(Mandatory = $true)][pscustomobject]$Definition)
+
+    $startupPath = Get-AgentStartupPath -Slug $Definition.slug
+    $writebackPath = Get-AgentInboxPath -Slug $Definition.slug
+
+    return @"
+# Shared Memory Coordination
+
+Use this skill to keep $($Definition.displayName) aligned with the shared Obsidian memory bus.
+
+## Read Order
+1. $Script:CanonicalObsidian
+2. $Script:CanonicalMemory
+3. $Script:CanonicalWorking
+4. $Script:GlobalContextPath
+5. $startupPath
+
+## Writeback
+- Durable cross-project facts -> $writebackPath
+- Current task state -> $Script:CanonicalWorking
+- Project-specific durable notes -> the relevant project note
+- Never write secrets, raw tokens, or credentials
+
+## Best Default Stack
+- Layer 1: shared HTTP MCP for ``memory``, ``obsidian``, ``context7``, ``fetch``, ``time``, ``sequential-thinking``, and shared ``playwright``
+- Layer 2: this skill plus the generated bootstrap/rule files for behavior, read order, and decomposition
+- Layer 3: a thin plugin adapter only if the host app needs native lifecycle hooks or UI
+
+## Multi-Agent Default
+- Prefer short focused work over one endlessly growing thread
+- If the host supports subagents, split independent slices into subagents
+- Re-read $Script:GlobalContextPath before a major handoff or after a long task
+"@.Trim() + "`n"
+}
+
+function Build-OnboardingPluginAdapterGuide {
+    param([Parameter(Mandatory = $true)][pscustomobject]$Definition)
+
+    return @"
+# Thin Plugin Adapter
+
+Use a plugin only as the last-mile adapter for $($Definition.displayName) when config files plus skills are not enough.
+
+## The Plugin Should Do
+- inject or point the host at ``bootstrap.md`` or ``generic/AGENTS.md``
+- wire the host's MCP settings to the HTTP snippets in ``generic/``
+- expose small host-native affordances such as "open WORKING.md" or "run sync now"
+
+## The Plugin Should Not Own
+- canonical memory schema
+- embeddings or retrieval logic
+- shared MCP lifecycle management
+- durable writeback policy beyond forwarding into the same inbox targets
+- duplicated copies of the skill/bootstrap text
+
+## Best Shape
+- keep the plugin thin
+- keep the durable memory contract in markdown and shared skills
+- keep shared tool transport in MCP config
+
+## Escalate To A Plugin Only When
+- the host cannot read a startup rule file or skill cleanly
+- the host needs native menu items, settings UI, or lifecycle hooks
+- config-only wiring cannot reliably inject the shared MCP endpoints
+"@.Trim() + "`n"
+}
+
+function Build-OnboardingPlatformGuide {
+    return @"
+# Platform Strategy
+
+## Windows
+- full control plane: installer, watchdog, shared MCP startup, verification scripts
+- best place to host the canonical local runtime
+
+## macOS
+- use the shared HTTP MCP snippets plus the portable skill/rule files first
+- portable core flows are smoke-validated, but full local startup orchestration is still less automated than Windows
+
+## Linux
+- use the shared HTTP MCP snippets plus the portable skill/rule files first
+- portable core flows are smoke-validated, but full local startup orchestration is still less automated than Windows
+
+## Best Cross-Platform Default
+- shared HTTP MCP for transport
+- shared skill / AGENTS bootstrap for behavior
+- thin plugin adapter only as a host-native last mile
+"@.Trim() + "`n"
+}
+
 function Build-OnboardingReadme {
     param([Parameter(Mandatory = $true)][pscustomobject]$Definition)
 
@@ -573,9 +753,14 @@ This folder is the portable shared-memory pack for $($Definition.displayName).
 
 ## What to hand to the new agent
 - ``generic/AGENTS.md``: universal rule file for agents that support a global instruction file
-- ``generic/mcp-stdio.json``: stdio MCP snippet that points at the shared Obsidian MCP launcher
+- ``generic/codex.shared-mcp.toml`` / ``cursor.shared-mcp.json`` / ``copilot.shared-mcp.json``: shared HTTP MCP snippets for the safe default set
+- ``generic/*.optional.*``: optional shared MCP snippets such as MiniMax
+- ``generic/obsidian-stdio.json``: fallback MCP snippet for hosts that still require a local stdio launcher
+- ``generic/skills/shared-memory/SKILL.md``: portable skill template for behavior, read order, and writeback policy
+- ``generic/plugin/README.md``: thin plugin-adapter contract for host-native last-mile integrations
+- ``generic/platforms.md``: cross-platform recommendation for Windows, macOS, and Linux
 - ``cursor/.cursor/rules/shared-memory.mdc``: ready-to-copy Cursor rule
-- ``cursor/.cursor/mcp.json``: ready-to-copy Cursor MCP config snippet
+- ``cursor/.cursor/mcp.json``: ready-to-copy Cursor HTTP MCP config snippet
 - ``bootstrap.md``: generated per-agent startup file
 
 ## Canonical Memory Contract
@@ -591,6 +776,7 @@ This folder is the portable shared-memory pack for $($Definition.displayName).
 - Write only durable, reusable facts into the agent inbox
 - Keep project-local conclusions in the relevant project note
 - Prefer shorter focused runs or subagents over one endlessly growing session
+- Default to ``shared HTTP MCP + shared skill`` and add a plugin only if the host truly needs a native adapter
 
 ## Pack root
 $agentPackRoot
@@ -630,6 +816,7 @@ This file is the portable contract for connecting any new AI agent to the shared
 - L0 canonical truth: Obsidian markdown notes
 - L1 operational bus: generated startup files, inboxes, imported snapshots, event log
 - L2 optional semantic accelerator: a service such as mcp-memory-service, without replacing the markdown source of truth
+- Default integration bundle: shared HTTP MCP + portable skill + thin plugin adapter only when needed
 "@.Trim() + "`n"
 }
 
@@ -660,8 +847,10 @@ function Build-ArchitectureGuide {
 
 ## Future-Proof Onboarding Contract
 - Give the new agent one onboarding pack from ``generated/onboarding/<agent>/``
-- Configure MCP to use ``$((Join-Path $Script:BusHome 'run-obsidian-mcp.ps1') -replace '\\', '/')``
-- Configure the agent rule file to read the canonical files and write back into its inbox
+- Prefer the shared HTTP MCP snippets in the onboarding pack
+- Keep ``obsidian-stdio.json`` only as a compatibility fallback
+- Configure the agent rule file or skill to read the canonical files and write back into its inbox
+- Keep plugins thin and host-native; do not move canonical memory logic into them
 - Keep portable shared skills in ``~/.agents/skills`` and repo-local portable skills in ``.agents/skills``
 "@.Trim() + "`n"
 }
@@ -671,23 +860,35 @@ function Write-OnboardingPack {
 
     $agentRoot = Join-Path $Script:OnboardingRoot $Definition.slug
     $genericRoot = Join-Path $agentRoot "generic"
-    $skillRoot = Join-SharedPath @($genericRoot, "skills", "shared-memory")
+    $skillRoot = Join-Path $genericRoot "skills\shared-memory"
     $pluginRoot = Join-Path $genericRoot "plugin"
-    $cursorRulesRoot = Join-SharedPath @($agentRoot, "cursor", ".cursor", "rules")
-    $cursorRoot = Join-SharedPath @($agentRoot, "cursor", ".cursor")
+    $cursorRulesRoot = Join-Path $agentRoot "cursor\.cursor\rules"
+    $cursorRoot = Join-Path $agentRoot "cursor\.cursor"
     $startupPath = Get-AgentStartupPath -Slug $Definition.slug
 
     Ensure-Directory -Path $agentRoot
     Ensure-Directory -Path $genericRoot
+    Ensure-Directory -Path $skillRoot
+    Ensure-Directory -Path $pluginRoot
     Ensure-Directory -Path $cursorRulesRoot
     Ensure-Directory -Path $cursorRoot
 
     Write-Text -Path (Join-Path $agentRoot "README.md") -Content (Build-OnboardingReadme -Definition $Definition)
     Write-Text -Path (Join-Path $agentRoot "bootstrap.md") -Content (Read-Text -Path $startupPath)
     Write-Text -Path (Join-Path $genericRoot "AGENTS.md") -Content (Build-OnboardingAgentRules -Definition $Definition)
-    Write-Text -Path (Join-Path $genericRoot "mcp-stdio.json") -Content (Build-OnboardingMcpConfigJson)
+    Write-Text -Path (Join-Path $genericRoot "mcp-http.md") -Content (Build-OnboardingSharedMcpGuide)
+    Write-Text -Path (Join-Path $genericRoot "codex.shared-mcp.toml") -Content (Build-OnboardingSharedMcpCodexToml)
+    Write-Text -Path (Join-Path $genericRoot "cursor.shared-mcp.json") -Content (Build-OnboardingSharedMcpCursorJson)
+    Write-Text -Path (Join-Path $genericRoot "copilot.shared-mcp.json") -Content (Build-OnboardingSharedMcpCopilotJson)
+    Write-Text -Path (Join-Path $genericRoot "codex.shared-mcp.optional.toml") -Content (Build-OnboardingSharedMcpCodexToml -IncludeOptional)
+    Write-Text -Path (Join-Path $genericRoot "cursor.shared-mcp.optional.json") -Content (Build-OnboardingSharedMcpCursorJson -IncludeOptional)
+    Write-Text -Path (Join-Path $genericRoot "copilot.shared-mcp.optional.json") -Content (Build-OnboardingSharedMcpCopilotJson -IncludeOptional)
+    Write-Text -Path (Join-Path $genericRoot "obsidian-stdio.json") -Content (Build-OnboardingObsidianStdioConfigJson)
+    Write-Text -Path (Join-Path $skillRoot "SKILL.md") -Content (Build-OnboardingSkillTemplate -Definition $Definition)
+    Write-Text -Path (Join-Path $pluginRoot "README.md") -Content (Build-OnboardingPluginAdapterGuide -Definition $Definition)
+    Write-Text -Path (Join-Path $genericRoot "platforms.md") -Content (Build-OnboardingPlatformGuide)
     Write-Text -Path (Join-Path $cursorRulesRoot "shared-memory.mdc") -Content (Build-OnboardingCursorRule -Definition $Definition)
-    Write-Text -Path (Join-Path $cursorRoot "mcp.json") -Content (Build-OnboardingMcpConfigJson)
+    Write-Text -Path (Join-Path $cursorRoot "mcp.json") -Content (Build-OnboardingSharedMcpCursorJson)
 }
 
 function Register-AgentDefinition {

@@ -37,11 +37,46 @@ Use isolated MCP when the service is:
 
 See `docs/INTEGRATION-MODES.md` for the recommended MCP versus skill versus plugin split.
 
+## Best Default Bundle
+For most new agents, the best packaged integration is:
+- shared HTTP MCP snippets for the safe default server set
+- one portable skill or rule file for behavior
+- one thin plugin adapter only if the host app truly needs native hooks or UI
+
+The generated onboarding packs under `generated/onboarding/<agent>/` are built around that split.
+
+Typical pack contents:
+- `generic/AGENTS.md`
+- `generic/codex.shared-mcp.toml`
+- `generic/cursor.shared-mcp.json`
+- `generic/copilot.shared-mcp.json`
+- `generic/obsidian-stdio.json`
+- `generic/skills/shared-memory/SKILL.md`
+- `generic/plugin/README.md`
+- `generic/platforms.md`
+- `bootstrap.md`
+
 ## Canonical Shared Memory Read Order
 1. `02-KB/OBSIDIAN.md`
 2. `02-KB/MEMORY.md`
 3. `02-KB/WORKING.md`
 4. `00-System/ai-memory/generated/GLOBAL-CONTEXT.md`
+
+## Portable Placeholder Rules
+When documenting or committing agent overlays, use portable placeholders instead of local absolute paths.
+
+- use `<obsidian-vault>` for the vault root
+- use `<repo-root>` for the checked-out repository root
+- use home-relative examples such as `~/.trae/user_rules.md` when a user-scoped file matters
+
+Do not publish tracked onboarding files with machine-specific paths like `C:\Users\...` or `E:\...`.
+
+Typical tracked overlay files include:
+- `AGENTS.md`
+- `.github/copilot-instructions.md`
+- `.trae/rules/project_rules.md`
+
+Runtime scripts may resolve placeholders dynamically, but the committed template should stay portable.
 
 ## Durable Writeback Rules
 - cross-project facts go to the tool inbox under `00-System/ai-memory/inbox/`
@@ -60,6 +95,17 @@ Most new agents should start with:
 
 Add `playwright` only when the agent actually needs browser automation.
 
+## Three-Platform Recommendation
+- Windows:
+  - use the full control plane when possible
+  - prefer shared HTTP MCP plus the portable skill/rule layer
+- macOS:
+  - prefer the shared HTTP MCP snippets plus the portable skill/rule layer
+  - use a plugin only for host-native last-mile integration
+- Linux:
+  - prefer the shared HTTP MCP snippets plus the portable skill/rule layer
+  - use a plugin only for host-native last-mile integration
+
 ## Skills Sharing
 If the agent supports skills or prompt libraries:
 - use the portable shared skills root where possible
@@ -72,6 +118,7 @@ If the agent supports skills or prompt libraries:
 - can it call `obsidian` successfully?
 - does it write back to the correct durable path?
 - does enabling browser automation avoid spawning a new local Playwright server per task?
+- does the generated or tracked overlay avoid writing workstation-specific absolute paths back into the repo?
 
 ## Documentation To Update
 When a new agent becomes supported, update:

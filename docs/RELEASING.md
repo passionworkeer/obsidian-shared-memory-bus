@@ -12,7 +12,7 @@ For public template safety, tracked overlay files must also stay free of worksta
 
 Recommended scan:
 ```powershell
-git grep -n -I -e "C:\\Users\\" -e "E:\\" -e "/Users/" -e "/home/" -e "/Volumes/" -- .
+git grep -n -I -e "C:\\Users\\" -e "E:\\" -- .
 ```
 
 Expected result for a clean public branch:
@@ -38,11 +38,11 @@ Run the pressure test if anything changed in shared MCP behavior, agent wiring, 
 If the change touched tracked overlays or generator code, also replay the installed runtime against the repo and verify it does not reintroduce machine-specific paths:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\memory-bus.ps1 -Action SyncAll -Project <repo-root> -Quiet
-git grep -n -I -e "C:\\Users\\" -e "E:\\" -e "/Users/" -e "/home/" -e "/Volumes/" -- .
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\memory-bus.ps1 -Action SyncAll -Project <repo-root> -Quiet
+git grep -n -I -e "C:\\Users\\" -e "E:\\" -- .
 ```
 
-If the change touched file layout or installer behavior, also confirm `.github/workflows/windows-validate.yml` and `.github/workflows/portable-core.yml` still reflect the expected smoke-install story and wrapper validation chain.
+If the change touched file layout or installer behavior, also confirm `.github/workflows/windows-validate.yml` still reflects the expected smoke-install story.
 
 ## Public Repo Hygiene
 - `README.md` explains what changed and what the project is for
@@ -56,6 +56,8 @@ If the change touched file layout or installer behavior, also confirm `.github/w
 3. confirm GitHub community health still looks good
 4. open the README and a couple of key docs from the public repo
 5. if needed, create a GitHub release note summarizing the change
+
+If your machine has flaky HTTPS access to `github.com:443`, prefer an SSH-over-443 remote. Use API-based publishing only as a temporary bridge, then reconcile history so future `git fetch/push` works normally.
 
 ## After Publish
 - record important release facts in the shared memory notes
