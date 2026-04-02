@@ -19,6 +19,148 @@ $StructuredDir = Join-SharedPath @($VBase, "structured")
 $InboxFile = Join-SharedPath @($VBase, "inbox", "claude-code.md")
 $StructuredFile = Join-SharedPath @($StructuredDir, "claude-code.jsonl")
 $ClaudeMemApi = "http://127.0.0.1:37778/api"
+$Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+
+function Normalize-Space {
+    param([AllowEmptyString()][string]$Text)
+
+    if ($null -eq $Text) {
+        return ""
+    }
+
+    return (($Text -replace "\s+", " ").Trim())
+}
+
+function Convert-ToArrayValue {
+    param($Value)
+
+    if ($null -eq $Value) {
+        return @()
+    }
+
+    if ($Value -is [System.Collections.IEnumerable] -and -not ($Value -is [string])) {
+        return @($Value)
+    }
+
+    if ($Value -is [string]) {
+        $trimmed = $Value.Trim()
+        if ([string]::IsNullOrWhiteSpace($trimmed)) {
+            return @()
+        }
+
+        try {
+            $parsed = $trimmed | ConvertFrom-Json
+            if ($parsed -is [System.Collections.IEnumerable] -and -not ($parsed -is [string])) {
+                return @($parsed)
+            }
+            return @($parsed)
+        } catch {
+            return @($trimmed)
+        }
+    }
+
+    return @($Value)
+}
+
+function Resolve-ClaudeMemScope {
+    param(
+        [AllowEmptyString()][string]$Project,
+        [AllowEmptyString()][string]$Type
+    )
+
+    $normalizedType = ([string]$Type).ToLowerInvariant()
+    if ($normalizedType -match "preference|decision|workflow|rule") {
+        return "feedback"
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Project) -and $Project -ne "wang") {
+        return "project"
+    }
+
+    return "summary"
+}
+
+function Get-OptionalProperty {
+    param(
+        [Parameter(Mandatory = $true)]$Item,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    $property = $Item.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        return $null
+    }
+
+    return $property.Value
+}
+
+function Convert-ToClaudeStructuredRecord {
+    param([Parameter(Mandatory = $true)]$Item)
+
+    $id = [string]$Item.id
+    if ([string]::IsNullOrWhiteSpace($id)) {
+        return $null
+    }
+
+    $facts = @(Convert-ToArrayValue -Value (Get-OptionalProperty -Item $Item -Name "facts"))
+    $concepts = @(Convert-ToArrayValue -Value (Get-OptionalProperty -Item $Item -Name "concepts"))
+    $filesRead = @(Convert-ToArrayValue -Value (Get-OptionalProperty -Item $Item -Name "files_read"))
+    $filesModified = @(Convert-ToArrayValue -Value (Get-OptionalProperty -Item $Item -Name "files_modified"))
+    $title = Normalize-Space ([string](Get-OptionalProperty -Item $Item -Name "title"))
+    $narrative = Normalize-Space ([string](Get-OptionalProperty -Item $Item -Name "narrative"))
+    $content = Normalize-Space ([string](Get-OptionalProperty -Item $Item -Name "content"))
+    if ([string]::IsNullOrWhiteSpace($content)) {
+        $content = if (-not [string]::IsNullOrWhiteSpace($narrative)) { $narrative } else { $title }
+    }
+    if ([string]::IsNullOrWhiteSpace($title)) {
+        $title = if (-not [string]::IsNullOrWhiteSpace($content)) { $content } else { $id }
+    }
+
+    $project = Normalize-Space ([string](Get-OptionalProperty -Item $Item -Name "project"))
+    $typeInput = [string](Get-OptionalProperty -Item $Item -Name "type")
+    $scope = Resolve-ClaudeMemScope -Project $project -Type $typeInput
+    $timestamp = Normalize-Space ([string](Get-OptionalProperty -Item $Item -Name "created_at"))
+    if ([string]::IsNullOrWhiteSpace($timestamp)) {
+        $timestamp = Normalize-Space ([string](Get-OptionalProperty -Item $Item -Name "t"))
+    }
+    $sessionValue = Normalize-Space ([string](Get-OptionalProperty -Item $Item -Name "memory_session_id"))
+    if ([string]::IsNullOrWhiteSpace($sessionValue)) {
+        $sessionValue = Normalize-Space ([string](Get-OptionalProperty -Item $Item -Name "session"))
+    }
+    $typeValue = Normalize-Space ($typeInput)
+    if ([string]::IsNullOrWhiteSpace($typeValue)) {
+        $typeValue = "memory"
+    }
+
+    return [ordered]@{
+        schemaVersion = 2
+        id = $id
+        t = $timestamp
+        tool = "claude-code"
+        session = $sessionValue
+        type = $typeValue
+        project = $project
+        title = $title
+        content = $content
+        facts = $facts
+        concepts = $concepts
+        files_read = $filesRead
+        files_modified = $filesModified
+        source = "claude-mem"
+        scope = $scope
+        visibility = "shared"
+        source_kind = "session"
+        memory_level = "session"
+        workspace = if (-not [string]::IsNullOrWhiteSpace($project)) { $project } else { "claude-mem" }
+        task_state = ""
+        freshness = "hot"
+        confidence = 0.72
+        metadata = [ordered]@{
+            subtitle = Normalize-Space ([string](Get-OptionalProperty -Item $Item -Name "subtitle"))
+            narrative = $narrative
+        }
+    }
+}
 
 if (-not (Test-Path -LiteralPath $StructuredDir)) {
     New-Item -ItemType Directory -Path $StructuredDir -Force | Out-Null
@@ -35,6 +177,7 @@ try {
 }
 
 $existingIds = @{}
+$recordMap = [ordered]@{}
 if (Test-Path -LiteralPath $StructuredFile) {
     foreach ($line in Get-Content -Path $StructuredFile -Encoding UTF8) {
         if ([string]::IsNullOrWhiteSpace($line)) {
@@ -43,8 +186,10 @@ if (Test-Path -LiteralPath $StructuredFile) {
 
         try {
             $item = $line | ConvertFrom-Json
-            if ($item.id) {
-                $existingIds[$item.id.ToString()] = $true
+            $normalized = Convert-ToClaudeStructuredRecord -Item $item
+            if ($null -ne $normalized -and $normalized.id) {
+                $existingIds[$normalized.id.ToString()] = $true
+                $recordMap[$normalized.id.ToString()] = $normalized
             }
         } catch {
         }
@@ -83,65 +228,13 @@ while ($true) {
             continue
         }
 
-        $facts = @()
-        if ($item.facts) {
-            try {
-                $facts = @($item.facts | ConvertFrom-Json)
-            } catch {
-            }
+        $structured = Convert-ToClaudeStructuredRecord -Item $item
+        if ($null -eq $structured) {
+            continue
         }
 
-        $concepts = @()
-        if ($item.concepts) {
-            try {
-                $concepts = @($item.concepts | ConvertFrom-Json)
-            } catch {
-            }
-        }
-
-        $filesRead = @()
-        if ($item.files_read) {
-            try {
-                $filesRead = @($item.files_read | ConvertFrom-Json)
-            } catch {
-            }
-        }
-
-        $filesMod = @()
-        if ($item.files_modified) {
-            try {
-                $filesMod = @($item.files_modified | ConvertFrom-Json)
-            } catch {
-            }
-        }
-
-        $content = ""
-        if ($item.narrative) {
-            $content = [string]$item.narrative
-        } elseif ($item.title) {
-            $content = [string]$item.title
-        }
-
-        $structured = [ordered]@{
-            id = $id
-            t = $item.created_at
-            tool = "claude-code"
-            session = $item.memory_session_id
-            type = $item.type
-            project = $item.project
-            title = $item.title
-            subtitle = $item.subtitle
-            narrative = $item.narrative
-            content = $content
-            facts = $facts
-            concepts = $concepts
-            files_read = $filesRead
-            files_modified = $filesMod
-            source = "claude-mem"
-        }
-
-        $jsonLine = $structured | ConvertTo-Json -Compress -Depth 5
-        $allNew += $jsonLine
+        $allNew += $structured
+        $recordMap[$structured.id] = $structured
         $existingIds[$id] = $true
         $newCount++
         $totalFetched++
@@ -165,28 +258,20 @@ Write-Host ""
 if ($allNew.Count -eq 0) {
     Write-Host "No new observations to add." -ForegroundColor Green
 } else {
-    Add-Content -Path $StructuredFile -Value ($allNew -join "`n") -Encoding UTF8
     Write-Host "Added $($allNew.Count) new entries to structured/claude-code.jsonl" -ForegroundColor Green
 
     $inboxLines = @()
-    $topNew = $allNew | Select-Object -Last 20
-    foreach ($jsonLine in $topNew) {
-        try {
-            $entry = $jsonLine | ConvertFrom-Json
-            $time = if ($entry.t) { $entry.t -replace "T", " " -replace "Z", "" } else { "unknown" }
-            $project = if ($entry.project -and $entry.project -ne "wang") { "[$($entry.project)] " } else { "" }
-            $type = if ($entry.type) { "[$($entry.type)] " } else { "" }
-            $content = if ($entry.title) { [string]$entry.title } else { "(untitled)" }
-            if ($entry.subtitle) {
-                $content += ": $($entry.subtitle)"
-            }
-            $files = ""
-            if ($entry.files_modified -and $entry.files_modified.Count -gt 0) {
-                $files = " | " + (($entry.files_modified | Select-Object -First 3) -join ", ")
-            }
-            $inboxLines += "- $time $project$type$content$files"
-        } catch {
+    $topNew = @($allNew | Select-Object -Last 20)
+    foreach ($entry in $topNew) {
+        $time = if ($entry.t) { $entry.t -replace "T", " " -replace "Z", "" } else { "unknown" }
+        $project = if ($entry.project -and $entry.project -ne "wang") { "[$($entry.project)] " } else { "" }
+        $type = if ($entry.type) { "[$($entry.type)] " } else { "" }
+        $content = if ($entry.title) { [string]$entry.title } else { "(untitled)" }
+        $files = ""
+        if ($entry.files_modified -and $entry.files_modified.Count -gt 0) {
+            $files = " | " + (($entry.files_modified | Select-Object -First 3) -join ", ")
         }
+        $inboxLines += "- $time $project$type$content$files"
     }
 
     if ($inboxLines.Count -gt 0) {
@@ -202,6 +287,11 @@ if ($allNew.Count -eq 0) {
         Write-Host "Updated inbox/claude-code.md with $($inboxLines.Count) recent entries" -ForegroundColor Green
     }
 }
+
+$allStructured = @($recordMap.Values | Sort-Object { [string]$_.t }, { [string]$_.id })
+$jsonLines = @($allStructured | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 8 })
+$structuredBody = if ($jsonLines.Count -gt 0) { ($jsonLines -join "`n") + "`n" } else { "" }
+[System.IO.File]::WriteAllText($StructuredFile, $structuredBody, $Utf8NoBom)
 
 Write-Host ""
 Write-Host "=== claude-mem -> Obsidian sync complete ===" -ForegroundColor Cyan

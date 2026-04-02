@@ -61,6 +61,9 @@ $SharedMcpStartScript = Join-Path $SharedMcpRoot "start-default-shared-mcp.ps1"
 $SharedMcpStatusScript = Join-Path $SharedMcpRoot "status-shared-mcp.ps1"
 $VaultRoot = Resolve-SharedObsidianVaultRoot -FallbackPath (Join-SharedPath @($UserHome, "Documents", "Obsidian Vault"))
 $GlobalContextPath = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "generated", "GLOBAL-CONTEXT.md")
+$MemoryLayersJsonPath = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "generated", "MEMORY-LAYERS.json")
+$HandoffPackJsonPath = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "generated", "HANDOFF.json")
+$AutoDreamJsonPath = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "generated", "AUTO-DREAM.json")
 $StructuredRoot = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "structured")
 $BlackboardDaemonScript = Resolve-BusPath -Candidates @("obsidian-blackboard-daemon.js", "ops/obsidian-blackboard-daemon.js")
 $OpenClawSyncScript = Resolve-BusPath -Candidates @("sync-openclaw-to-obsidian.js", "ops/sync-openclaw-to-obsidian.js")
@@ -78,6 +81,18 @@ $CopilotWorkspaceStorage = Join-SharedPath @($VsCodeUserRoot, "workspaceStorage"
 $TraeUserRoot = Get-SharedTraeUserRoot -ProductName "Trae"
 $TraeCnUserRoot = Get-SharedTraeUserRoot -ProductName "Trae CN"
 $CopilotCliSessionRoot = Join-SharedPath @((Get-SharedCopilotHomeRoot), "session-state")
+$StructuredSignatureFiles = @(
+    "shared-inbox.jsonl",
+    "session-memory.jsonl",
+    "shared-events.jsonl",
+    "task-memory.jsonl",
+    "claude-code.jsonl",
+    "openclaw.jsonl",
+    "openclaw-blackboard.jsonl",
+    "openclaw-runs.jsonl",
+    "openclaw-jobs.jsonl",
+    "openclaw-journal.jsonl"
+)
 $WatchSpecs = @(
     [pscustomobject]@{ Name = "claude-user"; Tool = "claude-code"; Type = "file"; Path = (Join-SharedPath @($UserHome, ".claude", "memory", "USER.md")) },
     [pscustomobject]@{ Name = "claude-memory"; Tool = "claude-code"; Type = "file"; Path = (Join-SharedPath @($UserHome, ".claude", "memory", "MEMORY.md")) },
@@ -317,6 +332,67 @@ function Get-WatchStamp {
     }) -join "|"
 }
 
+function Get-FileContentHash {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return "__missing__"
+    }
+
+    $sha1 = [System.Security.Cryptography.SHA1]::Create()
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        $hashBytes = $sha1.ComputeHash($stream)
+        $hash = ([System.BitConverter]::ToString($hashBytes)).Replace("-", "").ToLowerInvariant()
+        $item = Get-Item -LiteralPath $Path
+        return "{0}:{1}:{2}" -f $item.Name, $hash, $item.Length
+    } finally {
+        if ($null -ne $stream) {
+            $stream.Dispose()
+        }
+        $sha1.Dispose()
+    }
+}
+
+function Get-StructuredDataSignature {
+    if (-not (Test-Path -LiteralPath $StructuredRoot -PathType Container)) {
+        return "__missing__"
+    }
+
+    return ($StructuredSignatureFiles | ForEach-Object {
+        Get-FileContentHash -Path (Join-Path $StructuredRoot $_)
+    }) -join "|"
+}
+
+function Test-StructuredArtifactsNeedRefresh {
+    $currentStructuredSignature = Get-StructuredDataSignature
+    $artifactPaths = @($MemoryLayersJsonPath, $HandoffPackJsonPath, $AutoDreamJsonPath)
+    foreach ($artifactPath in $artifactPaths) {
+        if (-not (Test-Path -LiteralPath $artifactPath -PathType Leaf)) {
+            return $true
+        }
+
+        $artifactPayload = $null
+        try {
+            $artifactPayload = Get-Content -Raw -LiteralPath $artifactPath -Encoding UTF8 | ConvertFrom-Json
+        } catch {
+            return $true
+        }
+
+        if ($null -eq $artifactPayload.sourceStructuredSignature -or
+            [string]::IsNullOrWhiteSpace([string]$artifactPayload.sourceStructuredSignature.raw)) {
+            return $true
+        }
+
+        if ([string]$artifactPayload.sourceStructuredSignature.raw -cne $currentStructuredSignature) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 function Invoke-BusSync {
     param([Parameter(Mandatory = $true)][string]$Reason)
 
@@ -538,6 +614,22 @@ function Invoke-MemoryDream {
     }
 }
 
+function Invoke-StructuredRefreshPipeline {
+    param(
+        [Parameter(Mandatory = $true)][string]$Reason,
+        [bool]$StructuredChanged = $false
+    )
+
+    $layersBuilt = Invoke-BuildMemoryLayers -Reason $Reason
+    [void](Invoke-BuildHandoffPack -Reason $Reason)
+    if ($StructuredChanged -or $layersBuilt) {
+        [void](Invoke-EmbeddingsRefresh -Reason ($Reason + "-structured") -Force)
+    } else {
+        [void](Invoke-EmbeddingsRefresh -Reason ($Reason + "-index-check"))
+    }
+    [void](Invoke-MemoryDream -Reason $Reason)
+}
+
 function Invoke-EmbeddingsRefresh {
     param(
         [Parameter(Mandatory = $true)][string]$Reason,
@@ -642,18 +734,18 @@ try {
         $stamps[$spec.Name] = Get-WatchStamp -Spec $spec
     }
 
+    $startupStructuredSignatureBefore = Get-StructuredDataSignature
     $blackboardReason = Ensure-ObsidianBlackboardDaemon
     $startupOpenClawSynced = Invoke-OpenClawStructuredSync -Reason "watchdog-startup"
     $sharedMcpReason = Ensure-SharedMcp
     $lastSyncAt = Invoke-BusSync -Reason "watchdog-startup"
-    $startupMemoryLayersBuilt = Invoke-BuildMemoryLayers -Reason "watchdog-startup"
-    [void](Invoke-BuildHandoffPack -Reason "watchdog-startup")
-    if ($startupOpenClawSynced -or $startupMemoryLayersBuilt) {
-        [void](Invoke-EmbeddingsRefresh -Reason "watchdog-startup-structured" -Force)
+    $startupStructuredSignatureAfter = Get-StructuredDataSignature
+    $startupStructuredChanged = ($startupStructuredSignatureBefore -cne $startupStructuredSignatureAfter) -or $startupOpenClawSynced
+    if ($startupStructuredChanged -or (Test-StructuredArtifactsNeedRefresh)) {
+        Invoke-StructuredRefreshPipeline -Reason "watchdog-startup" -StructuredChanged:$startupStructuredChanged
     } else {
-        [void](Invoke-EmbeddingsRefresh -Reason "startup-index-check")
+        [void](Invoke-EmbeddingsRefresh -Reason "watchdog-startup-index-check")
     }
-    [void](Invoke-MemoryDream -Reason "watchdog-startup")
     if (-not [string]::IsNullOrWhiteSpace($blackboardReason)) {
         Write-State -Running $true -LastReason $blackboardReason -ChangedSpecs @() -LastSyncAt $lastSyncAt
     }
@@ -695,30 +787,34 @@ try {
         }
 
         if ($changed.Count -gt 0) {
+            $structuredSignatureBefore = Get-StructuredDataSignature
             $openClawChanged = @($changed | Where-Object { $OpenClawWatchSpecNames -contains $_ }).Count -gt 0
             if ($openClawChanged) {
                 [void](Invoke-OpenClawStructuredSync -Reason ("watchdog-change:" + ([string]::Join(",", $changed))))
             }
             $reason = "watchdog-change:" + ([string]::Join(",", $changed))
             $lastSyncAt = Invoke-BusSync -Reason $reason
-            $layersBuilt = Invoke-BuildMemoryLayers -Reason $reason
-            [void](Invoke-BuildHandoffPack -Reason $reason)
-            if ($openClawChanged -or $layersBuilt) {
-                [void](Invoke-EmbeddingsRefresh -Reason "watchdog-change-structured" -Force)
+            $structuredSignatureAfter = Get-StructuredDataSignature
+            $structuredChanged = ($structuredSignatureBefore -cne $structuredSignatureAfter)
+            if ($structuredChanged -or (Test-StructuredArtifactsNeedRefresh)) {
+                Invoke-StructuredRefreshPipeline -Reason $reason -StructuredChanged:$structuredChanged
             } else {
-                [void](Invoke-EmbeddingsRefresh -Reason "watchdog-change-index-check")
+                [void](Invoke-EmbeddingsRefresh -Reason ($reason + "-index-check"))
             }
-            [void](Invoke-MemoryDream -Reason $reason)
             Write-State -Running $true -LastReason $reason -ChangedSpecs $changed.ToArray() -LastSyncAt $lastSyncAt
             continue
         }
 
         if ($needsStaleRefresh) {
+            $structuredSignatureBefore = Get-StructuredDataSignature
             $lastSyncAt = Invoke-BusSync -Reason "watchdog-stale-refresh"
-            [void](Invoke-BuildMemoryLayers -Reason "watchdog-stale-refresh")
-            [void](Invoke-BuildHandoffPack -Reason "watchdog-stale-refresh")
-            [void](Invoke-EmbeddingsRefresh -Reason "watchdog-stale-refresh-index-check")
-            [void](Invoke-MemoryDream -Reason "watchdog-stale-refresh")
+            $structuredSignatureAfter = Get-StructuredDataSignature
+            $structuredChanged = ($structuredSignatureBefore -cne $structuredSignatureAfter)
+            if ($structuredChanged -or (Test-StructuredArtifactsNeedRefresh)) {
+                Invoke-StructuredRefreshPipeline -Reason "watchdog-stale-refresh" -StructuredChanged:$structuredChanged
+            } else {
+                [void](Invoke-EmbeddingsRefresh -Reason "watchdog-stale-refresh-index-check")
+            }
             Write-State -Running $true -LastReason "watchdog-stale-refresh" -ChangedSpecs @() -LastSyncAt $lastSyncAt
             continue
         }
