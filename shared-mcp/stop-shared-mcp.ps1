@@ -6,8 +6,21 @@ Set-StrictMode -Version 3.0
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$sourceRoot = Split-Path -Parent $root
+$helperPath = @(
+    (Join-Path $sourceRoot "runtime-platform.ps1"),
+    (Join-Path $sourceRoot (Join-Path "bus" "runtime-platform.ps1"))
+) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+
+if (-not $helperPath) {
+    throw "Unable to locate runtime-platform.ps1 from $root"
+}
+
+. $helperPath
+
 $manifestPath = Join-Path $root "manifest.json"
 $statePath = Join-Path $root "state.json"
+$stateMutexName = Get-SharedMutexName -BaseName "WangSharedMcpStateV1"
 
 function Normalize-RequestedIds {
     param([string[]]$Ids)
@@ -49,52 +62,8 @@ function Read-State {
     }
 }
 
-function Get-ListenerProcessId {
-    param([int]$Port)
-
-    if ($Port -le 0) {
-        return 0
-    }
-
-    try {
-        $tcp = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction Stop | Select-Object -First 1
-        if ($tcp -and $tcp.OwningProcess) {
-            return [int]$tcp.OwningProcess
-        }
-    } catch {
-    }
-
-    try {
-        $pattern = ":{0}\s+.*LISTENING\s+(\d+)\s*$" -f $Port
-        $line = netstat -ano -p tcp | Select-String -Pattern $pattern | Select-Object -First 1
-        if ($line -and ([string]$line.Line -match "LISTENING\s+(\d+)\s*$")) {
-            return [int]$Matches[1]
-        }
-    } catch {
-    }
-
-    return 0
-}
-
-function Stop-ProcessTree {
-    param([int]$ProcessId)
-
-    if ($ProcessId -le 0) {
-        return
-    }
-
-    try {
-        $null = cmd.exe /d /c "taskkill /PID $ProcessId /T /F" 2>$null
-    } catch {
-        try {
-            Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
-        } catch {
-        }
-    }
-}
-
 $manifest = Get-Content -Raw -LiteralPath $manifestPath -Encoding utf8 | ConvertFrom-Json
-$mutex = New-Object System.Threading.Mutex($false, "Global\WangSharedMcpStateV1")
+$mutex = New-Object System.Threading.Mutex($false, $stateMutexName)
 [void]$mutex.WaitOne()
 
 try {
@@ -121,9 +90,10 @@ try {
             $candidatePids.Add([int]$record["pid"]) | Out-Null
         }
         if ($server.PSObject.Properties.Name -contains "port") {
-            $listenerPid = Get-ListenerProcessId -Port ([int]$server.port)
-            if ($listenerPid -gt 0) {
-                $candidatePids.Add($listenerPid) | Out-Null
+            foreach ($listenerPid in @(Get-SharedListeningProcessIds -Port ([int]$server.port))) {
+                if ([int]$listenerPid -gt 0) {
+                    $candidatePids.Add([int]$listenerPid) | Out-Null
+                }
             }
         }
 
@@ -138,9 +108,8 @@ try {
         }
 
         foreach ($procId in $uniquePids) {
-            $process = Get-Process -Id $procId -ErrorAction SilentlyContinue
-            if ($process) {
-                Stop-ProcessTree -ProcessId $procId
+            if (Get-Process -Id $procId -ErrorAction SilentlyContinue) {
+                Stop-SharedProcessTree -ProcessId $procId
             }
             $results.Add([pscustomobject]@{
                 id = $id

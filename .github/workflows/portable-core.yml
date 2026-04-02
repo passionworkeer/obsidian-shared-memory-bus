@@ -34,6 +34,20 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Validate portable shell wrappers
+        shell: bash
+        run: |
+          sh -n ./scripts/install.sh
+          sh -n ./scripts/upgrade.sh
+          sh -n ./scripts/validate-layout.sh
+          sh -n ./shared-mcp/start-default-shared-mcp.sh
+          sh -n ./shared-mcp/start-shared-mcp.sh
+          sh -n ./shared-mcp/status-shared-mcp.sh
+          sh -n ./shared-mcp/stop-shared-mcp.sh
+
       - name: Seed portable smoke vault
         shell: pwsh
         run: |
@@ -104,6 +118,11 @@ jobs:
             throw 'AUTO-DREAM.md was not generated'
           }
 
+      - name: Validate memory integrity contract
+        shell: pwsh
+        run: |
+          node ./ops/check-memory-integrity.js --strict --json | Out-Null
+
       - name: Build embeddings
         shell: pwsh
         run: |
@@ -120,3 +139,101 @@ jobs:
           if ($result.entryCount -lt 1) {
             throw 'hybrid retrieval returned no indexed entries'
           }
+
+      - name: Portable install wrapper smoke
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            export AI_MEMORY_PWSH="powershell.exe"
+          else
+            export AI_MEMORY_PWSH="pwsh"
+          fi
+          TARGET_ROOT="$(python - <<'PY'
+import os
+from pathlib import Path
+print(Path(os.environ["RUNNER_TEMP"]) / "ai-memory-smoke")
+PY
+)"
+          ./scripts/install.sh -TargetRoot "$TARGET_ROOT" -RegisterStartup false -PersistUserEnvironment false
+          TARGET_ROOT="$TARGET_ROOT" python - <<'PY'
+import os
+from pathlib import Path
+target = Path(os.environ["TARGET_ROOT"])
+          expected = [
+              target / "memory-bus.ps1",
+              target / "memory-bus.sh",
+              target / "memory-watchdog.ps1",
+              target / "memory-watchdog.sh",
+              target / "verify-client-integrations.ps1",
+              target / "verify-client-integrations.sh",
+              target / "run-pressure-test.ps1",
+              target / "run-pressure-test.sh",
+              target / "run-memory-dream.sh",
+              target / "runtime-config.js",
+              target / "runtime_support.py",
+              target / "install-manifest.json",
+              target / "config" / "runtime.json",
+              target / "shared-mcp" / "start-default-shared-mcp.sh",
+              target / "shared-mcp" / "start-default-shared-mcp.ps1",
+          ]
+missing = [str(path) for path in expected if not path.exists()]
+          if missing:
+              raise SystemExit("Missing expected installed files:\n" + "\n".join(missing))
+          if os.name != "nt":
+              executables = [
+                  target / "shared-mcp" / "start-default-shared-mcp.sh",
+                  target / "run-pressure-test.sh",
+              ]
+              for executable in executables:
+                  if not os.access(executable, os.X_OK):
+                      raise SystemExit(f"Installed shell wrapper is not executable: {executable}")
+PY
+
+      - name: Portable shared MCP wrapper smoke
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            export AI_MEMORY_PWSH="powershell.exe"
+          else
+            export AI_MEMORY_PWSH="pwsh"
+          fi
+          TARGET_ROOT="$(python - <<'PY'
+import os
+from pathlib import Path
+print(Path(os.environ["RUNNER_TEMP"]) / "ai-memory-smoke")
+PY
+)"
+          export AI_MEMORY_ROOT="$TARGET_ROOT"
+          "$TARGET_ROOT/shared-mcp/start-default-shared-mcp.sh"
+          "$TARGET_ROOT/shared-mcp/status-shared-mcp.sh" > "$RUNNER_TEMP/shared-status.json"
+          python - <<'PY'
+import json
+import os
+from pathlib import Path
+status_path = Path(os.environ["RUNNER_TEMP"]) / "shared-status.json"
+status = json.loads(status_path.read_text(encoding="utf-8"))
+required = {"context7", "fetch", "time", "sequential-thinking", "obsidian", "memory"}
+running = {item.get("id") for item in status if item.get("running")}
+missing = sorted(required - running)
+if missing:
+    raise SystemExit("Shared MCP runtime did not start cleanly for: " + ", ".join(missing))
+PY
+
+      - name: Portable shared MCP wrapper shutdown
+        if: always()
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            export AI_MEMORY_PWSH="powershell.exe"
+          else
+            export AI_MEMORY_PWSH="pwsh"
+          fi
+          TARGET_ROOT="$(python - <<'PY'
+import os
+from pathlib import Path
+print(Path(os.environ["RUNNER_TEMP"]) / "ai-memory-smoke")
+PY
+)"
+          if [ -f "$TARGET_ROOT/shared-mcp/stop-shared-mcp.sh" ]; then
+            bash "$TARGET_ROOT/shared-mcp/stop-shared-mcp.sh"
+          fi

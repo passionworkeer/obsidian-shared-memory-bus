@@ -2,11 +2,17 @@ const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
 
-const USER_HOME = process.env.USERPROFILE || process.env.HOME || "";
-const LOCAL_APP_DATA = process.env.LOCALAPPDATA || path.join(USER_HOME, "AppData", "Local");
-const PROGRAM_FILES = process.env.ProgramFiles || "C:\\Program Files";
-const PROGRAM_FILES_X86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
 const IS_WINDOWS = process.platform === "win32";
+const IS_MACOS = process.platform === "darwin";
+const USER_HOME = process.env.USERPROFILE || process.env.HOME || "";
+const LOCAL_APP_DATA = IS_WINDOWS
+  ? process.env.LOCALAPPDATA || path.join(USER_HOME, "AppData", "Local")
+  : "";
+const PROGRAM_FILES = IS_WINDOWS ? process.env.ProgramFiles || "C:\\Program Files" : "";
+const PROGRAM_FILES_X86 = IS_WINDOWS ? process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)" : "";
+const DATA_HOME =
+  process.env.XDG_DATA_HOME ||
+  (IS_MACOS ? path.join(USER_HOME, "Library", "Application Support") : path.join(USER_HOME, ".local", "share"));
 
 let cachedRuntime = null;
 
@@ -59,10 +65,11 @@ function resolveLatestPythonFromDirectory(rootPath, source) {
   }
 
   try {
+    const executablePath = IS_WINDOWS ? "python.exe" : path.join("bin", "python3");
     const candidates = fs
       .readdirSync(rootPath, { withFileTypes: true })
       .filter((entry) => entry.isDirectory() && /^python/i.test(entry.name))
-      .map((entry) => path.join(rootPath, entry.name, "python.exe"))
+      .map((entry) => path.join(rootPath, entry.name, executablePath))
       .filter((candidate) => fs.existsSync(candidate))
       .sort((left, right) => right.localeCompare(left));
 
@@ -77,7 +84,7 @@ function resolveLatestPythonFromDirectory(rootPath, source) {
 }
 
 function resolveUvInstalledPython() {
-  const baseDir = path.join(USER_HOME, "AppData", "Roaming", "uv", "python");
+  const baseDir = path.join(DATA_HOME, "uv", "python");
   if (!fs.existsSync(baseDir)) {
     return null;
   }
@@ -85,7 +92,7 @@ function resolveUvInstalledPython() {
   const candidates = fs
     .readdirSync(baseDir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
-    .map((entry) => path.join(baseDir, entry.name, "python.exe"))
+    .map((entry) => (IS_WINDOWS ? path.join(baseDir, entry.name, "python.exe") : path.join(baseDir, entry.name, "bin", "python3")))
     .filter((candidate) => fs.existsSync(candidate))
     .sort((left, right) => right.localeCompare(left));
 
@@ -99,7 +106,8 @@ function resolveUvInstalledPython() {
 function resolveViaUvCommand() {
   const uvCandidates = [
     String(process.env.UV_COMMAND || "").trim(),
-    path.join(USER_HOME, ".local", "bin", "uv.exe"),
+    path.join(USER_HOME, ".local", "bin", IS_WINDOWS ? "uv.exe" : "uv"),
+    !IS_WINDOWS && IS_MACOS ? "/opt/homebrew/bin/uv" : "",
     "uv",
   ].filter(Boolean);
 
@@ -126,6 +134,7 @@ function resolvePythonRuntime() {
     return cachedRuntime;
   }
 
+  const condaPrefix = String(process.env.CONDA_PREFIX || "").trim();
   const envCommand = String(process.env.AI_MEMORY_PYTHON || "").trim();
   if (envCommand) {
     const runtime = envCommand.includes("\\") || envCommand.includes("/") || /^[A-Za-z]:/.test(envCommand)
@@ -151,16 +160,22 @@ function resolvePythonRuntime() {
   for (const runtime of [
     resolveViaUvCommand(),
     resolveUvInstalledPython(),
-    resolveAbsoluteCandidate(path.join(USER_HOME, "pipx", "shared", "Scripts", "python.exe"), "pipx-shared"),
-    resolveLatestPythonFromDirectory(path.join(LOCAL_APP_DATA, "Programs", "Python"), "local-python"),
-    resolveLatestPythonFromDirectory(PROGRAM_FILES, "program-files"),
-    resolveLatestPythonFromDirectory(PROGRAM_FILES_X86, "program-files-x86"),
-    resolveAbsoluteCandidate(path.join(process.env.CONDA_PREFIX || "", "python.exe"), "conda-prefix"),
-    resolveAbsoluteCandidate(path.join(USER_HOME, "pytorch-env", "Scripts", "python.exe"), "pytorch-env"),
-    resolveAbsoluteCandidate(path.join(USER_HOME, ".local", "bin", "python3"), "user-local"),
-    resolveAbsoluteCandidate("/usr/bin/python3", "system"),
-    resolveAbsoluteCandidate("/usr/local/bin/python3", "system"),
-    resolveAbsoluteCandidate("/opt/homebrew/bin/python3", "homebrew"),
+    ...(IS_WINDOWS
+      ? [
+          resolveAbsoluteCandidate(path.join(USER_HOME, "pipx", "shared", "Scripts", "python.exe"), "pipx-shared"),
+          resolveLatestPythonFromDirectory(path.join(LOCAL_APP_DATA, "Programs", "Python"), "local-python"),
+          resolveLatestPythonFromDirectory(PROGRAM_FILES, "program-files"),
+          resolveLatestPythonFromDirectory(PROGRAM_FILES_X86, "program-files-x86"),
+          condaPrefix ? resolveAbsoluteCandidate(path.join(condaPrefix, "python.exe"), "conda-prefix") : null,
+          resolveAbsoluteCandidate(path.join(USER_HOME, "pytorch-env", "Scripts", "python.exe"), "pytorch-env"),
+        ]
+      : [
+          condaPrefix ? resolveAbsoluteCandidate(path.join(condaPrefix, "bin", "python"), "conda-prefix") : null,
+          resolveAbsoluteCandidate(path.join(USER_HOME, ".local", "bin", "python3"), "user-local"),
+          resolveAbsoluteCandidate("/usr/bin/python3", "system"),
+          resolveAbsoluteCandidate("/usr/local/bin/python3", "system"),
+          resolveAbsoluteCandidate("/opt/homebrew/bin/python3", "homebrew"),
+        ]),
   ]) {
     if (runtime && runtime.available) {
       cachedRuntime = runtime;

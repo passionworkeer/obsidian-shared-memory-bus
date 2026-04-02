@@ -8,10 +8,23 @@ Set-StrictMode -Version 3.0
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$sourceRoot = Split-Path -Parent $root
+$helperPath = @(
+    (Join-Path $sourceRoot "runtime-platform.ps1"),
+    (Join-Path $sourceRoot (Join-Path "bus" "runtime-platform.ps1"))
+) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+
+if (-not $helperPath) {
+    throw "Unable to locate runtime-platform.ps1 from $root"
+}
+
+. $helperPath
+
 $manifestPath = Join-Path $root "manifest.json"
 $statePath = Join-Path $root "state.json"
 $logRoot = Join-Path $root "logs"
 $proxyScriptPath = Join-Path $root "singleton-stdio-mcp-proxy.mjs"
+$stateMutexName = Get-SharedMutexName -BaseName "WangSharedMcpStateV1"
 
 function Ensure-Directory {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -38,8 +51,6 @@ function Read-State {
         }
         return $map
     } catch {
-        # Backup corrupted state and return empty so the script starts fresh
-        # instead of silently skipping servers and allowing duplicate MCP servers
         $backup = "$statePath.corrupt.$(Get-Date -Format 'yyyyMMddHHmmss')"
         try { Move-Item -LiteralPath $statePath -Destination $backup -Force } catch {}
         Write-Warning "[shared-mcp] state.json was corrupt, backed up to $backup"
@@ -49,8 +60,7 @@ function Read-State {
 
 function Write-State {
     param([Parameter(Mandatory = $true)][hashtable]$State)
-    # Atomic write: write to temp file first, then rename.
-    # Prevents corruption if the script crashes mid-write.
+
     $tempPath = "$statePath.tmp"
     $json = $State | ConvertTo-Json -Depth 8
     [System.IO.File]::WriteAllText($tempPath, $json, (New-Object System.Text.UTF8Encoding($false)))
@@ -64,23 +74,6 @@ function Test-ProcessAlive {
     }
 
     return $null -ne (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)
-}
-
-function Stop-ProcessTree {
-    param([int]$ProcessId)
-
-    if ($ProcessId -le 0) {
-        return
-    }
-
-    try {
-        $null = cmd.exe /d /c "taskkill /PID $ProcessId /T /F" 2>$null
-    } catch {
-        try {
-            Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
-        } catch {
-        }
-    }
 }
 
 function Normalize-RequestedIds {
@@ -102,33 +95,6 @@ function Normalize-RequestedIds {
     return @($normalized | Select-Object -Unique)
 }
 
-function Get-ListenerProcessId {
-    param([int]$Port)
-
-    if ($Port -le 0) {
-        return 0
-    }
-
-    try {
-        $tcp = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction Stop | Select-Object -First 1
-        if ($tcp -and $tcp.OwningProcess) {
-            return [int]$tcp.OwningProcess
-        }
-    } catch {
-    }
-
-    try {
-        $pattern = ":{0}\s+.*LISTENING\s+(\d+)\s*$" -f $Port
-        $line = netstat -ano -p tcp | Select-String -Pattern $pattern | Select-Object -First 1
-        if ($line -and ([string]$line.Line -match "LISTENING\s+(\d+)\s*$")) {
-            return [int]$Matches[1]
-        }
-    } catch {
-    }
-
-    return 0
-}
-
 function Test-Health {
     param(
         [string]$Url,
@@ -148,8 +114,8 @@ function Test-Health {
 }
 
 # MCP protocol version: "2024-11-05"
-# Hardcoded in 3 places: manifest.json, start-shared-mcp.ps1 (here + line ~400), singleton-stdio-mcp-proxy.mjs.
-# Must update all 4 files together when the MCP protocol version changes.
+# Hardcoded in 3 places: manifest.json, start-shared-mcp.ps1, singleton-stdio-mcp-proxy.mjs.
+# Must update all files together when the MCP protocol version changes.
 function Test-McpInitialize {
     param(
         [string]$Url,
@@ -235,24 +201,148 @@ function Test-ServerReady {
     }
 }
 
-function Resolve-StdioCommand {
-    param($Server)
+function ConvertTo-ShellLiteral {
+    param([AllowEmptyString()][string]$Value)
 
-    $resolved = [string]$Server.stdioCommand
+    if ($null -eq $Value) {
+        return '""'
+    }
+
+    if (Test-SharedIsWindows) {
+        return '"' + ([string]$Value -replace '"', '\"') + '"'
+    }
+
+    $singleQuote = [string][char]39
+    $doubleQuote = [string][char]34
+    $replacement = $singleQuote + $doubleQuote + $singleQuote + $doubleQuote + $singleQuote
+    $escapedValue = [string]$Value -replace [regex]::Escape($singleQuote), $replacement
+    return "'$escapedValue'"
+}
+
+function Resolve-ManagedRuntimeFile {
+    param([Parameter(Mandatory = $true)][string[]]$RelativeCandidates)
+
+    foreach ($basePath in @($sourceRoot, $root)) {
+        foreach ($relativePath in @($RelativeCandidates)) {
+            if ([string]::IsNullOrWhiteSpace($relativePath)) {
+                continue
+            }
+
+            $candidate = Join-Path $basePath $relativePath
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                return (Get-Item -LiteralPath $candidate).FullName
+            }
+        }
+    }
+
+    throw "Unable to resolve runtime file from candidates: $([string]::Join(', ', $RelativeCandidates))"
+}
+
+function Get-ServerCommandTemplate {
+    param(
+        [Parameter(Mandatory = $true)]$Server,
+        [Parameter(Mandatory = $true)][string]$BaseProperty
+    )
+
+    $propertyNames = if (Test-SharedIsWindows) {
+        @("${BaseProperty}Windows", $BaseProperty)
+    } else {
+        @("${BaseProperty}Posix", $BaseProperty)
+    }
+
+    foreach ($propertyName in @($propertyNames)) {
+        if ($Server.PSObject.Properties.Name -contains $propertyName) {
+            $value = [string]$Server.$propertyName
+            if (-not [string]::IsNullOrWhiteSpace($value)) {
+                return $value
+            }
+        }
+    }
+
+    return ""
+}
+
+function Resolve-SharedPythonExecutable {
+    $override = Get-SharedEnvValue -Name "AI_MEMORY_MCP_PYTHON"
+    if (-not [string]::IsNullOrWhiteSpace($override) -and (Test-Path -LiteralPath $override -PathType Leaf)) {
+        return (Get-Item -LiteralPath $override).FullName
+    }
+
+    $override = Get-SharedEnvValue -Name "AI_MEMORY_PYTHON"
+    if (-not [string]::IsNullOrWhiteSpace($override) -and (Test-Path -LiteralPath $override -PathType Leaf)) {
+        return (Get-Item -LiteralPath $override).FullName
+    }
+
+    foreach ($candidate in @(
+            Get-Command python.exe, python3, python -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
+        )) {
+        if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            return (Get-Item -LiteralPath $candidate).FullName
+        }
+    }
+
+    throw "Unable to resolve a Python runtime for shared fetch/time MCP services. Set AI_MEMORY_PYTHON or reinstall the bundle."
+}
+
+function Resolve-CommandTemplate {
+    param([Parameter(Mandatory = $true)][string]$Template)
+
+    if ([string]::IsNullOrWhiteSpace($Template)) {
+        return ""
+    }
+
+    $replacements = [ordered]@{
+        "{{powershell}}" = (ConvertTo-ShellLiteral (Resolve-SharedPowerShellExecutable))
+        "{{node}}" = (ConvertTo-ShellLiteral (Resolve-SharedNodeExecutable))
+        "{{python}}" = (ConvertTo-ShellLiteral (Resolve-SharedPythonExecutable))
+        "{{obsidianRunner}}" = (ConvertTo-ShellLiteral (Resolve-ManagedRuntimeFile -RelativeCandidates @(
+                    "run-obsidian-mcp.ps1",
+                    (Join-Path "ops" "run-obsidian-mcp.ps1")
+                )))
+        "{{minimaxRunner}}" = (ConvertTo-ShellLiteral (Resolve-ManagedRuntimeFile -RelativeCandidates @(
+                    "run-minimax-mcp.ps1",
+                    (Join-Path "ops" "run-minimax-mcp.ps1")
+                )))
+        "{{omniMemoryServer}}" = (ConvertTo-ShellLiteral (Resolve-ManagedRuntimeFile -RelativeCandidates @(
+                    (Join-Path "shared-mcp" "omni-memory-server.js"),
+                    "omni-memory-server.js"
+                )))
+    }
+
+    $resolved = $Template
+    foreach ($entry in $replacements.GetEnumerator()) {
+        $resolved = $resolved.Replace([string]$entry.Key, [string]$entry.Value)
+    }
+
     return $resolved
+}
+
+function Resolve-StdioCommand {
+    param([Parameter(Mandatory = $true)]$Server)
+
+    $template = Get-ServerCommandTemplate -Server $Server -BaseProperty "stdioCommand"
+    if ([string]::IsNullOrWhiteSpace($template)) {
+        return ""
+    }
+
+    return Resolve-CommandTemplate -Template $template
+}
+
+function Resolve-LaunchCommand {
+    param([Parameter(Mandatory = $true)]$Server)
+
+    $template = Get-ServerCommandTemplate -Server $Server -BaseProperty "launchCommand"
+    if ([string]::IsNullOrWhiteSpace($template)) {
+        return ""
+    }
+
+    return Resolve-CommandTemplate -Template $template
 }
 
 function Get-EnvironmentValue {
     param([Parameter(Mandatory = $true)][string]$Name)
 
-    $value = [Environment]::GetEnvironmentVariable($Name, "Process")
-    if ([string]::IsNullOrWhiteSpace($value)) {
-        $value = [Environment]::GetEnvironmentVariable($Name, "User")
-    }
-    if ([string]::IsNullOrWhiteSpace($value)) {
-        $value = [Environment]::GetEnvironmentVariable($Name, "Machine")
-    }
-    return [string]$value
+    return Get-SharedEnvValue -Name $Name
 }
 
 function Add-EnvironmentValue {
@@ -279,40 +369,36 @@ function Resolve-StdioEnvironment {
 
     if ([string]$Server.id -eq "memory") {
         foreach ($name in @(
-            "AI_MEMORY_EMBED_BACKEND",
-            "AI_MEMORY_EMBED_BASE_URL",
-            "AI_MEMORY_EMBED_API_KEY",
-            "AI_MEMORY_EMBED_MODEL",
-            "AI_MEMORY_EMBED_TIMEOUT_MS",
-            "AI_MEMORY_EMBED_TIMEOUT_SECONDS",
-            "AI_MEMORY_EMBED_REQUEST_DELAY_MS",
-            "AI_MEMORY_EMBED_DELAY_MS",
-            "AI_MEMORY_EMBED_BATCH_SIZE",
-            "AI_MEMORY_EMBED_ALLOW_BATCH_FALLBACK",
-            "AI_MEMORY_PYTHON",
-            "UV_COMMAND",
-            "AI_MEMORY_OBSIDIAN_VAULT",
-            "OBSIDIAN_VAULT_ROOT",
-            "CLAUDE_MEM_BASE",
-            "OPENCLAW_HOME",
-            "OPENCLAW_BLACKBOARD_DB"
-        )) {
+                "AI_MEMORY_ROOT",
+                "AI_MEMORY_PWSH",
+                "AI_MEMORY_RUNTIME_CONFIG_PATH",
+                "AI_MEMORY_EMBED_ADAPTER",
+                "AI_MEMORY_EMBED_BACKEND",
+                "AI_MEMORY_EMBED_BASE_URL",
+                "AI_MEMORY_EMBED_API_KEY",
+                "AI_MEMORY_EMBED_API_KEY_ENV",
+                "AI_MEMORY_EMBED_MODEL",
+                "AI_MEMORY_EMBED_PROFILE",
+                "AI_MEMORY_EMBED_PROVIDER",
+                "AI_MEMORY_EMBED_TIMEOUT_MS",
+                "AI_MEMORY_EMBED_TIMEOUT_SECONDS",
+                "AI_MEMORY_EMBED_REQUEST_DELAY_MS",
+                "AI_MEMORY_EMBED_DELAY_MS",
+                "AI_MEMORY_EMBED_BATCH_SIZE",
+                "AI_MEMORY_EMBED_ALLOW_BATCH_FALLBACK",
+                "AI_MEMORY_PYTHON",
+                "UV_COMMAND",
+                "AI_MEMORY_OBSIDIAN_VAULT",
+                "OBSIDIAN_VAULT_ROOT",
+                "CLAUDE_MEM_BASE",
+                "OPENCLAW_HOME",
+                "OPENCLAW_BLACKBOARD_DB"
+            )) {
             Add-EnvironmentValue -Environment $envMap -Name $name
         }
     }
 
     return $envMap
-}
-
-function Resolve-NodeExecutable {
-    foreach ($candidate in @("node.exe", "node")) {
-        $command = Get-Command $candidate -ErrorAction SilentlyContinue
-        if ($command) {
-            return $command.Source
-        }
-    }
-
-    throw "Unable to find node.exe in PATH."
 }
 
 function Start-ManagedHttpProcess {
@@ -322,31 +408,50 @@ function Start-ManagedHttpProcess {
         [Parameter(Mandatory = $true)][string]$StderrPath
     )
 
-    return Start-Process -FilePath "cmd.exe" `
-        -ArgumentList @("/d", "/s", "/c", $Command) `
-        -WindowStyle Hidden `
-        -RedirectStandardOutput $StdoutPath `
-        -RedirectStandardError $StderrPath `
-        -PassThru
+    return Start-SharedShellProcess -Command $Command -StdoutPath $StdoutPath -StderrPath $StderrPath
+}
+
+function Start-ProxyProcess {
+    param(
+        [Parameter(Mandatory = $true)][string]$NodeExecutable,
+        [Parameter(Mandatory = $true)][string[]]$ArgumentList,
+        [Parameter(Mandatory = $true)][string]$StdoutPath,
+        [Parameter(Mandatory = $true)][string]$StderrPath
+    )
+
+    $parameters = @{
+        FilePath = $NodeExecutable
+        ArgumentList = $ArgumentList
+        RedirectStandardOutput = $StdoutPath
+        RedirectStandardError = $StderrPath
+        PassThru = $true
+        WorkingDirectory = $root
+    }
+
+    if (Test-SharedIsWindows) {
+        $parameters.WindowStyle = "Hidden"
+    }
+
+    return Start-Process @parameters
 }
 
 Ensure-Directory -Path $logRoot
 $manifest = Get-Content -Raw -LiteralPath $manifestPath -Encoding utf8 | ConvertFrom-Json
-$nodeExecutable = Resolve-NodeExecutable
-$mutex = New-Object System.Threading.Mutex($false, "Global\WangSharedMcpStateV1")
+$nodeExecutable = Resolve-SharedNodeExecutable
+$mutex = New-Object System.Threading.Mutex($false, $stateMutexName)
 [void]$mutex.WaitOne()
 
 try {
     $state = Read-State
 
     $requested = @(Normalize-RequestedIds -Ids $Only)
-
     $results = New-Object System.Collections.Generic.List[object]
 
     foreach ($server in @($manifest.servers)) {
         if ($server.mode -eq "isolated") {
             continue
         }
+
         $isExplicitlyRequested = $requested.Count -gt 0 -and $requested -contains [string]$server.id
         if ($server.mode -eq "optional" -and -not $IncludeOptional -and -not $isExplicitlyRequested) {
             continue
@@ -364,30 +469,31 @@ try {
             $existingPid = [int]$existing["pid"]
         }
 
-        $listenerPid = Get-ListenerProcessId -Port $port
+        $listenerPids = @(Get-SharedListeningProcessIds -Port $port)
 
         if ($ForceRestart) {
-            foreach ($pidToStop in @($existingPid, $listenerPid) | Select-Object -Unique) {
+            foreach ($pidToStop in @(@($listenerPids) + @($existingPid) | Select-Object -Unique)) {
                 if ([int]$pidToStop -gt 0) {
-                    Stop-ProcessTree -ProcessId ([int]$pidToStop)
+                    Stop-SharedProcessTree -ProcessId ([int]$pidToStop)
                 }
             }
             Start-Sleep -Milliseconds 750
-            $listenerPid = Get-ListenerProcessId -Port $port
+            $listenerPids = @(Get-SharedListeningProcessIds -Port $port)
         }
 
         if ($existing -and -not $ForceRestart) {
             if ((Test-ProcessAlive -ProcessId $existingPid) -and (Test-ServerReady -Server $server -Url $url -HealthUrl $healthUrl)) {
                 $results.Add([pscustomobject]@{
-                    id = [string]$server.id
-                    status = "already-running"
-                    pid = $existingPid
-                    url = $url
-                }) | Out-Null
+                        id = [string]$server.id
+                        status = "already-running"
+                        pid = $existingPid
+                        url = $url
+                    }) | Out-Null
                 continue
             }
         }
 
+        $listenerPid = if ($listenerPids.Count -gt 0) { [int]$listenerPids[0] } else { 0 }
         if ($listenerPid -gt 0 -and (Test-ServerReady -Server $server -Url $url -HealthUrl $healthUrl)) {
             $state[[string]$server.id] = @{
                 id = [string]$server.id
@@ -402,11 +508,11 @@ try {
                 notes = [string]$server.notes
             }
             $results.Add([pscustomobject]@{
-                id = [string]$server.id
-                status = "adopted"
-                pid = $listenerPid
-                url = $url
-            }) | Out-Null
+                    id = [string]$server.id
+                    status = "adopted"
+                    pid = $listenerPid
+                    url = $url
+                }) | Out-Null
             continue
         }
 
@@ -414,23 +520,32 @@ try {
         $stderrPath = Join-Path $logRoot ("{0}.err.log" -f $server.id)
         $process = $null
 
-        if ($server.PSObject.Properties.Name -contains "launchCommand" -and -not [string]::IsNullOrWhiteSpace([string]$server.launchCommand)) {
-            $process = Start-ManagedHttpProcess -Command ([string]$server.launchCommand) -StdoutPath $stdoutPath -StderrPath $stderrPath
+        $launchCommand = Resolve-LaunchCommand -Server $server
+        if (-not [string]::IsNullOrWhiteSpace($launchCommand)) {
+            $process = Start-ManagedHttpProcess -Command $launchCommand -StdoutPath $stdoutPath -StderrPath $stderrPath
         } else {
             $resolvedCommand = Resolve-StdioCommand -Server $server
+            if ([string]::IsNullOrWhiteSpace($resolvedCommand)) {
+                $results.Add([pscustomobject]@{
+                        id = [string]$server.id
+                        status = "skipped"
+                        reason = "No stdioCommand or launchCommand was configured for this platform."
+                    }) | Out-Null
+                continue
+            }
+
             $resolvedEnv = Resolve-StdioEnvironment -Server $server
             if ([string]$server.id -eq "MiniMax" -and (-not $resolvedEnv.ContainsKey("MINIMAX_API_HOST") -or -not $resolvedEnv.ContainsKey("MINIMAX_API_KEY"))) {
                 $results.Add([pscustomobject]@{
-                    id = [string]$server.id
-                    status = "skipped"
-                    reason = "Set MINIMAX_API_HOST and MINIMAX_API_KEY in your user or machine environment before starting this server."
-                }) | Out-Null
+                        id = [string]$server.id
+                        status = "skipped"
+                        reason = "Set MINIMAX_API_HOST and MINIMAX_API_KEY in your user or machine environment before starting this server."
+                    }) | Out-Null
                 continue
             }
 
             $encodedCommand = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($resolvedCommand))
             $encodedEnv = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes((($resolvedEnv | ConvertTo-Json -Compress).Trim())))
-            # MCP protocol version — see comment above Test-McpInitialize for the full list of hardcoded locations.
             $argumentList = @(
                 $proxyScriptPath,
                 "--server-id", [string]$server.id,
@@ -442,12 +557,7 @@ try {
                 "--env-json-b64", $encodedEnv
             )
 
-            $process = Start-Process -FilePath $nodeExecutable `
-                -ArgumentList $argumentList `
-                -WindowStyle Hidden `
-                -RedirectStandardOutput $stdoutPath `
-                -RedirectStandardError $stderrPath `
-                -PassThru
+            $process = Start-ProxyProcess -NodeExecutable $nodeExecutable -ArgumentList $argumentList -StdoutPath $stdoutPath -StderrPath $stderrPath
         }
 
         $healthy = $false
@@ -459,7 +569,8 @@ try {
             }
         }
 
-        $listenerPid = Get-ListenerProcessId -Port $port
+        $listenerPids = @(Get-SharedListeningProcessIds -Port $port)
+        $listenerPid = if ($listenerPids.Count -gt 0) { [int]$listenerPids[0] } else { 0 }
         $recordPid = if ($listenerPid -gt 0) { $listenerPid } else { $process.Id }
 
         $state[[string]$server.id] = @{
@@ -476,13 +587,13 @@ try {
         }
 
         $results.Add([pscustomobject]@{
-            id = [string]$server.id
-            status = if ($healthy) { "started" } else { "started-unhealthy" }
-            pid = $recordPid
-            url = $url
-            stdoutPath = $stdoutPath
-            stderrPath = $stderrPath
-        }) | Out-Null
+                id = [string]$server.id
+                status = if ($healthy) { "started" } else { "started-unhealthy" }
+                pid = $recordPid
+                url = $url
+                stdoutPath = $stdoutPath
+                stderrPath = $stderrPath
+            }) | Out-Null
     }
 
     Write-State -State $state
