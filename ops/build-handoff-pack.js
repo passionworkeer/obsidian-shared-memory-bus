@@ -1,5 +1,8 @@
 const fs = require("fs");
 const path = require("path");
+const {
+  buildGeneratedArtifactMetadata,
+} = require("./memory-contract.js");
 
 function loadVaultRootHelper() {
   const candidates = [
@@ -212,8 +215,12 @@ function buildPack(records) {
     title: trimText(record.title || record.content || record.id || "untitled", 180),
   }));
 
+  const generatedAt = new Date().toISOString();
   return {
-    generatedAt: new Date().toISOString(),
+    ...buildGeneratedArtifactMetadata({
+      structuredRoot: STRUCTURED_ROOT,
+      generatedAt,
+    }),
     goal: goalRecord ? trimText(goalRecord.title || goalRecord.content || "", 220) : "",
     done: done.map((record) => formatRecordLine(record)),
     next: next.map((record) => formatRecordLine(record)),

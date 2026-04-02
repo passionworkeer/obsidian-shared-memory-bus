@@ -27,6 +27,7 @@ const { resolvePythonRuntime, withPythonArgs } = require(
     ? path.join(__dirname, "python-runtime.js")
     : path.join(__dirname, "..", "bus", "python-runtime.js")
 );
+const { MEMORY_RECORD_SCHEMA_VERSION } = require("./memory-contract.js");
 const { resolveVaultRoot } = loadVaultRootHelper();
 const PYTHON = resolvePythonRuntime();
 
@@ -142,7 +143,7 @@ function buildRecord({
   metadata = {},
 }) {
   return {
-    schemaVersion: 2,
+    schemaVersion: MEMORY_RECORD_SCHEMA_VERSION,
     id,
     t,
     tool,

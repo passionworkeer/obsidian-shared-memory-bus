@@ -1,6 +1,10 @@
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
+const {
+  buildGeneratedArtifactMetadata,
+  MEMORY_RECORD_SCHEMA_VERSION,
+} = require("./memory-contract.js");
 
 function loadVaultRootHelper() {
   const candidates = [
@@ -36,6 +40,8 @@ const SHARED_INBOX_JSONL = path.join(STRUCTURED_ROOT, "shared-inbox.jsonl");
 const SESSION_MEMORY_JSONL = path.join(STRUCTURED_ROOT, "session-memory.jsonl");
 const SHARED_EVENTS_JSONL = path.join(STRUCTURED_ROOT, "shared-events.jsonl");
 const TASK_MEMORY_JSONL = path.join(STRUCTURED_ROOT, "task-memory.jsonl");
+const CLAUDE_CODE_JSONL = path.join(STRUCTURED_ROOT, "claude-code.jsonl");
+const OPENCLAW_SESSIONS_JSONL = path.join(STRUCTURED_ROOT, "openclaw.jsonl");
 const OPENCLAW_BLACKBOARD_JSONL = path.join(STRUCTURED_ROOT, "openclaw-blackboard.jsonl");
 const OPENCLAW_RUNS_JSONL = path.join(STRUCTURED_ROOT, "openclaw-runs.jsonl");
 const OPENCLAW_JOBS_JSONL = path.join(STRUCTURED_ROOT, "openclaw-jobs.jsonl");
@@ -148,7 +154,7 @@ function buildRecord({
   const normalizedTitle = normalizeSpaces(title || content).slice(0, 140) || id;
   const normalizedContent = String(content || "").trim();
   return {
-    schemaVersion: 2,
+    schemaVersion: MEMORY_RECORD_SCHEMA_VERSION,
     id,
     t,
     tool,
@@ -357,7 +363,37 @@ function parseSessionMemoryEntries() {
     }
   }
 
-  return records.sort((left, right) => String(left.t || "").localeCompare(String(right.t || "")));
+  const importedStructuredRecords = [
+    ...parseStructuredJsonl(CLAUDE_CODE_JSONL, {
+      prefix: "claude-import",
+      tool: "claude-code",
+      source: "claude-mem",
+      scope: "summary",
+      visibility: "shared",
+      source_kind: "session",
+      memory_level: "session",
+      workspace: "claude-session",
+      confidence: 0.72,
+    }),
+    ...parseStructuredJsonl(OPENCLAW_SESSIONS_JSONL, {
+      prefix: "openclaw-session",
+      tool: "openclaw",
+      source: "openclaw-session",
+      scope: "summary",
+      visibility: "shared",
+      source_kind: "session",
+      memory_level: "session",
+      workspace: "openclaw-workspace",
+      confidence: 0.62,
+    }),
+  ];
+
+  const merged = new Map();
+  [...records, ...importedStructuredRecords].forEach((record) => {
+    merged.set(record.id, record);
+  });
+
+  return [...merged.values()].sort((left, right) => String(left.t || "").localeCompare(String(right.t || "")));
 }
 
 function coerceStructuredRecord(payload, defaults = {}) {
@@ -377,7 +413,7 @@ function coerceStructuredRecord(payload, defaults = {}) {
     `${defaults.prefix || "record"}-${sha1(`${defaults.source || ""}|${title}|${content.slice(0, 200)}`)}`;
 
   return {
-    schemaVersion: Number(payload.schemaVersion || 2),
+    schemaVersion: Number(payload.schemaVersion || MEMORY_RECORD_SCHEMA_VERSION),
     id: recordId,
     t: timestamp,
     tool: normalizeSpaces(payload.tool || defaults.tool || "system") || "system",
@@ -496,6 +532,10 @@ function writeJsonl(filePath, records) {
 
 function buildLayerSummary(layers) {
   const generatedAt = new Date().toISOString();
+  const artifactMetadata = buildGeneratedArtifactMetadata({
+    structuredRoot: STRUCTURED_ROOT,
+    generatedAt,
+  });
   const lines = [
     "# Memory Layers",
     "",
@@ -555,7 +595,7 @@ function buildLayerSummary(layers) {
   return {
     markdown: `${lines.join("\n").trim()}\n`,
     json: {
-      generatedAt,
+      ...artifactMetadata,
       counts: {
         sharedInbox: layers.sharedInbox.length,
         sessionMemory: layers.sessionMemory.length,

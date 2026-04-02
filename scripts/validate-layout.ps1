@@ -111,10 +111,12 @@ foreach ($path in @($legacyCleanupFiles)) {
 $requiredInstalledFiles = @(
     "memory-bus.ps1"
     "memory-watchdog.ps1"
+    "memory-contract.js"
     "python-runtime.js"
     "register-agent.ps1"
     "runtime-platform.ps1"
     "runtime-config.js"
+    "check-memory-integrity.js"
     "run-pressure-test.ps1"
     "verify-client-integrations.ps1"
     "verify-integrations.ps1"
