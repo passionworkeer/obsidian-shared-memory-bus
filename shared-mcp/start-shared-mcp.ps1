@@ -472,7 +472,7 @@ try {
         $listenerPids = @(Get-SharedListeningProcessIds -Port $port)
 
         if ($ForceRestart) {
-            foreach ($pidToStop in @(@($listenerPids) + @($existingPid) | Select-Object -Unique)) {
+            foreach ($pidToStop in @($listenerPids | Select-Object -Unique)) {
                 if ([int]$pidToStop -gt 0) {
                     Stop-SharedProcessTree -ProcessId ([int]$pidToStop)
                 }
@@ -481,19 +481,20 @@ try {
             $listenerPids = @(Get-SharedListeningProcessIds -Port $port)
         }
 
-        if ($existing -and -not $ForceRestart) {
-            if ((Test-ProcessAlive -ProcessId $existingPid) -and (Test-ServerReady -Server $server -Url $url -HealthUrl $healthUrl)) {
+        $listenerPid = if ($listenerPids.Count -gt 0) { [int]$listenerPids[0] } else { 0 }
+
+        if ($listenerPid -gt 0 -and -not $ForceRestart) {
+            if (Test-ServerReady -Server $server -Url $url -HealthUrl $healthUrl) {
                 $results.Add([pscustomobject]@{
                         id = [string]$server.id
                         status = "already-running"
-                        pid = $existingPid
+                        pid = $listenerPid
                         url = $url
                     }) | Out-Null
                 continue
             }
         }
 
-        $listenerPid = if ($listenerPids.Count -gt 0) { [int]$listenerPids[0] } else { 0 }
         if ($listenerPid -gt 0 -and (Test-ServerReady -Server $server -Url $url -HealthUrl $healthUrl)) {
             $state[[string]$server.id] = @{
                 id = [string]$server.id

@@ -12,7 +12,9 @@
 - `ops/build-handoff-pack.js`
 - `ops/build-memory-layers.js`
 - `ops/cleanup-inbox.ps1`
+- `ops/install-client-integrations.ps1`
 - `ops/obsidian-blackboard-daemon.js`
+- `ops/refresh-generated-artifacts.js`
 - `ops/repair-codex-runtime.ps1`
 - `ops/run-memory-dream.ps1`
 - `ops/run-minimax-mcp.ps1`
@@ -22,12 +24,13 @@
 - `ops/sync-openclaw-to-obsidian.js`
 - `ops/sync-shared-skills.ps1`
 - `ops/verify-client-integrations.ps1`
-- `ops/verify-integrations.ps1`
+- `ops/verify-integrations.ps1` (compatibility alias to `ops/install-client-integrations.ps1`)
 
 ## Retrieval and Embeddings (`retrieval/`)
 - `retrieval/benchmark-architecture.py`
 - `retrieval/benchmark-backends.py`
 - `retrieval/probe-models.py`
+- `retrieval/semantic-search-cli.js`
 - `retrieval/semantic-search.py`
 - `retrieval/semantic-search.js`
 
@@ -46,8 +49,12 @@
 
 ## Install Helpers
 - `scripts/install-layout.psd1`
+- `scripts/install-client-integrations.ps1`
+- `scripts/install-client-integrations.sh`
+- `scripts/install.sh`
 - `scripts/install.ps1`
 - `scripts/upgrade.ps1`
+- `scripts/validate-layout.sh`
 - `scripts/validate-layout.ps1`
 
 ## Templates

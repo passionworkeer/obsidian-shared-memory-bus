@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("Initialize", "SyncAll", "Generate", "RecordEvent", "ClaudeSessionStart", "ClaudeTurnSync", "Status", "RegisterAgent")]
+    [ValidateSet("Initialize", "SyncAll", "Generate", "RefreshDerivedArtifacts", "RecordEvent", "ClaudeSessionStart", "ClaudeTurnSync", "Status", "RegisterAgent")]
     [string]$Action = "SyncAll",
     [string]$Tool = "system",
     [string]$Project = "",
@@ -120,6 +120,7 @@ $Script:PortableTraeInboxPath = "{0}/00-System/ai-memory/inbox/trae.md" -f $Scri
 $Script:PortableOpenCodeInboxPath = "{0}/00-System/ai-memory/inbox/opencode.md" -f $Script:PortableVaultPlaceholder
 $Script:PortableCopilotInboxPath = "{0}/00-System/ai-memory/inbox/copilot.md" -f $Script:PortableVaultPlaceholder
 $Script:SharedSkillsSyncScript = Resolve-BusScriptPath -Candidates @("sync-shared-skills.ps1", "ops/sync-shared-skills.ps1")
+$Script:RefreshGeneratedArtifactsScript = Resolve-BusScriptPath -Candidates @("refresh-generated-artifacts.js", "ops/refresh-generated-artifacts.js")
 $Script:ClaudeMemApiBase = "http://127.0.0.1:37778/api"
 $Script:BusLockTimeoutMs = 180000
 $Script:StaleSyncSeconds = 20
@@ -211,6 +212,36 @@ function Write-Json {
 
     $json = $Value | ConvertTo-Json -Depth 12
     Write-Text -Path $Path -Content $json
+}
+
+function Invoke-GeneratedArtifactRefresh {
+    param([switch]$Force)
+
+    if (-not (Test-Path -LiteralPath $Script:RefreshGeneratedArtifactsScript -PathType Leaf)) {
+        return $false
+    }
+
+    $args = @($Script:RefreshGeneratedArtifactsScript)
+    if ($Force) {
+        $args += "--force"
+    }
+
+    try {
+        $output = & (Resolve-SharedNodeExecutable) @args 2>&1
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -ne 0) {
+            $text = ($output | Out-String).Trim()
+            if (-not [string]::IsNullOrWhiteSpace($text)) {
+                [Console]::Error.WriteLine(("AI_MEMORY_REFRESH warning: {0}" -f $text))
+            }
+            return $false
+        }
+
+        return $true
+    } catch {
+        [Console]::Error.WriteLine(("AI_MEMORY_REFRESH exception: {0}" -f $_.Exception.Message))
+        return $false
+    }
 }
 
 function Get-OrAddRuntimeCache {
@@ -3781,6 +3812,9 @@ function Sync-AllSources {
     Invoke-ProfiledStep -Name "Sync-TraeSnapshot" -ScriptBlock {
         Sync-TraeSnapshot -ProjectDirectory $projectDirectory
     }
+    Invoke-ProfiledStep -Name "Refresh-GeneratedArtifacts" -ScriptBlock {
+        [void](Invoke-GeneratedArtifactRefresh)
+    }
     Invoke-ProfiledStep -Name "Generate-Artifacts" -ScriptBlock {
         Generate-Artifacts
     }
@@ -3880,6 +3914,17 @@ switch ($Action) {
             Sync-Mirrors
             if (-not $Quiet) {
                 Write-Output "Generated memory bus artifacts."
+            }
+        }
+    }
+    "RefreshDerivedArtifacts" {
+        With-BusLock {
+            if (-not (Invoke-GeneratedArtifactRefresh -Force)) {
+                throw "Failed to refresh generated memory artifacts."
+            }
+
+            if (-not $Quiet) {
+                Write-Output "Refreshed derived memory artifacts."
             }
         }
     }
