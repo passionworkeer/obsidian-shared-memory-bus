@@ -205,6 +205,7 @@ const PYTHON_SPAWN_ENV = {
   PYTHONUTF8: "1",
   PYTHONIOENCODING: "utf-8",
 };
+const SEARCH_ROUTE_VALUES = new Set(["auto", "mixed", "durable", "task", "recent", "reference"]);
 let searchWorker = null;
 let searchWorkerStartupPromise = null;
 let searchWorkerBuffer = "";
@@ -417,6 +418,7 @@ async function ensureSearchWorker() {
 async function runSemanticSearchOnce({
   query,
   mode = "hybrid",
+  route = "auto",
   limit = 8,
   tool = "",
   project = "",
@@ -426,7 +428,13 @@ async function runSemanticSearchOnce({
   taskState = "",
   preferSummaries = false,
 }) {
+  const normalizedRoute = SEARCH_ROUTE_VALUES.has(String(route || "").trim().toLowerCase())
+    ? String(route || "").trim().toLowerCase()
+    : "auto";
   const args = [SEARCH_SCRIPT, "--mode", mode, "--top-k", String(limit), "--json", query];
+  if (normalizedRoute) {
+    args.push("--route", normalizedRoute);
+  }
   if (tool) {
     args.push("--tool", tool);
   }
@@ -777,6 +785,7 @@ function readEmbeddingRuntimeCatalog() {
 async function runSemanticSearch({
   query,
   mode = "hybrid",
+  route = "auto",
   limit = 8,
   tool = "",
   project = "",
@@ -786,12 +795,16 @@ async function runSemanticSearch({
   taskState = "",
   preferSummaries = false,
 }) {
+  const normalizedRoute = SEARCH_ROUTE_VALUES.has(String(route || "").trim().toLowerCase())
+    ? String(route || "").trim().toLowerCase()
+    : "auto";
   try {
     return await requestSearchWorker(
       {
         action: "search",
         query,
         mode,
+        route: normalizedRoute,
         limit,
         tool,
         project,
@@ -808,6 +821,7 @@ async function runSemanticSearch({
     return runSemanticSearchOnce({
       query,
       mode,
+      route: normalizedRoute,
       limit,
       tool,
       project,
@@ -1112,6 +1126,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             enum: ["bm25", "dense", "hybrid", "auto"],
             description: "Alias for mode.",
           },
+          route: {
+            type: "string",
+            enum: ["auto", "mixed", "durable", "task", "recent", "reference"],
+            default: "auto",
+            description: "Optional query routing profile. auto infers the best layer mix from the query intent.",
+          },
           limit: { type: "number", default: 8, description: "Maximum number of results." },
           tool: { type: "string", description: "Optional exact tool filter." },
           project: { type: "string", description: "Optional project/workspace substring filter." },
@@ -1326,6 +1346,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const payload = await runSemanticSearch({
         query,
         mode: String(args.mode || args.strategy || "hybrid"),
+        route: String(args.route || "auto"),
         limit: Math.max(1, Number(args.limit) || 8),
         tool: String(args.tool || ""),
         project: String(args.project || ""),
