@@ -14,6 +14,8 @@ This document records the current validation story for the public bundle.
 
 ## Validated Behaviors
 - source-to-install layout validates cleanly through `scripts/validate-layout.ps1`
+- structured memory contract validates cleanly through `ops/check-memory-integrity.js`
+- generated memory artifacts now validate against content-hash-based `sourceStructuredSignature`, not only file timestamps
 - portable shell wrappers parse cleanly through `sh -n` and invoke the same PowerShell entrypoints
 - installed runtime now emits root `.sh` wrappers and activation helpers for macOS/Linux
 - shared MCP stack starts cleanly from the default starter
@@ -24,6 +26,7 @@ This document records the current validation story for the public bundle.
 - layered memory generation succeeds through `ops/build-memory-layers.js`
 - bounded handoff pack generation succeeds through `ops/build-handoff-pack.js`
 - dream consolidation succeeds through `ops/run-memory-dream.ps1`
+- imported `claude-code.jsonl` and `openclaw.jsonl` now participate in the same integrity-governed structured universe as the native shared layers
 - OpenClaw blackboard sync works both ways between SQLite and `02-KB/WORKING.md`
 - the shared memory core no longer requires native Node `sqlite3`
 - installed `install.sh` smoke runs now validate the flat runtime layout plus executable `shared-mcp/*.sh` wrappers on Windows, macOS, and Linux CI runners
@@ -41,7 +44,10 @@ The bundle has already been validated with repeated multi-wave shared-stack pres
 
 ## Current Live Results
 Validated on this workstation on April 2, 2026:
+- `ops/check-memory-integrity.js --strict` now passes both in the source tree and in the installed runtime after rebuilding `MEMORY-LAYERS -> HANDOFF -> AUTO-DREAM` in serial order
 - `verify-client-integrations.ps1 -RunCliChecks` passed for Codex, Claude Code, OpenCode, Cursor, VS Code/Copilot paths, and workspace configs
+- a fresh installed-runtime integrity check passed after reinstalling the live runtime from source, confirming the watchdog no longer overwrites generated artifacts with an older contract shape
+- `run-pressure-test.ps1 -Waves 5 -RunCliChecks` passed `30/30` with `overallPass=true`, `singleListenerPerPort=true`, stable shared PIDs, and no fallback to duplicate local `memory/context7/fetch/time/sequential-thinking/obsidian` listeners
 - `run-pressure-test.ps1 -Waves 5 -RunCliChecks` passed `35/35` with `overallPass=true`, `singleListenerPerPort=true`, and stable shared PIDs
 - `scripts/validate-layout.sh` and `shared-mcp/status-shared-mcp.sh` were smoke-executed locally through Git Bash with `AI_MEMORY_PWSH=powershell.exe`
 - `scripts/install.sh -TargetRoot <temp> -RegisterStartup false -PersistUserEnvironment false` completed successfully, and the installed `shared-mcp/status-shared-mcp.sh` wrapper returned healthy shared services from that temporary flat runtime
@@ -61,6 +67,7 @@ Portable-core CI now also smoke-runs the same wrapper chain on `windows-latest`,
 ## Reproduce The Basic Validation
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-layout.ps1
+node .\ops\check-memory-integrity.js --strict
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\start-default-shared-mcp.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
@@ -69,6 +76,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\run-
 
 ```bash
 ./scripts/validate-layout.sh
+node ./ops/check-memory-integrity.js --strict
 ./scripts/install.sh
 source ~/.ai-memory/activate-ai-memory.sh
 ~/.ai-memory/shared-mcp/start-default-shared-mcp.sh
