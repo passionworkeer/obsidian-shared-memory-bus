@@ -118,6 +118,11 @@ jobs:
             throw 'AUTO-DREAM.md was not generated'
           }
 
+      - name: Validate memory integrity contract
+        shell: pwsh
+        run: |
+          node ./ops/check-memory-integrity.js --strict --json | Out-Null
+
       - name: Build embeddings
         shell: pwsh
         run: |

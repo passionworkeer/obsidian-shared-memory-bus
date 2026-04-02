@@ -70,6 +70,11 @@ function loadEmbeddingProviderHelper() {
   return require(helperPath);
 }
 
+function loadMemoryContractHelper() {
+  const helperPath = resolveRuntimePath("memory-contract.js", path.join("ops", "memory-contract.js"));
+  return require(helperPath);
+}
+
 function readWindowsEnvironmentVariable(name) {
   if (!IS_WINDOWS) {
     return "";
@@ -181,6 +186,7 @@ const BLACKBOARD_DB_PATH =
 const { resolveVaultRoot } = loadVaultResolver();
 const { resolvePythonRuntime, withPythonArgs } = loadPythonRuntimeHelper();
 const { buildEmbeddingConfigHash } = loadEmbeddingProviderHelper();
+const { buildMemoryIntegrityReport } = loadMemoryContractHelper();
 const { buildEmbeddingRuntimeCatalog, resolveEmbeddingRuntime, updateEmbeddingRuntimeSelection } = loadRuntimeConfigHelper();
 const POWERSHELL_COMMAND = resolvePowerShellCommand();
 const HASH_MODEL = "hashing-v1";
@@ -222,6 +228,9 @@ function isProcessAlive(pid) {
 }
 
 const VAULT_ROOT = resolveVaultRoot();
+const CANONICAL_AI_MEMORY_ROOT = path.join(VAULT_ROOT, "00-System", "ai-memory");
+const STRUCTURED_ROOT = path.join(CANONICAL_AI_MEMORY_ROOT, "structured");
+const GENERATED_ROOT = path.join(CANONICAL_AI_MEMORY_ROOT, "generated");
 const EMBEDDINGS_INDEX_PATH = path.join(VAULT_ROOT, "00-System", "ai-memory", "embeddings", "index.jsonl");
 const HANDOFF_PACK_JSON_PATH = path.join(VAULT_ROOT, "00-System", "ai-memory", "generated", "HANDOFF.json");
 const MEMORY_LAYERS_JSON_PATH = path.join(VAULT_ROOT, "00-System", "ai-memory", "generated", "MEMORY-LAYERS.json");
@@ -636,6 +645,14 @@ function readEmbeddingRuntimeSummary() {
     configExists: Boolean(runtime.configExists),
     configError: runtime.configError || "",
   };
+}
+
+function readMemoryIntegritySummary() {
+  return buildMemoryIntegrityReport({
+    structuredRoot: STRUCTURED_ROOT,
+    generatedRoot: GENERATED_ROOT,
+    detailLimit: 8,
+  });
 }
 
 function buildEmbeddingIndexState(runtimeSummary, embeddingsSummary) {
@@ -1070,7 +1087,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "memory_status",
       description:
-        "Inspect the shared memory stack health: watchdog state, embeddings index summary, and claude-mem health.",
+        "Inspect the shared memory stack health: watchdog state, contract/integrity status, embeddings index summary, and claude-mem health.",
       inputSchema: {
         type: "object",
         properties: {},
@@ -1265,6 +1282,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const embeddingRuntime = readEmbeddingRuntimeSummary();
       const embeddings = readEmbeddingsSummary();
       const embeddingIndexState = buildEmbeddingIndexState(embeddingRuntime, embeddings);
+      const memoryIntegrity = readMemoryIntegritySummary();
       const workerHealth = await getSearchWorkerHealth();
       return jsonResult({
         ok: true,
@@ -1289,6 +1307,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           health: workerHealth,
         },
         watchdog: readWatchdogState(),
+        memoryIntegrity,
         embeddingRuntime,
         embeddingIndexState,
         embeddings,

@@ -92,7 +92,9 @@ function Get-FileStamp {
     }
 
     $item = Get-Item -LiteralPath $Path
-    return "{0}:{1}:{2}" -f $item.Name, $item.LastWriteTimeUtc.Ticks, $item.Length
+    $content = Read-Text -Path $Path
+    $hash = Get-StringHash -Text $content
+    return "{0}:{1}:{2}" -f $item.Name, $hash, $item.Length
 }
 
 function New-BulletLine {
@@ -293,6 +295,8 @@ $DreamJsonPath = Join-Path $GeneratedRoot "AUTO-DREAM.json"
 $DreamStatePath = Join-Path $StateRoot "auto-dream-state.json"
 $DreamLockPath = Join-Path $StateRoot "auto-dream.lock"
 $TaskMemoryPath = Join-Path $StructuredRoot "task-memory.jsonl"
+$ClaudeCodeStructuredPath = Join-Path $StructuredRoot "claude-code.jsonl"
+$OpenClawSessionStructuredPath = Join-Path $StructuredRoot "openclaw.jsonl"
 $OpenClawRunsPath = Join-Path $StructuredRoot "openclaw-runs.jsonl"
 $OpenClawJobsPath = Join-Path $StructuredRoot "openclaw-jobs.jsonl"
 $OpenClawBlackboardPath = Join-Path $StructuredRoot "openclaw-blackboard.jsonl"
@@ -303,9 +307,11 @@ $SourceFiles = @(
     (Join-Path $StructuredRoot "session-memory.jsonl"),
     (Join-Path $StructuredRoot "shared-events.jsonl"),
     $TaskMemoryPath,
+    $ClaudeCodeStructuredPath,
+    $OpenClawSessionStructuredPath,
+    $OpenClawBlackboardPath,
     $OpenClawRunsPath,
     $OpenClawJobsPath,
-    $OpenClawBlackboardPath,
     $OpenClawJournalPath
 )
 
@@ -321,6 +327,10 @@ try {
 
     $sourceStamp = ($SourceFiles | ForEach-Object { Get-FileStamp -Path $_ }) -join "|"
     $sourceDigest = Get-StringHash -Text $sourceStamp
+    $sourceStructuredSignature = [ordered]@{
+        raw = $sourceStamp
+        hash = if ($sourceDigest.Length -ge 16) { $sourceDigest.Substring(0, 16) } else { $sourceDigest }
+    }
 
     $state = $null
     if (Test-Path -LiteralPath $DreamStatePath -PathType Leaf) {
@@ -454,7 +464,10 @@ try {
 
     $jsonPayload = [ordered]@{
         generatedAt = $generatedAt
+        contractVersion = 2
+        recordSchemaVersion = 2
         sourceDigest = $sourceDigest
+        sourceStructuredSignature = $sourceStructuredSignature
         counts = [ordered]@{
             durable = $durableRecords.Count
             session = $sessionRecords.Count

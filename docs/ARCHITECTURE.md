@@ -18,6 +18,7 @@ Core canonical notes:
    - Codex/OpenCode/Copilot/other local activity
 2. Shared structured memory
    - JSONL records under `00-System/ai-memory/structured/`
+   - governed as one contract universe, including imported `claude-code.jsonl` and `openclaw.jsonl`
 3. Retrieval layer
    - `retrieval/semantic-search.py`
    - `bus/generate-embeddings.js`
@@ -31,6 +32,7 @@ Core canonical notes:
 - exposes `memory_status`, `search_shared_memory`, embeddings rebuild tools, claude-mem compatibility tools, and OpenClaw blackboard tools
 - keeps a warm shared Python retrieval worker for `search_shared_memory`, with one-shot fallback if the worker is unavailable
 - reports worker cache metrics through `memory_status` and supports explicit cache resets through `clear_shared_memory_search_cache`
+- reports contract/integrity state through `memory_status.memoryIntegrity`
 5. Client integration layer
    - Codex, Claude, OpenCode, Cursor, Copilot, Trae, OpenClaw
 
@@ -68,6 +70,9 @@ This bundle intentionally combines the strongest ideas from two native memory st
 - session and event memory:
   - `structured/session-memory.jsonl`
   - `structured/shared-events.jsonl`
+- imported session-layer memory:
+  - `structured/claude-code.jsonl`
+  - `structured/openclaw.jsonl`
 - OpenClaw task memory:
   - `structured/openclaw-blackboard.jsonl`
   - `structured/openclaw-runs.jsonl`
@@ -104,16 +109,19 @@ The architecture uses local shared HTTP for safe-to-share services and leaves st
 Builds and refreshes shared derived artifacts for onboarding, global context, imported snapshots, and inbox notes.
 
 ### `bus/memory-watchdog.ps1`
-Runs in the background, watches key native sources, triggers syncs, rebuilds layered summaries, and keeps the shared memory layer fresh.
+Runs in the background, watches key native sources, triggers syncs, and keeps the shared memory layer fresh. Heavy follow-up work such as `MEMORY-LAYERS`, `HANDOFF`, `AUTO-DREAM`, and embeddings refresh is now gated by real structured-memory signature drift instead of every watched source change.
 
 ### `ops/build-memory-layers.js`
 Builds layered memory views from durable writeback, session memory, shared events, and OpenClaw task/run data.
+It is the first step in the generated-artifact chain and establishes the structured snapshot that later artifacts must sign against.
 
 ### `ops/build-handoff-pack.js`
 Builds a bounded resume packet so the next agent can recover faster without rereading the entire history.
+It should be rebuilt after `build-memory-layers.js`, not in parallel with it.
 
 ### `ops/run-memory-dream.ps1`
 Runs a consolidation pass over durable, session, and task layers to produce a cleaner handoff-oriented `AUTO-DREAM` summary.
+It should run after both `MEMORY-LAYERS` and `HANDOFF` so all generated outputs share the same `sourceStructuredSignature`.
 
 ### `ops/run-obsidian-mcp.ps1`
 Finds the active Obsidian vault and launches the Obsidian MCP server from the bundle-local or global `mcpvault` install.
@@ -171,11 +179,14 @@ The shared retrieval path now avoids per-request Python cold starts by keeping a
 - Playwright can be centralized because one HTTP backend can still serve isolated MCP sessions and isolated browser profiles
 - only UI-bound desktop MCPs such as `pencil` stay isolated
 - watchdog plus structured sync keeps the cross-tool memory layer current
+- generated artifacts are now aligned by explicit content-hash signatures, so stale summaries can be detected even when timestamps look fresh
 
 ## Known Design Debt
 - `shared-mcp/omni-memory-server.js` is still a broad "god server" rather than a narrow retrieval-only service
 - runtime behavior is spread across PowerShell, Node.js, and Python helpers, so duplicated logic must stay aligned
+- the memory contract is now versioned and validated in Node, but it is still not a fully shared cross-language schema contract
 - retrieval is now warmer and less restart-heavy, but it still favors local simplicity over large-scale indexing sophistication
+- durable promotion is still largely heuristic; the next architectural step should be a typed promotion layer (`user / feedback / project / reference`) instead of further widening raw session/task recall
 
 See [`docs/MEMORY-ARCHITECTURE-CRITIQUE.md`](MEMORY-ARCHITECTURE-CRITIQUE.md) for the fuller critique and next refactor targets.
 
