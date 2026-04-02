@@ -72,13 +72,14 @@ The docs are right that Obsidian is the durable source of truth, but the live ar
 
 That means "canonical" currently means canonical storage and recall layer, not that every client writes through one unified transactional boundary.
 
-### 6. Extension Contracts Are Still Generator-First
-The project already generates onboarding packs, snippets, rules, and skill templates for multiple clients. That is useful, but the contract is still generator-first rather than schema-first.
+### 6. Extension Contracts Are Moving Toward Schema-First, But Not There Yet
+The project now has a versioned memory-contract validator and integrity status surface, which is a real improvement over pure generator-first onboarding. Even so, the overall contract is still only partially schema-first.
 
 Missing pieces:
 - a versioned adapter schema for third-party agents
 - a formal plugin contract beyond generated instructions and MCP snippets
 - compatibility tests for arbitrary external agent integrations
+- one shared contract implementation that Node, PowerShell, and Python all derive from instead of only Node-side validation
 
 In other words, new-agent onboarding is practical, but not yet a hardened ecosystem API.
 
