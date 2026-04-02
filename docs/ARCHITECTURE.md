@@ -30,6 +30,46 @@ Core canonical notes:
 5. Client integration layer
    - Codex, Claude, OpenCode, Cursor, Copilot, Trae, OpenClaw
 
+## Borrowed Strengths
+This bundle intentionally combines the strongest ideas from two native memory styles instead of copying either one literally.
+
+- Claude-style strengths folded in:
+  - session memory for live task continuity
+  - compaction and handoff style summaries
+  - durable promotion from short-term notes into cleaner long-term memory
+  - dream-like consolidation into generated summaries
+- OpenClaw-style strengths folded in:
+  - blackboard task layer
+  - run ledger and cron/job recall
+  - explicit task-state memory instead of only freeform notes
+  - subagent activity captured as structured recall targets
+
+## Memory Outputs
+- durable shared inbox:
+  - `structured/shared-inbox.jsonl`
+- session and event memory:
+  - `structured/session-memory.jsonl`
+  - `structured/shared-events.jsonl`
+- OpenClaw task memory:
+  - `structured/openclaw-blackboard.jsonl`
+  - `structured/openclaw-runs.jsonl`
+  - `structured/openclaw-jobs.jsonl`
+  - `structured/openclaw-journal.jsonl`
+- generated handoff layers:
+  - `generated/HANDOFF.md`
+  - `generated/HANDOFF.json`
+  - `generated/MEMORY-LAYERS.md`
+  - `generated/MEMORY-LAYERS.json`
+  - `generated/AUTO-DREAM.md`
+  - `generated/AUTO-DREAM.json`
+
+## Source Tree Vs Installed Runtime
+- Source tree groups files by responsibility: `bus/`, `ops/`, `retrieval/`, `shared-mcp/`, `scripts/`, `templates/`
+- Installed runtime under `%USERPROFILE%\.ai-memory` stays flat for backward compatibility with startup shortcuts, existing client configs, and old direct script paths
+- `scripts/install-layout.psd1` is the canonical source-to-install mapping; update it when adding or renaming runtime files
+- `scripts/validate-layout.ps1` and `.github/workflows/windows-validate.yml` are the guardrails that keep the grouped source tree and flat runtime contract from drifting
+- The installer writes `%USERPROFILE%\.ai-memory\install-manifest.json` so upgrades can remove stale managed runtime files from older layouts
+
 ## Transport Model
 | Mode | Use it for | Why |
 | --- | --- | --- |
@@ -45,7 +85,16 @@ The architecture uses local shared HTTP for safe-to-share services and leaves st
 Builds and refreshes shared derived artifacts for onboarding, global context, imported snapshots, and inbox notes.
 
 ### `bus/memory-watchdog.ps1`
-Runs in the background, watches key native sources, triggers syncs, and keeps the shared memory layer fresh.
+Runs in the background, watches key native sources, triggers syncs, rebuilds layered summaries, and keeps the shared memory layer fresh.
+
+### `ops/build-memory-layers.js`
+Builds layered memory views from durable writeback, session memory, shared events, and OpenClaw task/run data.
+
+### `ops/build-handoff-pack.js`
+Builds a bounded resume packet so the next agent can recover faster without rereading the entire history.
+
+### `ops/run-memory-dream.ps1`
+Runs a consolidation pass over durable, session, and task layers to produce a cleaner handoff-oriented `AUTO-DREAM` summary.
 
 ### `ops/run-obsidian-mcp.ps1`
 Finds the active Obsidian vault and launches the Obsidian MCP server from the bundle-local or global `mcpvault` install.
@@ -81,6 +130,15 @@ This is process deduplication with per-client session isolation, not one merged 
 - `hybrid`
 
 The default recommendation is `hybrid`.
+
+## Portability Boundary
+- Windows:
+  - full installer, startup shortcuts, watchdog, and shared MCP control plane are validated here first
+- macOS/Linux:
+  - the core memory engine is intentionally being kept more portable
+  - Python discovery now works across Windows, macOS, and Linux candidates
+  - core memory generation, dream consolidation, embeddings, and retrieval are smoke-validated in CI
+  - full one-command install and desktop startup registration are still Windows-first
 
 ## Why The Architecture Works
 - Obsidian stays canonical

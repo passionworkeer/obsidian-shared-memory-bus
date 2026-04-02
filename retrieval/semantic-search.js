@@ -5,10 +5,16 @@
 //   node semantic-search.js --json --mode dense "query"
 
 const { spawn } = require("child_process");
+const fs = require("fs");
 const path = require("path");
 
 const AI_MEMORY_ROOT = process.env.AI_MEMORY_ROOT || __dirname;
-const PYTHON = process.env.AI_MEMORY_PYTHON || "python";
+const { resolvePythonRuntime, withPythonArgs } = require(
+  fs.existsSync(path.join(__dirname, "python-runtime.js"))
+    ? path.join(__dirname, "python-runtime.js")
+    : path.join(__dirname, "..", "bus", "python-runtime.js")
+);
+const PYTHON = resolvePythonRuntime();
 const SCRIPT = path.join(AI_MEMORY_ROOT, "semantic-search.py");
 
 function parseArgs(argv) {
@@ -75,9 +81,20 @@ function main() {
     console.error('Usage: node semantic-search.js [--mode bm25|dense|hybrid] [--top-k N] [--json] "query"');
     process.exit(1);
   }
+  if (!PYTHON.available) {
+    console.error(`Python runtime unavailable: ${PYTHON.error || "unknown-error"}`);
+    process.exit(1);
+  }
 
   const args = [SCRIPT, "--mode", parsed.mode, "--top-k", String(parsed.topK), "--json", query];
-  const child = spawn(PYTHON, args, { stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(PYTHON.command, withPythonArgs(PYTHON, args), {
+    stdio: ["ignore", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      PYTHONUTF8: "1",
+      PYTHONIOENCODING: "utf-8",
+    },
+  });
   let stdout = "";
   let stderr = "";
 

@@ -5,11 +5,16 @@
 - `bus/memory-watchdog.ps1`
 - `bus/register-agent.ps1`
 - `bus/generate-embeddings.js`
+- `bus/python-runtime.js`
+- `bus/vault-root.js`
 
 ## Operations Scripts (`ops/`)
+- `ops/build-handoff-pack.js`
+- `ops/build-memory-layers.js`
 - `ops/cleanup-inbox.ps1`
 - `ops/obsidian-blackboard-daemon.js`
 - `ops/repair-codex-runtime.ps1`
+- `ops/run-memory-dream.ps1`
 - `ops/run-minimax-mcp.ps1`
 - `ops/run-obsidian-mcp.ps1`
 - `ops/run-pressure-test.ps1`
@@ -20,6 +25,7 @@
 - `ops/verify-integrations.ps1`
 
 ## Retrieval and Embeddings (`retrieval/`)
+- `retrieval/benchmark-architecture.py`
 - `retrieval/benchmark-backends.py`
 - `retrieval/probe-models.py`
 - `retrieval/semantic-search.py`
@@ -28,6 +34,7 @@
 ## Shared MCP
 - `shared-mcp/manifest.json`
 - `shared-mcp/omni-memory-server.js`
+- `shared-mcp/python-runtime.cjs`
 - `shared-mcp/start-default-shared-mcp.ps1`
 - `shared-mcp/start-shared-mcp.ps1`
 - `shared-mcp/stop-shared-mcp.ps1`
@@ -38,8 +45,10 @@
 - `shared-mcp/package.json`
 
 ## Install Helpers
+- `scripts/install-layout.psd1`
 - `scripts/install.ps1`
 - `scripts/upgrade.ps1`
+- `scripts/validate-layout.ps1`
 
 ## Templates
 - `templates/agents.json`
@@ -49,6 +58,7 @@
 - `docs/FAQ.md`
 - `docs/FILES.md`
 - `docs/INSTALL.md`
+- `docs/INTEGRATION-MODES.md`
 - `docs/MCP-DEDUP.md`
 - `docs/ARCHITECTURE.md`
 - `docs/NEW-AGENT-INTEGRATION.md`
@@ -64,10 +74,14 @@
 - `CODE_OF_CONDUCT.md`
 - `CONTRIBUTING.md`
 - `LICENSE`
+- `SECURITY.md`
 - `SUPPORT.md`
+- `.gitattributes`
 - `.gitignore`
 
 ## GitHub Community Files
+- `.github/workflows/portable-core.yml`
+- `.github/workflows/windows-validate.yml`
 - `.github/ISSUE_TEMPLATE/bug_report.md`
 - `.github/ISSUE_TEMPLATE/config.yml`
 - `.github/ISSUE_TEMPLATE/feature_request.md`

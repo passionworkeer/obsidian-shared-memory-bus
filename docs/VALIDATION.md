@@ -13,11 +13,17 @@ This document records the current validation story for the public bundle.
 - `9338`: `memory`
 
 ## Validated Behaviors
+- source-to-install layout validates cleanly through `scripts/validate-layout.ps1`
 - shared MCP stack starts cleanly from the default starter
 - shared services keep stable listener PIDs across repeated checks
 - shared `memory` and `obsidian` initialize and list tools successfully
 - shared Playwright responds to real MCP browser calls
 - client integration checks pass for the main supported local clients
+- layered memory generation succeeds through `ops/build-memory-layers.js`
+- bounded handoff pack generation succeeds through `ops/build-handoff-pack.js`
+- dream consolidation succeeds through `ops/run-memory-dream.ps1`
+- OpenClaw blackboard sync works both ways between SQLite and `02-KB/WORKING.md`
+- the shared memory core no longer requires native Node `sqlite3`
 
 ## Validated Clients
 - Codex
@@ -30,6 +36,15 @@ This document records the current validation story for the public bundle.
 ## Pressure Story
 The bundle has already been validated with repeated multi-wave shared-stack pressure checks. The important signal is stable single listeners on the shared ports rather than one new MCP process per task.
 
+## Current Live Results
+Validated on this workstation on April 2, 2026:
+- `verify-client-integrations.ps1 -RunCliChecks` passed for Codex, Claude Code, OpenCode, Cursor, VS Code/Copilot paths, and workspace configs
+- `run-pressure-test.ps1 -Waves 5 -RunCliChecks` passed `35/35` with `overallPass=true`, `singleListenerPerPort=true`, and stable shared PIDs
+- a post-hardening rerun of `run-pressure-test.ps1 -Waves 3 -RunCliChecks` passed `21/21` after removing the blackboard daemon's native Node `sqlite3` dependency
+- `sync-openclaw-to-obsidian.js` successfully ingested OpenClaw sessions, jobs, runs, blackboard tasks, and journal records
+- `benchmark-architecture.py` produced an average retrieval score of `0.867`
+- a dedicated smoke test confirmed the OpenClaw blackboard daemon still syncs both `SQLite -> WORKING.md` and `WORKING.md -> SQLite`
+
 ## Known Non-Blocking Noise
 - some client `mcp list` flows can show false negatives for the shared Playwright backend
 - old already-running sessions may keep old local Playwright trees alive until those sessions close
@@ -37,8 +52,14 @@ The bundle has already been validated with repeated multi-wave shared-stack pres
 
 ## Reproduce The Basic Validation
 ```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-layout.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\shared-mcp\start-default-shared-mcp.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\ops\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\ops\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks
 ```
+
+## CI Guardrail
+The repository also includes `.github/workflows/windows-validate.yml`, which runs the layout validator and a temporary Windows smoke install on every PR and push to `main`.
+
+For the portable core, `.github/workflows/portable-core.yml` runs a three-platform smoke matrix over layered memory generation, dream consolidation, embeddings, and hybrid retrieval on Windows, macOS, and Linux.

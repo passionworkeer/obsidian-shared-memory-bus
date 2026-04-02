@@ -27,7 +27,7 @@ function Read-State {
 
     try {
         $content = Get-Content -Raw -LiteralPath $statePath -Encoding UTF8
-        $parsed = [System.Text.Json.JsonSerializer]::Parse($content)
+        $parsed = $content | ConvertFrom-Json
         $map = @{}
         foreach ($property in @($parsed.PSObject.Properties)) {
             $entry = @{}
@@ -242,32 +242,62 @@ function Resolve-StdioCommand {
     return $resolved
 }
 
+function Get-EnvironmentValue {
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    $value = [Environment]::GetEnvironmentVariable($Name, "Process")
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        $value = [Environment]::GetEnvironmentVariable($Name, "User")
+    }
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        $value = [Environment]::GetEnvironmentVariable($Name, "Machine")
+    }
+    return [string]$value
+}
+
+function Add-EnvironmentValue {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$Environment,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    $value = Get-EnvironmentValue -Name $Name
+    if (-not [string]::IsNullOrWhiteSpace($value)) {
+        $Environment[$Name] = $value
+    }
+}
+
 function Resolve-StdioEnvironment {
     param($Server)
 
     $envMap = @{}
     if ([string]$Server.id -eq "MiniMax") {
-        $apiHost = $env:MINIMAX_API_HOST
-        if ([string]::IsNullOrWhiteSpace($apiHost)) {
-            $apiHost = [Environment]::GetEnvironmentVariable("MINIMAX_API_HOST", "User")
+        foreach ($name in @("MINIMAX_API_HOST", "MINIMAX_API_KEY", "MINIMAX_MCP_COMMAND")) {
+            Add-EnvironmentValue -Environment $envMap -Name $name
         }
-        if ([string]::IsNullOrWhiteSpace($apiHost)) {
-            $apiHost = [Environment]::GetEnvironmentVariable("MINIMAX_API_HOST", "Machine")
-        }
+    }
 
-        $apiKey = $env:MINIMAX_API_KEY
-        if ([string]::IsNullOrWhiteSpace($apiKey)) {
-            $apiKey = [Environment]::GetEnvironmentVariable("MINIMAX_API_KEY", "User")
-        }
-        if ([string]::IsNullOrWhiteSpace($apiKey)) {
-            $apiKey = [Environment]::GetEnvironmentVariable("MINIMAX_API_KEY", "Machine")
-        }
-
-        if (-not [string]::IsNullOrWhiteSpace($apiHost)) {
-            $envMap["MINIMAX_API_HOST"] = $apiHost
-        }
-        if (-not [string]::IsNullOrWhiteSpace($apiKey)) {
-            $envMap["MINIMAX_API_KEY"] = $apiKey
+    if ([string]$Server.id -eq "memory") {
+        foreach ($name in @(
+            "AI_MEMORY_EMBED_BACKEND",
+            "AI_MEMORY_EMBED_BASE_URL",
+            "AI_MEMORY_EMBED_API_KEY",
+            "AI_MEMORY_EMBED_MODEL",
+            "AI_MEMORY_EMBED_TIMEOUT_MS",
+            "AI_MEMORY_EMBED_TIMEOUT_SECONDS",
+            "AI_MEMORY_EMBED_REQUEST_DELAY_MS",
+            "AI_MEMORY_EMBED_DELAY_MS",
+            "AI_MEMORY_EMBED_BATCH_SIZE",
+            "AI_MEMORY_EMBED_ALLOW_BATCH_FALLBACK",
+            "AI_MEMORY_PYTHON",
+            "UV_COMMAND",
+            "AI_MEMORY_OBSIDIAN_VAULT",
+            "OBSIDIAN_VAULT_ROOT",
+            "CLAUDE_MEM_BASE",
+            "OPENCLAW_HOME",
+            "OPENCLAW_BLACKBOARD_DB"
+        )) {
+            Add-EnvironmentValue -Environment $envMap -Name $name
         }
     }
 

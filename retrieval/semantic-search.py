@@ -20,6 +20,11 @@ import urllib.error
 import urllib.request
 from typing import Dict, Iterable, List, Optional, Tuple
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 # In-memory cache for the embeddings index with 30-second TTL.
 # Avoids re-reading ~50k lines from index.jsonl on every search.
 _INDEX_CACHE = {"data": None, "loaded_at": 0.0}
@@ -41,9 +46,9 @@ except Exception:
 DEFAULT_MODEL = "all-MiniLM-L6-v2"
 HASH_MODEL = "hashing-v1"
 HASH_DIM = 384
-OPENAI_BASE_URL = os.environ.get("AI_MEMORY_EMBED_BASE_URL", "").strip().rstrip("/")
-OPENAI_API_KEY = os.environ.get("AI_MEMORY_EMBED_API_KEY", "").strip()
-OPENAI_TIMEOUT_SECONDS = max(1, int(os.environ.get("AI_MEMORY_EMBED_TIMEOUT_SECONDS", "120") or "120"))
+OPENAI_BASE_URL = ""
+OPENAI_API_KEY = ""
+OPENAI_TIMEOUT_SECONDS = 120
 NOISE_PATTERNS = [
     re.compile(r"^Sender\s*\(", re.I),
     re.compile(r"^System:", re.I),
@@ -55,6 +60,61 @@ NOISE_PATTERNS = [
     re.compile(r"^\[(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s", re.I),
     re.compile(r"^Run your Session Startup", re.I),
 ]
+_WINDOWS_ENV_CACHE: Dict[str, str] = {}
+
+
+def first_non_empty_env(*names: str) -> str:
+    for name in names:
+        value = os.environ.get(name, "")
+        if value and value.strip():
+            return value.strip()
+    for name in names:
+        value = read_windows_environment_variable(name)
+        if value:
+            return value
+    return ""
+
+
+def read_windows_environment_variable(name: str) -> str:
+    if os.name != "nt":
+        return ""
+    cached = _WINDOWS_ENV_CACHE.get(name)
+    if cached is not None:
+        return cached
+    value = ""
+    try:
+        import winreg  # type: ignore
+
+        locations = (
+            (winreg.HKEY_CURRENT_USER, r"Environment"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
+        )
+        for hive, subkey in locations:
+            try:
+                with winreg.OpenKey(hive, subkey) as key:
+                    raw_value, _ = winreg.QueryValueEx(key, name)
+            except OSError:
+                continue
+            if isinstance(raw_value, str) and raw_value.strip():
+                value = raw_value.strip()
+                break
+    except Exception:
+        value = ""
+    _WINDOWS_ENV_CACHE[name] = value
+    return value
+
+
+def resolve_openai_timeout_seconds() -> int:
+    timeout_ms = int(first_non_empty_env("AI_MEMORY_EMBED_TIMEOUT_MS") or "0")
+    if timeout_ms > 0:
+        return max(1, math.ceil(timeout_ms / 1000))
+    timeout_seconds = int(first_non_empty_env("AI_MEMORY_EMBED_TIMEOUT_SECONDS") or "120")
+    return max(1, timeout_seconds)
+
+
+OPENAI_BASE_URL = first_non_empty_env("AI_MEMORY_EMBED_BASE_URL").rstrip("/")
+OPENAI_API_KEY = first_non_empty_env("AI_MEMORY_EMBED_API_KEY")
+OPENAI_TIMEOUT_SECONDS = resolve_openai_timeout_seconds()
 
 
 def resolve_vault_root() -> str:
@@ -255,6 +315,12 @@ def build_entry(payload: dict) -> Optional[dict]:
         "excerpt": excerpt[:240],
         "text": search_text,
         "tokens": tokenize(search_text),
+        "scope": str(payload.get("scope", "")).strip(),
+        "visibility": str(payload.get("visibility", "")).strip(),
+        "sourceKind": str(payload.get("source_kind", "")).strip(),
+        "memoryLevel": str(payload.get("memory_level", "")).strip(),
+        "workspace": str(payload.get("workspace", "")).strip(),
+        "taskState": str(payload.get("task_state", "")).strip(),
     }
 
 
@@ -330,6 +396,21 @@ def normalize_backend(backend: str, model_name: str) -> str:
     if (model_name or "").strip().lower().startswith("hashing-"):
         return "hash"
     return "transformer"
+
+
+def build_embedding_config_hash(backend: str, model_name: str, base_url: str = "") -> str:
+    normalized_backend = normalize_backend(backend, model_name)
+    normalized_base_url = base_url.strip().rstrip("/") if normalized_backend in {"openai", "openai-compatible"} else ""
+    payload = json.dumps(
+        {
+            "backend": normalized_backend,
+            "model": (model_name or "").strip(),
+            "baseUrl": normalized_base_url.lower(),
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return hashlib.sha1(payload.encode("utf-8", errors="ignore")).hexdigest()[:16]
 
 
 def keyword_overlap_scores(entries: List[dict], query_tokens: List[str]) -> Dict[str, float]:
@@ -451,9 +532,17 @@ def dense_scores(entries_by_id: Dict[str, dict], query: str) -> Tuple[Dict[str, 
     backend = normalize_backend(str(first_record.get("backend", "")).strip(), model_name)
     if model_name.startswith("hashing-"):
         model_name = HASH_MODEL
+    record_config_hash = str(first_record.get("configHash", "")).strip()
+    if record_config_hash:
+        active_config_hash = build_embedding_config_hash(backend, model_name, OPENAI_BASE_URL)
+        if record_config_hash != active_config_hash:
+            return {}, "embedding-config-mismatch:rebuild-memory-embeddings-required"
     query_vector, error = embed_query(query, model_name, backend)
     if error is not None or query_vector is None:
         return {}, error
+    first_embedding = first_record.get("embedding", [])
+    if isinstance(first_embedding, list) and first_embedding and len(first_embedding) != len(query_vector):
+        return {}, f"embedding-dimension-mismatch:index={len(first_embedding)},query={len(query_vector)}"
 
     scores: Dict[str, float] = {}
     for record_id, payload in index_records.items():
@@ -492,6 +581,12 @@ def format_results(
                 "t": entry["t"][:19] if entry["t"] else "",
                 "title": entry["title"][:140],
                 "excerpt": entry["excerpt"][:240],
+                "scope": entry.get("scope", ""),
+                "visibility": entry.get("visibility", ""),
+                "sourceKind": entry.get("sourceKind", ""),
+                "memoryLevel": entry.get("memoryLevel", ""),
+                "workspace": entry.get("workspace", ""),
+                "taskState": entry.get("taskState", ""),
                 "sources": sources.get(entry_id, []),
                 "bm25Score": round(float(bm25_map.get(entry_id, 0.0)), 6) if entry_id in bm25_map else None,
                 "denseScore": round(float(dense_map.get(entry_id, 0.0)), 6) if entry_id in dense_map else None,
@@ -500,11 +595,18 @@ def format_results(
     return results
 
 
-def parse_args() -> Tuple[str, int, str]:
+def parse_args() -> Dict[str, object]:
     parser = argparse.ArgumentParser(description="Search shared Obsidian memory")
     parser.add_argument("query", nargs="*", help="search query")
     parser.add_argument("--mode", choices=("bm25", "dense", "hybrid", "auto"), default="bm25")
     parser.add_argument("--top-k", type=int, default=10)
+    parser.add_argument("--tool", default="")
+    parser.add_argument("--project", default="")
+    parser.add_argument("--scope", default="")
+    parser.add_argument("--source-kind", default="")
+    parser.add_argument("--workspace", default="")
+    parser.add_argument("--task-state", default="")
+    parser.add_argument("--prefer-summaries", action="store_true")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
@@ -525,12 +627,64 @@ def parse_args() -> Tuple[str, int, str]:
     query = normalize_spaces(" ".join(query_parts))
     if not query:
         raise SystemExit('Usage: python semantic-search.py "query" [topK] [strategy]')
-    return query, top_k, "hybrid" if mode == "auto" else mode
+    return {
+        "query": query,
+        "top_k": top_k,
+        "mode": "hybrid" if mode == "auto" else mode,
+        "tool": normalize_spaces(args.tool).lower(),
+        "project": normalize_spaces(args.project).lower(),
+        "scope": normalize_spaces(args.scope).lower(),
+        "source_kind": normalize_spaces(args.source_kind).lower(),
+        "workspace": normalize_spaces(args.workspace).lower(),
+        "task_state": normalize_spaces(args.task_state).lower(),
+        "prefer_summaries": bool(args.prefer_summaries),
+    }
+
+
+def apply_filters(entries: List[dict], filters: Dict[str, object]) -> List[dict]:
+    def matches(entry: dict) -> bool:
+        tool = str(filters.get("tool", ""))
+        if tool and entry.get("tool", "").lower() != tool:
+            return False
+        project = str(filters.get("project", ""))
+        if project and project not in entry.get("project", "").lower():
+            return False
+        scope = str(filters.get("scope", ""))
+        if scope and entry.get("scope", "").lower() != scope:
+            return False
+        source_kind = str(filters.get("source_kind", ""))
+        if source_kind and entry.get("sourceKind", "").lower() != source_kind:
+            return False
+        workspace = str(filters.get("workspace", ""))
+        if workspace and workspace not in entry.get("workspace", "").lower():
+            return False
+        task_state = str(filters.get("task_state", ""))
+        if task_state and entry.get("taskState", "").lower() != task_state:
+            return False
+        return True
+
+    return [entry for entry in entries if matches(entry)]
+
+
+def apply_summary_boost(scores: Dict[str, float], entries_by_id: Dict[str, dict]) -> Dict[str, float]:
+    boosted: Dict[str, float] = {}
+    for entry_id, score in scores.items():
+        entry = entries_by_id.get(entry_id, {})
+        bonus = 0.0
+        if entry.get("scope", "").lower() == "summary":
+            bonus += 0.05
+        if entry.get("memoryLevel", "").lower() == "session":
+            bonus += 0.03
+        boosted[entry_id] = score + bonus
+    return boosted
 
 
 def main() -> None:
-    query, top_k, requested_mode = parse_args()
-    entries = load_entries()
+    parsed = parse_args()
+    query = str(parsed["query"])
+    top_k = int(parsed["top_k"])
+    requested_mode = str(parsed["mode"])
+    entries = apply_filters(load_entries(), parsed)
     entries_by_id = {entry["id"]: entry for entry in entries}
     query_tokens = tokenize(query)
 
@@ -546,6 +700,8 @@ def main() -> None:
         ranked = ranked_pairs(bm25_map, top_k)
     elif requested_mode == "dense":
         if dense_map:
+            if bool(parsed.get("prefer_summaries")):
+                dense_map = apply_summary_boost(dense_map, entries_by_id)
             ranked = ranked_pairs(dense_map, top_k)
         else:
             effective_mode = "bm25"
@@ -553,6 +709,9 @@ def main() -> None:
             ranked = ranked_pairs(bm25_map, top_k)
     else:
         if dense_map:
+            if bool(parsed.get("prefer_summaries")):
+                bm25_map = apply_summary_boost(bm25_map, entries_by_id)
+                dense_map = apply_summary_boost(dense_map, entries_by_id)
             combined: Dict[str, float] = {}
             for rank, (entry_id, _) in enumerate(ranked_pairs(bm25_map, max(top_k * 5, 20)), start=1):
                 combined[entry_id] = combined.get(entry_id, 0.0) + (1.0 / (60 + rank))
@@ -562,6 +721,8 @@ def main() -> None:
         else:
             effective_mode = "bm25"
             fallback_reason = dense_error or "hybrid-dense-unavailable"
+            if bool(parsed.get("prefer_summaries")):
+                bm25_map = apply_summary_boost(bm25_map, entries_by_id)
             ranked = ranked_pairs(bm25_map, top_k)
 
     sources: Dict[str, List[str]] = {}
@@ -576,8 +737,21 @@ def main() -> None:
         "effectiveMode": effective_mode,
         "fallbackReason": fallback_reason,
         "query": query,
+        "filters": {
+            "tool": parsed.get("tool"),
+            "project": parsed.get("project"),
+            "scope": parsed.get("scope"),
+            "sourceKind": parsed.get("source_kind"),
+            "workspace": parsed.get("workspace"),
+            "taskState": parsed.get("task_state"),
+            "preferSummaries": parsed.get("prefer_summaries"),
+        },
         "entryCount": len(entries),
         "hasEmbeddings": bool(load_embeddings_index()),
+        "embeddingBackend": None if not load_embeddings_index() else normalize_backend(
+            str(next(iter(load_embeddings_index().values())).get("backend", "")).strip(),
+            str(next(iter(load_embeddings_index().values())).get("model", DEFAULT_MODEL)).strip() or DEFAULT_MODEL,
+        ),
         "results": format_results(ranked, entries_by_id, sources, bm25_map, dense_map),
     }
     sys.stdout.write(json.dumps(payload, ensure_ascii=False, indent=2))
