@@ -43,6 +43,22 @@ See `docs/INTEGRATION-MODES.md` for the recommended MCP versus skill versus plug
 3. `02-KB/WORKING.md`
 4. `00-System/ai-memory/generated/GLOBAL-CONTEXT.md`
 
+## Portable Placeholder Rules
+When documenting or committing agent overlays, use portable placeholders instead of local absolute paths.
+
+- use `<obsidian-vault>` for the vault root
+- use `<repo-root>` for the checked-out repository root
+- use home-relative examples such as `~/.trae/user_rules.md` when a user-scoped file matters
+
+Do not publish tracked onboarding files with machine-specific paths like `C:\Users\...` or `E:\...`.
+
+Typical tracked overlay files include:
+- `AGENTS.md`
+- `.github/copilot-instructions.md`
+- `.trae/rules/project_rules.md`
+
+Runtime scripts may resolve placeholders dynamically, but the committed template should stay portable.
+
 ## Durable Writeback Rules
 - cross-project facts go to the tool inbox under `00-System/ai-memory/inbox/`
 - active task state goes to `02-KB/WORKING.md`
@@ -72,6 +88,7 @@ If the agent supports skills or prompt libraries:
 - can it call `obsidian` successfully?
 - does it write back to the correct durable path?
 - does enabling browser automation avoid spawning a new local Playwright server per task?
+- does the generated or tracked overlay avoid writing workstation-specific absolute paths back into the repo?
 
 ## Documentation To Update
 When a new agent becomes supported, update:

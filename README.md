@@ -189,6 +189,22 @@ The manifest keeps `playwright` marked as an optional server so advanced users c
 
 See `docs/VALIDATION.md` for the current test story and reproduction flow.
 
+## Portable Overlay Placeholders
+Tracked onboarding and overlay files in this repo intentionally use portable placeholders instead of workstation-specific absolute paths.
+
+- `<obsidian-vault>` means the root of the Obsidian vault that hosts `00-System/ai-memory/` and `02-KB/`
+- `<repo-root>` means the checked-out repository root for this bundle or for the agent-specific project overlay
+- `~/.trae/user_rules.md` is shown as a user-home-relative example, not a hardcoded machine path
+
+At runtime, the Windows control plane resolves the vault from:
+
+1. `AI_MEMORY_OBSIDIAN_VAULT`
+2. `OBSIDIAN_VAULT_ROOT`
+3. the active or most recent vault in Obsidian's app config
+4. standard fallback locations such as Desktop or Documents when needed
+
+Public docs and tracked overlay files should never be committed with private paths such as `C:\Users\name\...` or `E:\...`.
+
 ## Install
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
