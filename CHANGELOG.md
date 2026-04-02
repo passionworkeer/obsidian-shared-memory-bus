@@ -25,7 +25,7 @@ All notable changes to this project should be documented here.
 ### Added
 - Shared `memory` MCP as a canonical default shared service
 - Optional OpenAI-compatible embedding backend while keeping offline `hashing-v1` as the default dense path
-- Portable public bundle under `E:\desktop\obsidian-shared-memory-bus`
+- Portable public bundle for the shared-memory architecture
 - Multi-client wiring for Codex, Claude Code, OpenCode, Cursor, VS Code/Copilot, and OpenClaw-related bridges
 
 ### Changed
