@@ -8,6 +8,16 @@ Use this checklist when publishing a new public revision of the bundle.
 - rescan for secrets and personal paths
 - confirm installer and runtime paths are still dynamic
 
+For public template safety, tracked overlay files must also stay free of workstation-specific absolute paths.
+
+Recommended scan:
+```powershell
+git grep -n -I -e "C:\\Users\\" -e "E:\\" -- .
+```
+
+Expected result for a clean public branch:
+- no hits in tracked files, or only clearly documented placeholder/examples that are not personal paths
+
 ## Minimum Validation
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-layout.ps1
@@ -17,6 +27,13 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-mem
 ```
 
 Run the pressure test if anything changed in shared MCP behavior, agent wiring, or memory indexing.
+
+If the change touched tracked overlays or generator code, also replay the installed runtime against the repo and verify it does not reintroduce machine-specific paths:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\memory-bus.ps1 -Action SyncAll -Project <repo-root> -Quiet
+git grep -n -I -e "C:\\Users\\" -e "E:\\" -- .
+```
 
 If the change touched file layout or installer behavior, also confirm `.github/workflows/windows-validate.yml` still reflects the expected smoke-install story.
 
@@ -32,6 +49,8 @@ If the change touched file layout or installer behavior, also confirm `.github/w
 3. confirm GitHub community health still looks good
 4. open the README and a couple of key docs from the public repo
 5. if needed, create a GitHub release note summarizing the change
+
+If your machine has flaky HTTPS access to `github.com:443`, prefer an SSH-over-443 remote. Use API-based publishing only as a temporary bridge, then reconcile history so future `git fetch/push` works normally.
 
 ## After Publish
 - record important release facts in the shared memory notes
