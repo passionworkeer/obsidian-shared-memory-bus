@@ -9,6 +9,7 @@ Compatibility:
 from __future__ import annotations
 
 import argparse
+import datetime
 import hashlib
 import json
 import math
@@ -95,6 +96,19 @@ STRUCTURED_FILES = [
     "openclaw-jobs.jsonl",
     "openclaw-journal.jsonl",
 ]
+DURABLE_SCOPES = {"user", "feedback", "project", "reference"}
+ROUTE_VALUES = {"auto", "mixed", "durable", "task", "recent", "reference"}
+KNOWN_LAYERS = ("durable", "session", "event", "task")
+RECENT_QUERY_PATTERN = re.compile(r"(最新|最近|刚刚|今天|\b(?:recent|latest|today|current|newest|new)\b)", re.I)
+TASK_QUERY_PATTERN = re.compile(
+    r"(任务|运行|工单|队列|\b(?:issue|pr|run|job|cron|queue|blackboard|pending|failed|status)\b)",
+    re.I,
+)
+REFERENCE_QUERY_PATTERN = re.compile(r"(路径|链接|文档|参考|\b(?:path|url|link|reference|doc|docs|file)\b)", re.I)
+DURABLE_QUERY_PATTERN = re.compile(
+    r"(偏好|规则|长期|记忆|全局|\b(?:preference|rule|workflow|durable|global|remember)\b)",
+    re.I,
+)
 
 
 def build_file_stamp(file_path: str) -> str:
@@ -358,6 +372,228 @@ def tokenize(text: str) -> List[str]:
     return tokens
 
 
+def derive_entry_layer(payload: dict) -> str:
+    memory_level = normalize_spaces(str(payload.get("memory_level", payload.get("memoryLevel", "")))).lower()
+    source_kind = normalize_spaces(str(payload.get("source_kind", payload.get("sourceKind", "")))).lower()
+    scope = normalize_spaces(str(payload.get("scope", ""))).lower()
+
+    if memory_level == "durable" or source_kind == "writeback":
+        return "durable"
+    if source_kind in {"hook", "event"} or memory_level == "event":
+        return "event"
+    if memory_level == "task" or source_kind in {"blackboard", "run", "cron", "task"} or scope in {"task", "run"}:
+        return "task"
+    return "session"
+
+
+def parse_timestamp_seconds(value: str) -> float:
+    candidate = normalize_spaces(value)
+    if not candidate:
+        return 0.0
+
+    try:
+        normalized = candidate.replace("Z", "+00:00")
+        return max(0.0, datetime.datetime.fromisoformat(normalized).timestamp())
+    except Exception:
+        return 0.0
+
+
+def count_entries_by_layer(entries: List[dict]) -> Dict[str, int]:
+    counts: Dict[str, int] = {layer: 0 for layer in KNOWN_LAYERS}
+    for entry in entries:
+        layer = str(entry.get("layer", "")).strip() or "session"
+        counts[layer] = counts.get(layer, 0) + 1
+    return counts
+
+
+def classify_query_intent(query: str, parsed: Dict[str, object]) -> Tuple[str, str]:
+    explicit_route = normalize_spaces(str(parsed.get("route", parsed.get("intent", "")))).lower()
+    if explicit_route in ROUTE_VALUES and explicit_route != "auto":
+        return explicit_route, explicit_route
+
+    scope = normalize_spaces(str(parsed.get("scope", ""))).lower()
+    source_kind = normalize_spaces(str(parsed.get("source_kind", parsed.get("sourceKind", "")))).lower()
+    task_state = normalize_spaces(str(parsed.get("task_state", parsed.get("taskState", "")))).lower()
+    query_text = normalize_spaces(query).lower()
+
+    if source_kind in {"blackboard", "run", "cron", "task"} or task_state or scope in {"task", "run"}:
+        return "task", explicit_route
+    if scope == "reference":
+        return "reference", explicit_route
+    if scope in DURABLE_SCOPES:
+        return "durable", explicit_route
+    if RECENT_QUERY_PATTERN.search(query_text):
+        return "recent", explicit_route
+    if TASK_QUERY_PATTERN.search(query_text):
+        return "task", explicit_route
+    if REFERENCE_QUERY_PATTERN.search(query_text):
+        return "reference", explicit_route
+    if DURABLE_QUERY_PATTERN.search(query_text):
+        return "durable", explicit_route
+    return "mixed", explicit_route
+
+
+def build_query_route(query: str, parsed: Dict[str, object]) -> Dict[str, object]:
+    intent, explicit_route = classify_query_intent(query, parsed)
+    layer_weights: Dict[str, Dict[str, float]] = {
+        "mixed": {"durable": 1.0, "session": 1.0, "event": 0.96, "task": 1.0},
+        "durable": {"durable": 1.35, "session": 0.94, "event": 0.82, "task": 0.72},
+        "task": {"durable": 0.76, "session": 0.92, "event": 0.84, "task": 1.35},
+        "recent": {"durable": 0.8, "session": 1.16, "event": 1.35, "task": 0.96},
+        "reference": {"durable": 1.18, "session": 0.92, "event": 0.82, "task": 0.9},
+    }
+    scope_weights: Dict[str, Dict[str, float]] = {
+        "mixed": {"user": 1.06, "feedback": 1.04, "project": 1.03, "reference": 1.03, "summary": 1.0, "task": 0.98, "run": 0.98},
+        "durable": {"user": 1.22, "feedback": 1.18, "project": 1.1, "reference": 1.12, "summary": 0.88, "task": 0.76, "run": 0.72},
+        "task": {"user": 0.88, "feedback": 0.94, "project": 1.08, "reference": 0.96, "summary": 0.92, "task": 1.2, "run": 1.24},
+        "recent": {"user": 0.92, "feedback": 0.96, "project": 1.0, "reference": 0.94, "summary": 1.06, "task": 1.02, "run": 1.04},
+        "reference": {"user": 0.92, "feedback": 0.96, "project": 1.14, "reference": 1.28, "summary": 0.9, "task": 0.9, "run": 0.88},
+    }
+    source_kind_weights: Dict[str, Dict[str, float]] = {
+        "mixed": {"writeback": 1.04, "session": 1.0, "hook": 0.98, "blackboard": 1.0, "run": 1.02, "cron": 1.01},
+        "durable": {"writeback": 1.12, "session": 1.02, "hook": 0.9, "blackboard": 0.84, "run": 0.82, "cron": 0.8},
+        "task": {"writeback": 0.86, "session": 0.96, "hook": 0.88, "blackboard": 1.16, "run": 1.18, "cron": 1.12},
+        "recent": {"writeback": 0.96, "session": 1.08, "hook": 1.14, "blackboard": 1.0, "run": 1.02, "cron": 1.04},
+        "reference": {"writeback": 1.06, "session": 0.98, "hook": 0.9, "blackboard": 0.9, "run": 0.9, "cron": 0.9},
+    }
+    freshness_weights: Dict[str, Dict[str, float]] = {
+        "mixed": {"hot": 1.02, "warm": 1.0, "cold": 0.98, "unknown": 1.0},
+        "durable": {"hot": 1.01, "warm": 1.0, "cold": 1.0, "unknown": 1.0},
+        "task": {"hot": 1.1, "warm": 1.04, "cold": 0.96, "unknown": 0.98},
+        "recent": {"hot": 1.12, "warm": 1.05, "cold": 0.92, "unknown": 0.96},
+        "reference": {"hot": 1.0, "warm": 1.0, "cold": 0.99, "unknown": 1.0},
+    }
+
+    effective_layer_weights = dict(layer_weights.get(intent, layer_weights["mixed"]))
+    effective_scope_weights = dict(scope_weights.get(intent, scope_weights["mixed"]))
+    effective_source_kind_weights = dict(source_kind_weights.get(intent, source_kind_weights["mixed"]))
+    effective_freshness_weights = dict(freshness_weights.get(intent, freshness_weights["mixed"]))
+
+    if bool(parsed.get("prefer_summaries")):
+        effective_scope_weights["summary"] = effective_scope_weights.get("summary", 1.0) + 0.08
+        effective_layer_weights["session"] = effective_layer_weights.get("session", 1.0) + 0.04
+
+    return {
+        "intent": intent,
+        "explicitRoute": explicit_route,
+        "layerWeights": effective_layer_weights,
+        "scopeWeights": effective_scope_weights,
+        "sourceKindWeights": effective_source_kind_weights,
+        "freshnessWeights": effective_freshness_weights,
+    }
+
+
+def normalize_score_map(scores: Dict[str, float]) -> Dict[str, float]:
+    if not scores:
+        return {}
+    max_score = max(float(value) for value in scores.values())
+    if max_score <= 0:
+        return {}
+    return {entry_id: float(value) / max_score for entry_id, value in scores.items() if float(value) > 0}
+
+
+def task_state_weight(task_state: str, intent: str) -> float:
+    normalized = normalize_spaces(task_state).lower()
+    if not normalized:
+        return 1.0
+    if intent == "task":
+        if normalized in {"processing", "active", "pending"}:
+            return 1.12
+        if normalized in {"ok", "pr_submitted", "pr_created"}:
+            return 1.06
+        if normalized in {"failed", "timeout", "dev_error", "report_error", "build_fail"}:
+            return 1.01
+    if intent == "recent":
+        if normalized in {"processing", "active", "pending"}:
+            return 1.06
+        if normalized in {"ok", "pr_submitted", "pr_created"}:
+            return 1.04
+    return 1.0
+
+
+def score_entry(
+    entry: dict,
+    effective_mode: str,
+    route: Dict[str, object],
+    bm25_norm: Dict[str, float],
+    dense_norm: Dict[str, float],
+) -> Optional[Tuple[float, Dict[str, object]]]:
+    entry_id = str(entry.get("id", "")).strip()
+    bm25_component = float(bm25_norm.get(entry_id, 0.0))
+    dense_component = float(dense_norm.get(entry_id, 0.0))
+
+    if effective_mode == "bm25":
+        retrieval_score = bm25_component
+    elif effective_mode == "dense":
+        retrieval_score = dense_component
+    else:
+        retrieval_score = (0.58 * bm25_component) + (0.42 * dense_component)
+
+    if retrieval_score <= 0:
+        return None
+
+    layer = normalize_spaces(str(entry.get("layer", ""))).lower() or "session"
+    scope = normalize_spaces(str(entry.get("scope", ""))).lower() or "summary"
+    source_kind = normalize_spaces(str(entry.get("sourceKind", ""))).lower()
+    freshness = normalize_spaces(str(entry.get("freshness", ""))).lower() or "unknown"
+    task_state = normalize_spaces(str(entry.get("taskState", ""))).lower()
+    intent = str(route.get("intent", "mixed"))
+    layer_weight = float(dict(route.get("layerWeights", {})).get(layer, 1.0))
+    scope_weight = float(dict(route.get("scopeWeights", {})).get(scope, 1.0))
+    source_kind_weight = float(dict(route.get("sourceKindWeights", {})).get(source_kind, 1.0))
+    freshness_weight = float(dict(route.get("freshnessWeights", {})).get(freshness, 1.0))
+    state_weight = task_state_weight(task_state, intent)
+    coverage_weight = 1.04 if effective_mode == "hybrid" and bm25_component > 0 and dense_component > 0 else 1.0
+    final_score = retrieval_score * layer_weight * scope_weight * source_kind_weight * freshness_weight * state_weight * coverage_weight
+
+    return (
+        final_score,
+        {
+            "retrievalScore": retrieval_score,
+            "layerWeight": layer_weight,
+            "scopeWeight": scope_weight,
+            "sourceKindWeight": source_kind_weight,
+            "freshnessWeight": freshness_weight,
+            "taskStateWeight": state_weight,
+            "coverageWeight": coverage_weight,
+        },
+    )
+
+
+def rerank_entries(
+    entries_by_id: Dict[str, dict],
+    effective_mode: str,
+    top_k: int,
+    route: Dict[str, object],
+    bm25_map: Dict[str, float],
+    dense_map: Dict[str, float],
+) -> Tuple[List[Tuple[str, float]], Dict[str, Dict[str, object]], int]:
+    candidate_ids = set()
+    if effective_mode in {"bm25", "hybrid"}:
+        candidate_ids.update(bm25_map.keys())
+    if effective_mode in {"dense", "hybrid"}:
+        candidate_ids.update(dense_map.keys())
+
+    bm25_norm = normalize_score_map(bm25_map)
+    dense_norm = normalize_score_map(dense_map)
+    ranked: List[Tuple[str, float]] = []
+    rank_meta: Dict[str, Dict[str, object]] = {}
+
+    for entry_id in candidate_ids:
+        entry = entries_by_id.get(entry_id)
+        if entry is None:
+            continue
+        scored = score_entry(entry, effective_mode, route, bm25_norm, dense_norm)
+        if scored is None:
+            continue
+        final_score, meta = scored
+        ranked.append((entry_id, final_score))
+        rank_meta[entry_id] = meta
+
+    ranked.sort(key=lambda item: item[1], reverse=True)
+    return ranked[:top_k], rank_meta, len(candidate_ids)
+
+
 def build_entry(payload: dict) -> Optional[dict]:
     title = normalize_spaces(str(payload.get("title", "")))
     content = normalize_spaces(str(payload.get("content", "")))
@@ -399,6 +635,8 @@ def build_entry(payload: dict) -> Optional[dict]:
         "memoryLevel": str(payload.get("memory_level", "")).strip(),
         "workspace": str(payload.get("workspace", "")).strip(),
         "taskState": str(payload.get("task_state", "")).strip(),
+        "freshness": str(payload.get("freshness", "")).strip(),
+        "layer": derive_entry_layer(payload),
     }
 
 
@@ -643,12 +881,18 @@ def format_results(
     sources: Dict[str, List[str]],
     bm25_map: Dict[str, float],
     dense_map: Dict[str, float],
+    rank_meta: Dict[str, Dict[str, object]],
 ) -> List[dict]:
     results: List[dict] = []
     for index, (entry_id, score) in enumerate(ranked, start=1):
         entry = entries_by_id.get(entry_id)
         if entry is None:
             continue
+        raw_meta = rank_meta.get(entry_id, {})
+        meta = {
+            key: round(float(value), 6) if isinstance(value, (int, float)) else value
+            for key, value in raw_meta.items()
+        }
         results.append(
             {
                 "rank": index,
@@ -666,9 +910,12 @@ def format_results(
                 "memoryLevel": entry.get("memoryLevel", ""),
                 "workspace": entry.get("workspace", ""),
                 "taskState": entry.get("taskState", ""),
+                "freshness": entry.get("freshness", ""),
+                "layer": entry.get("layer", ""),
                 "sources": sources.get(entry_id, []),
                 "bm25Score": round(float(bm25_map.get(entry_id, 0.0)), 6) if entry_id in bm25_map else None,
                 "denseScore": round(float(dense_map.get(entry_id, 0.0)), 6) if entry_id in dense_map else None,
+                "rankMeta": meta or None,
             }
         )
     return results
@@ -690,10 +937,15 @@ def normalize_request_payload(payload: Dict[str, object]) -> Dict[str, object]:
         minimum=1,
     )
 
+    route = normalize_spaces(str(payload.get("route", payload.get("intent", "auto")))).lower() or "auto"
+    if route not in ROUTE_VALUES:
+        route = "auto"
+
     return {
         "query": query,
         "top_k": top_k,
         "mode": mode,
+        "route": route,
         "tool": normalize_spaces(str(payload.get("tool", ""))).lower(),
         "project": normalize_spaces(str(payload.get("project", ""))).lower(),
         "scope": normalize_spaces(str(payload.get("scope", ""))).lower(),
@@ -709,6 +961,7 @@ def parse_args() -> Dict[str, object]:
     parser.add_argument("query", nargs="*", help="search query")
     parser.add_argument("--mode", choices=("bm25", "dense", "hybrid", "auto"), default="bm25")
     parser.add_argument("--top-k", type=int, default=10)
+    parser.add_argument("--route", choices=tuple(sorted(ROUTE_VALUES)), default="auto")
     parser.add_argument("--tool", default="")
     parser.add_argument("--project", default="")
     parser.add_argument("--scope", default="")
@@ -745,6 +998,7 @@ def parse_args() -> Dict[str, object]:
             "query": query,
             "top_k": top_k,
             "mode": mode,
+            "route": args.route,
             "tool": args.tool,
             "project": args.project,
             "scope": args.scope,
@@ -824,6 +1078,8 @@ def execute_search(parsed: Dict[str, object]) -> Dict[str, object]:
 
     entries = apply_filters(load_entries(), parsed)
     entries_by_id = {entry["id"]: entry for entry in entries}
+    layer_counts = count_entries_by_layer(entries)
+    query_route = build_query_route(query, parsed)
     query_tokens = tokenize(query)
     bm25_cache_key = build_bm25_cache_key(parsed, len(entries))
 
@@ -837,33 +1093,21 @@ def execute_search(parsed: Dict[str, object]) -> Dict[str, object]:
     effective_mode = requested_mode
     fallback_reason = None
     if requested_mode == "bm25":
-        ranked = ranked_pairs(bm25_map, top_k)
+        ranked, rank_meta, candidate_count = rerank_entries(entries_by_id, "bm25", top_k, query_route, bm25_map, dense_map)
     elif requested_mode == "dense":
         if dense_map:
-            if bool(parsed.get("prefer_summaries")):
-                dense_map = apply_summary_boost(dense_map, entries_by_id)
-            ranked = ranked_pairs(dense_map, top_k)
+            ranked, rank_meta, candidate_count = rerank_entries(entries_by_id, "dense", top_k, query_route, bm25_map, dense_map)
         else:
             effective_mode = "bm25"
             fallback_reason = dense_error or "dense-unavailable"
-            ranked = ranked_pairs(bm25_map, top_k)
+            ranked, rank_meta, candidate_count = rerank_entries(entries_by_id, "bm25", top_k, query_route, bm25_map, dense_map)
     else:
         if dense_map:
-            if bool(parsed.get("prefer_summaries")):
-                bm25_map = apply_summary_boost(bm25_map, entries_by_id)
-                dense_map = apply_summary_boost(dense_map, entries_by_id)
-            combined: Dict[str, float] = {}
-            for rank, (entry_id, _) in enumerate(ranked_pairs(bm25_map, max(top_k * 5, 20)), start=1):
-                combined[entry_id] = combined.get(entry_id, 0.0) + (1.0 / (60 + rank))
-            for rank, (entry_id, _) in enumerate(ranked_pairs(dense_map, max(top_k * 5, 20)), start=1):
-                combined[entry_id] = combined.get(entry_id, 0.0) + (1.0 / (60 + rank))
-            ranked = ranked_pairs(combined, top_k)
+            ranked, rank_meta, candidate_count = rerank_entries(entries_by_id, "hybrid", top_k, query_route, bm25_map, dense_map)
         else:
             effective_mode = "bm25"
             fallback_reason = dense_error or "hybrid-dense-unavailable"
-            if bool(parsed.get("prefer_summaries")):
-                bm25_map = apply_summary_boost(bm25_map, entries_by_id)
-            ranked = ranked_pairs(bm25_map, top_k)
+            ranked, rank_meta, candidate_count = rerank_entries(entries_by_id, "bm25", top_k, query_route, bm25_map, dense_map)
 
     sources: Dict[str, List[str]] = {}
     for entry_id in bm25_map:
@@ -886,7 +1130,10 @@ def execute_search(parsed: Dict[str, object]) -> Dict[str, object]:
         "effectiveMode": effective_mode,
         "fallbackReason": fallback_reason,
         "query": query,
+        "queryIntent": query_route["intent"],
+        "queryRoute": query_route,
         "filters": {
+            "route": parsed.get("route"),
             "tool": parsed.get("tool"),
             "project": parsed.get("project"),
             "scope": parsed.get("scope"),
@@ -896,6 +1143,8 @@ def execute_search(parsed: Dict[str, object]) -> Dict[str, object]:
             "preferSummaries": parsed.get("prefer_summaries"),
         },
         "entryCount": len(entries),
+        "candidateCount": candidate_count,
+        "layerCounts": layer_counts,
         "hasEmbeddings": bool(embeddings_index),
         "embeddingRuntime": build_embedding_runtime_summary(),
         "embeddingBackend": embedding_backend,
@@ -909,7 +1158,7 @@ def execute_search(parsed: Dict[str, object]) -> Dict[str, object]:
             search_result_cache_hit=False,
             query_embedding_cache_hit=bool(dense_meta.get("queryEmbeddingCacheHit")),
         ),
-        "results": format_results(ranked, entries_by_id, sources, bm25_map, dense_map),
+        "results": format_results(ranked, entries_by_id, sources, bm25_map, dense_map, rank_meta),
     }
     store_search_result(search_result_cache_key, payload)
     return payload

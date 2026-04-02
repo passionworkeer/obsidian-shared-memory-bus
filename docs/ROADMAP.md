@@ -1,9 +1,11 @@
 # Roadmap
 
 ## v0.2 (Next Release - target: Q2 2026)
-- [ ] Add rerank after `bm25 + dense` hybrid retrieval
+- [x] Add rerank after `bm25 + dense` hybrid retrieval
+- [x] Add typed durable promotion metadata and typed dream promotion/refresh queues
 - [ ] Add conflict-safe blackboard event log or lease semantics
-- [ ] Promote the current dream pass into a stronger consolidation pipeline with dedupe and promotion scoring
+- [ ] Promote the current typed dream pass into a stronger consolidation pipeline with dedupe, conflict handling, and promotion scoring
+- [ ] Add an evaluation harness for query-route weights, candidate pruning, and ranking regression checks
 - [ ] Import richer Claude compact/session boundary data instead of only snapshot-style session notes
 
 ## v0.3 (Next Quarter - target: Q3 2026)
