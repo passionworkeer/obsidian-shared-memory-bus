@@ -32,7 +32,10 @@ Use isolated MCP when the service is:
 3. Wire shared MCP endpoints for `memory`, `obsidian`, and any safe utility services
 4. Decide whether it should use shared `playwright` or stay local
 5. Expose portable skills if the agent supports them
-6. Run a smoke test and write the result into validation notes
+6. Add host-native plugins only if the agent truly needs lifecycle hooks or UI
+7. Run a smoke test and write the result into validation notes
+
+See `docs/INTEGRATION-MODES.md` for the recommended MCP versus skill versus plugin split.
 
 ## Canonical Shared Memory Read Order
 1. `02-KB/OBSIDIAN.md`

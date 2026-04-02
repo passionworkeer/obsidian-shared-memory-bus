@@ -1,0 +1,83 @@
+name: Windows Validate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    env:
+      AI_MEMORY_OBSIDIAN_VAULT: ${{ runner.temp }}\vault-smoke
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Validate layout contract
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version 3.0
+          ./scripts/validate-layout.ps1
+
+      - name: Smoke install bundle
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version 3.0
+          New-Item -ItemType Directory -Force -Path $env:AI_MEMORY_OBSIDIAN_VAULT | Out-Null
+          $targetRoot = Join-Path $env:RUNNER_TEMP 'ai-memory-smoke'
+          ./scripts/install.ps1 -TargetRoot $targetRoot -RegisterStartup:$false -PersistUserEnvironment:$false
+
+          $expectedFiles = @(
+            (Join-Path $targetRoot 'memory-bus.ps1'),
+            (Join-Path $targetRoot 'memory-watchdog.ps1'),
+            (Join-Path $targetRoot 'verify-client-integrations.ps1'),
+            (Join-Path $targetRoot 'run-pressure-test.ps1'),
+            (Join-Path $targetRoot 'install-manifest.json'),
+            (Join-Path $targetRoot 'shared-mcp\start-default-shared-mcp.ps1')
+          )
+
+          foreach ($path in $expectedFiles) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Missing expected installed file: $path"
+            }
+          }
+
+      - name: Start shared MCP smoke runtime
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version 3.0
+          $targetRoot = Join-Path $env:RUNNER_TEMP 'ai-memory-smoke'
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $targetRoot 'shared-mcp\start-default-shared-mcp.ps1') | Out-Null
+
+          $status = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $targetRoot 'shared-mcp\status-shared-mcp.ps1') | ConvertFrom-Json
+          $requiredIds = @('context7', 'fetch', 'time', 'sequential-thinking', 'obsidian', 'memory')
+
+          foreach ($id in $requiredIds) {
+            $record = @($status | Where-Object { $_.id -eq $id } | Select-Object -First 1)
+            if ($record.Count -eq 0 -or -not [bool]$record[0].running) {
+              throw "Shared MCP runtime did not start cleanly for: $id"
+            }
+          }
+
+      - name: Re-validate strict shared MCP manifest
+        shell: pwsh
+        run: |
+          Get-Content -Raw ./shared-mcp/manifest.json | ConvertFrom-Json | Out-Null
+
+      - name: Stop shared MCP smoke runtime
+        if: always()
+        shell: pwsh
+        run: |
+          $targetRoot = Join-Path $env:RUNNER_TEMP 'ai-memory-smoke'
+          if (Test-Path -LiteralPath (Join-Path $targetRoot 'shared-mcp\stop-shared-mcp.ps1') -PathType Leaf) {
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $targetRoot 'shared-mcp\stop-shared-mcp.ps1') | Out-Null
+          }

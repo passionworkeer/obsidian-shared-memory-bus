@@ -15,71 +15,60 @@ $ErrorActionPreference = "Stop"
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [Console]::OutputEncoding = $Utf8NoBom
 
+$sourceRoot = Split-Path -Parent $PSScriptRoot
+$helperPath = @(
+    (Join-Path $PSScriptRoot "runtime-platform.ps1"),
+    (Join-Path $sourceRoot "runtime-platform.ps1"),
+    (Join-Path $PSScriptRoot "bus/runtime-platform.ps1"),
+    (Join-Path $sourceRoot "bus/runtime-platform.ps1")
+) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+
+if (-not $helperPath) {
+    throw "Unable to locate runtime-platform.ps1 from $PSScriptRoot"
+}
+
+. $helperPath
+
 function Resolve-ObsidianVaultRoot {
     param([AllowEmptyString()][string]$FallbackPath = "")
 
-    foreach ($overridePath in @($env:AI_MEMORY_OBSIDIAN_VAULT, $env:OBSIDIAN_VAULT_ROOT)) {
-        if (-not [string]::IsNullOrWhiteSpace($overridePath) -and (Test-Path -LiteralPath $overridePath -PathType Container)) {
-            return (Get-Item -LiteralPath $overridePath).FullName
-        }
-    }
-
-    $obsidianConfigPath = Join-Path $env:APPDATA "obsidian\obsidian.json"
-    if (Test-Path -LiteralPath $obsidianConfigPath) {
-        try {
-            $config = Get-Content -Raw -LiteralPath $obsidianConfigPath -Encoding utf8 | ConvertFrom-Json
-            $records = New-Object System.Collections.Generic.List[object]
-            if ($config.vaults) {
-                foreach ($property in $config.vaults.PSObject.Properties) {
-                    $vault = $property.Value
-                    $path = [string]$vault.path
-                    if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Container)) {
-                        continue
-                    }
-
-                    $records.Add([pscustomobject]@{
-                        path = (Get-Item -LiteralPath $path).FullName
-                        open = [bool]$vault.open
-                        ts = if ($null -ne $vault.ts) { [int64]$vault.ts } else { 0 }
-                    }) | Out-Null
-                }
-            }
-
-            $openVault = @($records | Where-Object { $_.open } | Sort-Object ts -Descending | Select-Object -First 1)
-            if ($openVault.Count -gt 0) {
-                return $openVault[0].path
-            }
-
-            $recentVault = @($records | Sort-Object ts -Descending | Select-Object -First 1)
-            if ($recentVault.Count -gt 0) {
-                return $recentVault[0].path
-            }
-        } catch {
-        }
-    }
-
-    foreach ($candidate in @($FallbackPath, (Join-Path $env:USERPROFILE "Documents\Obsidian Vault"))) {
-        if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate -PathType Container)) {
-            return (Get-Item -LiteralPath $candidate).FullName
-        }
-    }
-
-    return $FallbackPath
+    return (Resolve-SharedObsidianVaultRoot -FallbackPath $FallbackPath)
 }
 
-$Script:UserHome = $env:USERPROFILE
+$Script:UserHome = Get-SharedUserHome
 $Script:BusHome = if (-not [string]::IsNullOrWhiteSpace($env:AI_MEMORY_ROOT)) { $env:AI_MEMORY_ROOT } else { $PSScriptRoot }
-$Script:LegacyVaultRoot = Join-Path $Script:UserHome "Documents\Obsidian Vault"
+$Script:BundleHome = Split-Path -Parent $PSScriptRoot
+
+function Resolve-BusScriptPath {
+    param([Parameter(Mandatory = $true)][string[]]$Candidates)
+
+    foreach ($root in @($Script:BusHome, $Script:BundleHome)) {
+        if ([string]::IsNullOrWhiteSpace($root)) {
+            continue
+        }
+
+        foreach ($candidate in @($Candidates)) {
+            $path = Join-Path $root $candidate
+            if (Test-Path -LiteralPath $path -PathType Leaf) {
+                return (Get-Item -LiteralPath $path).FullName
+            }
+        }
+    }
+
+    return (Join-Path $Script:BusHome $Candidates[0])
+}
+
+$Script:LegacyVaultRoot = Join-SharedPath @($Script:UserHome, "Documents", "Obsidian Vault")
 $Script:VaultRoot = Resolve-ObsidianVaultRoot -FallbackPath $Script:LegacyVaultRoot
-$Script:BusRoot = Join-Path $Script:VaultRoot "00-System\ai-memory"
+$Script:BusRoot = Join-SharedPath @($Script:VaultRoot, "00-System", "ai-memory")
 $Script:GeneratedRoot = Join-Path $Script:BusRoot "generated"
 $Script:StartupRoot = Join-Path $Script:GeneratedRoot "tool-startup"
 $Script:InboxRoot = Join-Path $Script:BusRoot "inbox"
 $Script:ImportedRoot = Join-Path $Script:BusRoot "imported"
 $Script:EventsRoot = Join-Path $Script:BusRoot "events"
-$Script:CanonicalObsidian = Join-Path $Script:VaultRoot "02-KB\OBSIDIAN.md"
-$Script:CanonicalMemory = Join-Path $Script:VaultRoot "02-KB\MEMORY.md"
-$Script:CanonicalWorking = Join-Path $Script:VaultRoot "02-KB\WORKING.md"
+$Script:CanonicalObsidian = Join-SharedPath @($Script:VaultRoot, "02-KB", "OBSIDIAN.md")
+$Script:CanonicalMemory = Join-SharedPath @($Script:VaultRoot, "02-KB", "MEMORY.md")
+$Script:CanonicalWorking = Join-SharedPath @($Script:VaultRoot, "02-KB", "WORKING.md")
 $Script:VaultAgents = Join-Path $Script:VaultRoot "AGENTS.md"
 $Script:ClaudeRoot = Join-Path $Script:UserHome ".claude"
 $Script:CodexRoot = Join-Path $Script:UserHome ".codex"
@@ -88,32 +77,49 @@ $Script:CodexConfigPath = Join-Path $Script:CodexRoot "config.toml"
 $Script:OpenClawRoot = Join-Path $Script:UserHome ".openclaw"
 $Script:TraeRulesRoot = Join-Path $Script:UserHome ".trae"
 $Script:TraeUserRulesPath = Join-Path $Script:TraeRulesRoot "user_rules.md"
-$Script:TraeProjectRulesRelativePath = ".trae\rules\project_rules.md"
-$Script:ClaudeMirror = Join-Path $Script:ClaudeRoot "memory\OBSIDIAN-SHARED.md"
+$Script:TraeProjectRulesRelativePath = Join-SharedPath @(".trae", "rules", "project_rules.md")
+$Script:ClaudeMirror = Join-SharedPath @($Script:ClaudeRoot, "memory", "OBSIDIAN-SHARED.md")
 $Script:CodexMirror = Join-Path $Script:CodexRoot "OBSIDIAN-SHARED.md"
-$Script:OpenClawSharedRoot = Join-Path $Script:OpenClawRoot "workspace\shared-memory"
-$Script:OpenCodeSharedRoot = Join-Path $Script:UserHome ".local\share\opencode"
+$Script:OpenClawSharedRoot = Join-SharedPath @($Script:OpenClawRoot, "workspace", "shared-memory")
+$Script:OpenCodeSharedRoot = Get-SharedOpenCodeDataRoot
 $Script:OpenCodeDbPath = Join-Path $Script:OpenCodeSharedRoot "opencode.db"
-$Script:OpenCodeConfigRoot = Join-Path $Script:UserHome ".config\opencode"
+$Script:OpenCodeConfigRoot = Get-SharedOpenCodeConfigRoot
 $Script:OpenCodeAgentsPath = Join-Path $Script:OpenCodeConfigRoot "AGENTS.md"
-$Script:CopilotHome = Join-Path $Script:UserHome ".copilot"
+$Script:CopilotHome = Get-SharedCopilotHomeRoot
 $Script:CopilotHomeInstructionsPath = Join-Path $Script:CopilotHome "copilot-instructions.md"
 $Script:CopilotCliSessionRoot = Join-Path $Script:CopilotHome "session-state"
-$Script:VsCodeUserRoot = Join-Path $env:APPDATA "Code\User"
-$Script:CopilotGlobalStorage = Join-Path $Script:VsCodeUserRoot "globalStorage\github.copilot-chat"
-$Script:CopilotWorkspaceStorageRoot = Join-Path $Script:VsCodeUserRoot "workspaceStorage"
-$Script:WatchdogScript = Join-Path $Script:BusHome "memory-watchdog.ps1"
+$Script:VsCodeUserRoot = Get-SharedVsCodeUserRoot -ProductName "Code"
+$Script:CopilotGlobalStorage = Join-SharedPath @($Script:VsCodeUserRoot, "globalStorage", "github.copilot-chat")
+$Script:CopilotWorkspaceStorageRoot = Join-SharedPath @($Script:VsCodeUserRoot, "workspaceStorage")
+$Script:WatchdogScript = Resolve-BusScriptPath -Candidates @("memory-watchdog.ps1", "bus/memory-watchdog.ps1")
 $Script:WatchdogStatePath = Join-Path $Script:BusHome "watchdog-state.json"
-$Script:WatchdogStartupVbs = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Startup\AI Memory Watchdog.vbs"
+$Script:WatchdogStartupVbs = Get-SharedWatchdogStartupHookPath
 $Script:GlobalContextPath = Join-Path $Script:GeneratedRoot "GLOBAL-CONTEXT.md"
 $Script:GlobalJsonPath = Join-Path $Script:GeneratedRoot "GLOBAL-CONTEXT.json"
+$Script:MemoryLayersGuidePath = Join-Path $Script:GeneratedRoot "MEMORY-LAYERS.md"
+$Script:MemoryLayersJsonPath = Join-Path $Script:GeneratedRoot "MEMORY-LAYERS.json"
+$Script:AutoDreamGuidePath = Join-Path $Script:GeneratedRoot "AUTO-DREAM.md"
+$Script:AutoDreamJsonPath = Join-Path $Script:GeneratedRoot "AUTO-DREAM.json"
 $Script:SharedSkillsGuidePath = Join-Path $Script:GeneratedRoot "SHARED-SKILLS.md"
 $Script:SharedSkillsJsonPath = Join-Path $Script:GeneratedRoot "SHARED-SKILLS.json"
 $Script:AgentRegistryPath = Join-Path $Script:BusHome "agents.json"
 $Script:OnboardingRoot = Join-Path $Script:GeneratedRoot "onboarding"
 $Script:UniversalArchitecturePath = Join-Path $Script:OnboardingRoot "ARCHITECTURE.md"
 $Script:UniversalBootstrapPath = Join-Path $Script:OnboardingRoot "UNIVERSAL-AGENT-BOOTSTRAP.md"
-$Script:SharedSkillsSyncScript = Join-Path $Script:BusHome "sync-shared-skills.ps1"
+$Script:SharedMcpManifestCache = $null
+$Script:PortableVaultPlaceholder = "<obsidian-vault>"
+$Script:PortableProjectRootPlaceholder = "<repo-root>"
+$Script:PortableTraeUserRulesPath = "~/.trae/user_rules.md"
+$Script:PortableCanonicalObsidian = "{0}/02-KB/OBSIDIAN.md" -f $Script:PortableVaultPlaceholder
+$Script:PortableCanonicalMemory = "{0}/02-KB/MEMORY.md" -f $Script:PortableVaultPlaceholder
+$Script:PortableCanonicalWorking = "{0}/02-KB/WORKING.md" -f $Script:PortableVaultPlaceholder
+$Script:PortableGlobalContextPath = "{0}/00-System/ai-memory/generated/GLOBAL-CONTEXT.md" -f $Script:PortableVaultPlaceholder
+$Script:PortableTraeStartupPath = "{0}/00-System/ai-memory/generated/tool-startup/trae.md" -f $Script:PortableVaultPlaceholder
+$Script:PortableCopilotStartupPath = "{0}/00-System/ai-memory/generated/tool-startup/copilot.md" -f $Script:PortableVaultPlaceholder
+$Script:PortableTraeInboxPath = "{0}/00-System/ai-memory/inbox/trae.md" -f $Script:PortableVaultPlaceholder
+$Script:PortableOpenCodeInboxPath = "{0}/00-System/ai-memory/inbox/opencode.md" -f $Script:PortableVaultPlaceholder
+$Script:PortableCopilotInboxPath = "{0}/00-System/ai-memory/inbox/copilot.md" -f $Script:PortableVaultPlaceholder
+$Script:SharedSkillsSyncScript = Resolve-BusScriptPath -Candidates @("sync-shared-skills.ps1", "ops/sync-shared-skills.ps1")
 $Script:ClaudeMemApiBase = "http://127.0.0.1:37778/api"
 $Script:BusLockTimeoutMs = 180000
 $Script:StaleSyncSeconds = 20
@@ -414,19 +420,75 @@ function Get-AgentStartupPath {
     return (Join-Path $Script:StartupRoot ((ConvertTo-AgentSlug -Name $Slug) + ".md"))
 }
 
-function Build-OnboardingMcpConfigJson {
-    $obsidianMcpScript = ((Join-Path $Script:BusHome "run-obsidian-mcp.ps1") -replace "\\", "/")
+function Resolve-BundleAssetPath {
+    param([Parameter(Mandatory = $true)][string[]]$Candidates)
+
+    foreach ($root in @($Script:BundleHome, $Script:BusHome)) {
+        if ([string]::IsNullOrWhiteSpace($root)) {
+            continue
+        }
+
+        foreach ($candidate in @($Candidates)) {
+            $path = Join-Path $root $candidate
+            if (Test-Path -LiteralPath $path -PathType Leaf) {
+                return (Get-Item -LiteralPath $path).FullName
+            }
+        }
+    }
+
+    return (Join-Path $Script:BusHome $Candidates[0])
+}
+
+function Get-SharedMcpManifest {
+    if ($null -eq $Script:SharedMcpManifestCache) {
+        $manifestPath = Resolve-BundleAssetPath -Candidates @("shared-mcp\manifest.json")
+        $Script:SharedMcpManifestCache = Get-Content -Raw -LiteralPath $manifestPath -Encoding utf8 | ConvertFrom-Json
+    }
+
+    return $Script:SharedMcpManifestCache
+}
+
+function Get-OnboardingSharedMcpServers {
+    param([switch]$IncludeOptional)
+
+    $manifest = Get-SharedMcpManifest
+    $servers = New-Object System.Collections.Generic.List[object]
+    $seen = @{}
+
+    foreach ($server in @($manifest.servers)) {
+        $serverId = [string]$server.id
+        $serverMode = [string]$server.mode
+
+        $shouldInclude = $false
+        if ($serverId -eq "MiniMax") {
+            $shouldInclude = $IncludeOptional
+        } elseif ($serverMode -eq "shared" -or $serverId -eq "playwright") {
+            $shouldInclude = $true
+        }
+
+        if ($shouldInclude -and -not $seen.ContainsKey($serverId)) {
+            $servers.Add($server) | Out-Null
+            $seen[$serverId] = $true
+        }
+    }
+
+    return @($servers.ToArray())
+}
+
+function Get-OnboardingSharedMcpUrl {
+    param([Parameter(Mandatory = $true)][object]$Server)
+
+    $manifest = Get-SharedMcpManifest
+    return ("http://{0}:{1}{2}" -f $manifest.defaults.host, [int]$Server.port, $manifest.defaults.path)
+}
+
+function Build-OnboardingObsidianStdioConfigJson {
+    $obsidianMcpScript = ((Resolve-BusScriptPath -Candidates @("run-obsidian-mcp.ps1", "ops/run-obsidian-mcp.ps1")) -replace "\\", "/")
     $payload = [ordered]@{
         mcpServers = [ordered]@{
             obsidian = [ordered]@{
-                command = "powershell.exe"
-                args = @(
-                    "-NoProfile",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-File",
-                    $obsidianMcpScript
-                )
+                command = (Get-SharedPowerShellCommandName)
+                args = (Get-SharedPowerShellFileArguments -ScriptPath $obsidianMcpScript)
             }
         }
     }
@@ -610,8 +672,10 @@ function Write-OnboardingPack {
 
     $agentRoot = Join-Path $Script:OnboardingRoot $Definition.slug
     $genericRoot = Join-Path $agentRoot "generic"
-    $cursorRulesRoot = Join-Path $agentRoot "cursor\.cursor\rules"
-    $cursorRoot = Join-Path $agentRoot "cursor\.cursor"
+    $skillRoot = Join-SharedPath @($genericRoot, "skills", "shared-memory")
+    $pluginRoot = Join-Path $genericRoot "plugin"
+    $cursorRulesRoot = Join-SharedPath @($agentRoot, "cursor", ".cursor", "rules")
+    $cursorRoot = Join-SharedPath @($agentRoot, "cursor", ".cursor")
     $startupPath = Get-AgentStartupPath -Slug $Definition.slug
 
     Ensure-Directory -Path $agentRoot
@@ -2211,8 +2275,8 @@ function Convert-TraeResourceToDisplay {
 
 function Get-TraeHistorySnapshot {
     $roots = @(
-        @{ label = "Trae"; path = Join-Path $env:APPDATA "Trae\User\History" },
-        @{ label = "Trae CN"; path = Join-Path $env:APPDATA "Trae CN\User\History" }
+        @{ label = "Trae"; path = Join-SharedPath @((Get-SharedTraeUserRoot -ProductName "Trae"), "History") },
+        @{ label = "Trae CN"; path = Join-SharedPath @((Get-SharedTraeUserRoot -ProductName "Trae CN"), "History") }
     )
 
     $records = New-Object System.Collections.Generic.List[object]
@@ -2268,14 +2332,14 @@ function Get-TraeHistorySnapshot {
 function Sync-ClaudeSnapshot {
     param([string]$ProjectDirectory)
 
-    $userMd = Read-Text -Path (Join-Path $Script:ClaudeRoot "memory\USER.md")
-    $memoryMd = Read-Text -Path (Join-Path $Script:ClaudeRoot "memory\MEMORY.md")
-    $todayMd = Read-Text -Path (Join-Path $Script:ClaudeRoot "memory\TODAY.md")
+    $userMd = Read-Text -Path (Join-SharedPath @($Script:ClaudeRoot, "memory", "USER.md"))
+    $memoryMd = Read-Text -Path (Join-SharedPath @($Script:ClaudeRoot, "memory", "MEMORY.md"))
+    $todayMd = Read-Text -Path (Join-SharedPath @($Script:ClaudeRoot, "memory", "TODAY.md"))
     $claudeMem = Get-ClaudeMemSnapshot
     $projectMemory = ""
 
     if (-not [string]::IsNullOrWhiteSpace($ProjectDirectory)) {
-        $projectLocal = Join-Path $ProjectDirectory ".claude\memory\MEMORY.md"
+        $projectLocal = Join-SharedPath @($ProjectDirectory, ".claude", "memory", "MEMORY.md")
         if (Test-Path -LiteralPath $projectLocal) {
             $projectMemory = Read-Text -Path $projectLocal
         }
@@ -2316,7 +2380,7 @@ function Sync-OpenClawSnapshot {
     $userMd = Read-Text -Path (Join-Path $workspace "USER.md")
     $memoryMd = Read-Text -Path (Join-Path $workspace "MEMORY.md")
     $dailyDir = Join-Path $workspace "memory"
-    $sessionDir = Join-Path $Script:OpenClawRoot "agents\main\sessions"
+    $sessionDir = Join-SharedPath @($Script:OpenClawRoot, "agents", "main", "sessions")
     $recentTopics = Get-OpenClawRecentTopicsSnapshot -SessionDir $sessionDir
 
     $dailyFiles = @()
@@ -2507,7 +2571,7 @@ function Sync-CopilotSnapshot {
 
     if (-not [string]::IsNullOrWhiteSpace($ProjectDirectory)) {
         $projectAgentsText = Read-Text -Path (Join-Path $ProjectDirectory "AGENTS.md")
-        $projectCopilotInstructions = Read-Text -Path (Join-Path $ProjectDirectory ".github\copilot-instructions.md")
+        $projectCopilotInstructions = Read-Text -Path (Join-SharedPath @($ProjectDirectory, ".github", "copilot-instructions.md"))
     }
 
     if ([string]::IsNullOrWhiteSpace($projectAgentsText)) {
@@ -2556,8 +2620,8 @@ function Sync-TraeSnapshot {
     if (-not [string]::IsNullOrWhiteSpace($ProjectDirectory)) {
         $projectRules = Read-Text -Path (Join-Path $ProjectDirectory $Script:TraeProjectRulesRelativePath)
     }
-    $mcpUser = Read-Text -Path (Join-Path $env:APPDATA "Trae\User\mcp.json")
-    $mcpCn = Read-Text -Path (Join-Path $env:APPDATA "Trae CN\User\mcp.json")
+    $mcpUser = Read-Text -Path (Join-SharedPath @((Get-SharedTraeUserRoot -ProductName "Trae"), "mcp.json"))
+    $mcpCn = Read-Text -Path (Join-SharedPath @((Get-SharedTraeUserRoot -ProductName "Trae CN"), "mcp.json"))
     $historySnapshot = Get-TraeHistorySnapshot
 
     $content = @"
@@ -2662,8 +2726,10 @@ Read in this order before doing substantive work:
 2. $Script:CanonicalMemory
 3. $Script:CanonicalWorking
 4. $Script:GlobalContextPath
-5. $Script:SharedSkillsGuidePath
-6. $ExtraReadPath
+5. $Script:MemoryLayersGuidePath
+6. $Script:AutoDreamGuidePath
+7. $Script:SharedSkillsGuidePath
+8. $ExtraReadPath
 
 Writeback rules:
 - Durable user preferences, cross-project facts, and reusable decisions go to $WritebackPath
@@ -3313,7 +3379,7 @@ This file complements $Script:TraeUserRulesPath for this workspace.
             -Position "append"
         Write-TextIfChanged -Path $projectAgentsPath -Content $projectAgentsUpdated | Out-Null
 
-        $projectCopilotInstructionsPath = Join-Path $ProjectDirectory ".github\copilot-instructions.md"
+        $projectCopilotInstructionsPath = Join-SharedPath @($ProjectDirectory, ".github", "copilot-instructions.md")
         $projectCopilotSection = @"
 ## Shared Obsidian Memory Bus
 
@@ -3339,6 +3405,8 @@ function Generate-Artifacts {
     $memoryText = Read-Text -Path $Script:CanonicalMemory
     $workingText = Read-Text -Path $Script:CanonicalWorking
     $vaultAgentsText = Read-Text -Path $Script:VaultAgents
+    $memoryLayersText = Read-Text -Path $Script:MemoryLayersGuidePath
+    $autoDreamText = Read-Text -Path $Script:AutoDreamGuidePath
     $sharedSkillsText = Read-Text -Path $Script:SharedSkillsGuidePath
     $imported = Get-ImportedHighlights
     $inboxes = Get-InboxHighlights
@@ -3389,6 +3457,12 @@ $(Clip-Lines -Text $memoryText -MaxLines 120)
 ## Current Working Context
 $(Clip-Lines -Text $workingText -MaxLines 80)
 
+## Memory Layers
+$(if ([string]::IsNullOrWhiteSpace($memoryLayersText)) { "(memory layers summary not generated yet)" } else { Clip-Lines -Text $memoryLayersText -MaxLines 80 })
+
+## Auto Dream
+$(if ([string]::IsNullOrWhiteSpace($autoDreamText)) { "(auto dream summary not generated yet)" } else { Clip-Lines -Text $autoDreamText -MaxLines 80 })
+
 ## Shared Skills
 $(if ([string]::IsNullOrWhiteSpace($sharedSkillsText)) { "(shared skills guide not generated yet)" } else { Clip-Lines -Text $sharedSkillsText -MaxLines 120 })
 
@@ -3411,6 +3485,8 @@ $(if ($inboxSections.Count -gt 0) { [string]::Join("`n`n", $inboxSections) } els
             memory = $Script:CanonicalMemory
             working = $Script:CanonicalWorking
             globalContext = $Script:GlobalContextPath
+            memoryLayers = $Script:MemoryLayersGuidePath
+            autoDream = $Script:AutoDreamGuidePath
             sharedSkills = $Script:SharedSkillsGuidePath
         }
         registry = $Script:AgentRegistryPath
@@ -3472,7 +3548,11 @@ function Sync-AllSources {
         if (Test-Path -LiteralPath $Script:SharedSkillsSyncScript -PathType Leaf) {
             $wsArg = if ([string]::IsNullOrWhiteSpace($projectDirectory)) { "" } else { $projectDirectory }
             if (-not [string]::IsNullOrWhiteSpace($wsArg)) {
-                & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Script:SharedSkillsSyncScript -WorkspaceRoot $wsArg -AiMemoryRoot $Script:BusHome -Quiet 2>$null | Out-Null
+                Invoke-SharedPowerShellFile -ScriptPath $Script:SharedSkillsSyncScript -ArgumentList @(
+                    "-WorkspaceRoot", $wsArg,
+                    "-AiMemoryRoot", $Script:BusHome,
+                    "-Quiet"
+                ) 2>$null | Out-Null
             }
         }
     }
@@ -3534,6 +3614,8 @@ function Get-StatusObject {
     return [ordered]@{
         generatedAt = if (Test-Path -LiteralPath $Script:GlobalContextPath) { (Get-Item -LiteralPath $Script:GlobalContextPath).LastWriteTime.ToString("o") } else { $null }
         globalContext = $Script:GlobalContextPath
+        memoryLayers = $Script:MemoryLayersGuidePath
+        autoDream = $Script:AutoDreamGuidePath
         sharedSkillsGuide = $Script:SharedSkillsGuidePath
         sharedSkillsJson = $Script:SharedSkillsJsonPath
         claudeMirror = $Script:ClaudeMirror
@@ -3548,7 +3630,7 @@ function Get-StatusObject {
         traeRules = Join-Path $Script:TraeRulesRoot "user_rules.md"
         traeProjectRules = if ([string]::IsNullOrWhiteSpace($ProjectDirectory)) { $null } else { Join-Path $ProjectDirectory $Script:TraeProjectRulesRelativePath }
         projectAgents = if ([string]::IsNullOrWhiteSpace($ProjectDirectory)) { $null } else { Join-Path $ProjectDirectory "AGENTS.md" }
-        projectCopilotInstructions = if ([string]::IsNullOrWhiteSpace($ProjectDirectory)) { $null } else { Join-Path $ProjectDirectory ".github\copilot-instructions.md" }
+        projectCopilotInstructions = if ([string]::IsNullOrWhiteSpace($ProjectDirectory)) { $null } else { Join-SharedPath @($ProjectDirectory, ".github", "copilot-instructions.md") }
         vaultAgents = $Script:VaultAgents
         startup = $startupMap
         imported = $importedMap
