@@ -106,7 +106,6 @@ $Script:AgentRegistryPath = Join-Path $Script:BusHome "agents.json"
 $Script:OnboardingRoot = Join-Path $Script:GeneratedRoot "onboarding"
 $Script:UniversalArchitecturePath = Join-Path $Script:OnboardingRoot "ARCHITECTURE.md"
 $Script:UniversalBootstrapPath = Join-Path $Script:OnboardingRoot "UNIVERSAL-AGENT-BOOTSTRAP.md"
-$Script:SharedMcpManifestCache = $null
 $Script:PortableVaultPlaceholder = "<obsidian-vault>"
 $Script:PortableProjectRootPlaceholder = "<repo-root>"
 $Script:PortableTraeUserRulesPath = "~/.trae/user_rules.md"
@@ -119,7 +118,7 @@ $Script:PortableCopilotStartupPath = "{0}/00-System/ai-memory/generated/tool-sta
 $Script:PortableTraeInboxPath = "{0}/00-System/ai-memory/inbox/trae.md" -f $Script:PortableVaultPlaceholder
 $Script:PortableOpenCodeInboxPath = "{0}/00-System/ai-memory/inbox/opencode.md" -f $Script:PortableVaultPlaceholder
 $Script:PortableCopilotInboxPath = "{0}/00-System/ai-memory/inbox/copilot.md" -f $Script:PortableVaultPlaceholder
-$Script:SharedSkillsSyncScript = Resolve-BusScriptPath -Candidates @("sync-shared-skills.ps1", "ops/sync-shared-skills.ps1")
+$Script:SharedSkillsSyncScript = Resolve-BusScriptPath -Candidates @("sync-shared-skills.ps1", "ops\sync-shared-skills.ps1")
 $Script:ClaudeMemApiBase = "http://127.0.0.1:37778/api"
 $Script:BusLockTimeoutMs = 180000
 $Script:StaleSyncSeconds = 20
@@ -3284,21 +3283,23 @@ If the workspace contains `.trae/rules/project_rules.md`, treat it as the projec
         $traeProjectRules = @"
 # Trae Project Shared Memory Overlay
 
-Project root: $ProjectDirectory
+Project root: $Script:PortableProjectRootPlaceholder
 
-This file complements $Script:TraeUserRulesPath for this workspace.
+This file complements $Script:PortableTraeUserRulesPath for this workspace.
+
+Resolve $Script:PortableVaultPlaceholder from `AI_MEMORY_OBSIDIAN_VAULT`, `OBSIDIAN_VAULT_ROOT`, or the active vault in Obsidian.
 
 ## Read Order
-1. $Script:TraeUserRulesPath
-2. $Script:CanonicalObsidian
-3. $Script:CanonicalMemory
-4. $Script:CanonicalWorking
-5. $Script:GlobalContextPath
-6. $traeStartupPath
+1. $Script:PortableTraeUserRulesPath
+2. $Script:PortableCanonicalObsidian
+3. $Script:PortableCanonicalMemory
+4. $Script:PortableCanonicalWorking
+5. $Script:PortableGlobalContextPath
+6. $Script:PortableTraeStartupPath
 
 ## Writeback Policy
-- Cross-project durable facts go to $traeInboxPath
-- Current task progress goes to $Script:CanonicalWorking
+- Cross-project durable facts go to $Script:PortableTraeInboxPath
+- Current task progress goes to $Script:PortableCanonicalWorking
 - Project-specific durable conclusions belong in the relevant Obsidian project note
 - Never store secrets, raw tokens, or credentials
 "@
@@ -3365,9 +3366,10 @@ This file complements $Script:TraeUserRulesPath for this workspace.
 ## Shared Obsidian Memory Bus
 
 - Follow `CLAUDE.md` for repository-specific conventions and treat this section as the cross-tool memory overlay for OpenCode and GitHub Copilot.
-- Before substantive work, read $Script:CanonicalObsidian, $Script:CanonicalMemory, $Script:CanonicalWorking, $Script:GlobalContextPath, and $copilotStartupPath.
-- Durable writeback targets: $opencodeInboxPath (OpenCode), $copilotInboxPath (GitHub Copilot)
-- Current task tracking target: $Script:CanonicalWorking
+- Resolve $Script:PortableVaultPlaceholder from `AI_MEMORY_OBSIDIAN_VAULT`, `OBSIDIAN_VAULT_ROOT`, or the active vault in Obsidian.
+- Before substantive work, read $Script:PortableCanonicalObsidian, $Script:PortableCanonicalMemory, $Script:PortableCanonicalWorking, $Script:PortableGlobalContextPath, and $Script:PortableCopilotStartupPath.
+- Durable writeback targets: $Script:PortableOpenCodeInboxPath (OpenCode), $Script:PortableCopilotInboxPath (GitHub Copilot)
+- Current task tracking target: $Script:PortableCanonicalWorking
 - For tasks with 2 or more independent slices, default to multi-agent/subagent decomposition.
 - Use matching skills from `.claude/skills`, `.agents/skills`, `skills/`, and `.agents/skills/` when available.
 "@
@@ -3383,9 +3385,10 @@ This file complements $Script:TraeUserRulesPath for this workspace.
         $projectCopilotSection = @"
 ## Shared Obsidian Memory Bus
 
-- Before long or multi-step work, consult `AGENTS.md`, $Script:CanonicalMemory, $Script:CanonicalWorking, $Script:GlobalContextPath, and $copilotStartupPath.
-- Durable cross-project facts belong in $copilotInboxPath.
-- Current-task progress belongs in $Script:CanonicalWorking.
+- Resolve $Script:PortableVaultPlaceholder from `AI_MEMORY_OBSIDIAN_VAULT`, `OBSIDIAN_VAULT_ROOT`, or the active vault in Obsidian.
+- Before long or multi-step work, consult `AGENTS.md`, $Script:PortableCanonicalMemory, $Script:PortableCanonicalWorking, $Script:PortableGlobalContextPath, and $Script:PortableCopilotStartupPath.
+- Durable cross-project facts belong in $Script:PortableCopilotInboxPath.
+- Current-task progress belongs in $Script:PortableCanonicalWorking.
 - For tasks with 2 or more independent slices, prefer focused subagents or separate execution waves instead of one long-running context.
 "@
         $projectCopilotExisting = Read-Text -Path $projectCopilotInstructionsPath
