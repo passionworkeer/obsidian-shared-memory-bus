@@ -31,8 +31,11 @@ The source tree is grouped by responsibility (`bus/`, `ops/`, `retrieval/`, `sha
 - Shared `obsidian` MCP for direct note reads and writes
 - One shared `playwright` MCP backend so multi-agent browser tasks stop spawning one local Playwright server per client
 - Background watchdog sync from tool-native memory into structured shared memory
+- Watchdog heavy refresh gating based on real structured-memory signature changes instead of every observed source change
 - Auto-built `MEMORY-LAYERS` and `AUTO-DREAM` summaries for handoff, compaction, and durable promotion
 - Auto-built `HANDOFF` pack with bounded `goal / done / next / blocked / files / open_threads / tool_invariants`
+- Generated artifacts now carry explicit `contractVersion`, `recordSchemaVersion`, and content-hash-based `sourceStructuredSignature` metadata instead of relying only on timestamps
+- The governed structured-memory universe now explicitly includes imported `claude-code.jsonl` and `openclaw.jsonl`, not just local session/event/task layers
 - Generated onboarding packs that bundle shared HTTP MCP snippets, a portable skill template, and a thin plugin-adapter contract for new agents
 - OpenClaw session, job, run, blackboard, and journal sync into shared structured memory
 - Hybrid retrieval with `bm25`, offline dense `hashing-v1`, and optional remote embeddings
@@ -44,6 +47,7 @@ The source tree is grouped by responsibility (`bus/`, `ops/`, `retrieval/`, `sha
 - A warm shared Python retrieval worker behind the `memory` MCP so BM25 state and model caches can be reused across requests
 - Shared retrieval worker cache introspection and cache-reset control through `memory_status` and `clear_shared_memory_search_cache`
 - Runtime embedding catalog and selection controls through `list_embedding_runtimes` and `set_embedding_runtime`, with drift detection exposed as `memory_status.embeddingIndexState`
+- Versioned memory-contract validation through `ops/check-memory-integrity.js` and live integrity reporting through `memory_status.memoryIntegrity`
 - Pressure-test and verification tooling for multi-agent setups
 - An explicit source-to-install contract with stale runtime cleanup plus Windows and portable-core CI validation
 
@@ -255,13 +259,25 @@ Before changing runtime file names, paths, or startup entrypoints, validate the 
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-layout.ps1
+node .\ops\check-memory-integrity.js --strict
 ```
 
 ```bash
 ./scripts/validate-layout.sh
+node ./ops/check-memory-integrity.js --strict
 ```
 
 The installer also writes `~/.ai-memory/install-manifest.json` so upgrades can prune stale managed runtime files left behind by older layouts or renamed entrypoints.
+
+When rebuilding generated memory artifacts manually, keep the build order serial:
+
+```powershell
+node .\ops\build-memory-layers.js
+node .\ops\build-handoff-pack.js
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\ops\run-memory-dream.ps1 -Force
+```
+
+`HANDOFF` and `AUTO-DREAM` depend on the current structured-layer snapshot, so parallel rebuilds can produce intentionally detectable signature drift.
 
 CI guardrails for that contract live in `.github/workflows/portable-core.yml` and `.github/workflows/windows-validate.yml`.
 
@@ -320,8 +336,9 @@ The shared `memory` MCP now exposes a small control plane for this:
 - `list_embedding_runtimes`
 - `set_embedding_runtime`
 - `memory_status.embeddingIndexState`
+- `memory_status.memoryIntegrity`
 
-That means agents can discover the configured providers/profiles, switch the persisted selection, and immediately see whether the current dense index is aligned or whether a rebuild is still required.
+That means agents can discover the configured providers/profiles, switch the persisted selection, and immediately see whether the current dense index is aligned or whether a rebuild is still required. They can also inspect whether the structured memory files, generated summaries, and duplicate/invalid records are still in a healthy state instead of assuming the shared memory stack is fine just because the process is alive.
 
 `list_embedding_runtimes` now also annotates each provider/profile with:
 - `configHash`

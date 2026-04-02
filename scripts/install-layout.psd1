@@ -14,7 +14,9 @@
         ops = @(
             "build-handoff-pack.js"
             "build-memory-layers.js"
+            "check-memory-integrity.js"
             "cleanup-inbox.ps1"
+            "memory-contract.js"
             "obsidian-blackboard-daemon.js"
             "repair-codex-runtime.ps1"
             "run-memory-dream.ps1"

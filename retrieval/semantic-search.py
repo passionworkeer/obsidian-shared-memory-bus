@@ -83,14 +83,27 @@ NOISE_PATTERNS = [
     re.compile(r"^\[(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s", re.I),
     re.compile(r"^Run your Session Startup", re.I),
 ]
+STRUCTURED_FILES = [
+    "shared-inbox.jsonl",
+    "session-memory.jsonl",
+    "shared-events.jsonl",
+    "task-memory.jsonl",
+    "claude-code.jsonl",
+    "openclaw.jsonl",
+    "openclaw-blackboard.jsonl",
+    "openclaw-runs.jsonl",
+    "openclaw-jobs.jsonl",
+    "openclaw-journal.jsonl",
+]
 
 
 def build_file_stamp(file_path: str) -> str:
     if not os.path.exists(file_path):
         return "__missing__"
     try:
-        stat = os.stat(file_path)
-        return f"{os.path.basename(file_path)}:{stat.st_mtime_ns}:{stat.st_size}"
+        with open(file_path, "rb") as handle:
+            body = handle.read()
+        return f"{os.path.basename(file_path)}:{hashlib.sha1(body).hexdigest()}:{len(body)}"
     except Exception:
         return f"{os.path.basename(file_path)}:__unreadable__"
 
@@ -98,14 +111,7 @@ def build_file_stamp(file_path: str) -> str:
 def build_structured_signature() -> str:
     if not os.path.isdir(STRUCTURED_DIR):
         return "__missing__"
-    parts: List[str] = []
-    try:
-        for file_name in sorted(os.listdir(STRUCTURED_DIR)):
-            if not file_name.endswith(".jsonl"):
-                continue
-            parts.append(build_file_stamp(os.path.join(STRUCTURED_DIR, file_name)))
-    except Exception:
-        return "__unreadable__"
+    parts = [build_file_stamp(os.path.join(STRUCTURED_DIR, file_name)) for file_name in STRUCTURED_FILES]
     return "|".join(parts) if parts else "__empty__"
 
 
@@ -401,10 +407,10 @@ def _load_entries_uncached() -> List[dict]:
     if not os.path.isdir(STRUCTURED_DIR):
         return []
 
-    for file_name in sorted(os.listdir(STRUCTURED_DIR)):
-        if not file_name.endswith(".jsonl"):
-            continue
+    for file_name in STRUCTURED_FILES:
         file_path = os.path.join(STRUCTURED_DIR, file_name)
+        if not os.path.isfile(file_path):
+            continue
         try:
             with open(file_path, "r", encoding="utf-8") as handle:
                 for line in handle:
