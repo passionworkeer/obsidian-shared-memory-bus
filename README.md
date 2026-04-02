@@ -148,7 +148,8 @@ Shared MCP deduplicates processes. It does not merge all agent state into one co
   - `ops/run-memory-dream.ps1`
   - `ops/run-obsidian-mcp.ps1`
   - `ops/run-minimax-mcp.ps1`
-  - `ops/verify-integrations.ps1`
+  - `ops/install-client-integrations.ps1`
+  - `ops/verify-integrations.ps1` (compatibility alias to `ops/install-client-integrations.ps1`)
   - `ops/verify-client-integrations.ps1`
   - `ops/sync-shared-skills.ps1`
   - `ops/run-pressure-test.ps1`
@@ -242,12 +243,12 @@ Public docs and tracked overlay files should never be committed with private pat
 ## Install
 Windows:
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -WorkspaceRoot <your-project-root>
 ```
 
 macOS/Linux (`pwsh` required):
 ```bash
-./scripts/install.sh
+./scripts/install.sh -WorkspaceRoot <your-project-root>
 ```
 
 On Windows, the installer writes `AI_MEMORY_ROOT` into your user environment and registers per-user startup hooks through the Startup folder.
@@ -255,6 +256,13 @@ On macOS, startup registration is emitted as LaunchAgents. On Linux, it prefers 
 On macOS/Linux, the installer generates `~/.ai-memory/activate-ai-memory.sh` and `~/.ai-memory/activate-ai-memory.ps1` instead of mutating shell startup files automatically.
 It also generates root-level `.sh` wrappers for installed runtime commands, so macOS/Linux users can call `~/.ai-memory/run-pressure-test.sh`, `~/.ai-memory/verify-client-integrations.sh`, `~/.ai-memory/memory-bus.sh`, and similar entrypoints directly. Those wrappers are POSIX `sh`, not Bash-only scripts.
 Before install, source-tree direct runs can fall back to `templates/config/runtime.json`; the installed runtime should use `~/.ai-memory/config/runtime.json`.
+
+## Install / Apply / Verify Contract
+- `scripts/install.ps1` and `scripts/install.sh` are the one-click entrypoints. When you pass `-WorkspaceRoot <repo-root>`, they install the flat runtime, regenerate onboarding artifacts, and auto-apply supported client integrations.
+- `install-client-integrations.ps1` is the official side-effecting apply command for updating supported home-scoped client configs plus workspace overlays without reinstalling the runtime.
+- `verify-integrations.ps1` and `verify-integrations.sh` remain only as compatibility aliases for that apply step. They still mutate configs.
+- `verify-client-integrations.ps1` and `verify-client-integrations.sh` are the hard validation gates.
+- The default applied server set is every manifest entry with `mode=shared`, plus shared `playwright`. Shared `MiniMax` is opt-in through `-IncludeOptionalServers` or `-IncludeOptionalClientServers`.
 
 ## Maintainer Guardrails
 Before changing runtime file names, paths, or startup entrypoints, validate the source-to-install contract:
@@ -285,27 +293,39 @@ CI guardrails for that contract live in `.github/workflows/portable-core.yml` an
 
 ## Minimal Quick Start
 
-> **What is `<your-project-root>`?** It is the directory where your AI agent's config files live. For Claude Code, this is your `.claude/` directory. For Codex, it is your `.codex/` directory. For other agents, point it at the directory where that agent stores its settings. The scripts will write per-agent MCP config snippets into a `mcp configs/` subdirectory there; they will not modify your existing settings directly.
+> **What is `<your-project-root>`?** It is the repository or workspace root where you want the portable overlays written, for example `E:\repo\my-app`. The installer writes global user-level client config under each host's home directory when supported, and writes workspace overlays such as `.cursor/mcp.json`, `.vscode/mcp.json`, `.claude/rules/shared-memory.md`, and `opencode.json` under this repo root.
 
 > **Prerequisites**: An Obsidian vault already exists with at least the `00-System/ai-memory/` directory structure. If your vault is empty or on a different drive, set `AI_MEMORY_OBSIDIAN_VAULT` to its root path before running.
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\start-default-shared-mcp.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\verify-integrations.ps1 -WorkspaceRoot <your-project-root>
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -WorkspaceRoot <your-project-root>
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks -RunRuntimeChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks -RunToolCalls -RunClientTaskChecks
 ```
 
 ```bash
-./scripts/install.sh
-~/.ai-memory/shared-mcp/start-default-shared-mcp.sh
-~/.ai-memory/verify-integrations.sh -WorkspaceRoot <your-project-root>
-~/.ai-memory/verify-client-integrations.sh -WorkspaceRoot <your-project-root> -RunCliChecks
-~/.ai-memory/run-pressure-test.sh -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks
+./scripts/install.sh -WorkspaceRoot <your-project-root>
+~/.ai-memory/verify-client-integrations.sh -WorkspaceRoot <your-project-root> -RunCliChecks -RunRuntimeChecks
+~/.ai-memory/run-pressure-test.sh -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks -RunToolCalls -RunClientTaskChecks
 ```
 
-**What to expect**: The pressure test runs 5 waves of concurrent MCP health checks against all shared endpoints (9331-9338). "passed" means every wave returned the expected responses with no crashes or duplicate PIDs. If you see failures, see [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) or the operational FAQ in [`docs/FAQ.md`](docs/FAQ.md).
+`scripts/install.ps1` now installs the flat runtime, generates onboarding artifacts, starts the watchdog/shared MCP stack for the current session, and automatically applies supported client integrations when `-WorkspaceRoot` is provided.
+
+If you want to re-apply client wiring without reinstalling the runtime, use:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\install-client-integrations.ps1 -WorkspaceRoot <your-project-root>
+```
+
+```bash
+~/.ai-memory/install-client-integrations.sh -WorkspaceRoot <your-project-root>
+```
+
+By default, client wiring applies every server whose manifest `mode` is `shared`, plus `playwright`. `MiniMax` remains opt-in through `-IncludeOptionalServers` or `-IncludeOptionalClientServers`.
+
+`verify-integrations.ps1` and `verify-integrations.sh` are compatibility aliases that now forward into `install-client-integrations`. They are side-effecting apply commands, not validation gates.
+
+**What to expect**: The pressure test runs 5 mixed waves of shared MCP health checks, direct `memory` tool calls, and real client task probes. "passed" means every wave returned the expected responses with no crashes, duplicate listeners, or PID churn. If you see failures, see [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) or the operational FAQ in [`docs/FAQ.md`](docs/FAQ.md).
 
 ## Optional Remote Embeddings
 The default dense retrieval backend is offline `hashing-v1`.

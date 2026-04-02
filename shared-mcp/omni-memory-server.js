@@ -175,6 +175,7 @@ function resolvePowerShellCommand() {
 
 const SEARCH_SCRIPT = resolveRuntimePath("semantic-search.py", path.join("retrieval", "semantic-search.py"));
 const EMBEDDINGS_SCRIPT = resolveRuntimePath("generate-embeddings.js", path.join("bus", "generate-embeddings.js"));
+const MEMORY_BUS_SCRIPT = resolveRuntimePath("memory-bus.ps1", path.join("bus", "memory-bus.ps1"));
 const HANDOFF_PACK_SCRIPT = resolveRuntimePath("build-handoff-pack.js", path.join("ops", "build-handoff-pack.js"));
 const MEMORY_LAYERS_SCRIPT = resolveRuntimePath("build-memory-layers.js", path.join("ops", "build-memory-layers.js"));
 const MEMORY_DREAM_SCRIPT = resolveRuntimePath("run-memory-dream.ps1", path.join("ops", "run-memory-dream.ps1"));
@@ -214,6 +215,38 @@ let searchWorkerStartedAt = "";
 let searchWorkerLastError = "";
 let searchWorkerRestartCount = 0;
 const searchWorkerPending = new Map();
+
+function isSearchWorkerRunning() {
+  return Boolean(searchWorker && !searchWorker.killed && searchWorker.exitCode === null);
+}
+
+function getSearchWorkerSnapshot() {
+  return {
+    enabled: true,
+    running: isSearchWorkerRunning(),
+    pid: searchWorker?.pid || null,
+    startedAt: searchWorkerStartedAt || null,
+    pendingRequests: searchWorkerPending.size,
+    restartCount: searchWorkerRestartCount,
+    lastError: searchWorkerLastError || "",
+    mode: "persistent-jsonl-with-oneshot-fallback",
+  };
+}
+
+function buildEmbeddingRuntimeRestartSignature(runtimeSummary = {}) {
+  return JSON.stringify({
+    profile: String(runtimeSummary?.profile || runtimeSummary?.profileName || "").trim(),
+    provider: String(runtimeSummary?.provider || runtimeSummary?.providerName || "").trim(),
+    adapter: String(runtimeSummary?.adapter || runtimeSummary?.backend || "hash").trim() || "hash",
+    backend: String(runtimeSummary?.backend || runtimeSummary?.adapter || "hash").trim() || "hash",
+    model: String(runtimeSummary?.model || "").trim(),
+    baseUrl: String(runtimeSummary?.baseUrl || "").trim(),
+    timeoutMs: Number(runtimeSummary?.timeoutMs || 0),
+    requestDelayMs: Number(runtimeSummary?.requestDelayMs || runtimeSummary?.delayMs || 0),
+    batchSize: Number(runtimeSummary?.batchSize || 0),
+    allowBatchFallback: Boolean(runtimeSummary?.allowBatchFallback),
+  });
+}
 
 function isProcessAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) {
@@ -341,8 +374,107 @@ function handleSearchWorkerExit(code, signal) {
   resetSearchWorkerState(reason);
 }
 
+async function stopSearchWorker(reason = "search-worker-stop-requested") {
+  if (searchWorkerStartupPromise) {
+    try {
+      await searchWorkerStartupPromise;
+    } catch (_error) {
+      // Startup failure already updates the shared worker state.
+    }
+  }
+
+  const child = searchWorker;
+  if (!child || child.killed || child.exitCode !== null) {
+    return {
+      ok: true,
+      stopped: false,
+      previousPid: child?.pid || null,
+      reason: "search-worker-not-running",
+    };
+  }
+
+  return await new Promise((resolve) => {
+    let settled = false;
+    const previousPid = child.pid || null;
+
+    const finish = (payload) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve({
+        ok: true,
+        previousPid,
+        ...payload,
+      });
+    };
+
+    const exitHandler = (code, signal) => {
+      clearTimeout(timeout);
+      finish({
+        stopped: true,
+        exitCode: code ?? null,
+        signal: signal ?? null,
+        reason: `search-worker-exited: code=${code ?? "null"} signal=${signal ?? "null"}`,
+      });
+    };
+
+    const timeout = setTimeout(() => {
+      child.removeListener("exit", exitHandler);
+      try {
+        child.kill("SIGKILL");
+      } catch (_error) {
+        // Best-effort hard stop only.
+      }
+      resetSearchWorkerState(`${reason}-timeout`);
+      finish({
+        stopped: false,
+        exitCode: child.exitCode ?? null,
+        signal: "timeout",
+        reason: `${reason}-timeout`,
+      });
+    }, 5000);
+
+    child.once("exit", exitHandler);
+
+    try {
+      child.kill();
+    } catch (error) {
+      clearTimeout(timeout);
+      child.removeListener("exit", exitHandler);
+      resetSearchWorkerState(String(error?.message || error));
+      finish({
+        stopped: false,
+        exitCode: child.exitCode ?? null,
+        signal: "kill-error",
+        reason: String(error?.message || error),
+      });
+    }
+  });
+}
+
+async function restartSearchWorker(reason = "search-worker-restart-requested") {
+  const before = getSearchWorkerSnapshot();
+  const stop = await stopSearchWorker(reason);
+  const child = await ensureSearchWorker();
+  const health = await getSearchWorkerHealth();
+  const after = getSearchWorkerSnapshot();
+  return {
+    ok: true,
+    requested: true,
+    reason,
+    previousPid: before.pid,
+    currentPid: child?.pid || null,
+    pidChanged: Number.isInteger(before.pid) && before.pid > 0 ? before.pid !== (child?.pid || null) : null,
+    stop,
+    before,
+    after,
+    health,
+  };
+}
+
 async function ensureSearchWorker() {
-  if (searchWorker && !searchWorker.killed && searchWorker.exitCode === null) {
+  if (isSearchWorkerRunning()) {
     return searchWorker;
   }
 
@@ -529,7 +661,12 @@ function readWatchdogState() {
       ? Math.max(0, Math.round((Date.now() - updatedAtMs) / 1000))
       : null;
     const staleByAge = Number.isFinite(updatedAtMs)
-      ? Date.now() - updatedAtMs > Math.max(60_000, (Number(payload?.pollSeconds || 15) || 15) * 8_000)
+      ? Date.now() - updatedAtMs >
+        Math.max(
+          60_000,
+          (Number(payload?.pollSeconds || 15) || 15) * 8_000,
+          (Number(payload?.staleMinutes || 0) || 0) * 60_000
+        )
       : false;
     const running = reportedRunning && pidAlive && !staleByAge;
     return {
@@ -906,66 +1043,14 @@ async function rebuildEmbeddings({ force = false }) {
   };
 }
 
-async function rebuildMemoryLayers() {
-  if (!fs.existsSync(MEMORY_LAYERS_SCRIPT)) {
-    throw new Error(`memory-layers-script-missing: ${MEMORY_LAYERS_SCRIPT}`);
-  }
-
-  const result = await spawnProcess(process.execPath, [MEMORY_LAYERS_SCRIPT], {
-    env: {
-      ...RUNTIME_ENV,
-      AI_MEMORY_OBSIDIAN_VAULT: VAULT_ROOT,
-    },
-  });
-
-  if (result.code !== 0) {
-    throw new Error(result.stderr.trim() || result.stdout.trim() || `memory-layers-exit-${result.code}`);
-  }
-
-  return {
-    ok: true,
-    stdout: result.stdout.trim(),
-    stderr: result.stderr.trim(),
-    summary: readOptionalJson(MEMORY_LAYERS_JSON_PATH),
-  };
-}
-
-async function buildHandoffPack() {
-  if (!fs.existsSync(HANDOFF_PACK_SCRIPT)) {
-    throw new Error(`handoff-pack-script-missing: ${HANDOFF_PACK_SCRIPT}`);
-  }
-
-  const result = await spawnProcess(process.execPath, [HANDOFF_PACK_SCRIPT], {
-    env: {
-      ...RUNTIME_ENV,
-      AI_MEMORY_OBSIDIAN_VAULT: VAULT_ROOT,
-    },
-  });
-
-  if (result.code !== 0) {
-    throw new Error(result.stderr.trim() || result.stdout.trim() || `handoff-pack-exit-${result.code}`);
-  }
-
-  return {
-    ok: true,
-    stdout: result.stdout.trim(),
-    stderr: result.stderr.trim(),
-    summary: readOptionalJson(HANDOFF_PACK_JSON_PATH),
-  };
-}
-
-async function runMemoryDream({ force = false }) {
-  if (!fs.existsSync(MEMORY_DREAM_SCRIPT)) {
-    throw new Error(`memory-dream-script-missing: ${MEMORY_DREAM_SCRIPT}`);
+async function refreshDerivedArtifacts() {
+  if (!fs.existsSync(MEMORY_BUS_SCRIPT)) {
+    throw new Error(`memory-bus-script-missing: ${MEMORY_BUS_SCRIPT}`);
   }
 
   const args = IS_WINDOWS
-    ? ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", MEMORY_DREAM_SCRIPT]
-    : ["-NoProfile", "-File", MEMORY_DREAM_SCRIPT];
-  if (force) {
-    args.push("-Force");
-  }
-
+    ? ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", MEMORY_BUS_SCRIPT, "-Action", "RefreshDerivedArtifacts", "-Quiet"]
+    : ["-NoProfile", "-File", MEMORY_BUS_SCRIPT, "-Action", "RefreshDerivedArtifacts", "-Quiet"];
   const result = await spawnProcess(POWERSHELL_COMMAND, args, {
     env: {
       ...RUNTIME_ENV,
@@ -974,14 +1059,50 @@ async function runMemoryDream({ force = false }) {
   });
 
   if (result.code !== 0) {
-    throw new Error(result.stderr.trim() || result.stdout.trim() || `memory-dream-exit-${result.code}`);
+    throw new Error(result.stderr.trim() || result.stdout.trim() || `refresh-derived-artifacts-exit-${result.code}`);
   }
 
   return {
     ok: true,
     stdout: result.stdout.trim(),
     stderr: result.stderr.trim(),
-    summary: readOptionalJson(AUTO_DREAM_JSON_PATH),
+    memoryLayers: readOptionalJson(MEMORY_LAYERS_JSON_PATH),
+    handoffPack: readOptionalJson(HANDOFF_PACK_JSON_PATH),
+    autoDream: readOptionalJson(AUTO_DREAM_JSON_PATH),
+  };
+}
+
+async function rebuildMemoryLayers() {
+  const result = await refreshDerivedArtifacts();
+
+  return {
+    ok: true,
+    stdout: result.stdout.trim(),
+    stderr: result.stderr.trim(),
+    summary: result.memoryLayers,
+  };
+}
+
+async function buildHandoffPack() {
+  const result = await refreshDerivedArtifacts();
+
+  return {
+    ok: true,
+    stdout: result.stdout.trim(),
+    stderr: result.stderr.trim(),
+    summary: result.handoffPack,
+  };
+}
+
+async function runMemoryDream({ force = false }) {
+  const result = await refreshDerivedArtifacts();
+
+  return {
+    ok: true,
+    stdout: result.stdout.trim(),
+    stderr: result.stderr.trim(),
+    summary: result.autoDream,
+    force,
   };
 }
 
@@ -1316,14 +1437,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           error: PYTHON.error,
         },
         searchWorker: {
-          enabled: true,
-          running: Boolean(searchWorker && !searchWorker.killed && searchWorker.exitCode === null),
-          pid: searchWorker?.pid || null,
-          startedAt: searchWorkerStartedAt || null,
-          pendingRequests: searchWorkerPending.size,
-          restartCount: searchWorkerRestartCount,
-          lastError: searchWorkerLastError || "",
-          mode: "persistent-jsonl-with-oneshot-fallback",
+          ...getSearchWorkerSnapshot(),
           health: workerHealth,
         },
         watchdog: readWatchdogState(),
@@ -1378,6 +1492,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "set_embedding_runtime") {
+      const previousRuntime = readEmbeddingRuntimeSummary();
+      const workerWasRunning = isSearchWorkerRunning();
       const payload = updateEmbeddingRuntimeSelection({
         rootPath: AI_MEMORY_ROOT,
         getEnvValue: firstNonEmptyEnv,
@@ -1389,10 +1505,37 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       });
       const embeddings = readEmbeddingsSummary();
       const catalog = annotateEmbeddingRuntimeCatalog(payload.catalog, embeddings);
+      const runtimeSignatureBefore = buildEmbeddingRuntimeRestartSignature(previousRuntime);
+      const runtimeSignatureAfter = buildEmbeddingRuntimeRestartSignature(catalog.runtime || payload.runtime || {});
+      const runtimeChanged = runtimeSignatureBefore !== runtimeSignatureAfter;
+      const workerSnapshot = getSearchWorkerSnapshot();
+      const searchWorkerRestart =
+        runtimeChanged && workerWasRunning
+          ? await restartSearchWorker("embedding-runtime-changed")
+          : {
+              ok: true,
+              requested: runtimeChanged,
+              reason: runtimeChanged ? "embedding-runtime-updated-worker-idle" : "embedding-runtime-unchanged",
+              workerWasRunning,
+              previousPid: workerSnapshot.pid,
+              currentPid: workerSnapshot.pid,
+              pidChanged: false,
+              stop: {
+                ok: true,
+                stopped: false,
+                previousPid: workerSnapshot.pid,
+                reason: runtimeChanged ? "search-worker-idle-no-restart-needed" : "embedding-runtime-unchanged",
+              },
+              before: workerSnapshot,
+              after: workerSnapshot,
+              health: workerWasRunning ? await getSearchWorkerHealth() : null,
+            };
       return jsonResult({
         ...payload,
+        runtimeChanged,
         catalog,
         embeddingIndexState: buildEmbeddingIndexState(catalog.runtime, embeddings),
+        searchWorkerRestart,
       });
     }
 

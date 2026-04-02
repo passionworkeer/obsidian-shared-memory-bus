@@ -16,8 +16,10 @@
             "build-memory-layers.js"
             "check-memory-integrity.js"
             "cleanup-inbox.ps1"
+            "install-client-integrations.ps1"
             "memory-contract.js"
             "obsidian-blackboard-daemon.js"
+            "refresh-generated-artifacts.js"
             "repair-codex-runtime.ps1"
             "run-memory-dream.ps1"
             "run-minimax-mcp.ps1"
@@ -35,6 +37,7 @@
             "embedding_providers.py"
             "probe-models.py"
             "runtime_support.py"
+            "semantic-search-cli.js"
             "semantic-search.js"
             "semantic-search.py"
         )
@@ -63,7 +66,6 @@
     LegacyCleanupFiles = @(
         "benchmark-embedding-backends.py"
         "export-bundle.ps1"
-        "install-client-integrations.ps1"
         "probe-embedding-models.py"
         "run-shared-stack-pressure-test.ps1"
     )

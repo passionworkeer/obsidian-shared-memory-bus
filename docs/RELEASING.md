@@ -21,16 +21,16 @@ Expected result for a clean public branch:
 ## Minimum Validation
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-layout.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -WorkspaceRoot <repo-root>
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\start-default-shared-mcp.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\verify-client-integrations.ps1 -WorkspaceRoot <repo-root> -RunCliChecks -RunRuntimeChecks
 ```
 
 ```bash
 ./scripts/validate-layout.sh
-./scripts/install.sh
+./scripts/install.sh -WorkspaceRoot <repo-root>
 ~/.ai-memory/shared-mcp/start-default-shared-mcp.sh
-pwsh -NoProfile -File ~/.ai-memory/verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
+pwsh -NoProfile -File ~/.ai-memory/verify-client-integrations.ps1 -WorkspaceRoot <repo-root> -RunCliChecks -RunRuntimeChecks
 ```
 
 Run the pressure test if anything changed in shared MCP behavior, agent wiring, or memory indexing.

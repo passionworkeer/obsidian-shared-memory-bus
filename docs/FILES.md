@@ -1,5 +1,7 @@
 # File Map
 
+> **Storage note**: The retrieval layer uses Python's standard-library `sqlite3` (no native Node.js bindings required). The shared `memory` MCP and OpenClaw blackboard daemon both route through Python for SQLite access.
+
 ## Core Bus Runtime (`bus/`)
 - `bus/memory-bus.ps1`
 - `bus/memory-watchdog.ps1`
@@ -12,7 +14,9 @@
 - `ops/build-handoff-pack.js`
 - `ops/build-memory-layers.js`
 - `ops/cleanup-inbox.ps1`
+- `ops/install-client-integrations.ps1`
 - `ops/obsidian-blackboard-daemon.js`
+- `ops/refresh-generated-artifacts.js`
 - `ops/repair-codex-runtime.ps1`
 - `ops/run-memory-dream.ps1`
 - `ops/run-minimax-mcp.ps1`
@@ -22,12 +26,13 @@
 - `ops/sync-openclaw-to-obsidian.js`
 - `ops/sync-shared-skills.ps1`
 - `ops/verify-client-integrations.ps1`
-- `ops/verify-integrations.ps1`
+- `ops/verify-integrations.ps1` (compatibility alias to `ops/install-client-integrations.ps1`)
 
 ## Retrieval and Embeddings (`retrieval/`)
 - `retrieval/benchmark-architecture.py`
 - `retrieval/benchmark-backends.py`
 - `retrieval/probe-models.py`
+- `retrieval/semantic-search-cli.js`
 - `retrieval/semantic-search.py`
 - `retrieval/semantic-search.js`
 
@@ -46,28 +51,24 @@
 
 ## Install Helpers
 - `scripts/install-layout.psd1`
+- `scripts/install-client-integrations.ps1`
+- `scripts/install-client-integrations.sh`
+- `scripts/install.sh`
 - `scripts/install.ps1`
 - `scripts/upgrade.ps1`
+- `scripts/validate-layout.sh`
 - `scripts/validate-layout.ps1`
 
 ## Templates
 - `templates/agents.json`
+- `templates/agents/README.md`
+- `templates/agents/portable-skill/SKILL.md`
+- `templates/agents/thin-plugin/.codex-plugin/plugin.json`
+- `templates/config/runtime.json`
 
-## Docs
-- `docs/DEPLOYMENT-MATRIX.md`
-- `docs/FAQ.md`
-- `docs/FILES.md`
-- `docs/INSTALL.md`
-- `docs/INTEGRATION-MODES.md`
-- `docs/MCP-DEDUP.md`
-- `docs/ARCHITECTURE.md`
-- `docs/NEW-AGENT-INTEGRATION.md`
-- `docs/OPERATIONS.md`
-- `docs/RELEASING.md`
-- `docs/ROADMAP.md`
-- `docs/SECURITY.md`
-- `docs/TROUBLESHOOTING.md`
-- `docs/VALIDATION.md`
+## Architecture Decision Records
+- `docs/ADR-001-shared-memory-architecture.md` — Superseded by ADR-002
+- `docs/ADR-002-unified-memory-architecture-v2.md` — Unified architecture (OpenClaw + Claude Code + claude-mem benchmark)
 
 ## Repo Metadata
 - `AGENTS.md`
