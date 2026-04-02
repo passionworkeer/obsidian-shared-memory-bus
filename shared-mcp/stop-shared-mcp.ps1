@@ -22,6 +22,13 @@ $manifestPath = Join-Path $root "manifest.json"
 $statePath = Join-Path $root "state.json"
 $stateMutexName = Get-SharedMutexName -BaseName "WangSharedMcpStateV1"
 
+function Ensure-Directory {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) {
+        [void](New-Item -ItemType Directory -Path $Path -Force)
+    }
+}
+
 function Normalize-RequestedIds {
     param([string[]]$Ids)
 
@@ -47,7 +54,8 @@ function Read-State {
     }
 
     try {
-        $parsed = Get-Content -Raw -LiteralPath $statePath -Encoding utf8 | ConvertFrom-Json
+        $content = Get-Content -Raw -LiteralPath $statePath -Encoding utf8
+        $parsed = $content | ConvertFrom-Json
         $map = @{}
         foreach ($property in @($parsed.PSObject.Properties)) {
             $entry = @{}
@@ -58,8 +66,21 @@ function Read-State {
         }
         return $map
     } catch {
+        $backup = "$statePath.corrupt.$(Get-Date -Format 'yyyyMMddHHmmss')"
+        try { Move-Item -LiteralPath $statePath -Destination $backup -Force } catch {}
+        Write-Warning "[shared-mcp] state.json was corrupt, backed up to $backup"
         return @{}
     }
+}
+
+function Write-State {
+    param([Parameter(Mandatory = $true)][hashtable]$State)
+
+    Ensure-Directory -Path (Split-Path -Parent $statePath)
+    $tempPath = "$statePath.tmp"
+    $json = $State | ConvertTo-Json -Depth 8
+    [System.IO.File]::WriteAllText($tempPath, $json, (New-Object System.Text.UTF8Encoding($false)))
+    Move-Item -LiteralPath $tempPath -Destination $statePath -Force
 }
 
 $manifest = Get-Content -Raw -LiteralPath $manifestPath -Encoding utf8 | ConvertFrom-Json
@@ -86,9 +107,6 @@ try {
         }
 
         $candidatePids = New-Object System.Collections.Generic.List[int]
-        if ($record -and $record.ContainsKey("pid")) {
-            $candidatePids.Add([int]$record["pid"]) | Out-Null
-        }
         if ($server.PSObject.Properties.Name -contains "port") {
             foreach ($listenerPid in @(Get-SharedListeningProcessIds -Port ([int]$server.port))) {
                 if ([int]$listenerPid -gt 0) {
@@ -117,6 +135,28 @@ try {
                 pid = $procId
             }) | Out-Null
         }
+
+        if ($server.PSObject.Properties.Name -contains "port") {
+            $portCleared = $false
+            for ($attempt = 0; $attempt -lt 10; $attempt++) {
+                $remainingListeners = @(Get-SharedListeningProcessIds -Port ([int]$server.port))
+                if ($remainingListeners.Count -eq 0) {
+                    $portCleared = $true
+                    break
+                }
+                Start-Sleep -Milliseconds 250
+            }
+
+            if (-not $portCleared) {
+                $remaining[$id] = $record
+                $results.Add([pscustomobject]@{
+                    id = $id
+                    status = "stop-pending"
+                    pid = (@(Get-SharedListeningProcessIds -Port ([int]$server.port)) | Select-Object -First 1)
+                }) | Out-Null
+                continue
+            }
+        }
     }
 
     foreach ($entry in $state.GetEnumerator()) {
@@ -128,9 +168,7 @@ try {
         }
         $remaining[[string]$entry.Key] = $entry.Value
     }
-
-    $json = $remaining | ConvertTo-Json -Depth 8
-    [System.IO.File]::WriteAllText($statePath, $json, (New-Object System.Text.UTF8Encoding($false)))
+    Write-State -State $remaining
     $results | ConvertTo-Json -Depth 5
 } finally {
     try {

@@ -1,0 +1,808 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/passionworkeer/obsidian-shared-memory-bus/main/docs/MCP-TOOLS.schema.json",
+  "title": "Omni-Memory-Mesh MCP Tool Schemas",
+  "description": "JSON Schema Draft-07 definitions for all MCP tools exposed by omni-memory-server.js (omni-memory-mesh v3.1.0).",
+  "definitions": {
+    "OkResponse": {
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean", "const": true }
+      },
+      "required": ["ok"],
+      "additionalProperties": true
+    },
+    "ErrorResponse": {
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean", "const": false },
+        "error": { "type": "string" }
+      },
+      "required": ["ok", "error"]
+    },
+    "ToolResult": {
+      "oneOf": [
+        { "$ref": "#/definitions/OkResponse" },
+        { "$ref": "#/definitions/ErrorResponse" }
+      ]
+    },
+
+    "search_shared_memory.input": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "search_shared_memory — input",
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Natural-language search query.",
+          "minLength": 1
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["bm25", "dense", "hybrid", "auto"],
+          "default": "hybrid",
+          "description": "Retrieval mode. hybrid is recommended."
+        },
+        "strategy": {
+          "type": "string",
+          "enum": ["bm25", "dense", "hybrid", "auto"],
+          "description": "Alias for mode. Takes precedence when both mode and strategy are provided."
+        },
+        "route": {
+          "type": "string",
+          "enum": ["auto", "mixed", "durable", "task", "recent", "reference"],
+          "default": "auto",
+          "description": "Query routing profile. auto infers the best layer mix from query intent."
+        },
+        "limit": {
+          "type": "number",
+          "default": 8,
+          "minimum": 1,
+          "description": "Maximum number of results returned."
+        },
+        "tool": {
+          "type": "string",
+          "description": "Optional exact tool filter (substring match on tool name)."
+        },
+        "project": {
+          "type": "string",
+          "description": "Optional project/workspace substring filter."
+        },
+        "scope": {
+          "type": "string",
+          "description": "Optional scope filter: user, feedback, project, task, run, or summary."
+        },
+        "sourceKind": {
+          "type": "string",
+          "description": "Optional source kind filter: session, writeback, cron, run, or blackboard."
+        },
+        "workspace": {
+          "type": "string",
+          "description": "Optional workspace filter."
+        },
+        "taskState": {
+          "type": "string",
+          "description": "Optional task state filter."
+        },
+        "preferSummaries": {
+          "type": "boolean",
+          "default": false,
+          "description": "Boost session/summary records slightly in ranking."
+        }
+      },
+      "required": ["query"],
+      "additionalProperties": false
+    },
+
+    "search_shared_memory.output": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "search_shared_memory — output",
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean" },
+        "error": { "type": "string" },
+        "isError": { "type": "boolean" },
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "string",
+                "description": "Text content of the memory entry."
+              },
+              "source": {
+                "type": "string",
+                "description": "File path or origin of the entry."
+              },
+              "tool": {
+                "type": "string",
+                "description": "Originating tool that created the entry."
+              },
+              "score": {
+                "type": "number",
+                "description": "Relevance score (0–1)."
+              },
+              "metadata": {
+                "type": "object",
+                "description": "Additional entry metadata (tool-specific)."
+              },
+              "path": {
+                "type": "string",
+                "description": "Obsidian file path."
+              },
+              "scope": {
+                "type": "string",
+                "description": "Scope label (user, feedback, project, task, run, summary)."
+              },
+              "sourceKind": {
+                "type": "string",
+                "description": "Source kind label."
+              },
+              "workspace": {
+                "type": "string",
+                "description": "Workspace identifier."
+              },
+              "taskState": {
+                "type": "string",
+                "description": "Task state label."
+              },
+              "tags": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Content tags."
+              }
+            },
+            "required": ["content"]
+          }
+        },
+        "route": {
+          "type": "string",
+          "description": "Actual route used (may differ from input if 'auto' was specified)."
+        },
+        "mode": {
+          "type": "string",
+          "description": "Actual retrieval mode used."
+        },
+        "total": {
+          "type": "number",
+          "description": "Total number of matching records (may exceed limit)."
+        }
+      }
+    },
+
+    "memory_status.input": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "memory_status — input",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+
+    "memory_status.output": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "memory_status — output",
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean" },
+        "generatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO-8601 timestamp when this status was generated."
+        },
+        "pythonRuntime": {
+          "type": "object",
+          "properties": {
+            "command": { "type": "string", "description": "Python executable path or name." },
+            "argsPrefix": { "type": "array", "items": { "type": "string" } },
+            "source": { "type": "string", "description": "Resolution source: resolved, env, fallback." },
+            "available": { "type": "boolean" },
+            "version": { "type": "string" },
+            "error": { "type": "string" }
+          },
+          "required": ["available"]
+        },
+        "searchWorker": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "running": { "type": "boolean" },
+            "pid": { "type": ["number", "null"] },
+            "startedAt": { "type": ["string", "null"] },
+            "pendingRequests": { "type": "number" },
+            "restartCount": { "type": "number" },
+            "lastError": { "type": "string" },
+            "mode": { "type": "string" },
+            "health": {
+              "type": "object",
+              "properties": {
+                "ok": { "type": "boolean" },
+                "status": { "type": "string" }
+              }
+            }
+          }
+        },
+        "watchdog": {
+          "type": ["object", "null"],
+          "properties": {
+            "pid": { "type": "number" },
+            "running": { "type": "boolean" },
+            "stale": { "type": "boolean" },
+            "stateAgeSeconds": { "type": ["number", "null"] },
+            "status": { "type": "string", "enum": ["running", "stale", "stopped"] },
+            "pollSeconds": { "type": "number" },
+            "updatedAt": { "type": "string" }
+          }
+        },
+        "memoryIntegrity": {
+          "type": "object",
+          "description": "File contract integrity report from memory-contract.js.",
+          "properties": {
+            "ok": { "type": "boolean" },
+            "files": { "type": "array" }
+          }
+        },
+        "embeddingRuntime": {
+          "type": "object",
+          "properties": {
+            "profile": { "type": "string" },
+            "provider": { "type": "string" },
+            "adapter": { "type": "string" },
+            "backend": { "type": "string" },
+            "model": { "type": "string" },
+            "baseUrl": { "type": "string" },
+            "apiKeyConfigured": { "type": "boolean" },
+            "timeoutMs": { "type": "number" },
+            "requestDelayMs": { "type": "number" },
+            "batchSize": { "type": "number" },
+            "allowBatchFallback": { "type": "boolean" },
+            "availableProfiles": { "type": "array", "items": { "type": "string" } },
+            "availableProviders": { "type": "array", "items": { "type": "string" } },
+            "configPath": { "type": "string" },
+            "configExists": { "type": "boolean" },
+            "configError": { "type": "string" }
+          }
+        },
+        "embeddingIndexState": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": ["aligned", "stale", "missing", "mixed"],
+              "description": "aligned: index matches active runtime. stale: runtime changed, rebuild needed. missing: no index. mixed: multiple config hashes."
+            },
+            "rebuildRequired": { "type": "boolean" },
+            "reason": { "type": "string" },
+            "activeConfigHash": { "type": "string" },
+            "indexedConfigHash": { "type": "string" },
+            "indexedConfigHashes": {
+              "type": "object",
+              "additionalProperties": { "type": "number" }
+            }
+          }
+        },
+        "embeddings": {
+          "type": "object",
+          "properties": {
+            "exists": { "type": "boolean" },
+            "path": { "type": "string" },
+            "count": { "type": "number" },
+            "bytes": { "type": "number" },
+            "updatedAt": { "type": "string", "format": "date-time" },
+            "tools": { "type": "object", "additionalProperties": { "type": "number" } },
+            "backends": { "type": "object", "additionalProperties": { "type": "number" } },
+            "models": { "type": "object", "additionalProperties": { "type": "number" } },
+            "dimensions": { "type": "object", "additionalProperties": { "type": "number" } },
+            "providerHosts": { "type": "object", "additionalProperties": { "type": "number" } },
+            "configHashes": { "type": "object", "additionalProperties": { "type": "number" } }
+          }
+        },
+        "handoffPack": {
+          "oneOf": [
+            { "type": "object", "properties": { "goal": { "type": "string" } } },
+            { "type": "null" },
+            { "$ref": "#/definitions/ErrorResponse" }
+          ]
+        },
+        "memoryLayers": {
+          "oneOf": [
+            { "type": "object" },
+            { "type": "null" },
+            { "$ref": "#/definitions/ErrorResponse" }
+          ]
+        },
+        "autoDream": {
+          "oneOf": [
+            { "type": "object" },
+            { "type": "null" },
+            { "$ref": "#/definitions/ErrorResponse" }
+          ]
+        },
+        "claudeMem": {
+          "type": "object",
+          "properties": {
+            "ok": { "type": "boolean" },
+            "status": { "type": "string" },
+            "error": { "type": "string" }
+          }
+        }
+      },
+      "required": ["ok", "generatedAt"]
+    },
+
+    "clear_shared_memory_search_cache.input": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "clear_shared_memory_search_cache — input",
+      "type": "object",
+      "properties": {
+        "includeDataCaches": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, also drops loaded entries and embeddings index caches in addition to query/BM25/result caches."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "clear_shared_memory_search_cache.output": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "clear_shared_memory_search_cache — output",
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean" },
+        "cleared": { "type": "boolean" },
+        "includeDataCaches": { "type": "boolean" },
+        "action": { "type": "string" }
+      }
+    },
+
+    "list_embedding_runtimes.input": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "list_embedding_runtimes — input",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+
+    "list_embedding_runtimes.output": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "list_embedding_runtimes — output",
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean" },
+        "catalog": {
+          "type": "object",
+          "properties": {
+            "runtime": {
+              "type": "object",
+              "properties": {
+                "profile": { "type": "string" },
+                "provider": { "type": "string" },
+                "adapter": { "type": "string" },
+                "backend": { "type": "string" },
+                "model": { "type": "string" },
+                "baseUrl": { "type": "string" },
+                "apiKeyEnv": { "type": "string" },
+                "apiKeyConfigured": { "type": "boolean" },
+                "processEmbeddingOverridesAllowed": { "type": "boolean" },
+                "timeoutMs": { "type": "number" },
+                "requestDelayMs": { "type": "number" },
+                "batchSize": { "type": "number" },
+                "allowBatchFallback": { "type": "boolean" },
+                "resolutionMode": { "type": "string" },
+                "availableProfiles": { "type": "array", "items": { "type": "string" } },
+                "availableProviders": { "type": "array", "items": { "type": "string" } },
+                "configPath": { "type": "string" },
+                "configExists": { "type": "boolean" },
+                "configError": { "type": "string" },
+                "configHash": { "type": "string" },
+                "indexedCount": { "type": "number" },
+                "indexCompatible": { "type": "boolean" },
+                "rebuildRequired": { "type": "boolean" }
+              }
+            },
+            "providers": {
+              "type": "array",
+              "items": { "type": "object" }
+            },
+            "profiles": {
+              "type": "array",
+              "items": { "type": "object" }
+            }
+          }
+        },
+        "embeddingIndexState": {
+          "$ref": "#/definitions/memory_status.output/properties/embeddingIndexState"
+        }
+      }
+    },
+
+    "set_embedding_runtime.input": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "set_embedding_runtime — input",
+      "type": "object",
+      "properties": {
+        "profile": {
+          "type": "string",
+          "description": "Configured embedding profile name to activate."
+        },
+        "provider": {
+          "type": "string",
+          "description": "Configured provider name to activate directly."
+        },
+        "clearProfile": {
+          "type": "boolean",
+          "default": false,
+          "description": "Clear the persisted activeProfile selection."
+        },
+        "clearProvider": {
+          "type": "boolean",
+          "default": false,
+          "description": "Clear the persisted activeProvider selection."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "set_embedding_runtime.output": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "set_embedding_runtime — output",
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean" },
+        "runtimeChanged": {
+          "type": "boolean",
+          "description": "True if the effective runtime signature changed (may trigger index rebuild)."
+        },
+        "catalog": {
+          "type": "object",
+          "description": "Updated embedding runtime catalog."
+        },
+        "embeddingIndexState": {
+          "$ref": "#/definitions/memory_status.output/properties/embeddingIndexState"
+        },
+        "searchWorkerRestart": {
+          "type": "object",
+          "properties": {
+            "ok": { "type": "boolean" },
+            "requested": { "type": "boolean" },
+            "reason": { "type": "string" },
+            "workerWasRunning": { "type": "boolean" },
+            "previousPid": { "type": ["number", "null"] },
+            "currentPid": { "type": ["number", "null"] },
+            "pidChanged": { "type": ["boolean", "null"] },
+            "stop": {
+              "type": "object",
+              "properties": {
+                "ok": { "type": "boolean" },
+                "stopped": { "type": "boolean" },
+                "exitCode": { "type": ["number", "null"] },
+                "signal": { "type": ["string", "null"] },
+                "reason": { "type": "string" },
+                "previousPid": { "type": ["number", "null"] }
+              }
+            },
+            "before": { "type": "object" },
+            "after": { "type": "object" },
+            "health": { "type": ["object", "null"] }
+          }
+        }
+      }
+    },
+
+    "rebuild_memory_embeddings.input": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "rebuild_memory_embeddings — input",
+      "type": "object",
+      "properties": {
+        "force": {
+          "type": "boolean",
+          "default": false,
+          "description": "Re-embed even unchanged records (bypass content-hash diff)."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "rebuild_shared_embeddings.input": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "rebuild_shared_embeddings — input (alias of rebuild_memory_embeddings)",
+      "type": "object",
+      "properties": {
+        "force": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "rebuild_memory_embeddings.output": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "rebuild_memory_embeddings — output",
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean" },
+        "command": {
+          "type": "string",
+          "description": "Full command line executed (node generate-embeddings.js [...])."
+        },
+        "stdout": { "type": "string" },
+        "stderr": { "type": "string" },
+        "summary": {
+          "type": "object",
+          "properties": {
+            "exists": { "type": "boolean" },
+            "path": { "type": "string" },
+            "count": { "type": "number", "description": "Total number of embedding records in index.jsonl." },
+            "bytes": { "type": "number" },
+            "updatedAt": { "type": "string", "format": "date-time" },
+            "tools": { "type": "object", "additionalProperties": { "type": "number" } },
+            "backends": { "type": "object", "additionalProperties": { "type": "number" } },
+            "models": { "type": "object", "additionalProperties": { "type": "number" } },
+            "dimensions": { "type": "object", "additionalProperties": { "type": "number" } },
+            "providerHosts": { "type": "object", "additionalProperties": { "type": "number" } },
+            "configHashes": { "type": "object", "additionalProperties": { "type": "number" } }
+          }
+        }
+      }
+    },
+
+    "rebuild_memory_layers.input": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "rebuild_memory_layers — input",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+
+    "rebuild_memory_layers.output": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "rebuild_memory_layers — output",
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean" },
+        "stdout": { "type": "string" },
+        "stderr": { "type": "string" },
+        "summary": {
+          "oneOf": [
+            { "type": "object" },
+            { "type": "null" }
+          ],
+          "description": "Parsed content of MEMORY-LAYERS.json."
+        }
+      }
+    },
+
+    "build_handoff_pack.input": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "build_handoff_pack — input",
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+
+    "build_handoff_pack.output": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "build_handoff_pack — output",
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean" },
+        "stdout": { "type": "string" },
+        "stderr": { "type": "string" },
+        "summary": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "goal": { "type": "string" },
+                "done": { "type": "array", "items": { "type": "string" } },
+                "next": { "type": "array", "items": { "type": "string" } },
+                "blocked": { "type": "array", "items": { "type": "string" } },
+                "files": { "type": "array", "items": { "type": "string" } },
+                "threads": { "type": "array", "items": { "type": "object" } },
+                "toolInvariants": { "type": "object" },
+                "generatedAt": { "type": "string", "format": "date-time" }
+              }
+            },
+            { "type": "null" }
+          ],
+          "description": "Parsed content of HANDOFF.json."
+        }
+      }
+    },
+
+    "run_memory_dream.input": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "run_memory_dream — input",
+      "type": "object",
+      "properties": {
+        "force": {
+          "type": "boolean",
+          "default": false,
+          "description": "Force a dream pass even when internal gates would normally skip."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "run_memory_dream.output": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "run_memory_dream — output",
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean" },
+        "stdout": { "type": "string" },
+        "stderr": { "type": "string" },
+        "summary": {
+          "oneOf": [
+            { "type": "object" },
+            { "type": "null" }
+          ],
+          "description": "Parsed content of AUTO-DREAM.json."
+        },
+        "force": { "type": "boolean" }
+      }
+    },
+
+    "query_claude_mem.input": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "query_claude_mem — input",
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Semantic query string.",
+          "minLength": 1
+        },
+        "limit": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "description": "Maximum number of results."
+        }
+      },
+      "required": ["query"],
+      "additionalProperties": false
+    },
+
+    "query_claude_mem.output": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "query_claude_mem — output",
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean" },
+        "query": { "type": "string" },
+        "response": {
+          "type": "object",
+          "description": "Raw response body from claude-mem /api/search."
+        }
+      }
+    },
+
+    "insert_claude_mem.input": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "insert_claude_mem — input",
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "string",
+          "description": "Memory content to insert.",
+          "minLength": 1
+        },
+        "metadata": {
+          "type": "object",
+          "default": {},
+          "description": "Optional arbitrary key-value metadata."
+        }
+      },
+      "required": ["content"],
+      "additionalProperties": false
+    },
+
+    "insert_claude_mem.output": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "insert_claude_mem — output",
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean" },
+        "response": {
+          "type": "object",
+          "description": "Raw response body from claude-mem /api/memories."
+        }
+      }
+    },
+
+    "get_blackboard_tasks.input": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "get_blackboard_tasks — input",
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "description": "Maximum rows to return."
+        },
+        "state": {
+          "type": "string",
+          "description": "Optional single state filter (case-insensitive, normalized to uppercase)."
+        },
+        "states": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Optional multiple state filters, e.g. ['PENDING', 'ACTIVE']."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "get_blackboard_tasks.output": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "get_blackboard_tasks — output",
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean" },
+        "error": { "type": "string" },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "number", "description": "Row ID." },
+              "repo": { "type": "string", "description": "Repository name." },
+              "issue_number": { "type": "number", "description": "GitHub issue number." },
+              "issue_title": { "type": "string", "description": "Issue title." },
+              "state": { "type": "string", "description": "Task state: PENDING, ACTIVE, DONE, etc." },
+              "assigned_agent": { "type": "string", "description": "OpenClaw agent lane." },
+              "processor": { "type": "string" },
+              "updated_at": { "type": "string", "format": "date-time" }
+            }
+          }
+        }
+      }
+    },
+
+    "write_blackboard_task.input": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "write_blackboard_task — input",
+      "type": "object",
+      "properties": {
+        "repo": {
+          "type": "string",
+          "description": "Repository name, e.g. browser-use/browser-use.",
+          "minLength": 1
+        },
+        "issue_number": {
+          "type": "number",
+          "description": "GitHub issue number.",
+          "minimum": 1
+        },
+        "assigned_agent": {
+          "type": "string",
+          "default": "intel",
+          "description": "OpenClaw agent lane: intel or developer."
+        },
+        "issue_title": {
+          "type": "string",
+          "default": "{repo}#{issue_number}",
+          "description": "Optional issue title."
+        }
+      },
+      "required": ["repo", "issue_number"],
+      "additionalProperties": false
+    },
+
+    "write_blackboard_task.output": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "write_blackboard_task — output",
+      "type": "object",
+      "properties": {
+        "ok": { "type": "boolean" },
+        "error": { "type": "string" },
+        "insertedId": { "type": "number", "description": "Last inserted row ID." }
+      }
+    }
+  }
+}
