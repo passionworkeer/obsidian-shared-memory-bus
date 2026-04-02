@@ -1,21 +1,45 @@
 // generate-embeddings.js
 // Incrementally rebuilds the shared dense index from structured/*.jsonl.
 
-const { spawn } = require("child_process");
+const { spawn, spawnSync } = require("child_process");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
+const { resolvePythonRuntime, withPythonArgs } = require("./python-runtime.js");
+const { resolveVaultRoot } = require("./vault-root.js");
+const WINDOWS_ENV_CACHE = new Map();
+
+hydrateProcessEnvFromWindows([
+  "AI_MEMORY_EMBED_BACKEND",
+  "AI_MEMORY_EMBED_BASE_URL",
+  "AI_MEMORY_EMBED_API_KEY",
+  "AI_MEMORY_EMBED_MODEL",
+  "AI_MEMORY_EMBED_TIMEOUT_MS",
+  "AI_MEMORY_EMBED_TIMEOUT_SECONDS",
+  "AI_MEMORY_EMBED_REQUEST_DELAY_MS",
+  "AI_MEMORY_EMBED_DELAY_MS",
+  "AI_MEMORY_EMBED_BATCH_SIZE",
+  "AI_MEMORY_EMBED_ALLOW_BATCH_FALLBACK",
+  "AI_MEMORY_OBSIDIAN_VAULT",
+  "OBSIDIAN_VAULT_ROOT",
+  "AI_MEMORY_PYTHON",
+  "UV_COMMAND",
+]);
 
 const USER_HOME = process.env.USERPROFILE || process.env.HOME || "";
 const AI_MEMORY_ROOT = process.env.AI_MEMORY_ROOT || __dirname;
-const PYTHON = process.env.AI_MEMORY_PYTHON || "python";
-const MODEL = process.env.AI_MEMORY_EMBED_MODEL || "all-MiniLM-L6-v2";
-const EMBED_BACKEND = (process.env.AI_MEMORY_EMBED_BACKEND || "hash").toLowerCase();
-const OPENAI_BASE_URL = (process.env.AI_MEMORY_EMBED_BASE_URL || "").trim().replace(/\/+$/, "");
-const OPENAI_API_KEY = (process.env.AI_MEMORY_EMBED_API_KEY || "").trim();
-const OPENAI_REQUEST_DELAY_MS = Math.max(0, Number(process.env.AI_MEMORY_EMBED_REQUEST_DELAY_MS || "0") || 0);
-const OPENAI_TIMEOUT_MS = Math.max(1000, Number(process.env.AI_MEMORY_EMBED_TIMEOUT_MS || "120000") || 120000);
-const EXPLICIT_BATCH_SIZE = Math.max(0, Number(process.env.AI_MEMORY_EMBED_BATCH_SIZE || "0") || 0);
+const PYTHON = resolvePythonRuntime();
+const MODEL = firstNonEmptyEnv("AI_MEMORY_EMBED_MODEL") || "all-MiniLM-L6-v2";
+const EMBED_BACKEND = ((firstNonEmptyEnv("AI_MEMORY_EMBED_BACKEND") || "hash").trim() || "hash").toLowerCase();
+const OPENAI_BASE_URL = ((firstNonEmptyEnv("AI_MEMORY_EMBED_BASE_URL") || "").trim()).replace(/\/+$/, "");
+const OPENAI_API_KEY = (firstNonEmptyEnv("AI_MEMORY_EMBED_API_KEY") || "").trim();
+const OPENAI_REQUEST_DELAY_MS = Math.max(
+  0,
+  Number(firstNonEmptyEnv("AI_MEMORY_EMBED_REQUEST_DELAY_MS", "AI_MEMORY_EMBED_DELAY_MS") || "0") || 0
+);
+const OPENAI_TIMEOUT_MS = resolveTimeoutMs();
+const EXPLICIT_BATCH_SIZE = Math.max(0, Number(firstNonEmptyEnv("AI_MEMORY_EMBED_BATCH_SIZE") || "0") || 0);
+const ALLOW_BATCH_FALLBACK = /^(1|true|yes|on)$/i.test(firstNonEmptyEnv("AI_MEMORY_EMBED_ALLOW_BATCH_FALLBACK"));
 const HASH_MODEL = "hashing-v1";
 const HASH_DIM = 384;
 
@@ -31,26 +55,82 @@ const NOISE_PATTERNS = [
   /^Run your Session Startup/i,
 ];
 
-function resolveVaultRoot() {
-  for (const envKey of ["AI_MEMORY_OBSIDIAN_VAULT", "OBSIDIAN_VAULT_ROOT"]) {
-    const candidate = (process.env[envKey] || "").trim();
-    if (candidate && fs.existsSync(candidate)) {
-      return candidate;
+function firstNonEmptyEnv(...names) {
+  for (const name of names) {
+    const value = process.env[name];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
     }
   }
-
-  const defaults = [
-    "E:/desktop/Obsidian Vault",
-    path.join(USER_HOME, "Documents", "Obsidian Vault"),
-  ];
-  const found = defaults.find((candidate) => fs.existsSync(candidate));
-  if (!found) {
-    throw new Error(
-      `no-obsidian-vault: Tried [${defaults.join(", ")}]. ` +
-      `Set AI_MEMORY_OBSIDIAN_VAULT or OBSIDIAN_VAULT_ROOT to your vault path.`
-    );
+  for (const name of names) {
+    const value = readWindowsEnvironmentVariable(name);
+    if (value) {
+      return value;
+    }
   }
-  return found;
+  return "";
+}
+
+function hydrateProcessEnvFromWindows(names) {
+  if (process.platform !== "win32" || !Array.isArray(names)) {
+    return;
+  }
+
+  for (const name of names) {
+    const normalized = String(name || "").trim();
+    if (!normalized || firstNonEmptyEnv(normalized)) {
+      continue;
+    }
+
+    const value = readWindowsEnvironmentVariable(normalized);
+    if (value) {
+      process.env[normalized] = value;
+    }
+  }
+}
+
+function readWindowsEnvironmentVariable(name) {
+  if (process.platform !== "win32") {
+    return "";
+  }
+  if (WINDOWS_ENV_CACHE.has(name)) {
+    return WINDOWS_ENV_CACHE.get(name);
+  }
+
+  const escapedName = String(name || "").replace(/'/g, "''");
+  const command = [
+    `$value = [Environment]::GetEnvironmentVariable('${escapedName}', 'User')`,
+    "if ([string]::IsNullOrWhiteSpace($value)) {",
+    `  $value = [Environment]::GetEnvironmentVariable('${escapedName}', 'Machine')`,
+    "}",
+    "if (-not [string]::IsNullOrWhiteSpace($value)) { [Console]::Out.Write($value) }",
+  ].join("; ");
+
+  let value = "";
+  try {
+    const result = spawnSync("powershell.exe", ["-NoProfile", "-Command", command], {
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    if (!result.error && result.status === 0) {
+      value = String(result.stdout || "").trim();
+    }
+  } catch (_error) {
+    value = "";
+  }
+
+  WINDOWS_ENV_CACHE.set(name, value);
+  return value;
+}
+
+function resolveTimeoutMs() {
+  const timeoutMs = Number(firstNonEmptyEnv("AI_MEMORY_EMBED_TIMEOUT_MS") || "0") || 0;
+  if (timeoutMs > 0) {
+    return Math.max(1000, timeoutMs);
+  }
+
+  const timeoutSeconds = Number(firstNonEmptyEnv("AI_MEMORY_EMBED_TIMEOUT_SECONDS") || "120") || 120;
+  return Math.max(1000, timeoutSeconds * 1000);
 }
 
 const VAULT_ROOT = resolveVaultRoot();
@@ -71,6 +151,27 @@ function ensureDirectory(targetPath) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function buildEmbeddingConfigHash({ backend, modelName, baseUrl = "" }) {
+  const normalizedBaseUrl = backend === "openai" || backend === "openai-compatible" ? String(baseUrl || "").trim().replace(/\/+$/, "") : "";
+  const payload = JSON.stringify({
+    backend: String(backend || "").trim().toLowerCase(),
+    model: String(modelName || "").trim(),
+    baseUrl: normalizedBaseUrl.toLowerCase(),
+  });
+  return crypto.createHash("sha1").update(payload).digest("hex").slice(0, 16);
+}
+
+function getProviderHost(baseUrl) {
+  if (!baseUrl) {
+    return "";
+  }
+  try {
+    return new URL(baseUrl).host || "";
+  } catch (_error) {
+    return "";
+  }
 }
 
 function normalizeBackend(value, modelName) {
@@ -264,6 +365,17 @@ function loadExistingIndex() {
   return existing;
 }
 
+function writeIndexSnapshot(orderedDocuments, finalRecords) {
+  const orderedRecords = orderedDocuments
+    .map((document) => finalRecords.get(document.id))
+    .filter(Boolean)
+    .sort((left, right) => left.id.localeCompare(right.id));
+
+  const body = orderedRecords.map((record) => JSON.stringify(record)).join("\n");
+  fs.writeFileSync(INDEX_FILE, body ? `${body}\n` : "", "utf8");
+  return orderedRecords;
+}
+
 function resolveBatchSize() {
   if (EXPLICIT_BATCH_SIZE > 0) {
     return EXPLICIT_BATCH_SIZE;
@@ -276,6 +388,11 @@ function resolveBatchSize() {
 
 function embedBatchWithTransformer(texts, modelName) {
   return new Promise((resolve, reject) => {
+    if (!PYTHON.available) {
+      reject(new Error(`python-runtime-unavailable: ${PYTHON.error || "unknown-error"}`));
+      return;
+    }
+
     const script = `
 import json
 import sys
@@ -286,9 +403,15 @@ model = SentenceTransformer(payload["model"])
 vectors = model.encode(payload["texts"], show_progress_bar=False, convert_to_numpy=True)
 json.dump([vector.tolist() for vector in vectors], sys.stdout)
 `;
-    const child = spawn(PYTHON, ["-c", script], {
+    const child = spawn(PYTHON.command, withPythonArgs(PYTHON, ["-c", script]), {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, TF_CPP_MIN_LOG_LEVEL: "3", TF_ENABLE_ONEDNN_OPTS: "0" },
+      env: {
+        ...process.env,
+        TF_CPP_MIN_LOG_LEVEL: "3",
+        TF_ENABLE_ONEDNN_OPTS: "0",
+        PYTHONUTF8: "1",
+        PYTHONIOENCODING: "utf-8",
+      },
     });
 
     let stdout = "";
@@ -379,12 +502,17 @@ async function embedBatch(texts, modelName) {
   if (EMBED_BACKEND === "transformer") {
     try {
       return {
+        backendName: "transformer",
         modelName,
         vectors: await embedBatchWithTransformer(texts, modelName),
       };
     } catch (error) {
+      if (!ALLOW_BATCH_FALLBACK) {
+        throw new Error(`transformer-embedding-failed:${error.message}`);
+      }
       console.warn(`Transformer embeddings unavailable, falling back to ${HASH_MODEL}: ${error.message}`);
       return {
+        backendName: "hash",
         modelName: HASH_MODEL,
         vectors: texts.map((text) => buildHashEmbedding(text)),
       };
@@ -394,12 +522,17 @@ async function embedBatch(texts, modelName) {
   if (EMBED_BACKEND === "openai" || EMBED_BACKEND === "openai-compatible") {
     try {
       return {
+        backendName: EMBED_BACKEND === "openai-compatible" ? "openai-compatible" : "openai",
         modelName,
         vectors: await embedBatchWithOpenAICompatible(texts, modelName),
       };
     } catch (error) {
+      if (!ALLOW_BATCH_FALLBACK) {
+        throw new Error(`openai-compatible-embedding-failed:${error.message}`);
+      }
       console.warn(`OpenAI-compatible embeddings unavailable, falling back to ${HASH_MODEL}: ${error.message}`);
       return {
+        backendName: "hash",
         modelName: HASH_MODEL,
         vectors: texts.map((text) => buildHashEmbedding(text)),
       };
@@ -407,6 +540,7 @@ async function embedBatch(texts, modelName) {
   }
 
   return {
+    backendName: "hash",
     modelName: HASH_MODEL,
     vectors: texts.map((text) => buildHashEmbedding(text)),
   };
@@ -423,6 +557,11 @@ async function main() {
     EMBED_BACKEND === "transformer" || EMBED_BACKEND === "openai" || EMBED_BACKEND === "openai-compatible"
       ? MODEL
       : HASH_MODEL;
+  const preferredConfigHash = buildEmbeddingConfigHash({
+    backend: preferredBackend,
+    modelName: preferredModelName,
+    baseUrl: OPENAI_BASE_URL,
+  });
   const orderedDocuments = Array.from(documents.values()).sort((left, right) => left.id.localeCompare(right.id));
   const finalRecords = new Map();
   const pending = [];
@@ -435,6 +574,7 @@ async function main() {
       current.contentHash === document.contentHash &&
       normalizeBackend(current.backend, current.model) === preferredBackend &&
       current.model === preferredModelName &&
+      current.configHash === preferredConfigHash &&
       Array.isArray(current.embedding) &&
       current.embedding.length > 0;
 
@@ -453,6 +593,11 @@ async function main() {
   console.log(`Structured documents: ${orderedDocuments.length}`);
   console.log(`Existing vectors: ${existing.size}`);
   console.log(`Pending vectors: ${pending.length}`);
+  console.log(`Target backend: ${preferredBackend}`);
+  console.log(`Target model: ${preferredModelName}`);
+  if (preferredBackend === "openai" || preferredBackend === "openai-compatible") {
+    console.log(`Target provider host: ${getProviderHost(OPENAI_BASE_URL) || "unknown"}`);
+  }
 
   if (orderedDocuments.length === 0) {
     fs.writeFileSync(INDEX_FILE, "", "utf8");
@@ -466,28 +611,31 @@ async function main() {
     const batchNumber = Math.floor(offset / batchSize) + 1;
     const batchCount = Math.ceil(pending.length / batchSize);
     process.stdout.write(`Embedding batch ${batchNumber}/${batchCount} (${batch.length} docs)... `);
-    const { vectors, modelName } = await embedBatch(batch.map((document) => document.text.slice(0, 3000)), MODEL);
+    const { vectors, modelName, backendName } = await embedBatch(batch.map((document) => document.text.slice(0, 3000)), MODEL);
+    const configHash = buildEmbeddingConfigHash({
+      backend: backendName,
+      modelName,
+      baseUrl: OPENAI_BASE_URL,
+    });
+    const providerHost = backendName === "openai" || backendName === "openai-compatible" ? getProviderHost(OPENAI_BASE_URL) : "";
     for (let index = 0; index < batch.length; index += 1) {
       const document = batch[index];
       finalRecords.set(document.id, {
         ...document,
         embedding: vectors[index],
         dim: Array.isArray(vectors[index]) ? vectors[index].length : 0,
-        backend: normalizeBackend(EMBED_BACKEND, modelName),
+        backend: backendName,
         model: modelName,
+        configHash,
+        providerHost,
         indexedAt: new Date().toISOString(),
       });
     }
+    writeIndexSnapshot(orderedDocuments, finalRecords);
     console.log("done");
   }
 
-  const orderedRecords = orderedDocuments
-    .map((document) => finalRecords.get(document.id))
-    .filter(Boolean)
-    .sort((left, right) => left.id.localeCompare(right.id));
-
-  const body = orderedRecords.map((record) => JSON.stringify(record)).join("\n");
-  fs.writeFileSync(INDEX_FILE, body ? `${body}\n` : "", "utf8");
+  const orderedRecords = writeIndexSnapshot(orderedDocuments, finalRecords);
 
   const byTool = {};
   for (const record of orderedRecords) {

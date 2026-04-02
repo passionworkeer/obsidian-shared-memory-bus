@@ -1,48 +1,307 @@
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 
-import sqlite3Module from "sqlite3";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 
-const sqlite3 = sqlite3Module.verbose ? sqlite3Module.verbose() : sqlite3Module;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
 const USER_HOME = process.env.USERPROFILE || process.env.HOME || "";
+const IS_WINDOWS = process.platform === "win32";
 const AI_MEMORY_ROOT = process.env.AI_MEMORY_ROOT || path.resolve(__dirname, "..");
-const PYTHON = process.env.AI_MEMORY_PYTHON || "python";
-const SEARCH_SCRIPT = path.join(AI_MEMORY_ROOT, "semantic-search.py");
-const EMBEDDINGS_SCRIPT = path.join(AI_MEMORY_ROOT, "generate-embeddings.js");
-const WATCHDOG_STATE_PATH = path.join(AI_MEMORY_ROOT, "watchdog-state.json");
-const OPENCLAW_HOME = process.env.OPENCLAW_HOME || path.join(USER_HOME, ".openclaw");
-const BLACKBOARD_DB_PATH =
-  process.env.OPENCLAW_BLACKBOARD_DB || path.join(OPENCLAW_HOME, "workspace", "ai-shrimp", "blackboard", "tasks.db");
+const WINDOWS_ENV_CACHE = new Map();
+const RUNTIME_ENV_NAMES = [
+  "AI_MEMORY_ROOT",
+  "AI_MEMORY_PYTHON",
+  "AI_MEMORY_OBSIDIAN_VAULT",
+  "OBSIDIAN_VAULT_ROOT",
+  "CLAUDE_MEM_BASE",
+  "OPENCLAW_HOME",
+  "OPENCLAW_BLACKBOARD_DB",
+  "AI_MEMORY_EMBED_BACKEND",
+  "AI_MEMORY_EMBED_BASE_URL",
+  "AI_MEMORY_EMBED_API_KEY",
+  "AI_MEMORY_EMBED_MODEL",
+  "AI_MEMORY_EMBED_TIMEOUT_MS",
+  "AI_MEMORY_EMBED_TIMEOUT_SECONDS",
+  "AI_MEMORY_EMBED_REQUEST_DELAY_MS",
+  "AI_MEMORY_EMBED_DELAY_MS",
+  "AI_MEMORY_EMBED_BATCH_SIZE",
+  "AI_MEMORY_EMBED_ALLOW_BATCH_FALLBACK",
+];
 
-function resolveVaultRoot() {
-  for (const envKey of ["AI_MEMORY_OBSIDIAN_VAULT", "OBSIDIAN_VAULT_ROOT"]) {
-    const candidate = (process.env[envKey] || "").trim();
-    if (candidate && fs.existsSync(candidate)) {
+function resolveRuntimePath(...candidates) {
+  for (const relativePath of candidates) {
+    const fullPath = path.join(AI_MEMORY_ROOT, relativePath);
+    if (fs.existsSync(fullPath)) {
+      return fullPath;
+    }
+  }
+  return path.join(AI_MEMORY_ROOT, candidates[0]);
+}
+
+function loadVaultResolver() {
+  const helperPath = resolveRuntimePath("vault-root.js", path.join("bus", "vault-root.js"));
+  return require(helperPath);
+}
+
+function readWindowsEnvironmentVariable(name) {
+  if (!IS_WINDOWS) {
+    return "";
+  }
+  if (WINDOWS_ENV_CACHE.has(name)) {
+    return WINDOWS_ENV_CACHE.get(name);
+  }
+
+  const escapedName = String(name || "").replace(/'/g, "''");
+  const command = [
+    `$value = [Environment]::GetEnvironmentVariable('${escapedName}', 'User')`,
+    "if ([string]::IsNullOrWhiteSpace($value)) {",
+    `  $value = [Environment]::GetEnvironmentVariable('${escapedName}', 'Machine')`,
+    "}",
+    "if (-not [string]::IsNullOrWhiteSpace($value)) { [Console]::Out.Write($value) }",
+  ].join(" ");
+
+  let value = "";
+  try {
+    const result = spawnSync("powershell.exe", ["-NoProfile", "-Command", command], {
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    if (!result.error && result.status === 0) {
+      value = String(result.stdout || "").trim();
+    }
+  } catch (_error) {
+    value = "";
+  }
+
+  WINDOWS_ENV_CACHE.set(name, value);
+  return value;
+}
+
+function firstNonEmptyEnv(...names) {
+  for (const name of names) {
+    const value = process.env[name];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  for (const name of names) {
+    const value = readWindowsEnvironmentVariable(name);
+    if (value) {
+      return value;
+    }
+  }
+  return "";
+}
+
+function buildMergedEnv(baseEnv = process.env, names = RUNTIME_ENV_NAMES) {
+  const merged = { ...(baseEnv || {}) };
+  for (const name of names) {
+    const current = merged[name];
+    if (typeof current === "string" && current.trim()) {
+      continue;
+    }
+    const resolved = firstNonEmptyEnv(name);
+    if (resolved) {
+      merged[name] = resolved;
+    }
+  }
+  return merged;
+}
+
+const SEARCH_SCRIPT = resolveRuntimePath("semantic-search.py", path.join("retrieval", "semantic-search.py"));
+const EMBEDDINGS_SCRIPT = resolveRuntimePath("generate-embeddings.js", path.join("bus", "generate-embeddings.js"));
+const HANDOFF_PACK_SCRIPT = resolveRuntimePath("build-handoff-pack.js", path.join("ops", "build-handoff-pack.js"));
+const MEMORY_LAYERS_SCRIPT = resolveRuntimePath("build-memory-layers.js", path.join("ops", "build-memory-layers.js"));
+const MEMORY_DREAM_SCRIPT = resolveRuntimePath("run-memory-dream.ps1", path.join("ops", "run-memory-dream.ps1"));
+const WATCHDOG_STATE_PATH = path.join(AI_MEMORY_ROOT, "watchdog-state.json");
+const RUNTIME_ENV = buildMergedEnv();
+const OPENCLAW_HOME = firstNonEmptyEnv("OPENCLAW_HOME") || path.join(USER_HOME, ".openclaw");
+const BLACKBOARD_DB_PATH =
+  firstNonEmptyEnv("OPENCLAW_BLACKBOARD_DB") || path.join(OPENCLAW_HOME, "workspace", "ai-shrimp", "blackboard", "tasks.db");
+const { resolveVaultRoot } = loadVaultResolver();
+
+function runProbe(command, args) {
+  try {
+    const result = spawnSync(command, args, {
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    return {
+      ok: !result.error && result.status === 0,
+      status: result.status,
+      stdout: String(result.stdout || "").trim(),
+      stderr: String(result.stderr || "").trim(),
+      error: result.error ? String(result.error.message || result.error) : "",
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: null,
+      stdout: "",
+      stderr: "",
+      error: String(error && error.message ? error.message : error),
+    };
+  }
+}
+
+function buildPythonRuntime(command, argsPrefix, source) {
+  const probe = runProbe(command, [...argsPrefix, "--version"]);
+  return {
+    command,
+    argsPrefix,
+    source,
+    available: probe.ok,
+    version: probe.stdout || probe.stderr || "",
+    error: probe.ok ? "" : probe.error || probe.stderr || `probe-exit-${probe.status}`,
+  };
+}
+
+function resolveAbsolutePython(candidate, source) {
+  if (!candidate || !fs.existsSync(candidate)) {
+    return null;
+  }
+  return buildPythonRuntime(candidate, [], source);
+}
+
+function resolveUvInstalledPython() {
+  const baseDir = path.join(USER_HOME, "AppData", "Roaming", "uv", "python");
+  if (!fs.existsSync(baseDir)) {
+    return null;
+  }
+
+  const candidates = fs
+    .readdirSync(baseDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => path.join(baseDir, entry.name, "python.exe"))
+    .filter((candidate) => fs.existsSync(candidate))
+    .sort((left, right) => right.localeCompare(left));
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  return buildPythonRuntime(candidates[0], [], "uv-cache");
+}
+
+function resolveViaUvCommand() {
+  const uvCandidates = [
+    String(process.env.UV_COMMAND || "").trim(),
+    path.join(USER_HOME, ".local", "bin", "uv.exe"),
+    "uv",
+  ].filter(Boolean);
+
+  for (const uvCommand of uvCandidates) {
+    const probe = runProbe(uvCommand, ["python", "find"]);
+    if (!probe.ok) {
+      continue;
+    }
+    const resolvedPath = probe.stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean);
+    if (!resolvedPath || !fs.existsSync(resolvedPath)) {
+      continue;
+    }
+    return buildPythonRuntime(resolvedPath, [], "uv");
+  }
+
+  return null;
+}
+
+function resolvePythonRuntime() {
+  const envCommand = String(process.env.AI_MEMORY_PYTHON || "").trim();
+  if (envCommand) {
+    const runtime = envCommand.includes("\\") || envCommand.includes("/") || /^[A-Za-z]:/.test(envCommand)
+      ? resolveAbsolutePython(envCommand, "env")
+      : buildPythonRuntime(envCommand, [], "env");
+    if (runtime && runtime.available) {
+      return runtime;
+    }
+  }
+
+  for (const candidate of [
+    buildPythonRuntime("python", [], "path"),
+    buildPythonRuntime("python3", [], "path"),
+    buildPythonRuntime("py", ["-3"], "launcher"),
+  ]) {
+    if (candidate.available) {
       return candidate;
     }
   }
 
-  const defaults = [
-    "E:/desktop/Obsidian Vault",
-    path.join(USER_HOME, "Documents", "Obsidian Vault"),
-  ];
-  const found = defaults.find((candidate) => fs.existsSync(candidate));
-  if (!found) {
-    throw new Error(
-      `no-obsidian-vault: Tried [${defaults.join(", ")}]. ` +
-      `Set AI_MEMORY_OBSIDIAN_VAULT or OBSIDIAN_VAULT_ROOT to your vault path.`
-    );
+  for (const runtime of [
+    resolveViaUvCommand(),
+    resolveUvInstalledPython(),
+    resolveAbsolutePython(path.join(USER_HOME, "pytorch-env", "Scripts", "python.exe"), "pytorch-env"),
+    resolveAbsolutePython(path.join(USER_HOME, ".local", "bin", "python3"), "user-local"),
+    resolveAbsolutePython("/usr/bin/python3", "system"),
+    resolveAbsolutePython("/usr/local/bin/python3", "system"),
+    resolveAbsolutePython("/opt/homebrew/bin/python3", "homebrew"),
+  ]) {
+    if (runtime && runtime.available) {
+      return runtime;
+    }
   }
-  return found;
+
+  if (IS_WINDOWS) {
+    for (const runtime of [
+      resolveAbsolutePython(path.join(USER_HOME, "AppData", "Local", "Programs", "Python", "Python313", "python.exe"), "python313"),
+      resolveAbsolutePython(path.join(USER_HOME, "AppData", "Local", "Programs", "Python", "Python312", "python.exe"), "python312"),
+      resolveAbsolutePython(path.join(USER_HOME, "AppData", "Local", "Programs", "Python", "Python311", "python.exe"), "python311"),
+    ]) {
+      if (runtime && runtime.available) {
+        return runtime;
+      }
+    }
+  }
+
+  return {
+    command: "python",
+    argsPrefix: [],
+    source: "fallback",
+    available: false,
+    version: "",
+    error: "python-runtime-not-found",
+  };
+}
+
+function withPythonArgs(runtime, args) {
+  return [...(runtime.argsPrefix || []), ...(Array.isArray(args) ? args : [])];
+}
+
+const PYTHON = resolvePythonRuntime();
+const PYTHON_SPAWN_ENV = {
+  ...RUNTIME_ENV,
+  PYTHONUTF8: "1",
+  PYTHONIOENCODING: "utf-8",
+};
+
+function isProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (_error) {
+    return false;
+  }
 }
 
 const VAULT_ROOT = resolveVaultRoot();
 const EMBEDDINGS_INDEX_PATH = path.join(VAULT_ROOT, "00-System", "ai-memory", "embeddings", "index.jsonl");
-const CLAUDE_MEM_BASE = (process.env.CLAUDE_MEM_BASE || "http://127.0.0.1:37778").replace(/\/+$/, "");
+const HANDOFF_PACK_JSON_PATH = path.join(VAULT_ROOT, "00-System", "ai-memory", "generated", "HANDOFF.json");
+const MEMORY_LAYERS_JSON_PATH = path.join(VAULT_ROOT, "00-System", "ai-memory", "generated", "MEMORY-LAYERS.json");
+const AUTO_DREAM_JSON_PATH = path.join(VAULT_ROOT, "00-System", "ai-memory", "generated", "AUTO-DREAM.json");
+const CLAUDE_MEM_BASE = (firstNonEmptyEnv("CLAUDE_MEM_BASE") || "http://127.0.0.1:37778").replace(/\/+$/, "");
 
 const server = new Server(
   {
@@ -109,7 +368,16 @@ function spawnProcess(executable, args, options = {}) {
 async function getClaudeMemHealth() {
   try {
     const response = await fetch(`${CLAUDE_MEM_BASE}/api/health`);
-    return await response.json();
+    const payload = await response.json();
+    const normalizedStatus = String(payload?.status || "").trim().toLowerCase();
+    const ok =
+      typeof payload?.ok === "boolean"
+        ? payload.ok
+        : normalizedStatus === "ok";
+    return {
+      ...payload,
+      ok,
+    };
   } catch (error) {
     return { ok: false, error: String(error) };
   }
@@ -120,9 +388,40 @@ function readWatchdogState() {
     return null;
   }
   try {
-    return JSON.parse(fs.readFileSync(WATCHDOG_STATE_PATH, "utf8"));
+    const payload = JSON.parse(fs.readFileSync(WATCHDOG_STATE_PATH, "utf8"));
+    const pid = Number(payload?.pid || 0);
+    const pidAlive = isProcessAlive(pid);
+    const reportedRunning = Boolean(payload?.running);
+    const updatedAtMs = Date.parse(String(payload?.updatedAt || ""));
+    const stateAgeSeconds = Number.isFinite(updatedAtMs)
+      ? Math.max(0, Math.round((Date.now() - updatedAtMs) / 1000))
+      : null;
+    const staleByAge = Number.isFinite(updatedAtMs)
+      ? Date.now() - updatedAtMs > Math.max(60_000, (Number(payload?.pollSeconds || 15) || 15) * 8_000)
+      : false;
+    const running = reportedRunning && pidAlive && !staleByAge;
+    return {
+      ...payload,
+      pidAlive,
+      reportedRunning,
+      running,
+      stale: (reportedRunning && !pidAlive) || staleByAge,
+      stateAgeSeconds,
+      status: running ? "running" : pidAlive ? "stale" : "stopped",
+    };
   } catch (error) {
     return { ok: false, error: String(error) };
+  }
+}
+
+function readOptionalJson(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch (error) {
+    return { ok: false, error: String(error), path: filePath };
   }
 }
 
@@ -133,10 +432,18 @@ function readEmbeddingsSummary() {
       path: EMBEDDINGS_INDEX_PATH,
       count: 0,
       tools: {},
+      backends: {},
+      models: {},
+      dimensions: {},
+      providerHosts: {},
     };
   }
 
   const tools = {};
+  const backends = {};
+  const models = {};
+  const dimensions = {};
+  const providerHosts = {};
   let count = 0;
   const lines = fs.readFileSync(EMBEDDINGS_INDEX_PATH, "utf8").split(/\r?\n/);
   for (const line of lines) {
@@ -148,6 +455,17 @@ function readEmbeddingsSummary() {
       count += 1;
       const tool = record.tool || "unknown";
       tools[tool] = (tools[tool] || 0) + 1;
+      const backend = record.backend || "unknown";
+      backends[backend] = (backends[backend] || 0) + 1;
+      const model = record.model || "unknown";
+      models[model] = (models[model] || 0) + 1;
+      const dimension = Number(record.dim) || (Array.isArray(record.embedding) ? record.embedding.length : 0);
+      if (dimension > 0) {
+        dimensions[String(dimension)] = (dimensions[String(dimension)] || 0) + 1;
+      }
+      if (record.providerHost) {
+        providerHosts[record.providerHost] = (providerHosts[record.providerHost] || 0) + 1;
+      }
     } catch (err) {
       // Ignore malformed lines and keep reporting readable data.
       console.error(`[omni-memory-server] JSON parse error in embeddings index (skipping line): ${err.message}`);
@@ -162,16 +480,57 @@ function readEmbeddingsSummary() {
     bytes: stat.size,
     updatedAt: stat.mtime.toISOString(),
     tools,
+    backends,
+    models,
+    dimensions,
+    providerHosts,
   };
 }
 
-async function runSemanticSearch({ query, mode = "hybrid", limit = 8 }) {
+async function runSemanticSearch({
+  query,
+  mode = "hybrid",
+  limit = 8,
+  tool = "",
+  project = "",
+  scope = "",
+  sourceKind = "",
+  workspace = "",
+  taskState = "",
+  preferSummaries = false,
+}) {
   if (!fs.existsSync(SEARCH_SCRIPT)) {
     throw new Error(`search-script-missing: ${SEARCH_SCRIPT}`);
   }
+  if (!PYTHON.available) {
+    throw new Error(`python-runtime-unavailable: ${PYTHON.error || "unknown-error"}`);
+  }
 
   const args = [SEARCH_SCRIPT, "--mode", mode, "--top-k", String(limit), "--json", query];
-  const result = await spawnProcess(PYTHON, args);
+  if (tool) {
+    args.push("--tool", tool);
+  }
+  if (project) {
+    args.push("--project", project);
+  }
+  if (scope) {
+    args.push("--scope", scope);
+  }
+  if (sourceKind) {
+    args.push("--source-kind", sourceKind);
+  }
+  if (workspace) {
+    args.push("--workspace", workspace);
+  }
+  if (taskState) {
+    args.push("--task-state", taskState);
+  }
+  if (preferSummaries) {
+    args.push("--prefer-summaries");
+  }
+  const result = await spawnProcess(PYTHON.command, withPythonArgs(PYTHON, args), {
+    env: PYTHON_SPAWN_ENV,
+  });
   if (result.code !== 0) {
     throw new Error(result.stderr.trim() || result.stdout.trim() || `semantic-search-exit-${result.code}`);
   }
@@ -190,7 +549,7 @@ async function rebuildEmbeddings({ force = false }) {
 
   const result = await spawnProcess(process.execPath, args, {
     env: {
-      ...process.env,
+      ...RUNTIME_ENV,
       AI_MEMORY_OBSIDIAN_VAULT: VAULT_ROOT,
     },
   });
@@ -208,67 +567,173 @@ async function rebuildEmbeddings({ force = false }) {
   };
 }
 
-function queryBlackboard({ limit = 10, states = [], state = "" }) {
-  return new Promise((resolve) => {
-    if (!fs.existsSync(BLACKBOARD_DB_PATH)) {
-      resolve({ ok: false, error: `blackboard-db-missing: ${BLACKBOARD_DB_PATH}` });
-      return;
-    }
+async function rebuildMemoryLayers() {
+  if (!fs.existsSync(MEMORY_LAYERS_SCRIPT)) {
+    throw new Error(`memory-layers-script-missing: ${MEMORY_LAYERS_SCRIPT}`);
+  }
 
-    let db;
-    try {
-      db = new sqlite3.Database(BLACKBOARD_DB_PATH, sqlite3.OPEN_READONLY);
-    } catch (error) {
-      resolve({ ok: false, error: String(error) });
-      return;
-    }
-    const normalizedStates = Array.isArray(states)
-      ? states.map((value) => String(value || "").trim().toUpperCase()).filter(Boolean)
-      : [];
-    if (normalizedStates.length === 0 && String(state || "").trim()) {
-      normalizedStates.push(String(state).trim().toUpperCase());
-    }
-    const whereClause =
-      normalizedStates.length > 0 ? ` WHERE state IN (${normalizedStates.map(() => "?").join(",")})` : "";
-    const sql = `SELECT id, repo, issue_number, issue_title, state, assigned_agent, processor, updated_at FROM tasks${whereClause} ORDER BY updated_at DESC LIMIT ?`;
-    const params = [...normalizedStates, Math.max(1, Number(limit) || 10)];
+  const result = await spawnProcess(process.execPath, [MEMORY_LAYERS_SCRIPT], {
+    env: {
+      ...RUNTIME_ENV,
+      AI_MEMORY_OBSIDIAN_VAULT: VAULT_ROOT,
+    },
+  });
 
-    db.all(sql, params, (error, rows) => {
-      db.close();
-      if (error) {
-        resolve({ ok: false, error: error.message });
-        return;
-      }
-      resolve({ ok: true, rows });
-    });
+  if (result.code !== 0) {
+    throw new Error(result.stderr.trim() || result.stdout.trim() || `memory-layers-exit-${result.code}`);
+  }
+
+  return {
+    ok: true,
+    stdout: result.stdout.trim(),
+    stderr: result.stderr.trim(),
+    summary: readOptionalJson(MEMORY_LAYERS_JSON_PATH),
+  };
+}
+
+async function buildHandoffPack() {
+  if (!fs.existsSync(HANDOFF_PACK_SCRIPT)) {
+    throw new Error(`handoff-pack-script-missing: ${HANDOFF_PACK_SCRIPT}`);
+  }
+
+  const result = await spawnProcess(process.execPath, [HANDOFF_PACK_SCRIPT], {
+    env: {
+      ...RUNTIME_ENV,
+      AI_MEMORY_OBSIDIAN_VAULT: VAULT_ROOT,
+    },
+  });
+
+  if (result.code !== 0) {
+    throw new Error(result.stderr.trim() || result.stdout.trim() || `handoff-pack-exit-${result.code}`);
+  }
+
+  return {
+    ok: true,
+    stdout: result.stdout.trim(),
+    stderr: result.stderr.trim(),
+    summary: readOptionalJson(HANDOFF_PACK_JSON_PATH),
+  };
+}
+
+async function runMemoryDream({ force = false }) {
+  if (!fs.existsSync(MEMORY_DREAM_SCRIPT)) {
+    throw new Error(`memory-dream-script-missing: ${MEMORY_DREAM_SCRIPT}`);
+  }
+
+  const args = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", MEMORY_DREAM_SCRIPT];
+  if (force) {
+    args.push("-Force");
+  }
+
+  const result = await spawnProcess("powershell.exe", args, {
+    env: {
+      ...RUNTIME_ENV,
+      AI_MEMORY_OBSIDIAN_VAULT: VAULT_ROOT,
+    },
+  });
+
+  if (result.code !== 0) {
+    throw new Error(result.stderr.trim() || result.stdout.trim() || `memory-dream-exit-${result.code}`);
+  }
+
+  return {
+    ok: true,
+    stdout: result.stdout.trim(),
+    stderr: result.stderr.trim(),
+    summary: readOptionalJson(AUTO_DREAM_JSON_PATH),
+  };
+}
+
+async function runBlackboardPython(payload) {
+  if (!fs.existsSync(BLACKBOARD_DB_PATH)) {
+    return { ok: false, error: `blackboard-db-missing: ${BLACKBOARD_DB_PATH}` };
+  }
+  if (!PYTHON.available) {
+    return { ok: false, error: `python-runtime-unavailable: ${PYTHON.error || "unknown-error"}` };
+  }
+
+  const script = `
+import json
+import sqlite3
+import sys
+
+payload = json.load(sys.stdin)
+db = sqlite3.connect(payload["db"])
+db.row_factory = sqlite3.Row
+
+try:
+    if payload["op"] == "query":
+        states = [str(item).strip().upper() for item in payload.get("states", []) if str(item).strip()]
+        where = ""
+        params = []
+        if states:
+            where = " WHERE state IN ({})".format(",".join("?" for _ in states))
+            params.extend(states)
+        params.append(max(1, int(payload.get("limit", 10))))
+        sql = "SELECT id, repo, issue_number, issue_title, state, assigned_agent, processor, updated_at FROM tasks{} ORDER BY updated_at DESC LIMIT ?".format(where)
+        rows = [dict(row) for row in db.execute(sql, params)]
+        print(json.dumps({"ok": True, "rows": rows}, ensure_ascii=False))
+    elif payload["op"] == "insert":
+        repo = str(payload["repo"]).strip()
+        issue_number = int(payload["issue_number"])
+        assigned_agent = str(payload.get("assigned_agent") or "intel").strip() or "intel"
+        issue_title = str(payload.get("issue_title") or "{}#{}".format(repo, issue_number)).strip()
+        cursor = db.execute(
+            "INSERT INTO tasks (repo, issue_number, assigned_agent, issue_title, state) VALUES (?, ?, ?, ?, 'PENDING')",
+            (repo, issue_number, assigned_agent, issue_title),
+        )
+        db.commit()
+        print(json.dumps({"ok": True, "insertedId": cursor.lastrowid}, ensure_ascii=False))
+    else:
+        print(json.dumps({"ok": False, "error": "unsupported-op"}, ensure_ascii=False))
+finally:
+    db.close()
+`;
+
+  const result = await spawnProcess(PYTHON.command, withPythonArgs(PYTHON, ["-c", script]), {
+    env: PYTHON_SPAWN_ENV,
+    input: JSON.stringify({
+      ...payload,
+      db: BLACKBOARD_DB_PATH,
+    }),
+  });
+
+  if (result.code !== 0) {
+    return {
+      ok: false,
+      error: result.stderr.trim() || result.stdout.trim() || `blackboard-exit-${result.code}`,
+    };
+  }
+
+  try {
+    return JSON.parse(result.stdout || "{}");
+  } catch (error) {
+    return { ok: false, error: `blackboard-json-parse-failed: ${error.message}` };
+  }
+}
+
+async function queryBlackboard({ limit = 10, states = [], state = "" }) {
+  const normalizedStates = Array.isArray(states)
+    ? states.map((value) => String(value || "").trim().toUpperCase()).filter(Boolean)
+    : [];
+  if (normalizedStates.length === 0 && String(state || "").trim()) {
+    normalizedStates.push(String(state).trim().toUpperCase());
+  }
+
+  return await runBlackboardPython({
+    op: "query",
+    limit: Math.max(1, Number(limit) || 10),
+    states: normalizedStates,
   });
 }
 
-function insertBlackboardTask({ repo, issue_number, assigned_agent = "intel", issue_title = "" }) {
-  return new Promise((resolve) => {
-    if (!fs.existsSync(BLACKBOARD_DB_PATH)) {
-      resolve({ ok: false, error: `blackboard-db-missing: ${BLACKBOARD_DB_PATH}` });
-      return;
-    }
-
-    const db = new sqlite3.Database(BLACKBOARD_DB_PATH);
-    const sql =
-      "INSERT INTO tasks (repo, issue_number, assigned_agent, issue_title, state) VALUES (?, ?, ?, ?, 'PENDING')";
-    const params = [
-      repo,
-      Number(issue_number),
-      assigned_agent || "intel",
-      issue_title || `${repo}#${issue_number}`,
-    ];
-
-    db.run(sql, params, function onInsert(error) {
-      db.close();
-      if (error) {
-        resolve({ ok: false, error: error.message });
-        return;
-      }
-      resolve({ ok: true, insertedId: this.lastID });
-    });
+async function insertBlackboardTask({ repo, issue_number, assigned_agent = "intel", issue_title = "" }) {
+  return await runBlackboardPython({
+    op: "insert",
+    repo,
+    issue_number: Number(issue_number),
+    assigned_agent,
+    issue_title,
   });
 }
 
@@ -321,8 +786,44 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             description: "Alias for mode.",
           },
           limit: { type: "number", default: 8, description: "Maximum number of results." },
+          tool: { type: "string", description: "Optional exact tool filter." },
+          project: { type: "string", description: "Optional project/workspace substring filter." },
+          scope: { type: "string", description: "Optional scope filter such as user, feedback, project, task, run, or summary." },
+          sourceKind: { type: "string", description: "Optional source kind filter such as session, writeback, cron, run, or blackboard." },
+          workspace: { type: "string", description: "Optional workspace filter." },
+          taskState: { type: "string", description: "Optional task state filter." },
+          preferSummaries: { type: "boolean", default: false, description: "Boost session/summary records slightly in ranking." },
         },
         required: ["query"],
+      },
+    },
+    {
+      name: "rebuild_memory_layers",
+      description:
+        "Rebuild derived shared memory layers such as shared inbox records, session-layer records, and shared event records.",
+      inputSchema: {
+        type: "object",
+        properties: {},
+      },
+    },
+    {
+      name: "build_handoff_pack",
+      description:
+        "Build a bounded handoff pack with current goal, done, next, blocked, files, open threads, and tool invariants.",
+      inputSchema: {
+        type: "object",
+        properties: {},
+      },
+    },
+    {
+      name: "run_memory_dream",
+      description:
+        "Run one memory dream consolidation pass over durable, session, and task layers to refresh AUTO-DREAM summaries.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          force: { type: "boolean", default: false, description: "Force a dream pass even when gates would normally skip." },
+        },
       },
     },
     {
@@ -416,8 +917,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return jsonResult({
         ok: true,
         generatedAt: new Date().toISOString(),
+        pythonRuntime: {
+          command: PYTHON.command,
+          argsPrefix: PYTHON.argsPrefix,
+          source: PYTHON.source,
+          available: PYTHON.available,
+          version: PYTHON.version,
+          error: PYTHON.error,
+        },
         watchdog: readWatchdogState(),
         embeddings: readEmbeddingsSummary(),
+        handoffPack: readOptionalJson(HANDOFF_PACK_JSON_PATH),
+        memoryLayers: readOptionalJson(MEMORY_LAYERS_JSON_PATH),
+        autoDream: readOptionalJson(AUTO_DREAM_JSON_PATH),
         claudeMem: await getClaudeMemHealth(),
       });
     }
@@ -431,8 +943,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         query,
         mode: String(args.mode || args.strategy || "hybrid"),
         limit: Math.max(1, Number(args.limit) || 8),
+        tool: String(args.tool || ""),
+        project: String(args.project || ""),
+        scope: String(args.scope || ""),
+        sourceKind: String(args.sourceKind || ""),
+        workspace: String(args.workspace || ""),
+        taskState: String(args.taskState || ""),
+        preferSummaries: Boolean(args.preferSummaries),
       });
       return jsonResult(payload);
+    }
+
+    if (name === "rebuild_memory_layers") {
+      return jsonResult(await rebuildMemoryLayers());
+    }
+
+    if (name === "build_handoff_pack") {
+      return jsonResult(await buildHandoffPack());
+    }
+
+    if (name === "run_memory_dream") {
+      return jsonResult(await runMemoryDream({ force: Boolean(args.force) }));
     }
 
     if (name === "rebuild_memory_embeddings" || name === "rebuild_shared_embeddings") {

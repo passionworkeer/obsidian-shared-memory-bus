@@ -6,6 +6,8 @@
 | Single machine, local Obsidian vault | Yes | recommended default |
 | Single machine, many agents and clients | Yes | primary target of this project |
 | Single machine with optional backup or sync | Yes, carefully | keep sync and memory indexing as separate concerns |
+| Windows full control plane | Yes | installer, shared MCP control, watchdog startup, and client wiring validated |
+| macOS/Linux portable core | Yes, partial | core memory generation, dream, embeddings, and retrieval are validated; installer/startup remain Windows-first |
 | Multi-device shared vault with extra sync layers | Caution | understand sync conflict behavior first |
 | Hosted multi-tenant deployment | No | out of scope for this bundle |
 

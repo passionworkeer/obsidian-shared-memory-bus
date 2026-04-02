@@ -8,13 +8,12 @@
     "healthPath": "/healthz"
   },
   "servers": [
-    # NOTE: pin versions - update periodically
     {
       "id": "context7",
       "displayName": "Context7",
       "mode": "shared",
       "port": 9331,
-      "stdioCommand": "cmd /c npx -y @upstash/context7-mcp@2.3.1",
+      "stdioCommand": "cmd /c npx -y @upstash/context7-mcp@latest",
       "notes": "Stateless documentation/code search MCP. Strong candidate for one shared instance."
     },
     {
@@ -22,7 +21,7 @@
       "displayName": "Fetch",
       "mode": "shared",
       "port": 9332,
-      "stdioCommand": "uvx mcp-server-fetch@1.2.0",
+      "stdioCommand": "uvx mcp-server-fetch",
       "notes": "Stateless fetch MCP. Safe to centralize."
     },
     {
@@ -30,7 +29,7 @@
       "displayName": "Time",
       "mode": "shared",
       "port": 9333,
-      "stdioCommand": "uvx mcp-server-time@1.2.0",
+      "stdioCommand": "uvx mcp-server-time",
       "notes": "Stateless utility MCP. Safe to centralize."
     },
     {
@@ -38,7 +37,7 @@
       "displayName": "Sequential Thinking",
       "mode": "shared",
       "port": 9334,
-      "stdioCommand": "cmd /c npx -y @modelcontextprotocol/server-sequential-thinking@1.3.0",
+      "stdioCommand": "cmd /c npx -y @modelcontextprotocol/server-sequential-thinking@latest",
       "notes": "Mostly stateless reasoning helper. Safe to centralize."
     },
     {
@@ -71,7 +70,7 @@
       "mode": "optional",
       "port": 9337,
       "healthPath": "/mcp",
-      "launchCommand": "npx @playwright/mcp@1.4.0 --host 127.0.0.1 --port 9337 --headless --isolated",
+      "launchCommand": "npx @playwright/mcp@latest --host 127.0.0.1 --port 9337 --headless --isolated --allowed-hosts *",
       "probeType": "mcp-initialize",
       "notes": "Standalone Playwright MCP HTTP server on 9337. Multiple clients can share one backend while keeping isolated MCP sessions and browser profiles."
     },
