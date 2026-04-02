@@ -3,6 +3,8 @@
 All notable changes to this project should be documented here.
 
 ## Unreleased
+- Sanitized tracked public overlay files to use portable placeholders instead of workstation-specific absolute paths
+- Documented publish-time checks for machine-path leakage and overlay regeneration safety
 - Added `ops/build-handoff-pack.js` plus watchdog/MCP integration so the stack now produces a bounded resume packet instead of relying only on layered summaries
 - Added layered memory generation and auto-dream consolidation docs to describe the Claude-style session/handoff layer plus OpenClaw-style task blackboard layer
 - Added portable-core CI coverage for Windows, macOS, and Linux memory smoke tests
