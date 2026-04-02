@@ -33,6 +33,7 @@ The source tree is grouped by responsibility (`bus/`, `ops/`, `retrieval/`, `sha
 - Background watchdog sync from tool-native memory into structured shared memory
 - Auto-built `MEMORY-LAYERS` and `AUTO-DREAM` summaries for handoff, compaction, and durable promotion
 - Auto-built `HANDOFF` pack with bounded `goal / done / next / blocked / files / open_threads / tool_invariants`
+- Generated onboarding packs that bundle shared HTTP MCP snippets, a portable skill template, and a thin plugin-adapter contract for new agents
 - OpenClaw session, job, run, blackboard, and journal sync into shared structured memory
 - Hybrid retrieval with `bm25`, offline dense `hashing-v1`, and optional remote embeddings
 - Installer-side Python runtime auto-detection, including uv-managed Python, so shared retrieval does not depend on `python` being on `PATH`
@@ -192,6 +193,20 @@ Still isolated:
 
 The manifest keeps `playwright` marked as an optional server so advanced users can opt out or manage it separately, but the default starter opts into it because duplicated local Playwright MCP launches are usually the biggest process multiplier in multi-agent workflows.
 
+## Recommended Integration Bundle
+For most agents, the best packaged setup is:
+
+1. shared HTTP MCP for transport and process deduplication
+2. a portable skill or rule file for read order, writeback policy, and task decomposition
+3. a thin plugin adapter only if the host app needs native lifecycle hooks, UI, or settings surfaces
+
+The generated onboarding packs under `generated/onboarding/<agent>/` are designed around that split. They now include:
+- shared HTTP MCP snippets for Codex, Cursor, and Copilot-style hosts
+- a stdio fallback snippet for hosts that still need a local launcher
+- a portable skill template
+- a thin plugin-adapter guide
+- platform guidance for Windows, macOS, and Linux
+
 ## Verification Story
 - Shared MCP services for `context7`, `fetch`, `time`, `sequential-thinking`, `obsidian`, `MiniMax`, and `memory` were validated on `9331-9336` and `9338`
 - The shared Playwright backend was validated on `9337` with real MCP `initialize`, `tools/list`, `browser_navigate`, and `browser_snapshot` calls
@@ -209,14 +224,14 @@ Tracked onboarding and overlay files in this repo intentionally use portable pla
 - `<repo-root>` means the checked-out repository root for this bundle or for the agent-specific project overlay
 - `~/.trae/user_rules.md` is shown as a user-home-relative example, not a hardcoded machine path
 
-At runtime, the bundle resolves the vault from:
+At runtime, the Windows control plane resolves the vault from:
 
 1. `AI_MEMORY_OBSIDIAN_VAULT`
 2. `OBSIDIAN_VAULT_ROOT`
-3. the active or most recent vault in Obsidian's app config on Windows, macOS, or Linux
-4. standard fallback locations such as `~/Obsidian Vault`, Desktop, or Documents when needed
+3. the active or most recent vault in Obsidian's app config
+4. standard fallback locations such as Desktop or Documents when needed
 
-Public docs and tracked overlay files should never be committed with private paths such as `C:\Users\name\...`, `/Users/name/...`, `/home/name/...`, or `E:\...`.
+Public docs and tracked overlay files should never be committed with private paths such as `C:\Users\name\...` or `E:\...`.
 
 ## Install
 Windows:

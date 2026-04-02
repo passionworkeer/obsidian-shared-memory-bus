@@ -70,6 +70,7 @@
 - `docs/VALIDATION.md`
 
 ## Repo Metadata
+- `AGENTS.md`
 - `CHANGELOG.md`
 - `CODE_OF_CONDUCT.md`
 - `CONTRIBUTING.md`
@@ -78,6 +79,9 @@
 - `SUPPORT.md`
 - `.gitattributes`
 - `.gitignore`
+
+## Agent Overlays
+- `.trae/rules/project_rules.md`
 
 ## GitHub Community Files
 - `.github/workflows/portable-core.yml`
