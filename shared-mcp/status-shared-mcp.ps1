@@ -16,6 +16,7 @@ if (-not $helperPath) {
 
 $manifestPath = Join-Path $root "manifest.json"
 $statePath = Join-Path $root "state.json"
+$stateMutexName = Get-SharedMutexName -BaseName "WangSharedMcpStateV1"
 
 function Test-Health {
     param([string]$Url)
@@ -113,20 +114,44 @@ function Test-ServerReady {
     }
 }
 
-$manifest = Get-Content -Raw -LiteralPath $manifestPath -Encoding utf8 | ConvertFrom-Json
-$state = @{}
-if (Test-Path -LiteralPath $statePath) {
+function Read-State {
+    if (-not (Test-Path -LiteralPath $statePath)) {
+        return @{}
+    }
+
     try {
-        $parsed = Get-Content -Raw -LiteralPath $statePath -Encoding utf8 | ConvertFrom-Json
+        $content = Get-Content -Raw -LiteralPath $statePath -Encoding utf8
+        $parsed = $content | ConvertFrom-Json
+        $map = @{}
         foreach ($property in @($parsed.PSObject.Properties)) {
             $entry = @{}
             foreach ($child in @($property.Value.PSObject.Properties)) {
                 $entry[$child.Name] = $child.Value
             }
-            $state[$property.Name] = $entry
+            $map[$property.Name] = $entry
         }
+        return $map
     } catch {
-        $state = @{}
+        $backup = "$statePath.corrupt.$(Get-Date -Format 'yyyyMMddHHmmss')"
+        try { Move-Item -LiteralPath $statePath -Destination $backup -Force } catch {}
+        Write-Warning "[shared-mcp] state.json was corrupt, backed up to $backup"
+        return @{}
+    }
+}
+
+$manifest = Get-Content -Raw -LiteralPath $manifestPath -Encoding utf8 | ConvertFrom-Json
+$state = @{}
+if (Test-Path -LiteralPath $statePath) {
+    $mutex = New-Object System.Threading.Mutex($false, $stateMutexName)
+    [void]$mutex.WaitOne()
+    try {
+        $state = Read-State
+    } finally {
+        try {
+            [void]$mutex.ReleaseMutex()
+        } catch {
+        }
+        $mutex.Dispose()
     }
 }
 
@@ -151,12 +176,13 @@ foreach ($server in @($manifest.servers)) {
         if (-not $healthUrl) {
             $healthUrl = Get-ServerHealthUrl -Server $server
         }
-        if (-not $alive) {
-            $listenerPid = Get-SharedListeningProcessId -Port ([int]$server.port)
-            if ($listenerPid -gt 0) {
-                $procId = $listenerPid
-                $alive = $null -ne (Get-Process -Id $procId -ErrorAction SilentlyContinue)
-            }
+        $listenerPid = Get-SharedListeningProcessId -Port ([int]$server.port)
+        if ($listenerPid -gt 0) {
+            $procId = $listenerPid
+            $alive = $null -ne (Get-Process -Id $procId -ErrorAction SilentlyContinue)
+        } else {
+            $procId = 0
+            $alive = $false
         }
         if ($alive -and $healthUrl) {
             $alive = Test-ServerReady -Server $server -Url $url -HealthUrl $healthUrl

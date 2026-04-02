@@ -73,6 +73,9 @@ $MemoryDreamScript = Resolve-BusPath -Candidates @("run-memory-dream.ps1", "ops/
 $EmbeddingsScript = Resolve-BusPath -Candidates @("generate-embeddings.js", "bus/generate-embeddings.js")
 $EmbeddingsIndexPath = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "embeddings", "index.jsonl")
 $EmbeddingsCooldownSeconds = 180
+$BusSyncTimeoutSeconds = 300
+$GeneratedArtifactsTimeoutSeconds = 180
+$WatchdogHeartbeatSeconds = [Math]::Max(5, [Math]::Min(15, $PollSeconds))
 $OpenClawWatchSpecNames = @("openclaw-sessions", "openclaw-memory", "openclaw-user", "openclaw-memory-md", "openclaw-jobs", "openclaw-runs", "openclaw-blackboard-db")
 $OpenCodeDbPath = Join-SharedPath @((Get-SharedOpenCodeDataRoot), "opencode.db")
 $VsCodeUserRoot = Get-SharedVsCodeUserRoot -ProductName "Code"
@@ -99,15 +102,15 @@ $WatchSpecs = @(
     [pscustomobject]@{ Name = "claude-today"; Tool = "claude-code"; Type = "file"; Path = (Join-SharedPath @($UserHome, ".claude", "memory", "TODAY.md")) },
     [pscustomobject]@{ Name = "claude-session-memory"; Tool = "claude-code"; Type = "file"; Path = (Join-SharedPath @($UserHome, ".claude", "session-memory", "session-memory.md")) },
     [pscustomobject]@{ Name = "claude-mem-db"; Tool = "claude-code"; Type = "file"; Path = (Join-SharedPath @($UserHome, ".claude-mem", "claude-mem.db")) },
-    [pscustomobject]@{ Name = "agents-skills"; Tool = "system"; Type = "dir"; Path = (Join-SharedPath @($UserHome, ".agents", "skills")); Filter = "SKILL.md"; Recurse = $true; Top = 250 },
-    [pscustomobject]@{ Name = "codex-skills"; Tool = "system"; Type = "dir"; Path = (Join-SharedPath @($UserHome, ".codex", "skills")); Filter = "SKILL.md"; Recurse = $true; Top = 250 },
-    [pscustomobject]@{ Name = "claude-skills"; Tool = "system"; Type = "dir"; Path = (Join-SharedPath @($UserHome, ".claude", "skills")); Filter = "SKILL.md"; Recurse = $true; Top = 250 },
+    [pscustomobject]@{ Name = "agents-skills"; Tool = "system"; Type = "dir"; Path = (Join-SharedPath @($UserHome, ".agents", "skills")); Filter = "SKILL.md"; Recurse = $true; Top = 250; MinPollSeconds = 120 },
+    [pscustomobject]@{ Name = "codex-skills"; Tool = "system"; Type = "dir"; Path = (Join-SharedPath @($UserHome, ".codex", "skills")); Filter = "SKILL.md"; Recurse = $true; Top = 250; MinPollSeconds = 120 },
+    [pscustomobject]@{ Name = "claude-skills"; Tool = "system"; Type = "dir"; Path = (Join-SharedPath @($UserHome, ".claude", "skills")); Filter = "SKILL.md"; Recurse = $true; Top = 250; MinPollSeconds = 120 },
     [pscustomobject]@{ Name = "codex-history"; Tool = "codex"; Type = "file"; Path = (Join-SharedPath @($UserHome, ".codex", "history.jsonl")) },
     [pscustomobject]@{ Name = "codex-session-index"; Tool = "codex"; Type = "file"; Path = (Join-SharedPath @($UserHome, ".codex", "session_index.jsonl")) },
-    [pscustomobject]@{ Name = "codex-rollouts"; Tool = "codex"; Type = "dir"; Path = (Join-SharedPath @($UserHome, ".codex", "sessions")); Filter = "*.jsonl"; Recurse = $true; Top = 20 },
+    [pscustomobject]@{ Name = "codex-rollouts"; Tool = "codex"; Type = "dir"; Path = (Join-SharedPath @($UserHome, ".codex", "sessions")); Filter = "*.jsonl"; Recurse = $true; Top = 20; MinPollSeconds = 60 },
     [pscustomobject]@{ Name = "trae-user-rules"; Tool = "trae"; Type = "file"; Path = (Join-SharedPath @($UserHome, ".trae", "user_rules.md")) },
-    [pscustomobject]@{ Name = "trae-history"; Tool = "trae"; Type = "dir"; Path = (Join-SharedPath @($TraeUserRoot, "History")); Filter = "entries.json"; Recurse = $true; Top = 10 },
-    [pscustomobject]@{ Name = "trae-history-cn"; Tool = "trae"; Type = "dir"; Path = (Join-SharedPath @($TraeCnUserRoot, "History")); Filter = "entries.json"; Recurse = $true; Top = 10 },
+    [pscustomobject]@{ Name = "trae-history"; Tool = "trae"; Type = "dir"; Path = (Join-SharedPath @($TraeUserRoot, "History")); Filter = "entries.json"; Recurse = $true; Top = 10; MinPollSeconds = 60 },
+    [pscustomobject]@{ Name = "trae-history-cn"; Tool = "trae"; Type = "dir"; Path = (Join-SharedPath @($TraeCnUserRoot, "History")); Filter = "entries.json"; Recurse = $true; Top = 10; MinPollSeconds = 60 },
     [pscustomobject]@{ Name = "trae-mcp-user"; Tool = "trae"; Type = "file"; Path = (Join-SharedPath @($TraeUserRoot, "mcp.json")) },
     [pscustomobject]@{ Name = "trae-mcp-cn"; Tool = "trae"; Type = "file"; Path = (Join-SharedPath @($TraeCnUserRoot, "mcp.json")) },
     [pscustomobject]@{ Name = "openclaw-sessions"; Tool = "openclaw"; Type = "dir"; Path = (Join-SharedPath @($UserHome, ".openclaw", "agents", "main", "sessions")); Filter = "*.jsonl*"; Recurse = $false; Top = 10 },
@@ -118,12 +121,13 @@ $WatchSpecs = @(
     [pscustomobject]@{ Name = "openclaw-runs"; Tool = "openclaw"; Type = "file"; Path = (Join-SharedPath @($UserHome, ".openclaw", "subagents", "runs.json")) },
     [pscustomobject]@{ Name = "openclaw-blackboard-db"; Tool = "openclaw"; Type = "file"; Path = (Join-SharedPath @($UserHome, ".openclaw", "workspace", "ai-shrimp", "blackboard", "tasks.db")) },
     [pscustomobject]@{ Name = "opencode-db"; Tool = "opencode"; Type = "file"; Path = $OpenCodeDbPath },
-    [pscustomobject]@{ Name = "copilot-global-files"; Tool = "copilot"; Type = "dir"; Path = $CopilotGlobalStorage; Filter = "*"; Recurse = $true; Top = 8 },
-    [pscustomobject]@{ Name = "copilot-workspaces"; Tool = "copilot"; Type = "dir"; Path = $CopilotWorkspaceStorage; Filter = "workspace.json"; Recurse = $true; Top = 20 },
-    [pscustomobject]@{ Name = "copilot-chat-sessions"; Tool = "copilot"; Type = "dir"; Path = $CopilotWorkspaceStorage; Filter = "*.jsonl"; Recurse = $true; Top = 12 },
-    [pscustomobject]@{ Name = "copilot-cli-workspaces"; Tool = "copilot"; Type = "dir"; Path = $CopilotCliSessionRoot; Filter = "workspace.yaml"; Recurse = $true; Top = 12 },
-    [pscustomobject]@{ Name = "copilot-cli-events"; Tool = "copilot"; Type = "dir"; Path = $CopilotCliSessionRoot; Filter = "events.jsonl"; Recurse = $true; Top = 12 }
+    [pscustomobject]@{ Name = "copilot-global-files"; Tool = "copilot"; Type = "dir"; Path = $CopilotGlobalStorage; Filter = "*"; Recurse = $true; Top = 8; MinPollSeconds = 60 },
+    [pscustomobject]@{ Name = "copilot-workspaces"; Tool = "copilot"; Type = "dir"; Path = $CopilotWorkspaceStorage; Filter = "workspace.json"; Recurse = $true; Top = 20; MinPollSeconds = 60 },
+    [pscustomobject]@{ Name = "copilot-chat-sessions"; Tool = "copilot"; Type = "dir"; Path = $CopilotWorkspaceStorage; Filter = "*.jsonl"; Recurse = $true; Top = 12; MinPollSeconds = 60 },
+    [pscustomobject]@{ Name = "copilot-cli-workspaces"; Tool = "copilot"; Type = "dir"; Path = $CopilotCliSessionRoot; Filter = "workspace.yaml"; Recurse = $true; Top = 12; MinPollSeconds = 60 },
+    [pscustomobject]@{ Name = "copilot-cli-events"; Tool = "copilot"; Type = "dir"; Path = $CopilotCliSessionRoot; Filter = "events.jsonl"; Recurse = $true; Top = 12; MinPollSeconds = 60 }
 )
+$script:LastKnownSyncAt = [datetime]::MinValue
 
 function Ensure-Directory {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -134,6 +138,37 @@ function Ensure-Directory {
 
 function Get-NodeExecutable {
     return (Resolve-SharedNodeExecutable)
+}
+
+function Get-LastKnownSyncAt {
+    if ((Test-Path variable:script:LastKnownSyncAt) -and $script:LastKnownSyncAt -is [datetime] -and $script:LastKnownSyncAt -gt [datetime]::MinValue) {
+        return $script:LastKnownSyncAt
+    }
+
+    return [datetime]::MinValue
+}
+
+function Set-LastKnownSyncAt {
+    param([datetime]$Value)
+
+    if ($Value -gt [datetime]::MinValue) {
+        $script:LastKnownSyncAt = $Value
+    }
+}
+
+function Read-TrimmedFileOrEmpty {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return ""
+    }
+
+    $content = Get-Content -Raw -LiteralPath $Path -Encoding utf8
+    if ($null -eq $content) {
+        return ""
+    }
+
+    return ([string]$content).Trim()
 }
 
 function Start-NodeProcess {
@@ -279,6 +314,71 @@ function Release-WatchdogLock {
     }
 }
 
+function Invoke-PowerShellFileWithTimeout {
+    param(
+        [Parameter(Mandatory = $true)][string]$ScriptPath,
+        [string[]]$ArgumentList = @(),
+        [int]$TimeoutSeconds = 60,
+        [string]$WorkingDirectory = "",
+        [string]$HeartbeatReason = ""
+    )
+
+    $stdoutPath = Join-Path $AiMemoryRoot ("tmp-" + [guid]::NewGuid().ToString("N") + ".stdout.log")
+    $stderrPath = Join-Path $AiMemoryRoot ("tmp-" + [guid]::NewGuid().ToString("N") + ".stderr.log")
+
+    try {
+        $parameters = @{
+            FilePath = (Resolve-SharedPowerShellExecutable)
+            ArgumentList = (Get-SharedPowerShellFileArguments -ScriptPath $ScriptPath -ArgumentList $ArgumentList)
+            PassThru = $true
+            RedirectStandardOutput = $stdoutPath
+            RedirectStandardError = $stderrPath
+        }
+        if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+            $parameters.WorkingDirectory = $WorkingDirectory
+        }
+        if (Test-SharedIsWindows) {
+            $parameters.WindowStyle = "Hidden"
+        }
+
+        $proc = Start-Process @parameters
+        $resolvedHeartbeatReason = if ([string]::IsNullOrWhiteSpace($HeartbeatReason)) {
+            "watchdog-subprocess:" + [System.IO.Path]::GetFileName($ScriptPath)
+        } else {
+            $HeartbeatReason
+        }
+        $waitResult = Wait-ProcessWithHeartbeat `
+            -Process $proc `
+            -TimeoutSeconds $TimeoutSeconds `
+            -Reason $resolvedHeartbeatReason `
+            -LastSyncAt (Get-LastKnownSyncAt)
+        $timedOut = [bool]$waitResult.timedOut
+        if ($timedOut) {
+            try {
+                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            } catch {
+            }
+            Start-Sleep -Milliseconds 150
+        }
+
+        return [pscustomobject]@{
+            timedOut = $timedOut
+            exitCode = if ($timedOut) { $null } else { $waitResult.exitCode }
+            stdout = Read-TrimmedFileOrEmpty -Path $stdoutPath
+            stderr = Read-TrimmedFileOrEmpty -Path $stderrPath
+        }
+    } finally {
+        foreach ($tempPath in @($stdoutPath, $stderrPath)) {
+            try {
+                if (Test-Path -LiteralPath $tempPath -PathType Leaf) {
+                    Remove-Item -LiteralPath $tempPath -Force
+                }
+            } catch {
+            }
+        }
+    }
+}
+
 function Write-State {
     param(
         [Parameter(Mandatory = $true)][bool]$Running,
@@ -306,6 +406,116 @@ function Write-State {
     Move-Item -LiteralPath $tempPath -Destination $StatePath -Force
 }
 
+function Wait-ProcessWithHeartbeat {
+    param(
+        [Parameter(Mandatory = $true)][System.Diagnostics.Process]$Process,
+        [Parameter(Mandatory = $true)][int]$TimeoutSeconds,
+        [Parameter(Mandatory = $true)][string]$Reason,
+        [datetime]$LastSyncAt = [datetime]::MinValue
+    )
+
+    $startedAt = Get-Date
+    while (-not $Process.HasExited) {
+        if (((Get-Date) - $startedAt).TotalSeconds -ge $TimeoutSeconds) {
+            try {
+                Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
+            } catch {
+            }
+
+            return [pscustomobject]@{
+                timedOut = $true
+                exitCode = $null
+            }
+        }
+
+        Start-Sleep -Seconds $WatchdogHeartbeatSeconds
+        try {
+            $Process.Refresh()
+        } catch {
+        }
+
+        if (-not $Process.HasExited) {
+            Write-State -Running $true -LastReason $Reason -ChangedSpecs @() -LastSyncAt $LastSyncAt
+        }
+    }
+
+    return [pscustomobject]@{
+        timedOut = $false
+        exitCode = $Process.ExitCode
+    }
+}
+
+function Get-WatchSpecPollSeconds {
+    param([Parameter(Mandatory = $true)][pscustomobject]$Spec)
+
+    if ($Spec.PSObject.Properties.Name -contains "MinPollSeconds") {
+        $configured = [int]$Spec.MinPollSeconds
+        if ($configured -gt $PollSeconds) {
+            return $configured
+        }
+    }
+
+    return $PollSeconds
+}
+
+function Write-WatchdogScanHeartbeat {
+    param([Parameter(Mandatory = $true)][string]$SpecName)
+
+    Write-State -Running $true -LastReason ("watchdog-scan:" + $SpecName) -ChangedSpecs @() -LastSyncAt (Get-LastKnownSyncAt)
+}
+
+function Get-DirectoryWatchStamp {
+    param([Parameter(Mandatory = $true)][pscustomobject]$Spec)
+
+    $topLimit = if (($Spec.PSObject.Properties.Name -contains "Top") -and ([int]$Spec.Top -gt 0)) { [int]$Spec.Top } else { 10 }
+    $processed = 0
+    $latest = New-Object System.Collections.Generic.List[object]
+    $lastHeartbeatAt = Get-Date
+
+    foreach ($file in (Get-ChildItem -LiteralPath $Spec.Path -File -Filter $Spec.Filter -Recurse:([bool]$Spec.Recurse) -ErrorAction SilentlyContinue)) {
+        $processed++
+        $candidate = [pscustomobject]@{
+            FullName = $file.FullName
+            LastWriteTicks = $file.LastWriteTimeUtc.Ticks
+            Length = $file.Length
+        }
+
+        $insertAt = -1
+        for ($i = 0; $i -lt $latest.Count; $i++) {
+            $existing = $latest[$i]
+            if (($candidate.LastWriteTicks -gt [int64]$existing.LastWriteTicks) -or
+                (($candidate.LastWriteTicks -eq [int64]$existing.LastWriteTicks) -and ($candidate.FullName -lt [string]$existing.FullName))) {
+                $insertAt = $i
+                break
+            }
+        }
+
+        if ($insertAt -ge 0) {
+            $latest.Insert($insertAt, $candidate)
+        } elseif ($latest.Count -lt $topLimit) {
+            $latest.Add($candidate) | Out-Null
+        }
+
+        if ($latest.Count -gt $topLimit) {
+            $latest.RemoveAt($latest.Count - 1)
+        }
+
+        $now = Get-Date
+        if ((($processed % 250) -eq 0) -or (($now - $lastHeartbeatAt).TotalSeconds -ge $WatchdogHeartbeatSeconds)) {
+            Write-WatchdogScanHeartbeat -SpecName $Spec.Name
+            $lastHeartbeatAt = $now
+        }
+    }
+
+    if ($latest.Count -eq 0) {
+        return "__empty__"
+    }
+
+    return (@($latest | Sort-Object @{ Expression = "LastWriteTicks"; Descending = $true }, @{ Expression = "FullName"; Descending = $false }) | ForEach-Object {
+        "{0}:{1}:{2}" -f $_.FullName, $_.LastWriteTicks, $_.Length
+    }) -join "|"
+}
+
 function Get-WatchStamp {
     param([Parameter(Mandatory = $true)][pscustomobject]$Spec)
 
@@ -318,18 +528,7 @@ function Get-WatchStamp {
         return "{0}:{1}:{2}" -f $item.FullName, $item.LastWriteTimeUtc.Ticks, $item.Length
     }
 
-    $files = @(
-        Get-ChildItem -LiteralPath $Spec.Path -File -Filter $Spec.Filter -Recurse:([bool]$Spec.Recurse) |
-            Sort-Object LastWriteTime -Descending |
-            Select-Object -First ([int]$Spec.Top)
-    )
-    if ($files.Count -eq 0) {
-        return "__empty__"
-    }
-
-    return ($files | ForEach-Object {
-        "{0}:{1}:{2}" -f $_.FullName, $_.LastWriteTimeUtc.Ticks, $_.Length
-    }) -join "|"
+    return (Get-DirectoryWatchStamp -Spec $Spec)
 }
 
 function Get-FileContentHash {
@@ -396,15 +595,26 @@ function Test-StructuredArtifactsNeedRefresh {
 function Invoke-BusSync {
     param([Parameter(Mandatory = $true)][string]$Reason)
 
+    $lastSyncAt = [datetime]::MinValue
     try {
-        $syncOutput = Invoke-SharedPowerShellFile -ScriptPath $BusScript -ArgumentList @(
+        $syncProcess = Start-SharedPowerShellFile -ScriptPath $BusScript -ArgumentList @(
             "-Action", "SyncAll",
             "-Tool", "system",
             "-Project", "watchdog",
             "-Quiet"
-        ) 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning "[watchdog] BusSync failed with exit code $LASTEXITCODE"
+        ) -WorkingDirectory (Split-Path -Parent $BusScript)
+        $syncResult = Wait-ProcessWithHeartbeat `
+            -Process $syncProcess `
+            -TimeoutSeconds $BusSyncTimeoutSeconds `
+            -Reason ("watchdog-sync:" + $Reason) `
+            -LastSyncAt $lastSyncAt
+        if ($syncResult.timedOut) {
+            Write-Warning ("[watchdog] BusSync timed out after {0}s" -f $BusSyncTimeoutSeconds)
+        } elseif ($syncResult.exitCode -ne 0) {
+            Write-Warning ("[watchdog] BusSync failed with exit code {0}" -f $syncResult.exitCode)
+        } else {
+            $lastSyncAt = Get-Date
+            Set-LastKnownSyncAt -Value $lastSyncAt
         }
     } catch {
         Write-Warning "[watchdog] BusSync threw: $_"
@@ -418,13 +628,50 @@ function Invoke-BusSync {
     if ($script:ClaudeMemCounter % 5 -eq 0) {
         $syncScript = Resolve-BusPath -Candidates @("sync-claudemem-to-obsidian.ps1", "ops/sync-claudemem-to-obsidian.ps1")
         if (Test-Path $syncScript) {
-            Invoke-SharedPowerShellFile -ScriptPath $syncScript 2>$null | Out-Null
+            try {
+                $claudeMemSync = Invoke-PowerShellFileWithTimeout -ScriptPath $syncScript -TimeoutSeconds 60 -HeartbeatReason "claude-mem-sync"
+                if ($claudeMemSync.timedOut) {
+                    Write-Warning "[watchdog] sync-claudemem-to-obsidian timed out after 60s"
+                } elseif ($claudeMemSync.exitCode -ne 0) {
+                    $detail = if (-not [string]::IsNullOrWhiteSpace($claudeMemSync.stderr)) { $claudeMemSync.stderr } else { $claudeMemSync.stdout }
+                    Write-Warning ("[watchdog] sync-claudemem-to-obsidian failed with exit code {0}: {1}" -f $claudeMemSync.exitCode, $detail)
+                }
+            } catch {
+                Write-Warning "[watchdog] sync-claudemem-to-obsidian threw: $_"
+            }
         }
     }
 
-    $lastSyncAt = Get-Date
     Write-State -Running $true -LastReason $Reason -ChangedSpecs @() -LastSyncAt $lastSyncAt
     return $lastSyncAt
+}
+
+function Invoke-RefreshGeneratedArtifacts {
+    param([Parameter(Mandatory = $true)][string]$Reason)
+
+    try {
+        $refreshProcess = Start-SharedPowerShellFile -ScriptPath $BusScript -ArgumentList @(
+            "-Action", "RefreshDerivedArtifacts",
+            "-Quiet"
+        ) -WorkingDirectory (Split-Path -Parent $BusScript)
+        $refreshResult = Wait-ProcessWithHeartbeat `
+            -Process $refreshProcess `
+            -TimeoutSeconds $GeneratedArtifactsTimeoutSeconds `
+            -Reason ("watchdog-refresh-generated:" + $Reason)
+        if ($refreshResult.timedOut) {
+            Write-State -Running $true -LastReason ("generated-artifacts-timeout:" + $Reason) -ChangedSpecs @()
+            return $false
+        }
+        if ($refreshResult.exitCode -ne 0) {
+            Write-State -Running $true -LastReason ("generated-artifacts-exitcode-" + $refreshResult.exitCode + ":" + $Reason) -ChangedSpecs @()
+            return $false
+        }
+
+        return $true
+    } catch {
+        Write-State -Running $true -LastReason ("generated-artifacts-failed:" + $Reason) -ChangedSpecs @()
+        return $false
+    }
 }
 
 function Get-BlackboardDaemonProcesses {
@@ -497,7 +744,12 @@ function Invoke-OpenClawStructuredSync {
 
     try {
         $proc = Start-NodeProcess -ScriptPath $OpenClawSyncScript -PassThru
-        if (-not (Wait-Process -Id $proc.Id -Timeout 30 -ErrorAction SilentlyContinue)) {
+        $waitResult = Wait-ProcessWithHeartbeat `
+            -Process $proc `
+            -TimeoutSeconds 30 `
+            -Reason ("openclaw-sync:" + $Reason) `
+            -LastSyncAt (Get-LastKnownSyncAt)
+        if ($waitResult.timedOut) {
             try {
                 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
             } catch {
@@ -505,8 +757,8 @@ function Invoke-OpenClawStructuredSync {
             Write-State -Running $true -LastReason ("openclaw-sync-timeout:" + $Reason) -ChangedSpecs @()
             return $false
         }
-        if ($proc.ExitCode -ne 0) {
-            Write-State -Running $true -LastReason ("openclaw-sync-exitcode-" + $proc.ExitCode + ":" + $Reason) -ChangedSpecs @()
+        if ($waitResult.exitCode -ne 0) {
+            Write-State -Running $true -LastReason ("openclaw-sync-exitcode-" + $waitResult.exitCode + ":" + $Reason) -ChangedSpecs @()
             return $false
         }
         return $true
@@ -525,7 +777,12 @@ function Invoke-BuildMemoryLayers {
 
     try {
         $proc = Start-NodeProcess -ScriptPath $BuildMemoryLayersScript -PassThru
-        if (-not (Wait-Process -Id $proc.Id -Timeout 30 -ErrorAction SilentlyContinue)) {
+        $waitResult = Wait-ProcessWithHeartbeat `
+            -Process $proc `
+            -TimeoutSeconds 30 `
+            -Reason ("memory-layers:" + $Reason) `
+            -LastSyncAt (Get-LastKnownSyncAt)
+        if ($waitResult.timedOut) {
             try {
                 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
             } catch {
@@ -534,8 +791,8 @@ function Invoke-BuildMemoryLayers {
             return $false
         }
 
-        if ($proc.ExitCode -ne 0) {
-            Write-State -Running $true -LastReason ("memory-layers-exitcode-" + $proc.ExitCode + ":" + $Reason) -ChangedSpecs @()
+        if ($waitResult.exitCode -ne 0) {
+            Write-State -Running $true -LastReason ("memory-layers-exitcode-" + $waitResult.exitCode + ":" + $Reason) -ChangedSpecs @()
             return $false
         }
 
@@ -555,7 +812,12 @@ function Invoke-BuildHandoffPack {
 
     try {
         $proc = Start-NodeProcess -ScriptPath $BuildHandoffPackScript -PassThru
-        if (-not (Wait-Process -Id $proc.Id -Timeout 30 -ErrorAction SilentlyContinue)) {
+        $waitResult = Wait-ProcessWithHeartbeat `
+            -Process $proc `
+            -TimeoutSeconds 30 `
+            -Reason ("handoff-pack:" + $Reason) `
+            -LastSyncAt (Get-LastKnownSyncAt)
+        if ($waitResult.timedOut) {
             try {
                 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
             } catch {
@@ -564,8 +826,8 @@ function Invoke-BuildHandoffPack {
             return $false
         }
 
-        if ($proc.ExitCode -ne 0) {
-            Write-State -Running $true -LastReason ("handoff-pack-exitcode-" + $proc.ExitCode + ":" + $Reason) -ChangedSpecs @()
+        if ($waitResult.exitCode -ne 0) {
+            Write-State -Running $true -LastReason ("handoff-pack-exitcode-" + $waitResult.exitCode + ":" + $Reason) -ChangedSpecs @()
             return $false
         }
 
@@ -593,7 +855,12 @@ function Invoke-MemoryDream {
         }
 
         $proc = Start-SharedPowerShellFile -ScriptPath $MemoryDreamScript -ArgumentList $args -WorkingDirectory (Split-Path -Parent $MemoryDreamScript)
-        if (-not (Wait-Process -Id $proc.Id -Timeout 45 -ErrorAction SilentlyContinue)) {
+        $waitResult = Wait-ProcessWithHeartbeat `
+            -Process $proc `
+            -TimeoutSeconds 45 `
+            -Reason ("memory-dream:" + $Reason) `
+            -LastSyncAt (Get-LastKnownSyncAt)
+        if ($waitResult.timedOut) {
             try {
                 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
             } catch {
@@ -602,8 +869,8 @@ function Invoke-MemoryDream {
             return $false
         }
 
-        if ($proc.ExitCode -ne 0) {
-            Write-State -Running $true -LastReason ("memory-dream-exitcode-" + $proc.ExitCode + ":" + $Reason) -ChangedSpecs @()
+        if ($waitResult.exitCode -ne 0) {
+            Write-State -Running $true -LastReason ("memory-dream-exitcode-" + $waitResult.exitCode + ":" + $Reason) -ChangedSpecs @()
             return $false
         }
 
@@ -620,14 +887,31 @@ function Invoke-StructuredRefreshPipeline {
         [bool]$StructuredChanged = $false
     )
 
-    $layersBuilt = Invoke-BuildMemoryLayers -Reason $Reason
-    [void](Invoke-BuildHandoffPack -Reason $Reason)
-    if ($StructuredChanged -or $layersBuilt) {
+    $artifactsRefreshed = Invoke-RefreshGeneratedArtifacts -Reason $Reason
+    if ($StructuredChanged -or $artifactsRefreshed) {
         [void](Invoke-EmbeddingsRefresh -Reason ($Reason + "-structured") -Force)
     } else {
         [void](Invoke-EmbeddingsRefresh -Reason ($Reason + "-index-check"))
     }
-    [void](Invoke-MemoryDream -Reason $Reason)
+}
+
+function Invoke-ArtifactCatchup {
+    param([Parameter(Mandatory = $true)][string]$Reason)
+
+    if (-not (Test-StructuredArtifactsNeedRefresh)) {
+        return $null
+    }
+
+    $structuredSignatureBefore = Get-StructuredDataSignature
+    $lastSyncAt = Invoke-BusSync -Reason $Reason
+    $structuredSignatureAfter = Get-StructuredDataSignature
+    $structuredChanged = ($structuredSignatureBefore -cne $structuredSignatureAfter)
+
+    if ($structuredChanged -or (Test-StructuredArtifactsNeedRefresh)) {
+        Invoke-StructuredRefreshPipeline -Reason $Reason -StructuredChanged:$structuredChanged
+    }
+
+    return $lastSyncAt
 }
 
 function Invoke-EmbeddingsRefresh {
@@ -702,25 +986,42 @@ function Ensure-SharedMcp {
 
     if (Test-Path -LiteralPath $SharedMcpStatusScript -PathType Leaf) {
         try {
-            $status = Invoke-SharedPowerShellFile -ScriptPath $SharedMcpStatusScript | ConvertFrom-Json
-            foreach ($id in $expected) {
-                $record = @($status | Where-Object { $_.id -eq $id } | Select-Object -First 1)
-                if ($record.Count -eq 0 -or -not [bool]$record[0].running) {
-                    [void]$missing.Add($id)
+            $statusResult = Invoke-PowerShellFileWithTimeout -ScriptPath $SharedMcpStatusScript -TimeoutSeconds 20 -HeartbeatReason "shared-mcp-status"
+            if ($statusResult.timedOut -or $statusResult.exitCode -ne 0 -or [string]::IsNullOrWhiteSpace($statusResult.stdout)) {
+                foreach ($expectedId in $expected) {
+                    [void]$missing.Add([string]$expectedId)
+                }
+            } else {
+                $status = $statusResult.stdout | ConvertFrom-Json
+                foreach ($id in $expected) {
+                    $record = @($status | Where-Object { $_.id -eq $id } | Select-Object -First 1)
+                    if ($record.Count -eq 0 -or -not [bool]$record[0].running) {
+                        [void]$missing.Add($id)
+                    }
                 }
             }
         } catch {
-            $missing.AddRange($expected)
+            foreach ($expectedId in $expected) {
+                [void]$missing.Add([string]$expectedId)
+            }
         }
     } else {
-        $missing.AddRange($expected)
+        foreach ($expectedId in $expected) {
+            [void]$missing.Add([string]$expectedId)
+        }
     }
 
     if ($missing.Count -eq 0) {
         return ""
     }
 
-    Invoke-SharedPowerShellFile -ScriptPath $SharedMcpStartScript | Out-Null
+    $startResult = Invoke-PowerShellFileWithTimeout -ScriptPath $SharedMcpStartScript -TimeoutSeconds 60 -HeartbeatReason ("shared-mcp-start:" + ([string]::Join(",", $missing)))
+    if ($startResult.timedOut) {
+        return "shared-mcp-restart-timeout:" + ([string]::Join(",", $missing))
+    }
+    if ($startResult.exitCode -ne 0) {
+        return "shared-mcp-restart-failed:" + ([string]::Join(",", $missing))
+    }
     return "shared-mcp-restarted:" + ([string]::Join(",", $missing))
 }
 
@@ -729,9 +1030,12 @@ if (-not (Acquire-WatchdogLock)) {
 }
 
 try {
+    Write-State -Running $true -LastReason "watchdog-startup-scan" -ChangedSpecs @() -LastSyncAt (Get-LastKnownSyncAt)
     $stamps = @{}
+    $nextStampRefresh = @{}
     foreach ($spec in $WatchSpecs) {
         $stamps[$spec.Name] = Get-WatchStamp -Spec $spec
+        $nextStampRefresh[$spec.Name] = (Get-Date).AddSeconds((Get-WatchSpecPollSeconds -Spec $spec))
     }
 
     $startupStructuredSignatureBefore = Get-StructuredDataSignature
@@ -769,7 +1073,13 @@ try {
         }
         $changed = New-Object System.Collections.Generic.List[string]
         foreach ($spec in $WatchSpecs) {
+            $scanNow = Get-Date
+            if ($nextStampRefresh.ContainsKey($spec.Name) -and ([datetime]$nextStampRefresh[$spec.Name]) -gt $scanNow) {
+                continue
+            }
+
             $currentStamp = Get-WatchStamp -Spec $spec
+            $nextStampRefresh[$spec.Name] = $scanNow.AddSeconds((Get-WatchSpecPollSeconds -Spec $spec))
             if ($stamps[$spec.Name] -cne $currentStamp) {
                 $stamps[$spec.Name] = $currentStamp
                 [void]$changed.Add($spec.Name)
@@ -802,6 +1112,12 @@ try {
                 [void](Invoke-EmbeddingsRefresh -Reason ($reason + "-index-check"))
             }
             Write-State -Running $true -LastReason $reason -ChangedSpecs $changed.ToArray() -LastSyncAt $lastSyncAt
+            continue
+        }
+
+        if (Test-StructuredArtifactsNeedRefresh) {
+            $lastSyncAt = Invoke-ArtifactCatchup -Reason "watchdog-artifact-refresh"
+            Write-State -Running $true -LastReason "watchdog-artifact-refresh" -ChangedSpecs @() -LastSyncAt $lastSyncAt
             continue
         }
 
