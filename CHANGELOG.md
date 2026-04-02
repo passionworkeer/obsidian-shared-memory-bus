@@ -3,6 +3,8 @@
 All notable changes to this project should be documented here.
 
 ## Unreleased
+- Expanded generated onboarding packs to bundle shared HTTP MCP snippets, a portable skill template, and a thin plugin-adapter guide
+- Documented the recommended cross-platform `MCP + skill + thin plugin` integration bundle more explicitly
 - Sanitized tracked public overlay files to use portable placeholders instead of workstation-specific absolute paths
 - Documented publish-time checks for machine-path leakage and overlay regeneration safety
 - Added `ops/build-handoff-pack.js` plus watchdog/MCP integration so the stack now produces a bounded resume packet instead of relying only on layered summaries

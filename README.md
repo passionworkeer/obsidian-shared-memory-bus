@@ -32,6 +32,7 @@ The source tree is grouped by responsibility (`bus/`, `ops/`, `retrieval/`, `sha
 - Background watchdog sync from tool-native memory into structured shared memory
 - Auto-built `MEMORY-LAYERS` and `AUTO-DREAM` summaries for handoff, compaction, and durable promotion
 - Auto-built `HANDOFF` pack with bounded `goal / done / next / blocked / files / open_threads / tool_invariants`
+- Generated onboarding packs that bundle shared HTTP MCP snippets, a portable skill template, and a thin plugin-adapter contract for new agents
 - OpenClaw session, job, run, blackboard, and journal sync into shared structured memory
 - Hybrid retrieval with `bm25`, offline dense `hashing-v1`, and optional remote embeddings
 - Installer-side Python runtime auto-detection, including uv-managed Python, so shared retrieval does not depend on `python` being on `PATH`
@@ -180,6 +181,20 @@ Still isolated:
 - `pencil`
 
 The manifest keeps `playwright` marked as an optional server so advanced users can opt out or manage it separately, but the default starter opts into it because duplicated local Playwright MCP launches are usually the biggest process multiplier in multi-agent workflows.
+
+## Recommended Integration Bundle
+For most agents, the best packaged setup is:
+
+1. shared HTTP MCP for transport and process deduplication
+2. a portable skill or rule file for read order, writeback policy, and task decomposition
+3. a thin plugin adapter only if the host app needs native lifecycle hooks, UI, or settings surfaces
+
+The generated onboarding packs under `generated/onboarding/<agent>/` are designed around that split. They now include:
+- shared HTTP MCP snippets for Codex, Cursor, and Copilot-style hosts
+- a stdio fallback snippet for hosts that still need a local launcher
+- a portable skill template
+- a thin plugin-adapter guide
+- platform guidance for Windows, macOS, and Linux
 
 ## Verification Story
 - Shared MCP services for `context7`, `fetch`, `time`, `sequential-thinking`, `obsidian`, `MiniMax`, and `memory` were validated on `9331-9336` and `9338`
