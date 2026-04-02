@@ -11,6 +11,32 @@ $ErrorActionPreference = "Stop"
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [Console]::OutputEncoding = $Utf8NoBom
 
+function Resolve-BusPath {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Candidates,
+        [switch]$Directory
+    )
+
+    $roots = New-Object System.Collections.Generic.List[string]
+    foreach ($root in @($env:AI_MEMORY_ROOT, $PSScriptRoot, (Split-Path -Parent $PSScriptRoot))) {
+        if (-not [string]::IsNullOrWhiteSpace($root) -and -not $roots.Contains($root)) {
+            $roots.Add($root) | Out-Null
+        }
+    }
+
+    foreach ($root in @($roots)) {
+        foreach ($candidate in @($Candidates)) {
+            $path = Join-Path $root $candidate
+            $pathType = if ($Directory) { "Container" } else { "Leaf" }
+            if (Test-Path -LiteralPath $path -PathType $pathType) {
+                return (Get-Item -LiteralPath $path).FullName
+            }
+        }
+    }
+
+    return (Join-Path $roots[0] $Candidates[0])
+}
+
 function Resolve-ObsidianVaultRoot {
     param([AllowEmptyString()][string]$FallbackPath = "")
 
@@ -65,7 +91,8 @@ function Resolve-ObsidianVaultRoot {
 
 $UserHome = $env:USERPROFILE
 $AiMemoryRoot = if (-not [string]::IsNullOrWhiteSpace($env:AI_MEMORY_ROOT)) { $env:AI_MEMORY_ROOT } else { $PSScriptRoot }
-$BusScript = Join-Path $AiMemoryRoot "bus\memory-bus.ps1"
+$BusScript = Resolve-BusPath -Candidates @("memory-bus.ps1", "bus\memory-bus.ps1")
+$LockPath = Join-Path $AiMemoryRoot "watchdog.lock"
 $StatePath = Join-Path $AiMemoryRoot "watchdog-state.json"
 $SharedMcpRoot = Join-Path $AiMemoryRoot "shared-mcp"
 $SharedMcpStartScript = Join-Path $SharedMcpRoot "start-default-shared-mcp.ps1"
@@ -73,12 +100,15 @@ $SharedMcpStatusScript = Join-Path $SharedMcpRoot "status-shared-mcp.ps1"
 $VaultRoot = Resolve-ObsidianVaultRoot -FallbackPath (Join-Path $UserHome "Documents\Obsidian Vault")
 $GlobalContextPath = Join-Path $VaultRoot "00-System\ai-memory\generated\GLOBAL-CONTEXT.md"
 $StructuredRoot = Join-Path $VaultRoot "00-System\ai-memory\structured"
-$BlackboardDaemonScript = Join-Path $AiMemoryRoot "ops\obsidian-blackboard-daemon.js"
-$OpenClawSyncScript = Join-Path $AiMemoryRoot "ops\sync-openclaw-to-obsidian.js"
-$EmbeddingsScript = Join-Path $AiMemoryRoot "bus\generate-embeddings.js"
+$BlackboardDaemonScript = Resolve-BusPath -Candidates @("obsidian-blackboard-daemon.js", "ops\obsidian-blackboard-daemon.js")
+$OpenClawSyncScript = Resolve-BusPath -Candidates @("sync-openclaw-to-obsidian.js", "ops\sync-openclaw-to-obsidian.js")
+$BuildHandoffPackScript = Resolve-BusPath -Candidates @("build-handoff-pack.js", "ops\build-handoff-pack.js")
+$BuildMemoryLayersScript = Resolve-BusPath -Candidates @("build-memory-layers.js", "ops\build-memory-layers.js")
+$MemoryDreamScript = Resolve-BusPath -Candidates @("run-memory-dream.ps1", "ops\run-memory-dream.ps1")
+$EmbeddingsScript = Resolve-BusPath -Candidates @("generate-embeddings.js", "bus\generate-embeddings.js")
 $EmbeddingsIndexPath = Join-Path $VaultRoot "00-System\ai-memory\embeddings\index.jsonl"
 $EmbeddingsCooldownSeconds = 180
-$OpenClawWatchSpecNames = @("openclaw-sessions", "openclaw-memory", "openclaw-user", "openclaw-memory-md")
+$OpenClawWatchSpecNames = @("openclaw-sessions", "openclaw-memory", "openclaw-user", "openclaw-memory-md", "openclaw-jobs", "openclaw-runs", "openclaw-blackboard-db")
 $OpenCodeDbPath = Join-Path $UserHome ".local\share\opencode\opencode.db"
 $CopilotGlobalStorage = Join-Path $env:APPDATA "Code\User\globalStorage\github.copilot-chat"
 $CopilotWorkspaceStorage = Join-Path $env:APPDATA "Code\User\workspaceStorage"
@@ -86,6 +116,7 @@ $WatchSpecs = @(
     [pscustomobject]@{ Name = "claude-user"; Tool = "claude-code"; Type = "file"; Path = (Join-Path $UserHome ".claude\memory\USER.md") },
     [pscustomobject]@{ Name = "claude-memory"; Tool = "claude-code"; Type = "file"; Path = (Join-Path $UserHome ".claude\memory\MEMORY.md") },
     [pscustomobject]@{ Name = "claude-today"; Tool = "claude-code"; Type = "file"; Path = (Join-Path $UserHome ".claude\memory\TODAY.md") },
+    [pscustomobject]@{ Name = "claude-session-memory"; Tool = "claude-code"; Type = "file"; Path = (Join-Path $UserHome ".claude\session-memory\session-memory.md") },
     [pscustomobject]@{ Name = "claude-mem-db"; Tool = "claude-code"; Type = "file"; Path = (Join-Path $UserHome ".claude-mem\claude-mem.db") },
     [pscustomobject]@{ Name = "agents-skills"; Tool = "system"; Type = "dir"; Path = (Join-Path $UserHome ".agents\skills"); Filter = "SKILL.md"; Recurse = $true; Top = 250 },
     [pscustomobject]@{ Name = "codex-skills"; Tool = "system"; Type = "dir"; Path = (Join-Path $UserHome ".codex\skills"); Filter = "SKILL.md"; Recurse = $true; Top = 250 },
@@ -102,6 +133,9 @@ $WatchSpecs = @(
     [pscustomobject]@{ Name = "openclaw-memory"; Tool = "openclaw"; Type = "dir"; Path = (Join-Path $UserHome ".openclaw\workspace\memory"); Filter = "*.md"; Recurse = $false; Top = 6 },
     [pscustomobject]@{ Name = "openclaw-user"; Tool = "openclaw"; Type = "file"; Path = (Join-Path $UserHome ".openclaw\workspace\USER.md") },
     [pscustomobject]@{ Name = "openclaw-memory-md"; Tool = "openclaw"; Type = "file"; Path = (Join-Path $UserHome ".openclaw\workspace\MEMORY.md") },
+    [pscustomobject]@{ Name = "openclaw-jobs"; Tool = "openclaw"; Type = "file"; Path = (Join-Path $UserHome ".openclaw\cron\jobs.json") },
+    [pscustomobject]@{ Name = "openclaw-runs"; Tool = "openclaw"; Type = "file"; Path = (Join-Path $UserHome ".openclaw\subagents\runs.json") },
+    [pscustomobject]@{ Name = "openclaw-blackboard-db"; Tool = "openclaw"; Type = "file"; Path = (Join-Path $UserHome ".openclaw\workspace\ai-shrimp\blackboard\tasks.db") },
     [pscustomobject]@{ Name = "opencode-db"; Tool = "opencode"; Type = "file"; Path = $OpenCodeDbPath },
     [pscustomobject]@{ Name = "copilot-global-files"; Tool = "copilot"; Type = "dir"; Path = $CopilotGlobalStorage; Filter = "*"; Recurse = $true; Top = 8 },
     [pscustomobject]@{ Name = "copilot-workspaces"; Tool = "copilot"; Type = "dir"; Path = $CopilotWorkspaceStorage; Filter = "workspace.json"; Recurse = $true; Top = 20 },
@@ -114,6 +148,76 @@ function Ensure-Directory {
     param([Parameter(Mandatory = $true)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path)) {
         [void](New-Item -ItemType Directory -Path $Path -Force)
+    }
+}
+
+function Test-ProcessIdAlive {
+    param([int]$ProcessId)
+
+    if ($ProcessId -le 0) {
+        return $false
+    }
+
+    return $null -ne (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)
+}
+
+function Acquire-WatchdogLock {
+    Ensure-Directory -Path (Split-Path -Parent $LockPath)
+
+    while ($true) {
+        try {
+            $stream = [System.IO.File]::Open($LockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+            $payload = [ordered]@{
+                pid       = $PID
+                createdAt = (Get-Date).ToString("o")
+            } | ConvertTo-Json -Depth 3
+            $bytes = $Utf8NoBom.GetBytes($payload)
+            $stream.Write($bytes, 0, $bytes.Length)
+            $stream.Flush()
+            $Script:WatchdogLockStream = $stream
+            return $true
+        } catch [System.IO.IOException] {
+            $lockOwnerPid = 0
+            if (Test-Path -LiteralPath $LockPath -PathType Leaf) {
+                try {
+                    $lockData = Get-Content -Raw -LiteralPath $LockPath -Encoding utf8 | ConvertFrom-Json
+                    if ($null -ne $lockData.pid) {
+                        $lockOwnerPid = [int]$lockData.pid
+                    }
+                } catch {
+                }
+            }
+
+            if ($lockOwnerPid -gt 0 -and (Test-ProcessIdAlive -ProcessId $lockOwnerPid)) {
+                return $false
+            }
+
+            try {
+                Remove-Item -LiteralPath $LockPath -Force -ErrorAction Stop
+            } catch {
+                return $false
+            }
+
+            Start-Sleep -Milliseconds 150
+            continue
+        }
+    }
+}
+
+function Release-WatchdogLock {
+    if ($Script:WatchdogLockStream) {
+        try {
+            $Script:WatchdogLockStream.Dispose()
+        } catch {
+        }
+        $Script:WatchdogLockStream = $null
+    }
+
+    try {
+        if (Test-Path -LiteralPath $LockPath -PathType Leaf) {
+            Remove-Item -LiteralPath $LockPath -Force
+        }
+    } catch {
     }
 }
 
@@ -139,7 +243,9 @@ function Write-State {
         busScript = $BusScript
         globalContext = $GlobalContextPath
     }
-    [System.IO.File]::WriteAllText($StatePath, ($payload | ConvertTo-Json -Depth 6), $Utf8NoBom)
+    $tempPath = "$StatePath.tmp"
+    [System.IO.File]::WriteAllText($tempPath, ($payload | ConvertTo-Json -Depth 6), $Utf8NoBom)
+    Move-Item -LiteralPath $tempPath -Destination $StatePath -Force
 }
 
 function Get-WatchStamp {
@@ -186,7 +292,7 @@ function Invoke-BusSync {
     }
     $script:ClaudeMemCounter++
     if ($script:ClaudeMemCounter % 5 -eq 0) {
-$syncScript = Join-Path $AiMemoryRoot "ops\sync-claudemem-to-obsidian.ps1"
+        $syncScript = Resolve-BusPath -Candidates @("sync-claudemem-to-obsidian.ps1", "ops\sync-claudemem-to-obsidian.ps1")
         if (Test-Path $syncScript) {
             & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $syncScript 2>$null | Out-Null
         }
@@ -315,6 +421,122 @@ function Invoke-OpenClawStructuredSync {
     }
 }
 
+function Invoke-BuildMemoryLayers {
+    param([Parameter(Mandatory = $true)][string]$Reason)
+
+    if (-not (Test-Path -LiteralPath $BuildMemoryLayersScript -PathType Leaf)) {
+        return $false
+    }
+
+    try {
+        $nodePath = "node.exe"
+        try {
+            $nodeCmd = Get-Command node.exe -ErrorAction Stop
+            if ($nodeCmd.Source) {
+                $nodePath = $nodeCmd.Source
+            }
+        } catch {
+        }
+
+        $proc = Start-Process -FilePath $nodePath -ArgumentList @($BuildMemoryLayersScript) -WorkingDirectory (Split-Path -Parent $BuildMemoryLayersScript) -PassThru -WindowStyle Hidden
+        if (-not (Wait-Process -Id $proc.Id -Timeout 30 -ErrorAction SilentlyContinue)) {
+            try {
+                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            } catch {
+            }
+            Write-State -Running $true -LastReason ("memory-layers-timeout:" + $Reason) -ChangedSpecs @()
+            return $false
+        }
+
+        if ($proc.ExitCode -ne 0) {
+            Write-State -Running $true -LastReason ("memory-layers-exitcode-" + $proc.ExitCode + ":" + $Reason) -ChangedSpecs @()
+            return $false
+        }
+
+        return $true
+    } catch {
+        Write-State -Running $true -LastReason ("memory-layers-failed:" + $Reason) -ChangedSpecs @()
+        return $false
+    }
+}
+
+function Invoke-BuildHandoffPack {
+    param([Parameter(Mandatory = $true)][string]$Reason)
+
+    if (-not (Test-Path -LiteralPath $BuildHandoffPackScript -PathType Leaf)) {
+        return $false
+    }
+
+    try {
+        $nodePath = "node.exe"
+        try {
+            $nodeCmd = Get-Command node.exe -ErrorAction Stop
+            if ($nodeCmd.Source) {
+                $nodePath = $nodeCmd.Source
+            }
+        } catch {
+        }
+
+        $proc = Start-Process -FilePath $nodePath -ArgumentList @($BuildHandoffPackScript) -WorkingDirectory (Split-Path -Parent $BuildHandoffPackScript) -PassThru -WindowStyle Hidden
+        if (-not (Wait-Process -Id $proc.Id -Timeout 30 -ErrorAction SilentlyContinue)) {
+            try {
+                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            } catch {
+            }
+            Write-State -Running $true -LastReason ("handoff-pack-timeout:" + $Reason) -ChangedSpecs @()
+            return $false
+        }
+
+        if ($proc.ExitCode -ne 0) {
+            Write-State -Running $true -LastReason ("handoff-pack-exitcode-" + $proc.ExitCode + ":" + $Reason) -ChangedSpecs @()
+            return $false
+        }
+
+        return $true
+    } catch {
+        Write-State -Running $true -LastReason ("handoff-pack-failed:" + $Reason) -ChangedSpecs @()
+        return $false
+    }
+}
+
+function Invoke-MemoryDream {
+    param(
+        [Parameter(Mandatory = $true)][string]$Reason,
+        [switch]$Force
+    )
+
+    if (-not (Test-Path -LiteralPath $MemoryDreamScript -PathType Leaf)) {
+        return $false
+    }
+
+    try {
+        $args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $MemoryDreamScript)
+        if ($Force) {
+            $args += "-Force"
+        }
+
+        $proc = Start-Process -FilePath "powershell.exe" -ArgumentList $args -WorkingDirectory (Split-Path -Parent $MemoryDreamScript) -PassThru -WindowStyle Hidden
+        if (-not (Wait-Process -Id $proc.Id -Timeout 45 -ErrorAction SilentlyContinue)) {
+            try {
+                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            } catch {
+            }
+            Write-State -Running $true -LastReason ("memory-dream-timeout:" + $Reason) -ChangedSpecs @()
+            return $false
+        }
+
+        if ($proc.ExitCode -ne 0) {
+            Write-State -Running $true -LastReason ("memory-dream-exitcode-" + $proc.ExitCode + ":" + $Reason) -ChangedSpecs @()
+            return $false
+        }
+
+        return $true
+    } catch {
+        Write-State -Running $true -LastReason ("memory-dream-failed:" + $Reason) -ChangedSpecs @()
+        return $false
+    }
+}
+
 function Invoke-EmbeddingsRefresh {
     param(
         [Parameter(Mandatory = $true)][string]$Reason,
@@ -417,20 +639,8 @@ function Ensure-SharedMcp {
     return "shared-mcp-restarted:" + ([string]::Join(",", $missing))
 }
 
-# PID-file based lock (skip stuck named mutex)
-$statePath = Join-Path $AiMemoryRoot "watchdog-state.json"
-if (Test-Path $statePath) {
-    try {
-        $state = Get-Content $statePath -Raw | ConvertFrom-Json
-        $existingPid = [int]$state.pid
-        if ($existingPid -gt 0) {
-            $proc = Get-Process -Id $existingPid -ErrorAction SilentlyContinue
-            if ($proc) {
-                "[{0}] Another watchdog already running PID:{1} - exiting" -f (Get-Date -Format "HH:mm:ss"), $existingPid | Out-Null
-                exit 0
-            }
-        }
-    } catch {}
+if (-not (Acquire-WatchdogLock)) {
+    exit 0
 }
 
 try {
@@ -441,13 +651,16 @@ try {
 
     $blackboardReason = Ensure-ObsidianBlackboardDaemon
     $startupOpenClawSynced = Invoke-OpenClawStructuredSync -Reason "watchdog-startup"
-    if ($startupOpenClawSynced) {
-        [void](Invoke-EmbeddingsRefresh -Reason "openclaw-structured-sync-startup" -Force)
+    $sharedMcpReason = Ensure-SharedMcp
+    $lastSyncAt = Invoke-BusSync -Reason "watchdog-startup"
+    $startupMemoryLayersBuilt = Invoke-BuildMemoryLayers -Reason "watchdog-startup"
+    [void](Invoke-BuildHandoffPack -Reason "watchdog-startup")
+    if ($startupOpenClawSynced -or $startupMemoryLayersBuilt) {
+        [void](Invoke-EmbeddingsRefresh -Reason "watchdog-startup-structured" -Force)
     } else {
         [void](Invoke-EmbeddingsRefresh -Reason "startup-index-check")
     }
-    $sharedMcpReason = Ensure-SharedMcp
-    $lastSyncAt = Invoke-BusSync -Reason "watchdog-startup"
+    [void](Invoke-MemoryDream -Reason "watchdog-startup")
     if (-not [string]::IsNullOrWhiteSpace($blackboardReason)) {
         Write-State -Running $true -LastReason $blackboardReason -ChangedSpecs @() -LastSyncAt $lastSyncAt
     }
@@ -491,22 +704,28 @@ try {
         if ($changed.Count -gt 0) {
             $openClawChanged = @($changed | Where-Object { $OpenClawWatchSpecNames -contains $_ }).Count -gt 0
             if ($openClawChanged) {
-                $openClawSynced = Invoke-OpenClawStructuredSync -Reason ("watchdog-change:" + ([string]::Join(",", $changed)))
-                if ($openClawSynced) {
-                    [void](Invoke-EmbeddingsRefresh -Reason "openclaw-structured-sync-change" -Force)
-                }
-            } else {
-                [void](Invoke-EmbeddingsRefresh -Reason "watchdog-change-index-check")
+                [void](Invoke-OpenClawStructuredSync -Reason ("watchdog-change:" + ([string]::Join(",", $changed))))
             }
             $reason = "watchdog-change:" + ([string]::Join(",", $changed))
             $lastSyncAt = Invoke-BusSync -Reason $reason
+            $layersBuilt = Invoke-BuildMemoryLayers -Reason $reason
+            [void](Invoke-BuildHandoffPack -Reason $reason)
+            if ($openClawChanged -or $layersBuilt) {
+                [void](Invoke-EmbeddingsRefresh -Reason "watchdog-change-structured" -Force)
+            } else {
+                [void](Invoke-EmbeddingsRefresh -Reason "watchdog-change-index-check")
+            }
+            [void](Invoke-MemoryDream -Reason $reason)
             Write-State -Running $true -LastReason $reason -ChangedSpecs $changed.ToArray() -LastSyncAt $lastSyncAt
             continue
         }
 
         if ($needsStaleRefresh) {
-            [void](Invoke-EmbeddingsRefresh -Reason "watchdog-stale-refresh-index-check")
             $lastSyncAt = Invoke-BusSync -Reason "watchdog-stale-refresh"
+            [void](Invoke-BuildMemoryLayers -Reason "watchdog-stale-refresh")
+            [void](Invoke-BuildHandoffPack -Reason "watchdog-stale-refresh")
+            [void](Invoke-EmbeddingsRefresh -Reason "watchdog-stale-refresh-index-check")
+            [void](Invoke-MemoryDream -Reason "watchdog-stale-refresh")
             Write-State -Running $true -LastReason "watchdog-stale-refresh" -ChangedSpecs @() -LastSyncAt $lastSyncAt
             continue
         }
@@ -518,6 +737,9 @@ try {
         }
     }
 } finally {
-    Write-State -Running $false -LastReason "watchdog-exit" -ChangedSpecs @()
-    # mutex guard removed - no mutex to release
+    try {
+        Write-State -Running $false -LastReason "watchdog-exit" -ChangedSpecs @()
+    } finally {
+        Release-WatchdogLock
+    }
 }

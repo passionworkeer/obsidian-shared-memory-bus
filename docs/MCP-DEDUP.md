@@ -12,6 +12,8 @@ Typical pain points:
 ## Strategy
 This bundle centralizes safe-to-share MCP servers behind local HTTP endpoints.
 
+Use MCP for transport and process deduplication. Use skills for reusable prompting and behavior. Use plugins only when a host app needs native lifecycle or UI integration. See `docs/INTEGRATION-MODES.md`.
+
 Shared by default through `start-default-shared-mcp.ps1`:
 - `context7`
 - `fetch`
@@ -54,7 +56,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-mem
 Run a pressure test:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\ops\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks
 ```
 
 Good signs:

@@ -10,12 +10,15 @@ Use this checklist when publishing a new public revision of the bundle.
 
 ## Minimum Validation
 ```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-layout.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\shared-mcp\start-default-shared-mcp.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
 ```
 
 Run the pressure test if anything changed in shared MCP behavior, agent wiring, or memory indexing.
+
+If the change touched file layout or installer behavior, also confirm `.github/workflows/windows-validate.yml` still reflects the expected smoke-install story.
 
 ## Public Repo Hygiene
 - `README.md` explains what changed and what the project is for

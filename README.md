@@ -2,7 +2,9 @@
 
 Portable Windows-first bundle for building a local-first, Obsidian-backed shared memory layer across multiple AI tools such as Codex, Claude Code, OpenCode, Cursor, Copilot, Trae, and OpenClaw.
 
-This repository packages the architecture, runtime scripts, shared MCP services, onboarding helpers, verification tools, and optional embedding utilities used to run a cross-tool memory bus on one machine.
+This repository packages the architecture, runtime scripts, shared MCP services, onboarding helpers, verification tools, and optional embedding utilities used to run a cross-tool memory bus on one machine. The full control plane is validated on Windows, while the core memory pipeline is now smoke-validated in CI on Windows, macOS, and Linux.
+
+The source tree is grouped by responsibility (`bus/`, `ops/`, `retrieval/`, `shared-mcp/`), while the installed runtime under `%USERPROFILE%\.ai-memory` stays intentionally flat for compatibility with existing startup hooks and client configs. That source-to-install contract is defined in `scripts/install-layout.psd1`.
 
 ## Project Status
 - Ready for real local use on Windows
@@ -23,12 +25,20 @@ This repository packages the architecture, runtime scripts, shared MCP services,
 
 ## What This Gives You
 - One canonical long-term memory store in Obsidian
+- Layered memory outputs inspired by Claude-style session memory and OpenClaw-style task blackboards
 - One shared `memory` MCP service instead of per-agent local memory processes
 - Shared `obsidian` MCP for direct note reads and writes
 - One shared `playwright` MCP backend so multi-agent browser tasks stop spawning one local Playwright server per client
 - Background watchdog sync from tool-native memory into structured shared memory
+- Auto-built `MEMORY-LAYERS` and `AUTO-DREAM` summaries for handoff, compaction, and durable promotion
+- Auto-built `HANDOFF` pack with bounded `goal / done / next / blocked / files / open_threads / tool_invariants`
+- OpenClaw session, job, run, blackboard, and journal sync into shared structured memory
 - Hybrid retrieval with `bm25`, offline dense `hashing-v1`, and optional remote embeddings
+- Installer-side Python runtime auto-detection, including uv-managed Python, so shared retrieval does not depend on `python` being on `PATH`
+- Vault root auto-discovery from environment overrides, the Obsidian app config, or standard Desktop/Documents fallback paths
+- No native Node `sqlite3` dependency in the shared `memory` MCP or the OpenClaw blackboard daemon
 - Pressure-test and verification tooling for multi-agent setups
+- An explicit source-to-install contract with stale runtime cleanup and Windows CI validation
 
 ## Who This Is For
 - People running multiple local AI agents on one Windows machine
@@ -111,6 +121,7 @@ Shared MCP deduplicates processes. It does not merge all agent state into one co
 | VS Code / GitHub Copilot | Supported | Config wiring and snapshot import supported |
 | Trae | Portable target | Use the new-agent integration guide |
 | Other MCP-capable agents | Portable target | Prefer the onboarding flow in `docs/NEW-AGENT-INTEGRATION.md` |
+| Portable core on macOS/Linux | Supported | Core memory generation, dream consolidation, and retrieval smoke-tested in CI; full installer/startup remains Windows-first |
 
 ## Included
 - Core bus runtime (`bus/`):
@@ -119,6 +130,9 @@ Shared MCP deduplicates processes. It does not merge all agent state into one co
   - `bus/register-agent.ps1`
   - `bus/generate-embeddings.js`
 - Operations (`ops/`):
+  - `ops/build-handoff-pack.js`
+  - `ops/build-memory-layers.js`
+  - `ops/run-memory-dream.ps1`
   - `ops/run-obsidian-mcp.ps1`
   - `ops/run-minimax-mcp.ps1`
   - `ops/verify-integrations.ps1`
@@ -131,10 +145,14 @@ Shared MCP deduplicates processes. It does not merge all agent state into one co
   - `ops/sync-openclaw-to-obsidian.js`
   - `ops/obsidian-blackboard-daemon.js`
 - Retrieval and embeddings (`retrieval/`):
+  - `retrieval/benchmark-architecture.py`
   - `retrieval/semantic-search.py`
   - `retrieval/semantic-search.js`
   - `retrieval/probe-models.py`
   - `retrieval/benchmark-backends.py`
+- Runtime portability helpers:
+  - `bus/python-runtime.js`
+  - `shared-mcp/python-runtime.cjs`
 - Shared MCP runtime under `shared-mcp/`:
   - `omni-memory-server.js`
   - `manifest.json`
@@ -178,31 +196,27 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
 
 The installer writes `AI_MEMORY_ROOT` into your user environment so shared MCP commands can locate the installed runtime without hardcoded machine-specific paths.
 
+## Maintainer Guardrails
+Before changing runtime file names, paths, or startup entrypoints, validate the source-to-install contract:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-layout.ps1
+```
+
+The installer also writes `%USERPROFILE%\.ai-memory\install-manifest.json` so upgrades can prune stale managed runtime files left behind by older layouts or renamed entrypoints.
+
 ## Minimal Quick Start
 
-> **What is `<your-project-root>`?** It is the directory where your AI agent's config files live. For Claude Code, this is your `.claude/` directory. For Codex, it is your `.codex/` directory. For other agents, point it at the directory where that agent stores its settings. The scripts will write per-agent MCP config snippets into a `mcp configs/` subdirectory there — they will not modify your existing settings directly.
+> **What is `<your-project-root>`?** It is the directory where your AI agent's config files live. For Claude Code, this is your `.claude/` directory. For Codex, it is your `.codex/` directory. For other agents, point it at the directory where that agent stores its settings. The scripts will write per-agent MCP config snippets into a `mcp configs/` subdirectory there; they will not modify your existing settings directly.
 
 > **Prerequisites**: An Obsidian vault already exists with at least the `00-System/ai-memory/` directory structure. If your vault is empty or on a different drive, set `AI_MEMORY_OBSIDIAN_VAULT` to its root path before running.
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\shared-mcp\start-default-shared-mcp.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\ops\verify-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
-```
-
-Then wire supported clients:
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\ops\verify-integrations.ps1 -WorkspaceRoot <your-project-root>
-```
-
-Then verify:
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\ops\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
-```
-
-Then pressure test:
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\ops\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\verify-integrations.ps1 -WorkspaceRoot <your-project-root>
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks
 ```
 
 **What to expect**: The pressure test runs 5 waves of concurrent MCP health checks against all shared endpoints (9331-9338). "passed" means every wave returned the expected responses with no crashes or duplicate PIDs. If you see failures, see [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) or the operational FAQ in [`docs/FAQ.md`](docs/FAQ.md).
@@ -217,6 +231,16 @@ $env:AI_MEMORY_EMBED_BASE_URL = "https://your-openai-compatible-endpoint/v1"
 $env:AI_MEMORY_EMBED_API_KEY = "<your-key>"
 $env:AI_MEMORY_EMBED_MODEL = "<your-model-id>"
 ```
+
+Then rebuild the shared embeddings index so the stored vectors match the active provider:
+
+```powershell
+node $env:USERPROFILE\.ai-memory\generate-embeddings.js
+```
+
+The index now records a provider fingerprint (`backend + model + base URL`) so switching remote embedding endpoints will not silently reuse stale vectors. If you change provider settings and keep seeing BM25-only fallbacks, rebuild the index again and inspect `memory_status` for `embeddings.backends`, `embeddings.models`, `embeddings.dimensions`, and `embeddings.providerHosts`.
+
+For consistency, remote rebuilds now fail the run instead of silently mixing `openai` and `hashing-v1` vectors in the same index. Only set `AI_MEMORY_EMBED_ALLOW_BATCH_FALLBACK=1` if you explicitly want per-batch fallback behavior.
 
 Use the included probe and benchmark scripts before doing any full reindex.
 
@@ -233,6 +257,7 @@ Use the included probe and benchmark scripts before doing any full reindex.
 - [`docs/FILES.md`](docs/FILES.md)
 - [`docs/FAQ.md`](docs/FAQ.md)
 - [`docs/NEW-AGENT-INTEGRATION.md`](docs/NEW-AGENT-INTEGRATION.md)
+- [`docs/INTEGRATION-MODES.md`](docs/INTEGRATION-MODES.md)
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md)
 - [`docs/RELEASING.md`](docs/RELEASING.md)
 - [`docs/ROADMAP.md`](docs/ROADMAP.md)
