@@ -10,7 +10,7 @@
 - [ ] Shared retrieval core module to remove duplicated hash logic from JS and Python
 - [ ] Add stronger retention and compaction policy for `structured/*.jsonl`
 - [ ] Windows Service registration for the watchdog
-- [ ] Portable installer parity beyond the current Windows-first control plane
+- [ ] Broader live acceptance parity beyond the current Windows-heavy validation depth
 
 ## Backlog
 - Prometheus metrics endpoint

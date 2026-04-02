@@ -1,5 +1,5 @@
 param(
-    [string]$CodexRoot = "$env:USERPROFILE\.codex",
+    [string]$CodexRoot = "",
     [switch]$Watch,
     [int]$TimeoutMinutes = 720,
     [int]$PollSeconds = 15,
@@ -8,6 +8,14 @@ param(
 
 Set-StrictMode -Version 3.0
 $ErrorActionPreference = "Stop"
+
+$bundleRoot = Split-Path -Parent $PSScriptRoot
+$platformHelperPath = Join-Path $bundleRoot (Join-Path "bus" "runtime-platform.ps1")
+. $platformHelperPath
+
+if ([string]::IsNullOrWhiteSpace($CodexRoot)) {
+    $CodexRoot = Join-SharedPath @((Get-SharedUserHome), ".codex")
+}
 
 if ([string]::IsNullOrWhiteSpace($ResultPath)) {
     $ResultPath = Join-Path $CodexRoot "repair-codex-runtime.last.json"

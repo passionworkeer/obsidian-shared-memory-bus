@@ -1,13 +1,14 @@
 # Obsidian Shared AI Memory Bus
 
-Portable Windows-first bundle for building a local-first, Obsidian-backed shared memory layer across multiple AI tools such as Codex, Claude Code, OpenCode, Cursor, Copilot, Trae, and OpenClaw.
+Portable PowerShell-based bundle for building a local-first, Obsidian-backed shared memory layer across multiple AI tools such as Codex, Claude Code, OpenCode, Cursor, Copilot, Trae, and OpenClaw.
 
-This repository packages the architecture, runtime scripts, shared MCP services, onboarding helpers, verification tools, and optional embedding utilities used to run a cross-tool memory bus on one machine. The full control plane is validated on Windows, while the core memory pipeline is now smoke-validated in CI on Windows, macOS, and Linux.
+This repository packages the architecture, runtime scripts, shared MCP services, onboarding helpers, verification tools, and optional embedding utilities used to run a cross-tool memory bus on one machine. The full control plane is live-validated on Windows, while the portable installer/runtime entrypoints now ship for Windows, macOS, and Linux with source-tree and installed-wrapper smoke coverage.
 
-The source tree is grouped by responsibility (`bus/`, `ops/`, `retrieval/`, `shared-mcp/`), while the installed runtime under `%USERPROFILE%\.ai-memory` stays intentionally flat for compatibility with existing startup hooks and client configs. That source-to-install contract is defined in `scripts/install-layout.psd1`.
+The source tree is grouped by responsibility (`bus/`, `ops/`, `retrieval/`, `shared-mcp/`), while the installed runtime under `~/.ai-memory` stays intentionally flat for compatibility with existing startup hooks and client configs. That source-to-install contract is defined in `scripts/install-layout.psd1`.
 
 ## Project Status
 - Ready for real local use on Windows
+- Portable install/startup entrypoints now ship for macOS and Linux
 - Local-first by default, with optional remote embeddings
 - Best suited for one machine hosting many agents and tools
 - Public template-quality bundle, but still opinionated and evolving
@@ -36,13 +37,18 @@ The source tree is grouped by responsibility (`bus/`, `ops/`, `retrieval/`, `sha
 - OpenClaw session, job, run, blackboard, and journal sync into shared structured memory
 - Hybrid retrieval with `bm25`, offline dense `hashing-v1`, and optional remote embeddings
 - Installer-side Python runtime auto-detection, including uv-managed Python, so shared retrieval does not depend on `python` being on `PATH`
+- Installer-side bootstrap of lightweight retrieval dependencies (`rank-bm25`, `jieba`) so BM25 scoring and Chinese tokenization do not silently degrade on fresh machines
+- Shared `fetch` / `time` startup now prefers a managed Python 3.10+ runtime through `AI_MEMORY_MCP_PYTHON` instead of cold-starting `uvx` on every launch
 - Vault root auto-discovery from environment overrides, the Obsidian app config, or standard Desktop/Documents fallback paths
 - No native Node `sqlite3` dependency in the shared `memory` MCP or the OpenClaw blackboard daemon
+- A warm shared Python retrieval worker behind the `memory` MCP so BM25 state and model caches can be reused across requests
+- Shared retrieval worker cache introspection and cache-reset control through `memory_status` and `clear_shared_memory_search_cache`
+- Runtime embedding catalog and selection controls through `list_embedding_runtimes` and `set_embedding_runtime`, with drift detection exposed as `memory_status.embeddingIndexState`
 - Pressure-test and verification tooling for multi-agent setups
-- An explicit source-to-install contract with stale runtime cleanup and Windows CI validation
+- An explicit source-to-install contract with stale runtime cleanup plus Windows and portable-core CI validation
 
 ## Who This Is For
-- People running multiple local AI agents on one Windows machine
+- People running multiple local AI agents on one machine
 - Setups where Obsidian should be the durable source of truth
 - Users who want shared retrieval without blindly sharing every tool process
 
@@ -94,7 +100,7 @@ flowchart LR
 ```
 
 ## High-Level Flow
-1. Install the bundle into `%USERPROFILE%\.ai-memory`
+1. Install the bundle into `~/.ai-memory`
 2. Point it at your Obsidian vault
 3. Start the shared MCP stack
 4. Wire clients to shared HTTP MCP endpoints
@@ -122,7 +128,7 @@ Shared MCP deduplicates processes. It does not merge all agent state into one co
 | VS Code / GitHub Copilot | Supported | Config wiring and snapshot import supported |
 | Trae | Portable target | Use the new-agent integration guide |
 | Other MCP-capable agents | Portable target | Prefer the onboarding flow in `docs/NEW-AGENT-INTEGRATION.md` |
-| Portable core on macOS/Linux | Supported | Core memory generation, dream consolidation, and retrieval smoke-tested in CI; full installer/startup remains Windows-first |
+| Portable core on macOS/Linux | Supported | `pwsh` + `.sh` entrypoints ship for install/start/status/stop flows; Windows still has the deepest live acceptance coverage |
 
 ## Included
 - Core bus runtime (`bus/`):
@@ -152,22 +158,27 @@ Shared MCP deduplicates processes. It does not merge all agent state into one co
   - `retrieval/probe-models.py`
   - `retrieval/benchmark-backends.py`
 - Runtime portability helpers:
+  - `bus/runtime-platform.ps1`
   - `bus/python-runtime.js`
   - `shared-mcp/python-runtime.cjs`
 - Shared MCP runtime under `shared-mcp/`:
   - `omni-memory-server.js`
   - `manifest.json`
   - `start-shared-mcp.ps1`
+  - `start-shared-mcp.sh`
   - `start-default-shared-mcp.ps1`
+  - `start-default-shared-mcp.sh`
   - `stop-shared-mcp.ps1`
+  - `stop-shared-mcp.sh`
   - `status-shared-mcp.ps1`
+  - `status-shared-mcp.sh`
   - `write-config-snippets.ps1`
   - `singleton-stdio-mcp-proxy.mjs`
   - `playwright-stdio-proxy.js`
   - `package.json`
 
 ## Shared MCP Defaults
-Started by `shared-mcp/start-default-shared-mcp.ps1`:
+Started by `shared-mcp/start-default-shared-mcp.ps1` or `shared-mcp/start-default-shared-mcp.sh`:
 - `context7`
 - `fetch`
 - `time`
@@ -201,6 +212,8 @@ The generated onboarding packs under `generated/onboarding/<agent>/` are designe
 - The shared Playwright backend was validated on `9337` with real MCP `initialize`, `tools/list`, `browser_navigate`, and `browser_snapshot` calls
 - Multi-wave pressure tests passed with stable shared listener PIDs
 - Client integration checks were validated for Codex, Claude Code, OpenCode, Cursor, and VS Code/Copilot paths
+- The POSIX wrapper layer was smoke-checked through Git Bash using `scripts/validate-layout.sh` and `shared-mcp/status-shared-mcp.sh`
+- The shared `memory` MCP now keeps a persistent Python retrieval worker and only falls back to one-shot search if the worker is unavailable
 
 See `docs/VALIDATION.md` for the current test story and reproduction flow.
 
@@ -211,21 +224,31 @@ Tracked onboarding and overlay files in this repo intentionally use portable pla
 - `<repo-root>` means the checked-out repository root for this bundle or for the agent-specific project overlay
 - `~/.trae/user_rules.md` is shown as a user-home-relative example, not a hardcoded machine path
 
-At runtime, the Windows control plane resolves the vault from:
+At runtime, the bundle resolves the vault from:
 
 1. `AI_MEMORY_OBSIDIAN_VAULT`
 2. `OBSIDIAN_VAULT_ROOT`
-3. the active or most recent vault in Obsidian's app config
-4. standard fallback locations such as Desktop or Documents when needed
+3. the active or most recent vault in Obsidian's app config on Windows, macOS, or Linux
+4. standard fallback locations such as `~/Obsidian Vault`, Desktop, or Documents when needed
 
-Public docs and tracked overlay files should never be committed with private paths such as `C:\Users\name\...` or `E:\...`.
+Public docs and tracked overlay files should never be committed with private paths such as `C:\Users\name\...`, `/Users/name/...`, `/home/name/...`, or `E:\...`.
 
 ## Install
+Windows:
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
 ```
 
-The installer writes `AI_MEMORY_ROOT` into your user environment so shared MCP commands can locate the installed runtime without hardcoded machine-specific paths.
+macOS/Linux (`pwsh` required):
+```bash
+./scripts/install.sh
+```
+
+On Windows, the installer writes `AI_MEMORY_ROOT` into your user environment and registers per-user startup hooks through the Startup folder.
+On macOS, startup registration is emitted as LaunchAgents. On Linux, it prefers `systemd --user` units and falls back to XDG autostart when `systemctl --user` is unavailable.
+On macOS/Linux, the installer generates `~/.ai-memory/activate-ai-memory.sh` and `~/.ai-memory/activate-ai-memory.ps1` instead of mutating shell startup files automatically.
+It also generates root-level `.sh` wrappers for installed runtime commands, so macOS/Linux users can call `~/.ai-memory/run-pressure-test.sh`, `~/.ai-memory/verify-client-integrations.sh`, `~/.ai-memory/memory-bus.sh`, and similar entrypoints directly. Those wrappers are POSIX `sh`, not Bash-only scripts.
+Before install, source-tree direct runs can fall back to `templates/config/runtime.json`; the installed runtime should use `~/.ai-memory/config/runtime.json`.
 
 ## Maintainer Guardrails
 Before changing runtime file names, paths, or startup entrypoints, validate the source-to-install contract:
@@ -234,7 +257,13 @@ Before changing runtime file names, paths, or startup entrypoints, validate the 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-layout.ps1
 ```
 
-The installer also writes `%USERPROFILE%\.ai-memory\install-manifest.json` so upgrades can prune stale managed runtime files left behind by older layouts or renamed entrypoints.
+```bash
+./scripts/validate-layout.sh
+```
+
+The installer also writes `~/.ai-memory/install-manifest.json` so upgrades can prune stale managed runtime files left behind by older layouts or renamed entrypoints.
+
+CI guardrails for that contract live in `.github/workflows/portable-core.yml` and `.github/workflows/windows-validate.yml`.
 
 ## Minimal Quick Start
 
@@ -244,10 +273,18 @@ The installer also writes `%USERPROFILE%\.ai-memory\install-manifest.json` so up
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\shared-mcp\start-default-shared-mcp.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\verify-integrations.ps1 -WorkspaceRoot <your-project-root>
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\start-default-shared-mcp.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\verify-integrations.ps1 -WorkspaceRoot <your-project-root>
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks
+```
+
+```bash
+./scripts/install.sh
+~/.ai-memory/shared-mcp/start-default-shared-mcp.sh
+~/.ai-memory/verify-integrations.sh -WorkspaceRoot <your-project-root>
+~/.ai-memory/verify-client-integrations.sh -WorkspaceRoot <your-project-root> -RunCliChecks
+~/.ai-memory/run-pressure-test.sh -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks
 ```
 
 **What to expect**: The pressure test runs 5 waves of concurrent MCP health checks against all shared endpoints (9331-9338). "passed" means every wave returned the expected responses with no crashes or duplicate PIDs. If you see failures, see [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) or the operational FAQ in [`docs/FAQ.md`](docs/FAQ.md).
@@ -255,21 +292,70 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-mem
 ## Optional Remote Embeddings
 The default dense retrieval backend is offline `hashing-v1`.
 
+The runtime now resolves embeddings through a decoupled registry:
+- `embeddings.defaults`
+- `embeddings.providers.<name>`
+- `embeddings.profiles.<name>.provider`
+
+That lets you keep provider transport details separate from task-oriented profiles. A provider defines the adapter and transport. A profile chooses a provider and can override model, delay, or batching behavior without copying the full provider block.
+
+You can switch selection at runtime with:
+- `AI_MEMORY_EMBED_PROFILE`
+- `AI_MEMORY_EMBED_PROVIDER`
+- `AI_MEMORY_EMBED_ADAPTER`
+
+Legacy `AI_MEMORY_EMBED_BACKEND` still works as a compatibility alias for `AI_MEMORY_EMBED_ADAPTER`.
+
+In the long-running shared `memory` MCP, persisted `runtime.json` is now treated as the canonical selector by default. Selection/tuning environment overrides for profile/provider/adapter/model/base-url are ignored unless you explicitly opt in with:
+
+```powershell
+$env:AI_MEMORY_ALLOW_EMBED_RUNTIME_ENV_OVERRIDES = "1"
+```
+
+Use that only when you intentionally want one process to ignore the saved runtime selection.
+
+This is a real config/plugin boundary, but it is still not a true dense hot-swap boundary: after changing adapter, model, or base URL, rebuild the stored embeddings index so query-time vectors and stored vectors stay aligned.
+
+The shared `memory` MCP now exposes a small control plane for this:
+- `list_embedding_runtimes`
+- `set_embedding_runtime`
+- `memory_status.embeddingIndexState`
+
+That means agents can discover the configured providers/profiles, switch the persisted selection, and immediately see whether the current dense index is aligned or whether a rebuild is still required.
+
+`list_embedding_runtimes` now also annotates each provider/profile with:
+- `configHash`
+- `indexedCount`
+- `indexCompatible`
+- `rebuildRequired`
+
 If you want to test an OpenAI-compatible embedding API, set:
 ```powershell
-$env:AI_MEMORY_EMBED_BACKEND = "openai"
+$env:AI_MEMORY_EMBED_PROVIDER = "openai-compatible-remote"
+$env:AI_MEMORY_EMBED_ADAPTER = "openai-compatible"
 $env:AI_MEMORY_EMBED_BASE_URL = "https://your-openai-compatible-endpoint/v1"
 $env:AI_MEMORY_EMBED_API_KEY = "<your-key>"
 $env:AI_MEMORY_EMBED_MODEL = "<your-model-id>"
+$env:AI_MEMORY_EMBED_PROFILE = "openai-compatible"
 ```
 
 Then rebuild the shared embeddings index so the stored vectors match the active provider:
 
 ```powershell
-node $env:USERPROFILE\.ai-memory\generate-embeddings.js
+node $env:AI_MEMORY_ROOT\generate-embeddings.js
 ```
 
-The index now records a provider fingerprint (`backend + model + base URL`) so switching remote embedding endpoints will not silently reuse stale vectors. If you change provider settings and keep seeing BM25-only fallbacks, rebuild the index again and inspect `memory_status` for `embeddings.backends`, `embeddings.models`, `embeddings.dimensions`, and `embeddings.providerHosts`.
+```bash
+export AI_MEMORY_EMBED_PROVIDER="openai-compatible-remote"
+export AI_MEMORY_EMBED_ADAPTER="openai-compatible"
+export AI_MEMORY_EMBED_BASE_URL="https://your-openai-compatible-endpoint/v1"
+export AI_MEMORY_EMBED_API_KEY="<your-key>"
+export AI_MEMORY_EMBED_MODEL="<your-model-id>"
+export AI_MEMORY_EMBED_PROFILE="openai-compatible"
+node ~/.ai-memory/generate-embeddings.js
+```
+
+The index records a provider fingerprint (`adapter + model + base URL`) so switching remote embedding endpoints will not silently reuse stale vectors. If you change provider settings and keep seeing BM25-only fallbacks, rebuild the index again and inspect `memory_status.embeddingRuntime` plus `memory_status.embeddings.backends`, `memory_status.embeddings.models`, `memory_status.embeddings.dimensions`, and `memory_status.embeddings.providerHosts`.
 
 For consistency, remote rebuilds now fail the run instead of silently mixing `openai` and `hashing-v1` vectors in the same index. Only set `AI_MEMORY_EMBED_ALLOW_BATCH_FALLBACK=1` if you explicitly want per-batch fallback behavior.
 
@@ -284,6 +370,7 @@ Use the included probe and benchmark scripts before doing any full reindex.
 ## Docs
 - [`docs/INSTALL.md`](docs/INSTALL.md)
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- [`docs/MEMORY-ARCHITECTURE-CRITIQUE.md`](docs/MEMORY-ARCHITECTURE-CRITIQUE.md)
 - [`docs/DEPLOYMENT-MATRIX.md`](docs/DEPLOYMENT-MATRIX.md)
 - [`docs/FILES.md`](docs/FILES.md)
 - [`docs/FAQ.md`](docs/FAQ.md)

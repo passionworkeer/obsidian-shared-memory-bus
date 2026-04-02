@@ -32,15 +32,19 @@
 - `MINIMAX_API_KEY`
 - `MINIMAX_API_HOST`
 - `MINIMAX_MCP_COMMAND` when the MiniMax executable is not already on `PATH`
-- `AI_MEMORY_EMBED_BACKEND`
+- `AI_MEMORY_EMBED_ADAPTER` or legacy `AI_MEMORY_EMBED_BACKEND`
 - `AI_MEMORY_EMBED_BASE_URL`
 - `AI_MEMORY_EMBED_API_KEY`
+- `AI_MEMORY_EMBED_PROFILE`
+- `AI_MEMORY_EMBED_PROVIDER`
 - `AI_MEMORY_EMBED_MODEL`
+- `AI_MEMORY_MCP_PYTHON` when shared `fetch` / `time` need a dedicated Python 3.10+ runtime
+- `AI_MEMORY_PIP_INDEX_URL` only if you intentionally route package installs through a custom mirror
 - `AI_MEMORY_OBSIDIAN_VAULT` or `OBSIDIAN_VAULT_ROOT` when auto-detection is not enough
 
 ## Path Hygiene
-- Runtime scripts now auto-detect the active Obsidian vault from `obsidian.json`
-- The bundle installs under `%USERPROFILE%\.ai-memory`
+- Runtime scripts now auto-detect the active Obsidian vault from Obsidian app config paths on Windows, macOS, and Linux
+- The bundle installs under `~/.ai-memory`
 - Public docs may mention example paths, but the runtime should not depend on one specific username or drive letter
 
 ## Privacy And Threat Model Notes
@@ -56,7 +60,7 @@ Run a quick scan for:
 - `ms-`
 - `MINIMAX_API_KEY=`
 - `api_key=`
-- hardcoded user profile paths
+- hardcoded user profile paths such as `C:\Users\`, `/Users/`, `/home/`, or `/Volumes/`
 
 ## Operational Advice
 - Keep `shared-mcp/logs/`, `shared-mcp/state.json`, caches, and generated reports out of git

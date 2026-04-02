@@ -18,7 +18,7 @@ function Add-Issue {
 function Normalize-RelativeInstallPath {
     param([Parameter(Mandatory = $true)][string]$Path)
 
-    return (($Path -replace '[/\\]+', '\').TrimStart('\'))
+    return (($Path -replace '[/\\]+', '/').TrimStart('/'))
 }
 
 function Get-LayoutEntries {
@@ -113,18 +113,25 @@ $requiredInstalledFiles = @(
     "memory-watchdog.ps1"
     "python-runtime.js"
     "register-agent.ps1"
+    "runtime-platform.ps1"
+    "runtime-config.js"
     "run-pressure-test.ps1"
     "verify-client-integrations.ps1"
     "verify-integrations.ps1"
     "benchmark-backends.py"
     "probe-models.py"
+    "runtime_support.py"
     "semantic-search.py"
-    "shared-mcp\manifest.json"
-    "shared-mcp\start-default-shared-mcp.ps1"
-    "shared-mcp\start-shared-mcp.ps1"
-    "shared-mcp\status-shared-mcp.ps1"
-    "shared-mcp\stop-shared-mcp.ps1"
-    "shared-mcp\write-config-snippets.ps1"
+    "shared-mcp/manifest.json"
+    "shared-mcp/start-default-shared-mcp.ps1"
+    "shared-mcp/start-default-shared-mcp.sh"
+    "shared-mcp/start-shared-mcp.ps1"
+    "shared-mcp/start-shared-mcp.sh"
+    "shared-mcp/status-shared-mcp.ps1"
+    "shared-mcp/status-shared-mcp.sh"
+    "shared-mcp/stop-shared-mcp.ps1"
+    "shared-mcp/stop-shared-mcp.sh"
+    "shared-mcp/write-config-snippets.ps1"
 )
 
 $missingRequiredFiles = @(
@@ -144,7 +151,7 @@ foreach ($path in @($rootMetadataFiles)) {
     }
 }
 
-$sharedManifestPath = Join-Path $bundleRoot "shared-mcp\manifest.json"
+$sharedManifestPath = Join-Path $bundleRoot (Join-Path "shared-mcp" "manifest.json")
 try {
     [void](Get-Content -Raw -LiteralPath $sharedManifestPath -Encoding utf8 | ConvertFrom-Json)
 } catch {

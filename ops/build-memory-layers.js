@@ -35,6 +35,11 @@ const MEMORY_LAYERS_JSON = path.join(GENERATED_ROOT, "MEMORY-LAYERS.json");
 const SHARED_INBOX_JSONL = path.join(STRUCTURED_ROOT, "shared-inbox.jsonl");
 const SESSION_MEMORY_JSONL = path.join(STRUCTURED_ROOT, "session-memory.jsonl");
 const SHARED_EVENTS_JSONL = path.join(STRUCTURED_ROOT, "shared-events.jsonl");
+const TASK_MEMORY_JSONL = path.join(STRUCTURED_ROOT, "task-memory.jsonl");
+const OPENCLAW_BLACKBOARD_JSONL = path.join(STRUCTURED_ROOT, "openclaw-blackboard.jsonl");
+const OPENCLAW_RUNS_JSONL = path.join(STRUCTURED_ROOT, "openclaw-runs.jsonl");
+const OPENCLAW_JOBS_JSONL = path.join(STRUCTURED_ROOT, "openclaw-jobs.jsonl");
+const OPENCLAW_JOURNAL_JSONL = path.join(STRUCTURED_ROOT, "openclaw-journal.jsonl");
 
 function ensureDirectory(targetPath) {
   if (!fs.existsSync(targetPath)) {
@@ -355,6 +360,134 @@ function parseSessionMemoryEntries() {
   return records.sort((left, right) => String(left.t || "").localeCompare(String(right.t || "")));
 }
 
+function coerceStructuredRecord(payload, defaults = {}) {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const timestamp = parseTimestamp(payload.t || payload.timestamp || payload.updated_at || payload.created_at);
+  const title = normalizeSpaces(payload.title || payload.content || "");
+  const content = String(payload.content || payload.title || "").trim();
+  if (!title && !content) {
+    return null;
+  }
+
+  const recordId =
+    normalizeSpaces(payload.id) ||
+    `${defaults.prefix || "record"}-${sha1(`${defaults.source || ""}|${title}|${content.slice(0, 200)}`)}`;
+
+  return {
+    schemaVersion: Number(payload.schemaVersion || 2),
+    id: recordId,
+    t: timestamp,
+    tool: normalizeSpaces(payload.tool || defaults.tool || "system") || "system",
+    session: normalizeSpaces(payload.session || ""),
+    type: normalizeSpaces(payload.type || defaults.type || "summary") || "summary",
+    project: normalizeSpaces(payload.project || defaults.project || ""),
+    title: title || recordId,
+    content: content.slice(0, 6000),
+    facts: Array.isArray(payload.facts) ? payload.facts : [],
+    concepts: Array.isArray(payload.concepts) ? payload.concepts : [],
+    files_read: Array.isArray(payload.files_read) ? payload.files_read : [],
+    files_modified: Array.isArray(payload.files_modified) ? payload.files_modified : [],
+    source: normalizeSpaces(payload.source || defaults.source || "structured-record") || "structured-record",
+    scope: normalizeSpaces(payload.scope || defaults.scope || "summary") || "summary",
+    visibility: normalizeSpaces(payload.visibility || defaults.visibility || "shared") || "shared",
+    source_kind: normalizeSpaces(payload.source_kind || payload.sourceKind || defaults.source_kind || "") || "",
+    memory_level: normalizeSpaces(payload.memory_level || payload.memoryLevel || defaults.memory_level || "task") || "task",
+    workspace: normalizeSpaces(payload.workspace || defaults.workspace || ""),
+    task_state: normalizeSpaces(payload.task_state || payload.taskState || defaults.task_state || "") || "",
+    freshness: normalizeSpaces(payload.freshness || getFreshness(timestamp)) || getFreshness(timestamp),
+    confidence: typeof payload.confidence === "number" ? payload.confidence : defaults.confidence ?? 0.65,
+    metadata: payload.metadata && typeof payload.metadata === "object" ? payload.metadata : {},
+  };
+}
+
+function parseStructuredJsonl(filePath, defaults = {}) {
+  if (!fs.existsSync(filePath)) {
+    return [];
+  }
+
+  const records = [];
+  for (const line of readText(filePath).split(/\r?\n/)) {
+    if (!line.trim()) {
+      continue;
+    }
+
+    let payload;
+    try {
+      payload = JSON.parse(line);
+    } catch (_error) {
+      continue;
+    }
+
+    const record = coerceStructuredRecord(payload, defaults);
+    if (record) {
+      records.push(record);
+    }
+  }
+
+  return records;
+}
+
+function parseTaskMemoryEntries() {
+  const sources = [
+    {
+      filePath: OPENCLAW_BLACKBOARD_JSONL,
+      defaults: {
+        prefix: "task",
+        source: "openclaw-blackboard",
+        scope: "task",
+        source_kind: "blackboard",
+        memory_level: "task",
+        workspace: "ai-shrimp",
+      },
+    },
+    {
+      filePath: OPENCLAW_RUNS_JSONL,
+      defaults: {
+        prefix: "run",
+        source: "openclaw-run-ledger",
+        scope: "run",
+        source_kind: "run",
+        memory_level: "task",
+        workspace: "ai-shrimp",
+      },
+    },
+    {
+      filePath: OPENCLAW_JOBS_JSONL,
+      defaults: {
+        prefix: "job",
+        source: "openclaw-cron-job",
+        scope: "task",
+        source_kind: "cron",
+        memory_level: "task",
+        workspace: "ai-shrimp",
+      },
+    },
+    {
+      filePath: OPENCLAW_JOURNAL_JSONL,
+      defaults: {
+        prefix: "journal",
+        source: "openclaw-blackboard-journal",
+        scope: "run",
+        source_kind: "blackboard",
+        memory_level: "task",
+        workspace: "ai-shrimp",
+      },
+    },
+  ];
+
+  const merged = new Map();
+  for (const source of sources) {
+    for (const record of parseStructuredJsonl(source.filePath, source.defaults)) {
+      merged.set(record.id, record);
+    }
+  }
+
+  return [...merged.values()].sort((left, right) => String(left.t || "").localeCompare(String(right.t || "")));
+}
+
 function writeJsonl(filePath, records) {
   ensureDirectory(path.dirname(filePath));
   const body = records.map((record) => JSON.stringify(record)).join("\n");
@@ -373,6 +506,7 @@ function buildLayerSummary(layers) {
     `- shared-inbox: ${layers.sharedInbox.length}`,
     `- session-memory: ${layers.sessionMemory.length}`,
     `- shared-events: ${layers.sharedEvents.length}`,
+    `- task-memory: ${layers.taskMemory.length}`,
     "",
     "## Durable Highlights",
     "",
@@ -407,6 +541,17 @@ function buildLayerSummary(layers) {
     }
   }
 
+  lines.push("", "## Task Highlights", "");
+  const taskHighlights = layers.taskMemory.slice(-8).reverse();
+  if (taskHighlights.length === 0) {
+    lines.push("- No task-layer records yet.");
+  } else {
+    for (const record of taskHighlights) {
+      const taskState = record.task_state ? ` {${record.task_state}}` : "";
+      lines.push(`- [${record.tool}]${taskState} ${record.title}`);
+    }
+  }
+
   return {
     markdown: `${lines.join("\n").trim()}\n`,
     json: {
@@ -415,6 +560,7 @@ function buildLayerSummary(layers) {
         sharedInbox: layers.sharedInbox.length,
         sessionMemory: layers.sessionMemory.length,
         sharedEvents: layers.sharedEvents.length,
+        taskMemory: layers.taskMemory.length,
       },
       latest: {
         sharedInbox: durableHighlights.map((record) => ({
@@ -433,6 +579,12 @@ function buildLayerSummary(layers) {
           title: record.title,
           t: record.t,
         })),
+        taskMemory: taskHighlights.map((record) => ({
+          tool: record.tool,
+          taskState: record.task_state,
+          title: record.title,
+          t: record.t,
+        })),
       },
     },
   };
@@ -446,11 +598,13 @@ function main() {
     sharedInbox: parseInboxEntries(),
     sessionMemory: parseSessionMemoryEntries(),
     sharedEvents: parseEventEntries(),
+    taskMemory: parseTaskMemoryEntries(),
   };
 
   writeJsonl(SHARED_INBOX_JSONL, layers.sharedInbox);
   writeJsonl(SESSION_MEMORY_JSONL, layers.sessionMemory);
   writeJsonl(SHARED_EVENTS_JSONL, layers.sharedEvents);
+  writeJsonl(TASK_MEMORY_JSONL, layers.taskMemory);
 
   const summary = buildLayerSummary(layers);
   writeText(MEMORY_LAYERS_MD, summary.markdown);
@@ -466,6 +620,7 @@ function main() {
           sharedInbox: SHARED_INBOX_JSONL,
           sessionMemory: SESSION_MEMORY_JSONL,
           sharedEvents: SHARED_EVENTS_JSONL,
+          taskMemory: TASK_MEMORY_JSONL,
           layersMarkdown: MEMORY_LAYERS_MD,
           layersJson: MEMORY_LAYERS_JSON,
         },
