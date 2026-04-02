@@ -1,8 +1,11 @@
 param(
     [string]$TargetRoot = "",
+    [string]$WorkspaceRoot = "",
     $RegisterStartup = $true,
     $PersistUserEnvironment = $true,
-    $InstallPythonDeps = $true
+    $InstallPythonDeps = $true,
+    $ApplyClientIntegrations = $true,
+    $IncludeOptionalClientServers = $false
 )
 
 Set-StrictMode -Version 3.0
@@ -54,6 +57,8 @@ function ConvertTo-BooleanOption {
 $RegisterStartup = ConvertTo-BooleanOption -Value $RegisterStartup -Name "RegisterStartup" -Default $true
 $PersistUserEnvironment = ConvertTo-BooleanOption -Value $PersistUserEnvironment -Name "PersistUserEnvironment" -Default $true
 $InstallPythonDeps = ConvertTo-BooleanOption -Value $InstallPythonDeps -Name "InstallPythonDeps" -Default $true
+$ApplyClientIntegrations = ConvertTo-BooleanOption -Value $ApplyClientIntegrations -Name "ApplyClientIntegrations" -Default $true
+$IncludeOptionalClientServers = ConvertTo-BooleanOption -Value $IncludeOptionalClientServers -Name "IncludeOptionalClientServers" -Default $false
 
 function Ensure-Directory {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -1086,8 +1091,34 @@ if ($RegisterStartup) {
     Register-StartupHooks -TargetRoot $TargetRoot
 }
 
-Invoke-SharedPowerShellFile -ScriptPath (Join-Path $TargetRoot "memory-bus.ps1") -ArgumentList @("-Action", "Generate") | Out-Null
+$generateArgs = @("-Action", "Generate")
+if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
+    $generateArgs += @("-Project", $WorkspaceRoot)
+}
+Invoke-SharedPowerShellFile -ScriptPath (Join-Path $TargetRoot "memory-bus.ps1") -ArgumentList $generateArgs | Out-Null
 Invoke-SharedPowerShellFile -ScriptPath (Join-SharedPath @($TargetRoot, "shared-mcp", "write-config-snippets.ps1")) | Out-Null
+
+if ($ApplyClientIntegrations) {
+    $clientIntegrationScript = Join-Path $TargetRoot "install-client-integrations.ps1"
+    if (-not (Test-Path -LiteralPath $clientIntegrationScript -PathType Leaf)) {
+        throw "install-client-integrations.ps1 was not installed into the managed runtime."
+    }
+
+    $clientArgs = @(
+        "-AiMemoryRoot", $resolvedTargetRoot,
+        "-SkipGenerate",
+        "-SkipSkillSync"
+    )
+    if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
+        $clientArgs += @("-WorkspaceRoot", $WorkspaceRoot)
+    }
+    if ($IncludeOptionalClientServers) {
+        $clientArgs += "-IncludeOptionalServers"
+    }
+
+    Invoke-SharedPowerShellFile -ScriptPath $clientIntegrationScript -ArgumentList $clientArgs | Out-Null
+}
+
 Write-InstallManifest `
     -ManifestPath $installManifestPath `
     -ManagedFiles $managedInstallFiles `

@@ -239,12 +239,12 @@ Typical cause:
 The bundled manifest now prefers registry-resolvable current specs for these thin wrapper servers, but if you are upgrading from an older install, reinstall the runtime first:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -WorkspaceRoot <repo-root>
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\start-default-shared-mcp.ps1 -ForceRestart
 ```
 
 ```bash
-./scripts/install.sh
+./scripts/install.sh -WorkspaceRoot <repo-root>
 ~/.ai-memory/shared-mcp/start-default-shared-mcp.sh -ForceRestart
 ```
 
@@ -286,13 +286,13 @@ Then verify with a real browser task instead of relying only on `mcp list`.
 Run:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\verify-client-integrations.ps1 -WorkspaceRoot <repo-root> -RunCliChecks -RunRuntimeChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\run-pressure-test.ps1 -WorkspaceRoot <repo-root> -Waves 5 -RunCliChecks -RunToolCalls -RunClientTaskChecks
 ```
 
 ```bash
-~/.ai-memory/verify-client-integrations.sh -WorkspaceRoot <your-project-root> -RunCliChecks
-~/.ai-memory/run-pressure-test.sh -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks
+~/.ai-memory/verify-client-integrations.sh -WorkspaceRoot <repo-root> -RunCliChecks -RunRuntimeChecks
+~/.ai-memory/run-pressure-test.sh -WorkspaceRoot <repo-root> -Waves 5 -RunCliChecks -RunToolCalls -RunClientTaskChecks
 ```
 
 Good signs:

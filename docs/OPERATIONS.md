@@ -75,21 +75,25 @@ node ~/.ai-memory/generate-embeddings.js
 
 ## Run Validation
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks -RunRuntimeChecks
 ```
 
 ```bash
-~/.ai-memory/verify-client-integrations.sh -WorkspaceRoot <your-project-root> -RunCliChecks
+~/.ai-memory/verify-client-integrations.sh -WorkspaceRoot <your-project-root> -RunCliChecks -RunRuntimeChecks
 ```
+
+Treat this as a hard gate. The script now exits non-zero when `summary.overallPass=false`.
 
 ## Run Pressure Tests
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks -RunToolCalls -RunClientTaskChecks -IncludeOptionalServers
 ```
 
 ```bash
-~/.ai-memory/run-pressure-test.sh -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks
+~/.ai-memory/run-pressure-test.sh -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks -RunToolCalls -RunClientTaskChecks -IncludeOptionalServers
 ```
+
+Treat this as a hard gate too. The script now exits non-zero when `summary.overallPass=false`.
 
 ## Logs And Runtime State
 Look here first:
@@ -109,3 +113,16 @@ These are operational files, not canonical memory.
 2. restart the affected shared service
 3. rerun validation
 4. only rebuild embeddings if the problem is actually retrieval-index related
+
+## Watchdog Recovery
+If `memory_status.watchdog.status` reports `stale` or `watchdog-exit`, recover in this order:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\status-shared-mcp.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\memory-watchdog.ps1 -Daemon -PollSeconds 15
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks -RunRuntimeChecks
+```
+
+Notes:
+- the shared MCP control plane now trusts the active listener PID on each port, not the cached PID in `shared-mcp/state.json`
+- a clean stop/start cycle should not create new `state.json.corrupt.*` files; if it does, treat that as a control-plane regression

@@ -56,6 +56,26 @@ Typical pack contents:
 - `generic/platforms.md`
 - `bootstrap.md`
 
+## Official Apply Flow
+For supported local clients, the source of truth is now:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -WorkspaceRoot <your-project-root>
+```
+
+That install flow now:
+- installs or upgrades the flat runtime in `~/.ai-memory`
+- regenerates onboarding packs and startup files
+- applies global client wiring plus workspace overlays through `install-client-integrations.ps1`
+
+If the runtime is already installed and you only need to re-apply client wiring, use:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\install-client-integrations.ps1 -WorkspaceRoot <your-project-root>
+```
+
+`verify-integrations.ps1` remains only as a compatibility alias for the apply step. The real validation gate is `verify-client-integrations.ps1`.
+
 ## Canonical Shared Memory Read Order
 1. `02-KB/OBSIDIAN.md`
 2. `02-KB/MEMORY.md`
@@ -93,7 +113,12 @@ Most new agents should start with:
 - `time`
 - `sequential-thinking`
 
-Add `playwright` only when the agent actually needs browser automation.
+Add `playwright` when the agent actually needs browser automation. The built-in apply flow wires it by default because it is usually the biggest per-agent process multiplier; opt out with `-SkipPlaywright` when a host should keep browser automation local.
+
+In the built-in apply flow, the default wiring set is:
+- every server whose manifest `mode` is `shared`
+- `playwright` by default because it is usually the biggest source of duplicated per-agent MCP processes
+- `MiniMax` only when explicitly included
 
 ## Three-Platform Recommendation
 - Windows:

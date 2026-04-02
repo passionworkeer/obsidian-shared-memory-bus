@@ -27,11 +27,11 @@ The bundle installs into:
 From the repository root:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -WorkspaceRoot <your-project-root>
 ```
 
 ```bash
-./scripts/install.sh
+./scripts/install.sh -WorkspaceRoot <your-project-root>
 ```
 
 If you are changing the runtime layout itself, validate the contract first:
@@ -62,7 +62,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-layou
     - Linux `systemd --user`, or XDG autostart when `systemctl --user` is unavailable
 13. Registers the safe default shared MCP bootstrap through the same OS-specific mechanism
 14. Generates initial shared-memory artifacts, runtime shell wrappers, and MCP config snippets
-15. Starts the watchdog and shared MCP stack immediately for the current interactive session unless the installer is running under CI
+15. Applies supported client integrations through `install-client-integrations.ps1` when `-ApplyClientIntegrations` stays enabled
+16. Starts the watchdog and shared MCP stack immediately for the current interactive session unless the installer is running under CI
 
 ## After Install
 If you want the environment variables in your current macOS/Linux shell session, run:
@@ -103,45 +104,45 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shar
 ~/.ai-memory/shared-mcp/start-shared-mcp.sh -Only context7,fetch,time,sequential-thinking,obsidian,memory
 ```
 
-Register a client:
+Register a client pack explicitly if you need a generated onboarding preset:
+
+The installer already auto-applies supported client integrations when you pass `-WorkspaceRoot`. Re-apply them manually later without reinstalling:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\register-agent.ps1 -AgentName cursor -Preset cursor
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\install-client-integrations.ps1 -WorkspaceRoot <your-project-root>
 ```
 
 ```bash
-~/.ai-memory/register-agent.sh -AgentName cursor -Preset cursor
+~/.ai-memory/install-client-integrations.sh -WorkspaceRoot <your-project-root>
 ```
 
-Wire supported local clients:
+By default, that apply step wires every shared-mode server in `shared-mcp/manifest.json`, plus `playwright`. Add `-IncludeOptionalServers` if you also want `MiniMax`. Use `-SkipPlaywright` if you want a narrower footprint.
+
+`verify-integrations.ps1` and `verify-integrations.sh` remain as compatibility aliases, but they now forward into `install-client-integrations` and should be treated as side-effecting apply helpers rather than validators.
+
+Verify the setup with the hard validation gate:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\verify-integrations.ps1 -WorkspaceRoot <your-project-root>
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks -RunRuntimeChecks
 ```
 
 ```bash
-~/.ai-memory/verify-integrations.sh -WorkspaceRoot <your-project-root>
-```
-
-Verify the setup:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
-```
-
-```bash
-~/.ai-memory/verify-client-integrations.sh -WorkspaceRoot <your-project-root> -RunCliChecks
+~/.ai-memory/verify-client-integrations.sh -WorkspaceRoot <your-project-root> -RunCliChecks -RunRuntimeChecks
 ```
 
 Pressure test before trusting a heavy multi-agent workflow:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks -RunToolCalls -RunClientTaskChecks
 ```
 
 ```bash
-~/.ai-memory/run-pressure-test.sh -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks
+~/.ai-memory/run-pressure-test.sh -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks -RunToolCalls -RunClientTaskChecks
 ```
+
+`<your-project-root>` means the repository or workspace root where overlays such as `.cursor/mcp.json`, `.vscode/mcp.json`, `.claude/rules/shared-memory.md`, and `opencode.json` should be written. It is not the user-home config directory itself.
+
+If you need the installer to skip client rewiring entirely, pass `-ApplyClientIntegrations false`. If you want the installer to include optional servers such as `MiniMax` during that automatic apply step, pass `-IncludeOptionalClientServers`.
 
 ## Optional Secrets
 These must be environment variables, not committed files.

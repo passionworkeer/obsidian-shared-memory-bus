@@ -14,30 +14,22 @@ param(
 Set-StrictMode -Version 3.0
 $ErrorActionPreference = "Stop"
 
-$helperPath = @(
-    (Join-Path $PSScriptRoot "runtime-platform.ps1"),
-    (Join-Path $PSScriptRoot "../bus/runtime-platform.ps1")
-) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
-
-if (-not $helperPath) {
+$helperPath = Join-Path (Split-Path -Parent $PSScriptRoot) "bus\runtime-platform.ps1"
+if (-not (Test-Path -LiteralPath $helperPath -PathType Leaf)) {
     throw "Unable to locate runtime-platform.ps1 from $PSScriptRoot"
 }
 
 . $helperPath
 
-$scriptPath = @(
-    (Join-Path $PSScriptRoot "install-client-integrations.ps1"),
-    (Join-Path $PSScriptRoot "../ops/install-client-integrations.ps1")
-) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
-
-if (-not $scriptPath) {
-    throw "install-client-integrations.ps1 was not found next to verify-integrations.ps1"
+$scriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) "ops\install-client-integrations.ps1"
+if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
+    throw "Unable to locate ops/install-client-integrations.ps1 from $PSScriptRoot"
 }
 
 $argumentList = @()
 if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) { $argumentList += @("-WorkspaceRoot", $WorkspaceRoot) }
 if (-not [string]::IsNullOrWhiteSpace($AiMemoryRoot)) { $argumentList += @("-AiMemoryRoot", $AiMemoryRoot) }
-foreach ($client in @($Clients)) { $argumentList += @("-Clients", $client) }
+if (@($Clients).Count -gt 0) { $argumentList += @("-Clients") + @($Clients) }
 if ($IncludeOptionalServers) { $argumentList += "-IncludeOptionalServers" }
 if ($SkipPlaywright) { $argumentList += "-SkipPlaywright" }
 if (-not [string]::IsNullOrWhiteSpace($ReportPath)) { $argumentList += @("-ReportPath", $ReportPath) }
