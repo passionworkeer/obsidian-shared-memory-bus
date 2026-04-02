@@ -3,9 +3,9 @@
 Thanks for helping improve this project.
 
 ## Before You Start
-- This repo is Windows-first
+- Windows has the deepest live validation, but portable install/start/status wrappers now ship for macOS and Linux too
 - `Node.js` and `npm` should be available on `PATH`
-- `PowerShell` should be able to run local scripts with `-ExecutionPolicy Bypass`
+- Windows PowerShell or `pwsh` should be able to run local scripts
 - `uv` is recommended if you want to exercise the shared `fetch` and `time` MCP services
 
 ## Local Development Loop
@@ -17,18 +17,36 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-layou
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
 ```
 
+```bash
+./scripts/validate-layout.sh
+./scripts/install.sh
+```
+
 3. Start the shared stack:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\shared-mcp\start-default-shared-mcp.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\start-default-shared-mcp.ps1
+```
+
+```bash
+~/.ai-memory/shared-mcp/start-default-shared-mcp.sh
 ```
 
 4. Run the basic validation story:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 3 -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 3 -RunCliChecks
 ```
+
+```bash
+pwsh -NoProfile -File ~/.ai-memory/verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
+pwsh -NoProfile -File ~/.ai-memory/run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 3 -RunCliChecks
+```
+
+CI coverage for these flows is split intentionally:
+- `.github/workflows/portable-core.yml` checks portable layered-memory, wrapper, and retrieval behavior on Windows, macOS, and Linux
+- `.github/workflows/windows-validate.yml` checks the Windows smoke-install and shared-MCP control plane
 
 ## Good First Contributions
 - Improve docs and onboarding clarity
@@ -48,7 +66,9 @@ Before proposing a new shared MCP, document:
 Update at least these files when appropriate:
 - `shared-mcp/manifest.json`
 - `shared-mcp/start-shared-mcp.ps1`
+- `shared-mcp/start-shared-mcp.sh`
 - `shared-mcp/status-shared-mcp.ps1`
+- `shared-mcp/status-shared-mcp.sh`
 - `docs/ARCHITECTURE.md`
 - `docs/MCP-DEDUP.md`
 - `docs/TROUBLESHOOTING.md`
@@ -70,7 +90,7 @@ At minimum, document:
 
 ## Before Opening A Pull Request
 - Run the basic validation commands above
-- If you changed file layout, install behavior, or startup entrypoints, make sure `scripts/validate-layout.ps1` still passes
+- If you changed file layout, install behavior, or startup entrypoints, make sure `scripts/validate-layout.ps1` and `scripts/validate-layout.sh` still pass
 - Check that new docs match actual script behavior
 - Rescan for secrets and accidental personal paths
 - Keep changes focused; split unrelated work into separate PRs when possible

@@ -9,60 +9,19 @@ $ErrorActionPreference = "Stop"
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [Console]::OutputEncoding = $Utf8NoBom
 
-if ([string]::IsNullOrWhiteSpace($AiMemoryRoot)) {
-    $AiMemoryRoot = if (-not [string]::IsNullOrWhiteSpace($env:AI_MEMORY_ROOT)) { $env:AI_MEMORY_ROOT } else { Join-Path $env:USERPROFILE ".ai-memory" }
+$helperPath = @(
+    (Join-Path $PSScriptRoot "runtime-platform.ps1"),
+    (Join-Path $PSScriptRoot "../bus/runtime-platform.ps1")
+) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+
+if (-not $helperPath) {
+    throw "Unable to locate runtime-platform.ps1 from $PSScriptRoot"
 }
 
-function Resolve-ObsidianVaultRoot {
-    param([AllowEmptyString()][string]$FallbackPath = "")
+. $helperPath
 
-    foreach ($overridePath in @($env:AI_MEMORY_OBSIDIAN_VAULT, $env:OBSIDIAN_VAULT_ROOT)) {
-        if (-not [string]::IsNullOrWhiteSpace($overridePath) -and (Test-Path -LiteralPath $overridePath -PathType Container)) {
-            return (Get-Item -LiteralPath $overridePath).FullName
-        }
-    }
-
-    $obsidianConfigPath = Join-Path $env:APPDATA "obsidian\obsidian.json"
-    if (Test-Path -LiteralPath $obsidianConfigPath) {
-        try {
-            $config = Get-Content -Raw -LiteralPath $obsidianConfigPath -Encoding utf8 | ConvertFrom-Json
-            $records = New-Object System.Collections.Generic.List[object]
-            if ($config.vaults) {
-                foreach ($property in $config.vaults.PSObject.Properties) {
-                    $vault = $property.Value
-                    $path = [string]$vault.path
-                    if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Container)) {
-                        continue
-                    }
-
-                    $records.Add([pscustomobject]@{
-                        path = (Get-Item -LiteralPath $path).FullName
-                        open = [bool]$vault.open
-                        ts = if ($null -ne $vault.ts) { [int64]$vault.ts } else { 0 }
-                    }) | Out-Null
-                }
-            }
-
-            $openVault = @($records | Where-Object { $_.open } | Sort-Object ts -Descending | Select-Object -First 1)
-            if ($openVault.Count -gt 0) {
-                return $openVault[0].path
-            }
-
-            $recentVault = @($records | Sort-Object ts -Descending | Select-Object -First 1)
-            if ($recentVault.Count -gt 0) {
-                return $recentVault[0].path
-            }
-        } catch {
-        }
-    }
-
-    foreach ($candidate in @($FallbackPath, (Join-Path $env:USERPROFILE "Documents\Obsidian Vault"))) {
-        if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate -PathType Container)) {
-            return (Get-Item -LiteralPath $candidate).FullName
-        }
-    }
-
-    return $FallbackPath
+if ([string]::IsNullOrWhiteSpace($AiMemoryRoot)) {
+    $AiMemoryRoot = if (-not [string]::IsNullOrWhiteSpace($env:AI_MEMORY_ROOT)) { $env:AI_MEMORY_ROOT } else { Get-SharedDefaultAiMemoryRoot }
 }
 
 function Ensure-Directory {
@@ -194,23 +153,23 @@ function Set-ManagedBlock {
     Write-TextFile -Path $Path -Content ($prefix + $block) -Report $Report
 }
 
-$userHome = $env:USERPROFILE
-$vaultRoot = Resolve-ObsidianVaultRoot -FallbackPath (Join-Path $userHome "Documents\Obsidian Vault")
-$busRoot = Join-Path $vaultRoot "00-System\ai-memory"
+$userHome = Get-SharedUserHome
+$vaultRoot = Resolve-SharedObsidianVaultRoot -FallbackPath (Join-SharedPath @($userHome, "Documents", "Obsidian Vault"))
+$busRoot = Join-SharedPath @($vaultRoot, "00-System", "ai-memory")
 $generatedRoot = Join-Path $busRoot "generated"
 $startupRoot = Join-Path $generatedRoot "tool-startup"
-$canonicalObsidian = Join-Path $vaultRoot "02-KB\OBSIDIAN.md"
-$canonicalMemory = Join-Path $vaultRoot "02-KB\MEMORY.md"
-$canonicalWorking = Join-Path $vaultRoot "02-KB\WORKING.md"
+$canonicalObsidian = Join-SharedPath @($vaultRoot, "02-KB", "OBSIDIAN.md")
+$canonicalMemory = Join-SharedPath @($vaultRoot, "02-KB", "MEMORY.md")
+$canonicalWorking = Join-SharedPath @($vaultRoot, "02-KB", "WORKING.md")
 $globalContext = Join-Path $generatedRoot "GLOBAL-CONTEXT.md"
 $sharedSkillsGuide = Join-Path $generatedRoot "SHARED-SKILLS.md"
 $cursorStartup = Join-Path $startupRoot "cursor.md"
 $copilotStartup = Join-Path $startupRoot "copilot.md"
 $opencodeStartup = Join-Path $startupRoot "opencode.md"
-$cursorInbox = Join-Path $busRoot "inbox\cursor.md"
-$copilotInbox = Join-Path $busRoot "inbox\copilot.md"
-$opencodeInbox = Join-Path $busRoot "inbox\opencode.md"
-$globalPortableSkillsRoot = Join-Path $userHome ".agents\skills"
+$cursorInbox = Join-SharedPath @($busRoot, "inbox", "cursor.md")
+$copilotInbox = Join-SharedPath @($busRoot, "inbox", "copilot.md")
+$opencodeInbox = Join-SharedPath @($busRoot, "inbox", "opencode.md")
+$globalPortableSkillsRoot = Join-SharedPath @($userHome, ".agents", "skills")
 $sharedSkillsSyncScript = Join-Path $AiMemoryRoot "sync-shared-skills.ps1"
 
 $safeSharedCursorServers = [ordered]@{
@@ -259,11 +218,14 @@ $report = [pscustomobject]@{
 }
 
 if (Test-Path -LiteralPath $sharedSkillsSyncScript -PathType Leaf) {
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $sharedSkillsSyncScript -WorkspaceRoot $WorkspaceRoot -AiMemoryRoot $AiMemoryRoot | Out-Null
+    Invoke-SharedPowerShellFile -ScriptPath $sharedSkillsSyncScript -ArgumentList @(
+        "-WorkspaceRoot", $WorkspaceRoot,
+        "-AiMemoryRoot", $AiMemoryRoot
+    ) | Out-Null
 }
 
 # Cursor user-level MCP
-$cursorMcpPath = Join-Path $userHome ".cursor\mcp.json"
+$cursorMcpPath = Join-SharedPath @($userHome, ".cursor", "mcp.json")
 $cursorMcp = Read-JsonFile -Path $cursorMcpPath -DefaultObject ([pscustomobject]@{ mcpServers = [pscustomobject]@{} })
 $cursorServers = Ensure-ObjectProperty -Object $cursorMcp -Name "mcpServers"
 foreach ($entry in $safeSharedCursorServers.GetEnumerator()) {
@@ -272,7 +234,8 @@ foreach ($entry in $safeSharedCursorServers.GetEnumerator()) {
 Write-JsonFile -Path $cursorMcpPath -Object $cursorMcp -Report ([ref]$report)
 
 # VS Code / Copilot user-level MCP + instructions
-$vsCodeMcpPath = Join-Path $env:APPDATA "Code\User\mcp.json"
+$vsCodeUserRoot = Get-SharedVsCodeUserRoot -ProductName "Code"
+$vsCodeMcpPath = Join-SharedPath @($vsCodeUserRoot, "mcp.json")
 $vsCodeMcp = Read-JsonFile -Path $vsCodeMcpPath -DefaultObject ([pscustomobject]@{ servers = [pscustomobject]@{}; inputs = @() })
 $vsCodeServers = Ensure-ObjectProperty -Object $vsCodeMcp -Name "servers"
 foreach ($entry in $safeSharedVsCodeServers.GetEnumerator()) {
@@ -280,7 +243,7 @@ foreach ($entry in $safeSharedVsCodeServers.GetEnumerator()) {
 }
 Write-JsonFile -Path $vsCodeMcpPath -Object $vsCodeMcp -Report ([ref]$report)
 
-$vsCodeSettingsPath = Join-Path $env:APPDATA "Code\User\settings.json"
+$vsCodeSettingsPath = Join-SharedPath @($vsCodeUserRoot, "settings.json")
 $vsCodeSettings = Read-JsonFile -Path $vsCodeSettingsPath -DefaultObject ([pscustomobject]@{})
 Set-ScalarProperty -Object $vsCodeSettings -Name "chat.useAgentsMdFile" -Value $true
 Set-ScalarProperty -Object $vsCodeSettings -Name "chat.useClaudeMdFile" -Value $true
@@ -292,7 +255,7 @@ Set-ScalarProperty -Object $instructionLocations -Name "~/.copilot/instructions"
 Set-ScalarProperty -Object $instructionLocations -Name "~/.claude/rules" -Value $true
 Write-JsonFile -Path $vsCodeSettingsPath -Object $vsCodeSettings -Report ([ref]$report)
 
-$copilotInstructionsPath = Join-Path $userHome ".copilot\instructions\shared-memory.instructions.md"
+$copilotInstructionsPath = Join-SharedPath @((Get-SharedCopilotHomeRoot), "instructions", "shared-memory.instructions.md")
 $copilotInstructions = @"
 ---
 name: Shared Memory Bus
@@ -323,7 +286,8 @@ Defaults:
 Write-TextFile -Path $copilotInstructionsPath -Content $copilotInstructions -Report ([ref]$report)
 
 # OpenCode global config + instructions
-$opencodeConfigPath = Join-Path $userHome ".config\opencode\opencode.json"
+$opencodeConfigRoot = Get-SharedOpenCodeConfigRoot
+$opencodeConfigPath = Join-SharedPath @($opencodeConfigRoot, "opencode.json")
 $opencodeConfig = Read-JsonFile -Path $opencodeConfigPath -DefaultObject ([pscustomobject]@{
     '$schema' = "https://opencode.ai/config.json"
     mcp = [pscustomobject]@{}
@@ -339,7 +303,7 @@ if ($opencodeMcp.PSObject.Properties["time"]) {
     }
 }
 
-$opencodeInstructionFile = Join-Path $userHome ".config\opencode\instructions\shared-memory.md"
+$opencodeInstructionFile = Join-SharedPath @($opencodeConfigRoot, "instructions", "shared-memory.md")
 $opencodeInstructionText = @"
 # Shared Memory Bus
 
@@ -365,7 +329,7 @@ Defaults:
 "@
 Write-TextFile -Path $opencodeInstructionFile -Content $opencodeInstructionText -Report ([ref]$report)
 
-$opencodeAgentsPath = Join-Path $userHome ".config\opencode\AGENTS.md"
+$opencodeAgentsPath = Join-SharedPath @($opencodeConfigRoot, "AGENTS.md")
 $opencodeAgentsBody = @"
 ## Shared Obsidian Memory Bus
 
@@ -402,7 +366,7 @@ Write-JsonFile -Path $opencodeConfigPath -Object $opencodeConfig -Report ([ref]$
 if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
     Ensure-Directory -Path $WorkspaceRoot
 
-    $workspaceCursorRule = Join-Path $WorkspaceRoot ".cursor\rules\shared-memory.mdc"
+    $workspaceCursorRule = Join-SharedPath @($WorkspaceRoot, ".cursor", "rules", "shared-memory.mdc")
     $workspaceCursorRuleText = @"
 ---
 description: Shared Obsidian memory bootstrap
@@ -431,21 +395,21 @@ Defaults:
 "@
     Write-TextFile -Path $workspaceCursorRule -Content $workspaceCursorRuleText -Report ([ref]$report)
 
-    $workspaceCursorMcpPath = Join-Path $WorkspaceRoot ".cursor\mcp.json"
+    $workspaceCursorMcpPath = Join-SharedPath @($WorkspaceRoot, ".cursor", "mcp.json")
     $workspaceCursorMcp = [pscustomobject]@{ mcpServers = [pscustomobject]@{} }
     foreach ($entry in $safeSharedCursorServers.GetEnumerator()) {
         Set-ScalarProperty -Object $workspaceCursorMcp.mcpServers -Name $entry.Key -Value $entry.Value
     }
     Write-JsonFile -Path $workspaceCursorMcpPath -Object $workspaceCursorMcp -Report ([ref]$report)
 
-    $workspaceVsCodeMcpPath = Join-Path $WorkspaceRoot ".vscode\mcp.json"
+    $workspaceVsCodeMcpPath = Join-SharedPath @($WorkspaceRoot, ".vscode", "mcp.json")
     $workspaceVsCodeMcp = [pscustomobject]@{ servers = [pscustomobject]@{} }
     foreach ($entry in $safeSharedVsCodeServers.GetEnumerator()) {
         Set-ScalarProperty -Object $workspaceVsCodeMcp.servers -Name $entry.Key -Value $entry.Value
     }
     Write-JsonFile -Path $workspaceVsCodeMcpPath -Object $workspaceVsCodeMcp -Report ([ref]$report)
 
-    $workspaceClaudeRulePath = Join-Path $WorkspaceRoot ".claude\rules\shared-memory.md"
+    $workspaceClaudeRulePath = Join-SharedPath @($WorkspaceRoot, ".claude", "rules", "shared-memory.md")
     $workspaceClaudeRuleText = @"
 ---
 description: Shared Obsidian memory overlay
@@ -498,7 +462,7 @@ Defaults:
 - Current-task progress belongs in $canonicalWorking.
 - For tasks with 2 or more independent slices, prefer focused subagents or separate execution waves instead of one long-running context.
 "@
-    Set-ManagedBlock -Path (Join-Path $WorkspaceRoot ".github\copilot-instructions.md") -StartMarker "<!-- SHARED-MEMORY-BUS:START -->" -EndMarker "<!-- SHARED-MEMORY-BUS:END -->" -Body $sharedCopilotBody -Report ([ref]$report)
+    Set-ManagedBlock -Path (Join-SharedPath @($WorkspaceRoot, ".github", "copilot-instructions.md")) -StartMarker "<!-- SHARED-MEMORY-BUS:START -->" -EndMarker "<!-- SHARED-MEMORY-BUS:END -->" -Body $sharedCopilotBody -Report ([ref]$report)
 
     $workspaceOpenCodeConfigPath = Join-Path $WorkspaceRoot "opencode.json"
     $workspaceOpenCodeConfig = [pscustomobject]@{

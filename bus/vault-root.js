@@ -3,8 +3,10 @@
 const fs = require("fs");
 const path = require("path");
 
+const IS_WINDOWS = process.platform === "win32";
+const IS_MACOS = process.platform === "darwin";
 const USER_HOME = process.env.USERPROFILE || process.env.HOME || "";
-const APP_DATA = process.env.APPDATA || path.join(USER_HOME, "AppData", "Roaming");
+const APP_DATA = process.env.APPDATA || (IS_WINDOWS ? path.join(USER_HOME, "AppData", "Roaming") : "");
 const XDG_CONFIG_HOME = process.env.XDG_CONFIG_HOME || path.join(USER_HOME, ".config");
 
 let cachedVaultRoot = null;
@@ -22,11 +24,15 @@ function isDirectory(candidate) {
 }
 
 function getObsidianConfigCandidates() {
-  return [
-    path.join(APP_DATA, "obsidian", "obsidian.json"),
-    path.join(USER_HOME, "Library", "Application Support", "obsidian", "obsidian.json"),
-    path.join(XDG_CONFIG_HOME, "obsidian", "obsidian.json"),
-  ];
+  const candidates = [];
+  if (APP_DATA) {
+    candidates.push(path.join(APP_DATA, "obsidian", "obsidian.json"));
+  }
+  if (IS_MACOS) {
+    candidates.push(path.join(USER_HOME, "Library", "Application Support", "obsidian", "obsidian.json"));
+  }
+  candidates.push(path.join(XDG_CONFIG_HOME, "obsidian", "obsidian.json"));
+  return [...new Set(candidates)];
 }
 
 function resolveFromObsidianConfig() {
@@ -66,8 +72,9 @@ function resolveFromObsidianConfig() {
 
 function getDefaultVaultCandidates() {
   return [
-    path.join(USER_HOME, "Desktop", "Obsidian Vault"),
+    path.join(USER_HOME, "Obsidian Vault"),
     path.join(USER_HOME, "Documents", "Obsidian Vault"),
+    path.join(USER_HOME, "Desktop", "Obsidian Vault"),
   ];
 }
 

@@ -9,11 +9,24 @@ param(
 Set-StrictMode -Version 3.0
 $ErrorActionPreference = "Stop"
 
+$sourceRoot = Split-Path -Parent $PSScriptRoot
+$helperPath = @(
+    (Join-Path $PSScriptRoot "runtime-platform.ps1"),
+    (Join-Path $sourceRoot "runtime-platform.ps1"),
+    (Join-Path $sourceRoot (Join-Path "bus" "runtime-platform.ps1"))
+) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+
+if (-not $helperPath) {
+    throw "Unable to locate runtime-platform.ps1 from $PSScriptRoot"
+}
+
+. $helperPath
+
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [Console]::OutputEncoding = $Utf8NoBom
 
 if ([string]::IsNullOrWhiteSpace($AiMemoryRoot)) {
-    $AiMemoryRoot = if (-not [string]::IsNullOrWhiteSpace($env:AI_MEMORY_ROOT)) { $env:AI_MEMORY_ROOT } else { Join-Path $env:USERPROFILE ".ai-memory" }
+    $AiMemoryRoot = if (-not [string]::IsNullOrWhiteSpace($env:AI_MEMORY_ROOT)) { $env:AI_MEMORY_ROOT } else { Get-SharedDefaultAiMemoryRoot }
 }
 
 function Ensure-Directory {
@@ -55,7 +68,7 @@ function Get-SharedStatus {
         throw "Shared MCP status script not found: $ScriptPath"
     }
 
-    return (& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ScriptPath | ConvertFrom-Json)
+    return (Invoke-SharedPowerShellFile -ScriptPath $ScriptPath | ConvertFrom-Json)
 }
 
 function Get-ListenerSnapshot {
@@ -63,22 +76,7 @@ function Get-ListenerSnapshot {
 
     $records = New-Object System.Collections.Generic.List[object]
     foreach ($port in $Ports) {
-        $listeners = @()
-        try {
-            $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction Stop)
-        } catch {
-            $lines = netstat -ano -p tcp | Select-String -Pattern (":$port\s+.*LISTENING\s+")
-            foreach ($line in @($lines)) {
-                $tokens = (($line.ToString().Trim()) -split "\s+")
-                if ($tokens.Length -ge 5) {
-                    $listeners += [pscustomobject]@{
-                        OwningProcess = [int]$tokens[-1]
-                    }
-                }
-            }
-        }
-
-        $pids = @($listeners | ForEach-Object { [int]$_.OwningProcess } | Sort-Object -Unique)
+        $pids = @(Get-SharedListeningProcessIds -Port $port | Sort-Object -Unique)
         $records.Add([pscustomobject]@{
             port = $port
             listenerCount = $pids.Count
@@ -107,7 +105,7 @@ function Invoke-CliCheck {
             $previousNativePref = $Global:PSNativeCommandUseErrorActionPreference
             $Global:PSNativeCommandUseErrorActionPreference = $false
         }
-        if ($Executable -match '\.(cmd|bat)$') {
+        if ((Test-SharedIsWindows) -and $Executable -match '\.(cmd|bat)$') {
             $cmdLine = '"' + $Executable + '" ' + ($Arguments -join ' ')
             $output = & cmd.exe /d /c $cmdLine 2>&1
         } else {
@@ -166,8 +164,8 @@ if ($Waves -lt 1) {
     throw "-Waves must be >= 1"
 }
 
-$manifestPath = Join-Path $AiMemoryRoot "shared-mcp\manifest.json"
-$statusScriptPath = Join-Path $AiMemoryRoot "shared-mcp\status-shared-mcp.ps1"
+$manifestPath = Join-SharedPath @($AiMemoryRoot, "shared-mcp", "manifest.json")
+$statusScriptPath = Join-SharedPath @($AiMemoryRoot, "shared-mcp", "status-shared-mcp.ps1")
 $reportRoot = Join-Path $AiMemoryRoot "reports"
 Ensure-Directory -Path $reportRoot
 
