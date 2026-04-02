@@ -16,10 +16,10 @@ Ensure-Directory -Path $outputRoot
 $manifest = Get-Content -Raw -LiteralPath $manifestPath -Encoding utf8 | ConvertFrom-Json
 
 $defaultSharedServers = @($manifest.servers | Where-Object {
-    $_.mode -eq "shared" -and [string]$_.id -ne "MiniMax"
+    $_.mode -eq "shared" -or [string]$_.id -eq "playwright"
 })
 $optionalSharedServers = @($manifest.servers | Where-Object {
-    [string]$_.id -eq "MiniMax" -or $_.mode -eq "optional"
+    [string]$_.id -eq "MiniMax"
 })
 
 function New-CodexSnippet {

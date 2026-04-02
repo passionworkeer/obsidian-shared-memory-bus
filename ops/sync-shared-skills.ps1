@@ -222,10 +222,13 @@ function Get-SkillRecords {
 }
 
 function New-RecordMap {
-    param([Parameter(Mandatory = $true)][System.Collections.Generic.List[object]]$Records)
+    param([AllowNull()][object[]]$Records)
 
     $map = @{}
     foreach ($record in @($Records)) {
+        if ($null -eq $record) {
+            continue
+        }
         if (-not $map.ContainsKey($record.key)) {
             $map[$record.key] = $record
         }

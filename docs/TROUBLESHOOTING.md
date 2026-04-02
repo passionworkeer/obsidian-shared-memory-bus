@@ -14,6 +14,32 @@ node -v
 npm -v
 ```
 
+## `search_shared_memory` Returns `spawn python ENOENT`
+
+Cause:
+- the machine has Python installed, but not exposed as `python` on `PATH`
+- only Windows Store shims exist, which are not usable as a real interpreter
+
+Fix:
+- rerun `scripts/install.ps1`; the installer now resolves a usable interpreter and persists `AI_MEMORY_PYTHON`
+- if needed, set `AI_MEMORY_PYTHON` manually to a real interpreter path such as `C:\Users\<you>\AppData\Roaming\uv\python\...\python.exe`
+
+## OpenClaw Blackboard Sync Fails After Removing `sqlite3`
+
+The blackboard daemon now uses Python's standard-library `sqlite3`, not the native Node `sqlite3` package.
+
+Check:
+- `AI_MEMORY_PYTHON` points to a real interpreter
+- the OpenClaw database path is correct:
+  - `OPENCLAW_BLACKBOARD_DB`
+- the database actually has a `tasks` table
+
+If needed, run:
+
+```powershell
+node .\ops\sync-openclaw-to-obsidian.js
+```
+
 ## Obsidian MCP Does Not Start
 
 `ops/run-obsidian-mcp.ps1` looks for the vault in this order:
@@ -55,6 +81,43 @@ Force a clean restart:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\shared-mcp\start-default-shared-mcp.ps1 -ForceRestart
 ```
 
+## `search_shared_memory` Falls Back To BM25 After Switching Embedding Provider
+
+If `search_shared_memory` reports a fallback reason like `embedding-config-mismatch` or `embedding-dimension-mismatch`, the query side is using different embedding settings from the stored index.
+
+Fix:
+- confirm the active environment variables:
+  - `AI_MEMORY_EMBED_BACKEND`
+  - `AI_MEMORY_EMBED_BASE_URL`
+  - `AI_MEMORY_EMBED_MODEL`
+- rebuild the stored index:
+
+```powershell
+node $env:USERPROFILE\.ai-memory\generate-embeddings.js
+```
+
+- inspect `memory_status` and confirm:
+  - `embeddings.backends`
+  - `embeddings.models`
+  - `embeddings.dimensions`
+  - `embeddings.providerHosts`
+
+If a remote rebuild fails with an API error (for example `403`), the run now aborts instead of silently mixing remote and hash vectors in one index. Increase `AI_MEMORY_EMBED_REQUEST_DELAY_MS`, retry later, or use the smaller probe/benchmark scripts before attempting another full rebuild.
+
+## Shared MCP Starts But Stays Unhealthy
+
+If `context7`, `fetch`, `time`, or `playwright` keep showing `running=false` after a restart, inspect the per-server logs under `%USERPROFILE%\.ai-memory\shared-mcp\logs\`.
+
+Typical cause:
+- an old pinned upstream package version was removed from npm or PyPI
+
+The bundled manifest now prefers registry-resolvable current specs for these thin wrapper servers, but if you are upgrading from an older install, reinstall the runtime first:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\shared-mcp\start-default-shared-mcp.ps1 -ForceRestart
+```
+
 ## Playwright Shows Failed In A Client `mcp list`
 
 This can be a false negative.
@@ -80,8 +143,8 @@ Then verify with a real browser task instead of relying only on `mcp list`.
 Run:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\ops\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\ops\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks
 ```
 
 Good signs:
@@ -94,9 +157,7 @@ If Playwright is the only noisy line in a client CLI health report but real brow
 
 ## `npm audit` Shows Vulnerabilities
 
-At the moment, the remaining audit warnings are in third-party dependencies under the `sqlite3` tree. They are not secret leaks from this repository.
-
-Practical guidance:
+The current `shared-mcp/package-lock.json` is expected to audit cleanly. If a future upstream package reintroduces warnings:
 - keep the repo clean and secret-free
-- prefer local trusted installs
-- upgrade dependencies in a controlled pass rather than using `npm audit fix --force` blindly
+- prefer controlled dependency updates
+- avoid `npm audit fix --force` unless you have revalidated the shared MCP runtime afterward

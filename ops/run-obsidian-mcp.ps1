@@ -55,12 +55,24 @@ function Resolve-ObsidianVaultRoot {
 }
 
 function Resolve-McpVaultRunner {
-    $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-    $localModule = Join-Path $scriptRoot "shared-mcp\node_modules\@bitbonsai\mcpvault\dist\server.js"
-    if (Test-Path -LiteralPath $localModule -PathType Leaf) {
-        return @{
-            kind = "node"
-            path = $localModule
+    $searchRoots = New-Object System.Collections.Generic.List[string]
+    foreach ($root in @($PSScriptRoot, (Split-Path -Parent $PSScriptRoot), $env:AI_MEMORY_ROOT)) {
+        if (-not [string]::IsNullOrWhiteSpace($root) -and -not $searchRoots.Contains($root)) {
+            $searchRoots.Add($root) | Out-Null
+        }
+    }
+
+    foreach ($root in @($searchRoots)) {
+        foreach ($candidate in @(
+            (Join-Path $root "shared-mcp\node_modules\@bitbonsai\mcpvault\dist\server.js"),
+            (Join-Path $root "node_modules\@bitbonsai\mcpvault\dist\server.js")
+        )) {
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                return @{
+                    kind = "node"
+                    path = $candidate
+                }
+            }
         }
     }
 
