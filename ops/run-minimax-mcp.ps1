@@ -3,21 +3,21 @@ param()
 Set-StrictMode -Version 3.0
 $ErrorActionPreference = "Stop"
 
-function Get-EnvValue {
-    param([Parameter(Mandatory = $true)][string]$Name)
+$sourceRoot = Split-Path -Parent $PSScriptRoot
+$helperPath = @(
+    (Join-Path $PSScriptRoot "runtime-platform.ps1"),
+    (Join-Path $sourceRoot "runtime-platform.ps1"),
+    (Join-Path $sourceRoot (Join-Path "bus" "runtime-platform.ps1"))
+) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
 
-    $value = [Environment]::GetEnvironmentVariable($Name, "Process")
-    if ([string]::IsNullOrWhiteSpace($value)) {
-        $value = [Environment]::GetEnvironmentVariable($Name, "User")
-    }
-    if ([string]::IsNullOrWhiteSpace($value)) {
-        $value = [Environment]::GetEnvironmentVariable($Name, "Machine")
-    }
-    return [string]$value
+if (-not $helperPath) {
+    throw "Unable to locate runtime-platform.ps1 from $PSScriptRoot"
 }
 
+. $helperPath
+
 function Resolve-MiniMaxRunner {
-    $customCommand = Get-EnvValue -Name "MINIMAX_MCP_COMMAND"
+    $customCommand = Get-SharedEnvValue -Name "MINIMAX_MCP_COMMAND"
     if (-not [string]::IsNullOrWhiteSpace($customCommand)) {
         return @{
             kind = "shell"
@@ -38,12 +38,12 @@ function Resolve-MiniMaxRunner {
     throw "MiniMax MCP executable was not found. Install minimax-coding-plan-mcp or set MINIMAX_MCP_COMMAND."
 }
 
-$apiKey = Get-EnvValue -Name "MINIMAX_API_KEY"
+$apiKey = Get-SharedEnvValue -Name "MINIMAX_API_KEY"
 if ([string]::IsNullOrWhiteSpace($apiKey)) {
     throw "MINIMAX_API_KEY is not set."
 }
 
-$apiHost = Get-EnvValue -Name "MINIMAX_API_HOST"
+$apiHost = Get-SharedEnvValue -Name "MINIMAX_API_HOST"
 if ([string]::IsNullOrWhiteSpace($apiHost)) {
     $apiHost = "https://api.minimax.chat"
 }
@@ -53,7 +53,7 @@ $env:MINIMAX_API_HOST = $apiHost
 
 $runner = Resolve-MiniMaxRunner
 if ($runner.kind -eq "shell") {
-    & cmd.exe /d /c $runner.path
+    Invoke-SharedShellCommand -Command $runner.path
     exit $LASTEXITCODE
 }
 

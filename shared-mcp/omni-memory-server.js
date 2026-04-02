@@ -17,16 +17,21 @@ const AI_MEMORY_ROOT = process.env.AI_MEMORY_ROOT || path.resolve(__dirname, "..
 const WINDOWS_ENV_CACHE = new Map();
 const RUNTIME_ENV_NAMES = [
   "AI_MEMORY_ROOT",
+  "AI_MEMORY_RUNTIME_CONFIG_PATH",
   "AI_MEMORY_PYTHON",
   "AI_MEMORY_OBSIDIAN_VAULT",
   "OBSIDIAN_VAULT_ROOT",
   "CLAUDE_MEM_BASE",
   "OPENCLAW_HOME",
   "OPENCLAW_BLACKBOARD_DB",
+  "AI_MEMORY_EMBED_ADAPTER",
   "AI_MEMORY_EMBED_BACKEND",
   "AI_MEMORY_EMBED_BASE_URL",
   "AI_MEMORY_EMBED_API_KEY",
+  "AI_MEMORY_EMBED_API_KEY_ENV",
   "AI_MEMORY_EMBED_MODEL",
+  "AI_MEMORY_EMBED_PROFILE",
+  "AI_MEMORY_EMBED_PROVIDER",
   "AI_MEMORY_EMBED_TIMEOUT_MS",
   "AI_MEMORY_EMBED_TIMEOUT_SECONDS",
   "AI_MEMORY_EMBED_REQUEST_DELAY_MS",
@@ -47,6 +52,21 @@ function resolveRuntimePath(...candidates) {
 
 function loadVaultResolver() {
   const helperPath = resolveRuntimePath("vault-root.js", path.join("bus", "vault-root.js"));
+  return require(helperPath);
+}
+
+function loadPythonRuntimeHelper() {
+  const helperPath = resolveRuntimePath("python-runtime.js", path.join("bus", "python-runtime.js"));
+  return require(helperPath);
+}
+
+function loadRuntimeConfigHelper() {
+  const helperPath = resolveRuntimePath("runtime-config.js", path.join("bus", "runtime-config.js"));
+  return require(helperPath);
+}
+
+function loadEmbeddingProviderHelper() {
+  const helperPath = resolveRuntimePath("embedding-provider-registry.js", path.join("bus", "embedding-provider-registry.js"));
   return require(helperPath);
 }
 
@@ -115,6 +135,39 @@ function buildMergedEnv(baseEnv = process.env, names = RUNTIME_ENV_NAMES) {
   return merged;
 }
 
+function resolvePowerShellCommand() {
+  if (IS_WINDOWS) {
+    return "powershell.exe";
+  }
+
+  for (const candidate of [
+    firstNonEmptyEnv("AI_MEMORY_PWSH"),
+    "pwsh",
+    "/usr/local/bin/pwsh",
+    "/opt/homebrew/bin/pwsh",
+  ]) {
+    if (!candidate) {
+      continue;
+    }
+    if (path.isAbsolute(candidate) && fs.existsSync(candidate)) {
+      return candidate;
+    }
+    try {
+      const probe = spawnSync(candidate, ["-NoProfile", "-Command", "$PSVersionTable.PSVersion.ToString()"], {
+        encoding: "utf8",
+        windowsHide: true,
+      });
+      if (!probe.error && probe.status === 0) {
+        return candidate;
+      }
+    } catch (_error) {
+      // Keep probing fallbacks.
+    }
+  }
+
+  return firstNonEmptyEnv("AI_MEMORY_PWSH") || "pwsh";
+}
+
 const SEARCH_SCRIPT = resolveRuntimePath("semantic-search.py", path.join("retrieval", "semantic-search.py"));
 const EMBEDDINGS_SCRIPT = resolveRuntimePath("generate-embeddings.js", path.join("bus", "generate-embeddings.js"));
 const HANDOFF_PACK_SCRIPT = resolveRuntimePath("build-handoff-pack.js", path.join("ops", "build-handoff-pack.js"));
@@ -126,155 +179,19 @@ const OPENCLAW_HOME = firstNonEmptyEnv("OPENCLAW_HOME") || path.join(USER_HOME, 
 const BLACKBOARD_DB_PATH =
   firstNonEmptyEnv("OPENCLAW_BLACKBOARD_DB") || path.join(OPENCLAW_HOME, "workspace", "ai-shrimp", "blackboard", "tasks.db");
 const { resolveVaultRoot } = loadVaultResolver();
-
-function runProbe(command, args) {
-  try {
-    const result = spawnSync(command, args, {
-      encoding: "utf8",
-      windowsHide: true,
-    });
-    return {
-      ok: !result.error && result.status === 0,
-      status: result.status,
-      stdout: String(result.stdout || "").trim(),
-      stderr: String(result.stderr || "").trim(),
-      error: result.error ? String(result.error.message || result.error) : "",
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      status: null,
-      stdout: "",
-      stderr: "",
-      error: String(error && error.message ? error.message : error),
-    };
-  }
-}
-
-function buildPythonRuntime(command, argsPrefix, source) {
-  const probe = runProbe(command, [...argsPrefix, "--version"]);
-  return {
-    command,
-    argsPrefix,
-    source,
-    available: probe.ok,
-    version: probe.stdout || probe.stderr || "",
-    error: probe.ok ? "" : probe.error || probe.stderr || `probe-exit-${probe.status}`,
-  };
-}
-
-function resolveAbsolutePython(candidate, source) {
-  if (!candidate || !fs.existsSync(candidate)) {
-    return null;
-  }
-  return buildPythonRuntime(candidate, [], source);
-}
-
-function resolveUvInstalledPython() {
-  const baseDir = path.join(USER_HOME, "AppData", "Roaming", "uv", "python");
-  if (!fs.existsSync(baseDir)) {
-    return null;
-  }
-
-  const candidates = fs
-    .readdirSync(baseDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => path.join(baseDir, entry.name, "python.exe"))
-    .filter((candidate) => fs.existsSync(candidate))
-    .sort((left, right) => right.localeCompare(left));
-
-  if (candidates.length === 0) {
-    return null;
-  }
-
-  return buildPythonRuntime(candidates[0], [], "uv-cache");
-}
-
-function resolveViaUvCommand() {
-  const uvCandidates = [
-    String(process.env.UV_COMMAND || "").trim(),
-    path.join(USER_HOME, ".local", "bin", "uv.exe"),
-    "uv",
-  ].filter(Boolean);
-
-  for (const uvCommand of uvCandidates) {
-    const probe = runProbe(uvCommand, ["python", "find"]);
-    if (!probe.ok) {
-      continue;
-    }
-    const resolvedPath = probe.stdout
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .find(Boolean);
-    if (!resolvedPath || !fs.existsSync(resolvedPath)) {
-      continue;
-    }
-    return buildPythonRuntime(resolvedPath, [], "uv");
-  }
-
-  return null;
-}
-
-function resolvePythonRuntime() {
-  const envCommand = String(process.env.AI_MEMORY_PYTHON || "").trim();
-  if (envCommand) {
-    const runtime = envCommand.includes("\\") || envCommand.includes("/") || /^[A-Za-z]:/.test(envCommand)
-      ? resolveAbsolutePython(envCommand, "env")
-      : buildPythonRuntime(envCommand, [], "env");
-    if (runtime && runtime.available) {
-      return runtime;
-    }
-  }
-
-  for (const candidate of [
-    buildPythonRuntime("python", [], "path"),
-    buildPythonRuntime("python3", [], "path"),
-    buildPythonRuntime("py", ["-3"], "launcher"),
-  ]) {
-    if (candidate.available) {
-      return candidate;
-    }
-  }
-
-  for (const runtime of [
-    resolveViaUvCommand(),
-    resolveUvInstalledPython(),
-    resolveAbsolutePython(path.join(USER_HOME, "pytorch-env", "Scripts", "python.exe"), "pytorch-env"),
-    resolveAbsolutePython(path.join(USER_HOME, ".local", "bin", "python3"), "user-local"),
-    resolveAbsolutePython("/usr/bin/python3", "system"),
-    resolveAbsolutePython("/usr/local/bin/python3", "system"),
-    resolveAbsolutePython("/opt/homebrew/bin/python3", "homebrew"),
-  ]) {
-    if (runtime && runtime.available) {
-      return runtime;
-    }
-  }
-
-  if (IS_WINDOWS) {
-    for (const runtime of [
-      resolveAbsolutePython(path.join(USER_HOME, "AppData", "Local", "Programs", "Python", "Python313", "python.exe"), "python313"),
-      resolveAbsolutePython(path.join(USER_HOME, "AppData", "Local", "Programs", "Python", "Python312", "python.exe"), "python312"),
-      resolveAbsolutePython(path.join(USER_HOME, "AppData", "Local", "Programs", "Python", "Python311", "python.exe"), "python311"),
-    ]) {
-      if (runtime && runtime.available) {
-        return runtime;
-      }
-    }
-  }
-
-  return {
-    command: "python",
-    argsPrefix: [],
-    source: "fallback",
-    available: false,
-    version: "",
-    error: "python-runtime-not-found",
-  };
-}
-
-function withPythonArgs(runtime, args) {
-  return [...(runtime.argsPrefix || []), ...(Array.isArray(args) ? args : [])];
-}
+const { resolvePythonRuntime, withPythonArgs } = loadPythonRuntimeHelper();
+const { buildEmbeddingConfigHash } = loadEmbeddingProviderHelper();
+const { buildEmbeddingRuntimeCatalog, resolveEmbeddingRuntime, updateEmbeddingRuntimeSelection } = loadRuntimeConfigHelper();
+const POWERSHELL_COMMAND = resolvePowerShellCommand();
+const HASH_MODEL = "hashing-v1";
+const EMBEDDING_RUNTIME_DEFAULTS = {
+  adapter: "hash",
+  model: "all-MiniLM-L6-v2",
+  timeoutMs: 120000,
+  requestDelayMs: 0,
+  batchSize: 0,
+  allowBatchFallback: false,
+};
 
 const PYTHON = resolvePythonRuntime();
 const PYTHON_SPAWN_ENV = {
@@ -282,6 +199,14 @@ const PYTHON_SPAWN_ENV = {
   PYTHONUTF8: "1",
   PYTHONIOENCODING: "utf-8",
 };
+let searchWorker = null;
+let searchWorkerStartupPromise = null;
+let searchWorkerBuffer = "";
+let searchWorkerRequestCounter = 0;
+let searchWorkerStartedAt = "";
+let searchWorkerLastError = "";
+let searchWorkerRestartCount = 0;
+const searchWorkerPending = new Map();
 
 function isProcessAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) {
@@ -323,6 +248,15 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (reason) => {
   console.error('[omni-memory] unhandledRejection:', reason);
 });
+process.on("exit", () => {
+  try {
+    if (searchWorker && !searchWorker.killed) {
+      searchWorker.kill();
+    }
+  } catch (_error) {
+    // Best-effort cleanup only.
+  }
+});
 
 function jsonResult(payload) {
   return {
@@ -335,6 +269,187 @@ function errorResult(message) {
     content: [{ type: "text", text: JSON.stringify({ ok: false, error: String(message) }, null, 2) }],
     isError: true,
   };
+}
+
+function rejectPendingSearchRequests(reason) {
+  for (const [, pending] of searchWorkerPending) {
+    clearTimeout(pending.timeout);
+    pending.reject(new Error(reason));
+  }
+  searchWorkerPending.clear();
+}
+
+function resetSearchWorkerState(reason = "") {
+  searchWorkerBuffer = "";
+  if (reason) {
+    searchWorkerLastError = reason;
+  }
+  rejectPendingSearchRequests(reason || "search-worker-reset");
+  searchWorker = null;
+}
+
+function handleSearchWorkerStdout(chunk) {
+  searchWorkerBuffer += chunk.toString();
+  const lines = searchWorkerBuffer.split(/\r?\n/);
+  searchWorkerBuffer = lines.pop() ?? "";
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    let payload;
+    try {
+      payload = JSON.parse(trimmed);
+    } catch (error) {
+      searchWorkerLastError = `search-worker-invalid-json: ${error.message}`;
+      continue;
+    }
+
+    const requestId = String(payload?.id || "").trim();
+    if (!requestId || !searchWorkerPending.has(requestId)) {
+      continue;
+    }
+
+    const pending = searchWorkerPending.get(requestId);
+    searchWorkerPending.delete(requestId);
+    clearTimeout(pending.timeout);
+
+    if (payload?.ok === false) {
+      pending.reject(new Error(String(payload.error || "search-worker-error")));
+      continue;
+    }
+
+    pending.resolve(payload);
+  }
+}
+
+function handleSearchWorkerExit(code, signal) {
+  const reason = `search-worker-exited: code=${code ?? "null"} signal=${signal ?? "null"}`;
+  searchWorkerRestartCount += 1;
+  resetSearchWorkerState(reason);
+}
+
+async function ensureSearchWorker() {
+  if (searchWorker && !searchWorker.killed && searchWorker.exitCode === null) {
+    return searchWorker;
+  }
+
+  if (searchWorkerStartupPromise) {
+    return searchWorkerStartupPromise;
+  }
+
+  if (!fs.existsSync(SEARCH_SCRIPT)) {
+    throw new Error(`search-script-missing: ${SEARCH_SCRIPT}`);
+  }
+  if (!PYTHON.available) {
+    throw new Error(`python-runtime-unavailable: ${PYTHON.error || "unknown-error"}`);
+  }
+
+  searchWorkerStartupPromise = new Promise((resolve, reject) => {
+    const child = spawn(PYTHON.command, withPythonArgs(PYTHON, [SEARCH_SCRIPT, "--server"]), {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: {
+        ...PYTHON_SPAWN_ENV,
+        AI_MEMORY_OBSIDIAN_VAULT: VAULT_ROOT,
+      },
+    });
+
+    let settled = false;
+
+    const settleResolve = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      searchWorker = child;
+      searchWorkerStartedAt = new Date().toISOString();
+      searchWorkerLastError = "";
+      searchWorkerBuffer = "";
+      child.stdout.on("data", handleSearchWorkerStdout);
+      child.stderr.on("data", (chunk) => {
+        const text = chunk.toString("utf8").trim();
+        if (text) {
+          searchWorkerLastError = text;
+          console.error(`[search-worker] ${text}`);
+        }
+      });
+      child.on("exit", handleSearchWorkerExit);
+      child.on("error", (error) => {
+        searchWorkerLastError = String(error?.message || error);
+      });
+      resolve(child);
+    };
+
+    const settleReject = (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resetSearchWorkerState(String(error?.message || error));
+      reject(error);
+    };
+
+    child.once("spawn", settleResolve);
+    child.once("error", settleReject);
+    child.once("exit", (code, signal) => {
+      if (!settled) {
+        settleReject(new Error(`search-worker-startup-exited: code=${code ?? "null"} signal=${signal ?? "null"}`));
+      }
+    });
+  }).finally(() => {
+    searchWorkerStartupPromise = null;
+  });
+
+  return searchWorkerStartupPromise;
+}
+
+async function runSemanticSearchOnce({
+  query,
+  mode = "hybrid",
+  limit = 8,
+  tool = "",
+  project = "",
+  scope = "",
+  sourceKind = "",
+  workspace = "",
+  taskState = "",
+  preferSummaries = false,
+}) {
+  const args = [SEARCH_SCRIPT, "--mode", mode, "--top-k", String(limit), "--json", query];
+  if (tool) {
+    args.push("--tool", tool);
+  }
+  if (project) {
+    args.push("--project", project);
+  }
+  if (scope) {
+    args.push("--scope", scope);
+  }
+  if (sourceKind) {
+    args.push("--source-kind", sourceKind);
+  }
+  if (workspace) {
+    args.push("--workspace", workspace);
+  }
+  if (taskState) {
+    args.push("--task-state", taskState);
+  }
+  if (preferSummaries) {
+    args.push("--prefer-summaries");
+  }
+
+  const result = await spawnProcess(PYTHON.command, withPythonArgs(PYTHON, args), {
+    env: {
+      ...PYTHON_SPAWN_ENV,
+      AI_MEMORY_OBSIDIAN_VAULT: VAULT_ROOT,
+    },
+  });
+  if (result.code !== 0) {
+    throw new Error(result.stderr.trim() || result.stdout.trim() || `semantic-search-exit-${result.code}`);
+  }
+  return JSON.parse(result.stdout);
 }
 
 function spawnProcess(executable, args, options = {}) {
@@ -436,6 +551,7 @@ function readEmbeddingsSummary() {
       models: {},
       dimensions: {},
       providerHosts: {},
+      configHashes: {},
     };
   }
 
@@ -444,6 +560,7 @@ function readEmbeddingsSummary() {
   const models = {};
   const dimensions = {};
   const providerHosts = {};
+  const configHashes = {};
   let count = 0;
   const lines = fs.readFileSync(EMBEDDINGS_INDEX_PATH, "utf8").split(/\r?\n/);
   for (const line of lines) {
@@ -466,6 +583,9 @@ function readEmbeddingsSummary() {
       if (record.providerHost) {
         providerHosts[record.providerHost] = (providerHosts[record.providerHost] || 0) + 1;
       }
+      if (record.configHash) {
+        configHashes[record.configHash] = (configHashes[record.configHash] || 0) + 1;
+      }
     } catch (err) {
       // Ignore malformed lines and keep reporting readable data.
       console.error(`[omni-memory-server] JSON parse error in embeddings index (skipping line): ${err.message}`);
@@ -484,7 +604,157 @@ function readEmbeddingsSummary() {
     models,
     dimensions,
     providerHosts,
+    configHashes,
   };
+}
+
+function readEmbeddingRuntimeSummary() {
+  const runtime = resolveEmbeddingRuntime({
+    rootPath: AI_MEMORY_ROOT,
+    getEnvValue: firstNonEmptyEnv,
+    defaults: EMBEDDING_RUNTIME_DEFAULTS,
+  });
+
+  return {
+    profile: runtime.profileName || "",
+    provider: runtime.providerName || "",
+    adapter: runtime.adapter || runtime.backend || "hash",
+    backend: runtime.backend || "hash",
+    model: runtime.model || "all-MiniLM-L6-v2",
+    baseUrl: runtime.baseUrl || "",
+    apiKeyEnv: runtime.apiKeyEnv || "",
+    apiKeyConfigured: Boolean(runtime.apiKey),
+    processEmbeddingOverridesAllowed: Boolean(runtime.processEmbeddingOverridesAllowed),
+    timeoutMs: runtime.timeoutMs || 120000,
+    requestDelayMs: runtime.requestDelayMs || 0,
+    batchSize: runtime.batchSize || 0,
+    allowBatchFallback: Boolean(runtime.allowBatchFallback),
+    resolutionMode: runtime.resolutionMode || "",
+    availableProfiles: Array.isArray(runtime.availableProfiles) ? runtime.availableProfiles : [],
+    availableProviders: Array.isArray(runtime.availableProviders) ? runtime.availableProviders : [],
+    configPath: runtime.configPath || "",
+    configExists: Boolean(runtime.configExists),
+    configError: runtime.configError || "",
+  };
+}
+
+function buildEmbeddingIndexState(runtimeSummary, embeddingsSummary) {
+  const adapter = String(runtimeSummary?.adapter || runtimeSummary?.backend || "hash").trim() || "hash";
+  const modelName = adapter === "hash" ? HASH_MODEL : String(runtimeSummary?.model || "").trim();
+  const activeConfigHash = buildEmbeddingConfigHash({
+    backend: adapter,
+    modelName: modelName || HASH_MODEL,
+    baseUrl: String(runtimeSummary?.baseUrl || ""),
+  });
+  const indexedConfigHashes =
+    embeddingsSummary && typeof embeddingsSummary.configHashes === "object" && embeddingsSummary.configHashes
+      ? embeddingsSummary.configHashes
+      : {};
+  const uniqueConfigHashes = Object.keys(indexedConfigHashes);
+
+  if (!embeddingsSummary?.exists || !embeddingsSummary?.count) {
+    return {
+      status: "missing",
+      rebuildRequired: false,
+      reason: "missing-embeddings-index",
+      activeConfigHash,
+      indexedConfigHash: "",
+      indexedConfigHashes,
+    };
+  }
+
+  if (uniqueConfigHashes.length === 0) {
+    return {
+      status: "legacy",
+      rebuildRequired: false,
+      reason: "index-missing-config-hash",
+      activeConfigHash,
+      indexedConfigHash: "",
+      indexedConfigHashes,
+    };
+  }
+
+  if (uniqueConfigHashes.length > 1) {
+    return {
+      status: "mixed",
+      rebuildRequired: true,
+      reason: "embeddings-index-has-mixed-config-hashes",
+      activeConfigHash,
+      indexedConfigHash: "",
+      indexedConfigHashes,
+    };
+  }
+
+  const indexedConfigHash = uniqueConfigHashes[0];
+  if (indexedConfigHash !== activeConfigHash) {
+    return {
+      status: "stale",
+      rebuildRequired: true,
+      reason: "active-runtime-differs-from-index",
+      activeConfigHash,
+      indexedConfigHash,
+      indexedConfigHashes,
+    };
+  }
+
+  return {
+    status: "aligned",
+    rebuildRequired: false,
+    reason: "",
+    activeConfigHash,
+    indexedConfigHash,
+    indexedConfigHashes,
+  };
+}
+
+function annotateEmbeddingRuntimeCatalog(catalog, embeddingsSummary) {
+  if (!catalog || typeof catalog !== "object") {
+    return catalog;
+  }
+
+  const annotated = JSON.parse(JSON.stringify(catalog));
+  const indexedConfigHashes =
+    embeddingsSummary && typeof embeddingsSummary.configHashes === "object" && embeddingsSummary.configHashes
+      ? embeddingsSummary.configHashes
+      : {};
+
+  const annotateEntry = (entry = {}) => {
+    const adapter = String(entry.adapter || entry.backend || "hash").trim() || "hash";
+    const modelName = adapter === "hash" ? HASH_MODEL : String(entry.model || "").trim() || HASH_MODEL;
+    const configHash = buildEmbeddingConfigHash({
+      backend: adapter,
+      modelName,
+      baseUrl: String(entry.baseUrl || ""),
+    });
+    const indexedCount = Number(indexedConfigHashes[configHash] || 0);
+    return {
+      ...entry,
+      configHash,
+      indexedCount,
+      indexCompatible: indexedCount > 0,
+      rebuildRequired: indexedCount === 0,
+    };
+  };
+
+  if (annotated.runtime && typeof annotated.runtime === "object") {
+    annotated.runtime = annotateEntry(annotated.runtime);
+  }
+  if (Array.isArray(annotated.providers)) {
+    annotated.providers = annotated.providers.map((entry) => annotateEntry(entry));
+  }
+  if (Array.isArray(annotated.profiles)) {
+    annotated.profiles = annotated.profiles.map((entry) => annotateEntry(entry));
+  }
+
+  return annotated;
+}
+
+function readEmbeddingRuntimeCatalog() {
+  return buildEmbeddingRuntimeCatalog({
+    rootPath: AI_MEMORY_ROOT,
+    getEnvValue: firstNonEmptyEnv,
+    defaults: EMBEDDING_RUNTIME_DEFAULTS,
+  });
 }
 
 async function runSemanticSearch({
@@ -499,42 +769,80 @@ async function runSemanticSearch({
   taskState = "",
   preferSummaries = false,
 }) {
-  if (!fs.existsSync(SEARCH_SCRIPT)) {
-    throw new Error(`search-script-missing: ${SEARCH_SCRIPT}`);
+  try {
+    return await requestSearchWorker(
+      {
+        action: "search",
+        query,
+        mode,
+        limit,
+        tool,
+        project,
+        scope,
+        sourceKind,
+        workspace,
+        taskState,
+        preferSummaries,
+      },
+      120000
+    );
+  } catch (error) {
+    searchWorkerLastError = String(error?.message || error);
+    return runSemanticSearchOnce({
+      query,
+      mode,
+      limit,
+      tool,
+      project,
+      scope,
+      sourceKind,
+      workspace,
+      taskState,
+      preferSummaries,
+    });
   }
-  if (!PYTHON.available) {
-    throw new Error(`python-runtime-unavailable: ${PYTHON.error || "unknown-error"}`);
-  }
+}
 
-  const args = [SEARCH_SCRIPT, "--mode", mode, "--top-k", String(limit), "--json", query];
-  if (tool) {
-    args.push("--tool", tool);
-  }
-  if (project) {
-    args.push("--project", project);
-  }
-  if (scope) {
-    args.push("--scope", scope);
-  }
-  if (sourceKind) {
-    args.push("--source-kind", sourceKind);
-  }
-  if (workspace) {
-    args.push("--workspace", workspace);
-  }
-  if (taskState) {
-    args.push("--task-state", taskState);
-  }
-  if (preferSummaries) {
-    args.push("--prefer-summaries");
-  }
-  const result = await spawnProcess(PYTHON.command, withPythonArgs(PYTHON, args), {
-    env: PYTHON_SPAWN_ENV,
+async function requestSearchWorker(payload, timeoutMs = 120000) {
+  const child = await ensureSearchWorker();
+  return await new Promise((resolve, reject) => {
+    const requestId = `search-${Date.now()}-${++searchWorkerRequestCounter}`;
+    const timeout = setTimeout(() => {
+      searchWorkerPending.delete(requestId);
+      reject(new Error("search-worker-timeout"));
+    }, timeoutMs);
+
+    searchWorkerPending.set(requestId, { resolve, reject, timeout });
+
+    try {
+      child.stdin.write(`${JSON.stringify({ id: requestId, ...payload })}\n`, "utf8");
+    } catch (error) {
+      clearTimeout(timeout);
+      searchWorkerPending.delete(requestId);
+      reject(error);
+    }
   });
-  if (result.code !== 0) {
-    throw new Error(result.stderr.trim() || result.stdout.trim() || `semantic-search-exit-${result.code}`);
+}
+
+async function getSearchWorkerHealth() {
+  try {
+    return await requestSearchWorker({ action: "health" }, 10000);
+  } catch (error) {
+    return {
+      ok: false,
+      error: String(error?.message || error),
+    };
   }
-  return JSON.parse(result.stdout);
+}
+
+async function clearSearchWorkerCache({ includeDataCaches = false } = {}) {
+  return await requestSearchWorker(
+    {
+      action: "clear_cache",
+      includeDataCaches,
+    },
+    30000
+  );
 }
 
 async function rebuildEmbeddings({ force = false }) {
@@ -620,12 +928,14 @@ async function runMemoryDream({ force = false }) {
     throw new Error(`memory-dream-script-missing: ${MEMORY_DREAM_SCRIPT}`);
   }
 
-  const args = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", MEMORY_DREAM_SCRIPT];
+  const args = IS_WINDOWS
+    ? ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", MEMORY_DREAM_SCRIPT]
+    : ["-NoProfile", "-File", MEMORY_DREAM_SCRIPT];
   if (force) {
     args.push("-Force");
   }
 
-  const result = await spawnProcess("powershell.exe", args, {
+  const result = await spawnProcess(POWERSHELL_COMMAND, args, {
     env: {
       ...RUNTIME_ENV,
       AI_MEMORY_OBSIDIAN_VAULT: VAULT_ROOT,
@@ -798,6 +1108,44 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: "clear_shared_memory_search_cache",
+      description:
+        "Clear the persistent shared retrieval worker's in-memory search caches. Optionally also clear loaded entry/index data so the next query fully reloads state from disk.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          includeDataCaches: {
+            type: "boolean",
+            default: false,
+            description: "When true, also drop the loaded entries and embeddings index caches in addition to query/BM25/result caches.",
+          },
+        },
+      },
+    },
+    {
+      name: "list_embedding_runtimes",
+      description:
+        "List the configured embedding defaults, providers, and profiles, along with the currently resolved active runtime and whether the dense index is aligned or needs a rebuild.",
+      inputSchema: {
+        type: "object",
+        properties: {},
+      },
+    },
+    {
+      name: "set_embedding_runtime",
+      description:
+        "Activate an embedding profile or provider in the runtime config. Returns the updated runtime selection and whether the dense embeddings index now needs a rebuild.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          profile: { type: "string", description: "Configured embedding profile name to activate." },
+          provider: { type: "string", description: "Configured provider name to activate directly." },
+          clearProfile: { type: "boolean", default: false, description: "Clear the persisted activeProfile selection." },
+          clearProvider: { type: "boolean", default: false, description: "Clear the persisted activeProvider selection." },
+        },
+      },
+    },
+    {
       name: "rebuild_memory_layers",
       description:
         "Rebuild derived shared memory layers such as shared inbox records, session-layer records, and shared event records.",
@@ -914,6 +1262,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   try {
     if (name === "memory_status") {
+      const embeddingRuntime = readEmbeddingRuntimeSummary();
+      const embeddings = readEmbeddingsSummary();
+      const embeddingIndexState = buildEmbeddingIndexState(embeddingRuntime, embeddings);
+      const workerHealth = await getSearchWorkerHealth();
       return jsonResult({
         ok: true,
         generatedAt: new Date().toISOString(),
@@ -925,8 +1277,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           version: PYTHON.version,
           error: PYTHON.error,
         },
+        searchWorker: {
+          enabled: true,
+          running: Boolean(searchWorker && !searchWorker.killed && searchWorker.exitCode === null),
+          pid: searchWorker?.pid || null,
+          startedAt: searchWorkerStartedAt || null,
+          pendingRequests: searchWorkerPending.size,
+          restartCount: searchWorkerRestartCount,
+          lastError: searchWorkerLastError || "",
+          mode: "persistent-jsonl-with-oneshot-fallback",
+          health: workerHealth,
+        },
         watchdog: readWatchdogState(),
-        embeddings: readEmbeddingsSummary(),
+        embeddingRuntime,
+        embeddingIndexState,
+        embeddings,
         handoffPack: readOptionalJson(HANDOFF_PACK_JSON_PATH),
         memoryLayers: readOptionalJson(MEMORY_LAYERS_JSON_PATH),
         autoDream: readOptionalJson(AUTO_DREAM_JSON_PATH),
@@ -952,6 +1317,43 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         preferSummaries: Boolean(args.preferSummaries),
       });
       return jsonResult(payload);
+    }
+
+    if (name === "clear_shared_memory_search_cache") {
+      return jsonResult(
+        await clearSearchWorkerCache({
+          includeDataCaches: Boolean(args.includeDataCaches),
+        })
+      );
+    }
+
+    if (name === "list_embedding_runtimes") {
+      const embeddings = readEmbeddingsSummary();
+      const catalog = annotateEmbeddingRuntimeCatalog(readEmbeddingRuntimeCatalog(), embeddings);
+      return jsonResult({
+        ok: true,
+        catalog,
+        embeddingIndexState: buildEmbeddingIndexState(catalog.runtime, embeddings),
+      });
+    }
+
+    if (name === "set_embedding_runtime") {
+      const payload = updateEmbeddingRuntimeSelection({
+        rootPath: AI_MEMORY_ROOT,
+        getEnvValue: firstNonEmptyEnv,
+        defaults: EMBEDDING_RUNTIME_DEFAULTS,
+        profile: String(args.profile || ""),
+        provider: String(args.provider || ""),
+        clearProfile: Boolean(args.clearProfile),
+        clearProvider: Boolean(args.clearProvider),
+      });
+      const embeddings = readEmbeddingsSummary();
+      const catalog = annotateEmbeddingRuntimeCatalog(payload.catalog, embeddings);
+      return jsonResult({
+        ...payload,
+        catalog,
+        embeddingIndexState: buildEmbeddingIndexState(catalog.runtime, embeddings),
+      });
     }
 
     if (name === "rebuild_memory_layers") {

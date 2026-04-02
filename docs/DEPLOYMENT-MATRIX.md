@@ -7,7 +7,7 @@
 | Single machine, many agents and clients | Yes | primary target of this project |
 | Single machine with optional backup or sync | Yes, carefully | keep sync and memory indexing as separate concerns |
 | Windows full control plane | Yes | installer, shared MCP control, watchdog startup, and client wiring validated |
-| macOS/Linux portable core | Yes, partial | core memory generation, dream, embeddings, and retrieval are validated; installer/startup remain Windows-first |
+| macOS/Linux portable core | Yes | `pwsh`-based install/start/status/stop wrappers and startup registration ship in the bundle as LaunchAgents, `systemd --user`, or XDG autostart fallbacks; current deepest live validation still happens on Windows |
 | Cross-platform onboarding pack | Yes | generated agent packs bundle shared HTTP MCP snippets, a portable skill template, and a thin plugin-adapter contract |
 | Multi-device shared vault with extra sync layers | Caution | understand sync conflict behavior first |
 | Hosted multi-tenant deployment | No | out of scope for this bundle |

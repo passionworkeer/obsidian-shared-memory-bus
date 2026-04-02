@@ -1,11 +1,14 @@
 @{
     FlatRuntimeFiles = @{
         bus = @(
+            "embedding-provider-registry.js"
             "generate-embeddings.js"
             "memory-bus.ps1"
             "memory-watchdog.ps1"
             "python-runtime.js"
             "register-agent.ps1"
+            "runtime-platform.ps1"
+            "runtime-config.js"
             "vault-root.js"
         )
         ops = @(
@@ -27,7 +30,9 @@
         retrieval = @(
             "benchmark-architecture.py"
             "benchmark-backends.py"
+            "embedding_providers.py"
             "probe-models.py"
+            "runtime_support.py"
             "semantic-search.js"
             "semantic-search.py"
         )
@@ -40,13 +45,18 @@
         "playwright-stdio-proxy.js"
         "singleton-stdio-mcp-proxy.mjs"
         "start-default-shared-mcp.ps1"
+        "start-default-shared-mcp.sh"
         "start-shared-mcp.ps1"
+        "start-shared-mcp.sh"
         "status-shared-mcp.ps1"
+        "status-shared-mcp.sh"
         "stop-shared-mcp.ps1"
+        "stop-shared-mcp.sh"
         "write-config-snippets.ps1"
     )
     TemplateFiles = @(
         "agents.json"
+        "config/runtime.json"
     )
     LegacyCleanupFiles = @(
         "benchmark-embedding-backends.py"

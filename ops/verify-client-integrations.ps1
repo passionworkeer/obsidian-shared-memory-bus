@@ -7,11 +7,24 @@ param(
 Set-StrictMode -Version 3.0
 $ErrorActionPreference = "Stop"
 
+$sourceRoot = Split-Path -Parent $PSScriptRoot
+$helperPath = @(
+    (Join-Path $PSScriptRoot "runtime-platform.ps1"),
+    (Join-Path $sourceRoot "runtime-platform.ps1"),
+    (Join-Path $sourceRoot (Join-Path "bus" "runtime-platform.ps1"))
+) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+
+if (-not $helperPath) {
+    throw "Unable to locate runtime-platform.ps1 from $PSScriptRoot"
+}
+
+. $helperPath
+
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [Console]::OutputEncoding = $Utf8NoBom
 
 if ([string]::IsNullOrWhiteSpace($AiMemoryRoot)) {
-    $AiMemoryRoot = if (-not [string]::IsNullOrWhiteSpace($env:AI_MEMORY_ROOT)) { $env:AI_MEMORY_ROOT } else { Join-Path $env:USERPROFILE ".ai-memory" }
+    $AiMemoryRoot = if (-not [string]::IsNullOrWhiteSpace($env:AI_MEMORY_ROOT)) { $env:AI_MEMORY_ROOT } else { Get-SharedDefaultAiMemoryRoot }
 }
 
 $expectedShared = [ordered]@{
@@ -20,60 +33,7 @@ $expectedShared = [ordered]@{
     time = "http://127.0.0.1:9333/mcp"
     "sequential-thinking" = "http://127.0.0.1:9334/mcp"
     obsidian = "http://127.0.0.1:9335/mcp"
-    MiniMax = "http://127.0.0.1:9336/mcp"
     memory = "http://127.0.0.1:9338/mcp"
-}
-
-function Resolve-ObsidianVaultRoot {
-    param([AllowEmptyString()][string]$FallbackPath = "")
-
-    foreach ($overridePath in @($env:AI_MEMORY_OBSIDIAN_VAULT, $env:OBSIDIAN_VAULT_ROOT)) {
-        if (-not [string]::IsNullOrWhiteSpace($overridePath) -and (Test-Path -LiteralPath $overridePath -PathType Container)) {
-            return (Get-Item -LiteralPath $overridePath).FullName
-        }
-    }
-
-    $obsidianConfigPath = Join-Path $env:APPDATA "obsidian\obsidian.json"
-    if (Test-Path -LiteralPath $obsidianConfigPath) {
-        try {
-            $config = Get-Content -Raw -LiteralPath $obsidianConfigPath -Encoding utf8 | ConvertFrom-Json
-            $records = New-Object System.Collections.Generic.List[object]
-            if ($config.vaults) {
-                foreach ($property in $config.vaults.PSObject.Properties) {
-                    $vault = $property.Value
-                    $path = [string]$vault.path
-                    if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Container)) {
-                        continue
-                    }
-
-                    $records.Add([pscustomobject]@{
-                        path = (Get-Item -LiteralPath $path).FullName
-                        open = [bool]$vault.open
-                        ts = if ($null -ne $vault.ts) { [int64]$vault.ts } else { 0 }
-                    }) | Out-Null
-                }
-            }
-
-            $openVault = @($records | Where-Object { $_.open } | Sort-Object ts -Descending | Select-Object -First 1)
-            if ($openVault.Count -gt 0) {
-                return $openVault[0].path
-            }
-
-            $recentVault = @($records | Sort-Object ts -Descending | Select-Object -First 1)
-            if ($recentVault.Count -gt 0) {
-                return $recentVault[0].path
-            }
-        } catch {
-        }
-    }
-
-    foreach ($candidate in @($FallbackPath, (Join-Path $env:USERPROFILE "Documents\Obsidian Vault"))) {
-        if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate -PathType Container)) {
-            return (Get-Item -LiteralPath $candidate).FullName
-        }
-    }
-
-    return $FallbackPath
 }
 
 function Ensure-Directory {
@@ -217,7 +177,7 @@ function Invoke-CliCheck {
             $previousNativePref = $Global:PSNativeCommandUseErrorActionPreference
             $Global:PSNativeCommandUseErrorActionPreference = $false
         }
-        if ($Executable -match '\.(cmd|bat)$') {
+        if ((Test-SharedIsWindows) -and $Executable -match '\.(cmd|bat)$') {
             $cmdLine = '"' + $Executable + '" ' + ($Arguments -join ' ')
             $output = & cmd.exe /d /c $cmdLine 2>&1
         } else {
@@ -259,7 +219,8 @@ function Invoke-CliCheck {
     }
 }
 
-$userHome = $env:USERPROFILE
+$userHome = Get-SharedUserHome
+$vsCodeUserRoot = Get-SharedVsCodeUserRoot -ProductName "Code"
 $report = [ordered]@{
     generatedAt = (Get-Date).ToString("s")
     aiMemoryRoot = $AiMemoryRoot
@@ -270,27 +231,27 @@ $report = [ordered]@{
     cliChecks = @()
 }
 
-$sharedStatusPath = Join-Path $AiMemoryRoot "shared-mcp\status-shared-mcp.ps1"
+$sharedStatusPath = Join-SharedPath @($AiMemoryRoot, "shared-mcp", "status-shared-mcp.ps1")
 if (Test-Path -LiteralPath $sharedStatusPath -PathType Leaf) {
     try {
-        $report.sharedMcpStatus = (& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $sharedStatusPath | ConvertFrom-Json)
+        $report.sharedMcpStatus = @((Invoke-SharedPowerShellFile -ScriptPath $sharedStatusPath | ConvertFrom-Json))
     } catch {
         $report.sharedMcpStatus = [pscustomobject]@{ error = $_.Exception.Message }
     }
 }
 
-$cursorGlobalPath = Join-Path $userHome ".cursor\mcp.json"
-$vsCodeMcpPath = Join-Path $env:APPDATA "Code\User\mcp.json"
-$vsCodeSettingsPath = Join-Path $env:APPDATA "Code\User\settings.json"
-$copilotInstructionsPath = Join-Path $userHome ".copilot\instructions\shared-memory.instructions.md"
-$opencodeConfigPath = Join-Path $userHome ".config\opencode\opencode.json"
-$opencodeInstructionsPath = Join-Path $userHome ".config\opencode\instructions\shared-memory.md"
-$opencodeAgentsPath = Join-Path $userHome ".config\opencode\AGENTS.md"
-$claudeConfigPath = Join-Path $userHome ".claude.json"
-$vaultRoot = Resolve-ObsidianVaultRoot -FallbackPath (Join-Path $userHome "Documents\Obsidian Vault")
-$sharedSkillsManifestPath = Join-Path $AiMemoryRoot "shared-skills\managed-links.json"
-$sharedSkillsGuidePath = Join-Path $vaultRoot "00-System\ai-memory\generated\SHARED-SKILLS.md"
-$globalPortableSkillsRoot = Join-Path $userHome ".agents\skills"
+$cursorGlobalPath = Join-SharedPath @($userHome, ".cursor", "mcp.json")
+$vsCodeMcpPath = Join-Path $vsCodeUserRoot "mcp.json"
+$vsCodeSettingsPath = Join-Path $vsCodeUserRoot "settings.json"
+$copilotInstructionsPath = Join-SharedPath @($userHome, ".copilot", "instructions", "shared-memory.instructions.md")
+$opencodeConfigPath = Join-SharedPath @($userHome, ".config", "opencode", "opencode.json")
+$opencodeInstructionsPath = Join-SharedPath @($userHome, ".config", "opencode", "instructions", "shared-memory.md")
+$opencodeAgentsPath = Join-SharedPath @($userHome, ".config", "opencode", "AGENTS.md")
+$claudeConfigPath = Join-SharedPath @($userHome, ".claude.json")
+$vaultRoot = Resolve-SharedObsidianVaultRoot -FallbackPath (Join-SharedPath @($userHome, "Documents", "Obsidian Vault"))
+$sharedSkillsManifestPath = Join-SharedPath @($AiMemoryRoot, "shared-skills", "managed-links.json")
+$sharedSkillsGuidePath = Join-SharedPath @($vaultRoot, "00-System", "ai-memory", "generated", "SHARED-SKILLS.md")
+$globalPortableSkillsRoot = Join-SharedPath @($userHome, ".agents", "skills")
 
 $sharedSkillsManifest = Read-JsonFileOrNull -Path $sharedSkillsManifestPath
 $report.sharedSkills = [ordered]@{
@@ -347,13 +308,13 @@ $report.clients.copilot = [ordered]@{
 }
 
 if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
-    $workspaceCursorPath = Join-Path $WorkspaceRoot ".cursor\mcp.json"
-    $workspaceVsCodePath = Join-Path $WorkspaceRoot ".vscode\mcp.json"
-    $workspaceClaudePath = Join-Path $WorkspaceRoot ".claude\rules\shared-memory.md"
+    $workspaceCursorPath = Join-SharedPath @($WorkspaceRoot, ".cursor", "mcp.json")
+    $workspaceVsCodePath = Join-SharedPath @($WorkspaceRoot, ".vscode", "mcp.json")
+    $workspaceClaudePath = Join-SharedPath @($WorkspaceRoot, ".claude", "rules", "shared-memory.md")
     $workspaceAgentsPath = Join-Path $WorkspaceRoot "AGENTS.md"
-    $workspaceCopilotPath = Join-Path $WorkspaceRoot ".github\copilot-instructions.md"
+    $workspaceCopilotPath = Join-SharedPath @($WorkspaceRoot, ".github", "copilot-instructions.md")
     $workspaceOpenCodePath = Join-Path $WorkspaceRoot "opencode.json"
-    $workspacePortableSkillsRoot = Join-Path $WorkspaceRoot ".agents\skills"
+    $workspacePortableSkillsRoot = Join-SharedPath @($WorkspaceRoot, ".agents", "skills")
 
     $workspaceCursor = Read-JsonFileOrNull -Path $workspaceCursorPath
     $workspaceVsCode = Read-JsonFileOrNull -Path $workspaceVsCodePath

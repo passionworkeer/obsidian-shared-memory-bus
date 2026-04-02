@@ -16,7 +16,8 @@ assignees: ""
 3.
 
 ## Environment
-- Windows version:
+- OS:
+- Shell:
 - Agent or client:
 - Workspace path:
 
@@ -26,6 +27,12 @@ Paste sanitized output only. Remove secrets, cookies, tokens, and private paths 
 ## Shared MCP status
 If relevant, include sanitized output from:
 
+Windows:
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\.ai-memory\shared-mcp\status-shared-mcp.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\status-shared-mcp.ps1
+```
+
+macOS/Linux:
+```bash
+~/.ai-memory/shared-mcp/status-shared-mcp.sh
 ```

@@ -78,18 +78,27 @@ function isInteresting(record) {
 }
 
 function collectRecords() {
-  const files = [
+  const baseFiles = [
     "shared-inbox.jsonl",
     "session-memory.jsonl",
     "shared-events.jsonl",
+  ];
+  const taskMemoryPath = path.join(STRUCTURED_ROOT, "task-memory.jsonl");
+  const taskMemoryRecords = readJsonl(taskMemoryPath);
+  const fallbackTaskFiles = [
     "openclaw-blackboard.jsonl",
     "openclaw-runs.jsonl",
     "openclaw-jobs.jsonl",
     "openclaw-journal.jsonl",
   ];
+  const taskRecords =
+    taskMemoryRecords.length > 0
+      ? taskMemoryRecords
+      : fallbackTaskFiles.flatMap((fileName) => readJsonl(path.join(STRUCTURED_ROOT, fileName)));
 
-  return files
+  return baseFiles
     .flatMap((fileName) => readJsonl(path.join(STRUCTURED_ROOT, fileName)))
+    .concat(taskRecords)
     .filter(isInteresting)
     .sort((left, right) => toTimestamp(right.t) - toTimestamp(left.t));
 }

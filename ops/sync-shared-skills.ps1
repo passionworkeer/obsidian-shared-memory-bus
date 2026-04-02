@@ -10,60 +10,19 @@ $ErrorActionPreference = "Stop"
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [Console]::OutputEncoding = $Utf8NoBom
 
-if ([string]::IsNullOrWhiteSpace($AiMemoryRoot)) {
-    $AiMemoryRoot = if (-not [string]::IsNullOrWhiteSpace($env:AI_MEMORY_ROOT)) { $env:AI_MEMORY_ROOT } else { Join-Path $env:USERPROFILE ".ai-memory" }
+$helperPath = @(
+    (Join-Path $PSScriptRoot "runtime-platform.ps1"),
+    (Join-Path $PSScriptRoot "../bus/runtime-platform.ps1")
+) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+
+if (-not $helperPath) {
+    throw "Unable to locate runtime-platform.ps1 from $PSScriptRoot"
 }
 
-function Resolve-ObsidianVaultRoot {
-    param([AllowEmptyString()][string]$FallbackPath = "")
+. $helperPath
 
-    foreach ($overridePath in @($env:AI_MEMORY_OBSIDIAN_VAULT, $env:OBSIDIAN_VAULT_ROOT)) {
-        if (-not [string]::IsNullOrWhiteSpace($overridePath) -and (Test-Path -LiteralPath $overridePath -PathType Container)) {
-            return (Get-Item -LiteralPath $overridePath).FullName
-        }
-    }
-
-    $obsidianConfigPath = Join-Path $env:APPDATA "obsidian\obsidian.json"
-    if (Test-Path -LiteralPath $obsidianConfigPath) {
-        try {
-            $config = Get-Content -Raw -LiteralPath $obsidianConfigPath -Encoding utf8 | ConvertFrom-Json
-            $records = New-Object System.Collections.Generic.List[object]
-            if ($config.vaults) {
-                foreach ($property in $config.vaults.PSObject.Properties) {
-                    $vault = $property.Value
-                    $path = [string]$vault.path
-                    if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Container)) {
-                        continue
-                    }
-
-                    $records.Add([pscustomobject]@{
-                        path = (Get-Item -LiteralPath $path).FullName
-                        open = [bool]$vault.open
-                        ts = if ($null -ne $vault.ts) { [int64]$vault.ts } else { 0 }
-                    }) | Out-Null
-                }
-            }
-
-            $openVault = @($records | Where-Object { $_.open } | Sort-Object ts -Descending | Select-Object -First 1)
-            if ($openVault.Count -gt 0) {
-                return $openVault[0].path
-            }
-
-            $recentVault = @($records | Sort-Object ts -Descending | Select-Object -First 1)
-            if ($recentVault.Count -gt 0) {
-                return $recentVault[0].path
-            }
-        } catch {
-        }
-    }
-
-    foreach ($candidate in @($FallbackPath, (Join-Path $env:USERPROFILE "Documents\Obsidian Vault"))) {
-        if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate -PathType Container)) {
-            return (Get-Item -LiteralPath $candidate).FullName
-        }
-    }
-
-    return $FallbackPath
+if ([string]::IsNullOrWhiteSpace($AiMemoryRoot)) {
+    $AiMemoryRoot = if (-not [string]::IsNullOrWhiteSpace($env:AI_MEMORY_ROOT)) { $env:AI_MEMORY_ROOT } else { Get-SharedDefaultAiMemoryRoot }
 }
 
 function Ensure-Directory {
@@ -417,12 +376,9 @@ function New-ManagedLink {
 
     Ensure-Directory -Path (Split-Path -Parent $TargetPath)
     try {
-        [void](New-Item -ItemType Junction -Path $TargetPath -Target $SourcePath -Force)
+        New-SharedDirectoryLink -TargetPath $TargetPath -SourcePath $SourcePath
     } catch {
-        $mklink = cmd.exe /d /c ('mklink /J "{0}" "{1}"' -f $TargetPath, $SourcePath) 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            throw ("Failed to create junction for skill '{0}': {1}" -f $SkillName, (($mklink | Out-String).Trim()))
-        }
+        throw ("Failed to create managed link for skill '{0}': {1}" -f $SkillName, $_.Exception.Message)
     }
 
     $Created.Add([pscustomobject]@{
@@ -480,20 +436,20 @@ function Format-SkillBullet {
     return ("- `{0}`: {1}" -f $Record.slug, $description)
 }
 
-$userHome = $env:USERPROFILE
-$vaultRoot = Resolve-ObsidianVaultRoot -FallbackPath (Join-Path $userHome "Documents\Obsidian Vault")
-$generatedRoot = Join-Path $vaultRoot "00-System\ai-memory\generated"
+$userHome = Get-SharedUserHome
+$vaultRoot = Resolve-SharedObsidianVaultRoot -FallbackPath (Join-SharedPath @($userHome, "Documents", "Obsidian Vault"))
+$generatedRoot = Join-SharedPath @($vaultRoot, "00-System", "ai-memory", "generated")
 $sharedGuidePath = Join-Path $generatedRoot "SHARED-SKILLS.md"
 $sharedJsonPath = Join-Path $generatedRoot "SHARED-SKILLS.json"
 $catalogRoot = Join-Path $AiMemoryRoot "shared-skills"
 $managedLinksPath = Join-Path $catalogRoot "managed-links.json"
 $catalogReadmePath = Join-Path $catalogRoot "README.md"
 
-$globalPortableRoot = Join-Path $userHome ".agents\skills"
-$globalCodexRoot = Join-Path $userHome ".codex\skills"
-$globalClaudeRoot = Join-Path $userHome ".claude\skills"
+$globalPortableRoot = Join-SharedPath @($userHome, ".agents", "skills")
+$globalCodexRoot = Join-SharedPath @($userHome, ".codex", "skills")
+$globalClaudeRoot = Join-SharedPath @($userHome, ".claude", "skills")
 
-$workspacePortableRoot = if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) { "" } else { Join-Path $WorkspaceRoot ".agents\skills" }
+$workspacePortableRoot = if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) { "" } else { Join-SharedPath @($WorkspaceRoot, ".agents", "skills") }
 $workspaceGenericRoot = if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) { "" } else { Join-Path $WorkspaceRoot "skills" }
 
 Ensure-Directory -Path $catalogRoot

@@ -11,6 +11,20 @@ $ErrorActionPreference = "Stop"
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [Console]::OutputEncoding = $Utf8NoBom
 
+$sourceRoot = Split-Path -Parent $PSScriptRoot
+$helperPath = @(
+    (Join-Path $PSScriptRoot "runtime-platform.ps1"),
+    (Join-Path $sourceRoot "runtime-platform.ps1"),
+    (Join-Path $PSScriptRoot "bus/runtime-platform.ps1"),
+    (Join-Path $sourceRoot "bus/runtime-platform.ps1")
+) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+
+if (-not $helperPath) {
+    throw "Unable to locate runtime-platform.ps1 from $PSScriptRoot"
+}
+
+. $helperPath
+
 function Resolve-BusPath {
     param(
         [Parameter(Mandatory = $true)][string[]]$Candidates,
@@ -37,111 +51,63 @@ function Resolve-BusPath {
     return (Join-Path $roots[0] $Candidates[0])
 }
 
-function Resolve-ObsidianVaultRoot {
-    param([AllowEmptyString()][string]$FallbackPath = "")
-
-    foreach ($overridePath in @($env:AI_MEMORY_OBSIDIAN_VAULT, $env:OBSIDIAN_VAULT_ROOT)) {
-        if (-not [string]::IsNullOrWhiteSpace($overridePath) -and (Test-Path -LiteralPath $overridePath -PathType Container)) {
-            return (Get-Item -LiteralPath $overridePath).FullName
-        }
-    }
-
-    $obsidianConfigPath = Join-Path $env:APPDATA "obsidian\obsidian.json"
-    if (Test-Path -LiteralPath $obsidianConfigPath) {
-        try {
-            $config = Get-Content -Raw -LiteralPath $obsidianConfigPath -Encoding utf8 | ConvertFrom-Json
-            $records = New-Object System.Collections.Generic.List[object]
-            if ($config.vaults) {
-                foreach ($property in $config.vaults.PSObject.Properties) {
-                    $vault = $property.Value
-                    $path = [string]$vault.path
-                    if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Container)) {
-                        continue
-                    }
-
-                    $records.Add([pscustomobject]@{
-                        path = (Get-Item -LiteralPath $path).FullName
-                        open = [bool]$vault.open
-                        ts = if ($null -ne $vault.ts) { [int64]$vault.ts } else { 0 }
-                    }) | Out-Null
-                }
-            }
-
-            $openVault = @($records | Where-Object { $_.open } | Sort-Object ts -Descending | Select-Object -First 1)
-            if ($openVault.Count -gt 0) {
-                return $openVault[0].path
-            }
-
-            $recentVault = @($records | Sort-Object ts -Descending | Select-Object -First 1)
-            if ($recentVault.Count -gt 0) {
-                return $recentVault[0].path
-            }
-        } catch {
-        }
-    }
-
-    foreach ($candidate in @($FallbackPath, (Join-Path $env:USERPROFILE "Documents\Obsidian Vault"))) {
-        if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate -PathType Container)) {
-            return (Get-Item -LiteralPath $candidate).FullName
-        }
-    }
-
-    return $FallbackPath
-}
-
-$UserHome = $env:USERPROFILE
+$UserHome = Get-SharedUserHome
 $AiMemoryRoot = if (-not [string]::IsNullOrWhiteSpace($env:AI_MEMORY_ROOT)) { $env:AI_MEMORY_ROOT } else { $PSScriptRoot }
-$BusScript = Resolve-BusPath -Candidates @("memory-bus.ps1", "bus\memory-bus.ps1")
+$BusScript = Resolve-BusPath -Candidates @("memory-bus.ps1", "bus/memory-bus.ps1")
 $LockPath = Join-Path $AiMemoryRoot "watchdog.lock"
 $StatePath = Join-Path $AiMemoryRoot "watchdog-state.json"
 $SharedMcpRoot = Join-Path $AiMemoryRoot "shared-mcp"
 $SharedMcpStartScript = Join-Path $SharedMcpRoot "start-default-shared-mcp.ps1"
 $SharedMcpStatusScript = Join-Path $SharedMcpRoot "status-shared-mcp.ps1"
-$VaultRoot = Resolve-ObsidianVaultRoot -FallbackPath (Join-Path $UserHome "Documents\Obsidian Vault")
-$GlobalContextPath = Join-Path $VaultRoot "00-System\ai-memory\generated\GLOBAL-CONTEXT.md"
-$StructuredRoot = Join-Path $VaultRoot "00-System\ai-memory\structured"
-$BlackboardDaemonScript = Resolve-BusPath -Candidates @("obsidian-blackboard-daemon.js", "ops\obsidian-blackboard-daemon.js")
-$OpenClawSyncScript = Resolve-BusPath -Candidates @("sync-openclaw-to-obsidian.js", "ops\sync-openclaw-to-obsidian.js")
-$BuildHandoffPackScript = Resolve-BusPath -Candidates @("build-handoff-pack.js", "ops\build-handoff-pack.js")
-$BuildMemoryLayersScript = Resolve-BusPath -Candidates @("build-memory-layers.js", "ops\build-memory-layers.js")
-$MemoryDreamScript = Resolve-BusPath -Candidates @("run-memory-dream.ps1", "ops\run-memory-dream.ps1")
-$EmbeddingsScript = Resolve-BusPath -Candidates @("generate-embeddings.js", "bus\generate-embeddings.js")
-$EmbeddingsIndexPath = Join-Path $VaultRoot "00-System\ai-memory\embeddings\index.jsonl"
+$VaultRoot = Resolve-SharedObsidianVaultRoot -FallbackPath (Join-SharedPath @($UserHome, "Documents", "Obsidian Vault"))
+$GlobalContextPath = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "generated", "GLOBAL-CONTEXT.md")
+$StructuredRoot = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "structured")
+$BlackboardDaemonScript = Resolve-BusPath -Candidates @("obsidian-blackboard-daemon.js", "ops/obsidian-blackboard-daemon.js")
+$OpenClawSyncScript = Resolve-BusPath -Candidates @("sync-openclaw-to-obsidian.js", "ops/sync-openclaw-to-obsidian.js")
+$BuildHandoffPackScript = Resolve-BusPath -Candidates @("build-handoff-pack.js", "ops/build-handoff-pack.js")
+$BuildMemoryLayersScript = Resolve-BusPath -Candidates @("build-memory-layers.js", "ops/build-memory-layers.js")
+$MemoryDreamScript = Resolve-BusPath -Candidates @("run-memory-dream.ps1", "ops/run-memory-dream.ps1")
+$EmbeddingsScript = Resolve-BusPath -Candidates @("generate-embeddings.js", "bus/generate-embeddings.js")
+$EmbeddingsIndexPath = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "embeddings", "index.jsonl")
 $EmbeddingsCooldownSeconds = 180
 $OpenClawWatchSpecNames = @("openclaw-sessions", "openclaw-memory", "openclaw-user", "openclaw-memory-md", "openclaw-jobs", "openclaw-runs", "openclaw-blackboard-db")
-$OpenCodeDbPath = Join-Path $UserHome ".local\share\opencode\opencode.db"
-$CopilotGlobalStorage = Join-Path $env:APPDATA "Code\User\globalStorage\github.copilot-chat"
-$CopilotWorkspaceStorage = Join-Path $env:APPDATA "Code\User\workspaceStorage"
+$OpenCodeDbPath = Join-SharedPath @((Get-SharedOpenCodeDataRoot), "opencode.db")
+$VsCodeUserRoot = Get-SharedVsCodeUserRoot -ProductName "Code"
+$CopilotGlobalStorage = Join-SharedPath @($VsCodeUserRoot, "globalStorage", "github.copilot-chat")
+$CopilotWorkspaceStorage = Join-SharedPath @($VsCodeUserRoot, "workspaceStorage")
+$TraeUserRoot = Get-SharedTraeUserRoot -ProductName "Trae"
+$TraeCnUserRoot = Get-SharedTraeUserRoot -ProductName "Trae CN"
+$CopilotCliSessionRoot = Join-SharedPath @((Get-SharedCopilotHomeRoot), "session-state")
 $WatchSpecs = @(
-    [pscustomobject]@{ Name = "claude-user"; Tool = "claude-code"; Type = "file"; Path = (Join-Path $UserHome ".claude\memory\USER.md") },
-    [pscustomobject]@{ Name = "claude-memory"; Tool = "claude-code"; Type = "file"; Path = (Join-Path $UserHome ".claude\memory\MEMORY.md") },
-    [pscustomobject]@{ Name = "claude-today"; Tool = "claude-code"; Type = "file"; Path = (Join-Path $UserHome ".claude\memory\TODAY.md") },
-    [pscustomobject]@{ Name = "claude-session-memory"; Tool = "claude-code"; Type = "file"; Path = (Join-Path $UserHome ".claude\session-memory\session-memory.md") },
-    [pscustomobject]@{ Name = "claude-mem-db"; Tool = "claude-code"; Type = "file"; Path = (Join-Path $UserHome ".claude-mem\claude-mem.db") },
-    [pscustomobject]@{ Name = "agents-skills"; Tool = "system"; Type = "dir"; Path = (Join-Path $UserHome ".agents\skills"); Filter = "SKILL.md"; Recurse = $true; Top = 250 },
-    [pscustomobject]@{ Name = "codex-skills"; Tool = "system"; Type = "dir"; Path = (Join-Path $UserHome ".codex\skills"); Filter = "SKILL.md"; Recurse = $true; Top = 250 },
-    [pscustomobject]@{ Name = "claude-skills"; Tool = "system"; Type = "dir"; Path = (Join-Path $UserHome ".claude\skills"); Filter = "SKILL.md"; Recurse = $true; Top = 250 },
-    [pscustomobject]@{ Name = "codex-history"; Tool = "codex"; Type = "file"; Path = (Join-Path $UserHome ".codex\history.jsonl") },
-    [pscustomobject]@{ Name = "codex-session-index"; Tool = "codex"; Type = "file"; Path = (Join-Path $UserHome ".codex\session_index.jsonl") },
-    [pscustomobject]@{ Name = "codex-rollouts"; Tool = "codex"; Type = "dir"; Path = (Join-Path $UserHome ".codex\sessions"); Filter = "*.jsonl"; Recurse = $true; Top = 20 },
-    [pscustomobject]@{ Name = "trae-user-rules"; Tool = "trae"; Type = "file"; Path = (Join-Path $UserHome ".trae\user_rules.md") },
-    [pscustomobject]@{ Name = "trae-history"; Tool = "trae"; Type = "dir"; Path = (Join-Path $env:APPDATA "Trae\User\History"); Filter = "entries.json"; Recurse = $true; Top = 10 },
-    [pscustomobject]@{ Name = "trae-history-cn"; Tool = "trae"; Type = "dir"; Path = (Join-Path $env:APPDATA "Trae CN\User\History"); Filter = "entries.json"; Recurse = $true; Top = 10 },
-    [pscustomobject]@{ Name = "trae-mcp-user"; Tool = "trae"; Type = "file"; Path = (Join-Path $env:APPDATA "Trae\User\mcp.json") },
-    [pscustomobject]@{ Name = "trae-mcp-cn"; Tool = "trae"; Type = "file"; Path = (Join-Path $env:APPDATA "Trae CN\User\mcp.json") },
-    [pscustomobject]@{ Name = "openclaw-sessions"; Tool = "openclaw"; Type = "dir"; Path = (Join-Path $UserHome ".openclaw\agents\main\sessions"); Filter = "*.jsonl*"; Recurse = $false; Top = 10 },
-    [pscustomobject]@{ Name = "openclaw-memory"; Tool = "openclaw"; Type = "dir"; Path = (Join-Path $UserHome ".openclaw\workspace\memory"); Filter = "*.md"; Recurse = $false; Top = 6 },
-    [pscustomobject]@{ Name = "openclaw-user"; Tool = "openclaw"; Type = "file"; Path = (Join-Path $UserHome ".openclaw\workspace\USER.md") },
-    [pscustomobject]@{ Name = "openclaw-memory-md"; Tool = "openclaw"; Type = "file"; Path = (Join-Path $UserHome ".openclaw\workspace\MEMORY.md") },
-    [pscustomobject]@{ Name = "openclaw-jobs"; Tool = "openclaw"; Type = "file"; Path = (Join-Path $UserHome ".openclaw\cron\jobs.json") },
-    [pscustomobject]@{ Name = "openclaw-runs"; Tool = "openclaw"; Type = "file"; Path = (Join-Path $UserHome ".openclaw\subagents\runs.json") },
-    [pscustomobject]@{ Name = "openclaw-blackboard-db"; Tool = "openclaw"; Type = "file"; Path = (Join-Path $UserHome ".openclaw\workspace\ai-shrimp\blackboard\tasks.db") },
+    [pscustomobject]@{ Name = "claude-user"; Tool = "claude-code"; Type = "file"; Path = (Join-SharedPath @($UserHome, ".claude", "memory", "USER.md")) },
+    [pscustomobject]@{ Name = "claude-memory"; Tool = "claude-code"; Type = "file"; Path = (Join-SharedPath @($UserHome, ".claude", "memory", "MEMORY.md")) },
+    [pscustomobject]@{ Name = "claude-today"; Tool = "claude-code"; Type = "file"; Path = (Join-SharedPath @($UserHome, ".claude", "memory", "TODAY.md")) },
+    [pscustomobject]@{ Name = "claude-session-memory"; Tool = "claude-code"; Type = "file"; Path = (Join-SharedPath @($UserHome, ".claude", "session-memory", "session-memory.md")) },
+    [pscustomobject]@{ Name = "claude-mem-db"; Tool = "claude-code"; Type = "file"; Path = (Join-SharedPath @($UserHome, ".claude-mem", "claude-mem.db")) },
+    [pscustomobject]@{ Name = "agents-skills"; Tool = "system"; Type = "dir"; Path = (Join-SharedPath @($UserHome, ".agents", "skills")); Filter = "SKILL.md"; Recurse = $true; Top = 250 },
+    [pscustomobject]@{ Name = "codex-skills"; Tool = "system"; Type = "dir"; Path = (Join-SharedPath @($UserHome, ".codex", "skills")); Filter = "SKILL.md"; Recurse = $true; Top = 250 },
+    [pscustomobject]@{ Name = "claude-skills"; Tool = "system"; Type = "dir"; Path = (Join-SharedPath @($UserHome, ".claude", "skills")); Filter = "SKILL.md"; Recurse = $true; Top = 250 },
+    [pscustomobject]@{ Name = "codex-history"; Tool = "codex"; Type = "file"; Path = (Join-SharedPath @($UserHome, ".codex", "history.jsonl")) },
+    [pscustomobject]@{ Name = "codex-session-index"; Tool = "codex"; Type = "file"; Path = (Join-SharedPath @($UserHome, ".codex", "session_index.jsonl")) },
+    [pscustomobject]@{ Name = "codex-rollouts"; Tool = "codex"; Type = "dir"; Path = (Join-SharedPath @($UserHome, ".codex", "sessions")); Filter = "*.jsonl"; Recurse = $true; Top = 20 },
+    [pscustomobject]@{ Name = "trae-user-rules"; Tool = "trae"; Type = "file"; Path = (Join-SharedPath @($UserHome, ".trae", "user_rules.md")) },
+    [pscustomobject]@{ Name = "trae-history"; Tool = "trae"; Type = "dir"; Path = (Join-SharedPath @($TraeUserRoot, "History")); Filter = "entries.json"; Recurse = $true; Top = 10 },
+    [pscustomobject]@{ Name = "trae-history-cn"; Tool = "trae"; Type = "dir"; Path = (Join-SharedPath @($TraeCnUserRoot, "History")); Filter = "entries.json"; Recurse = $true; Top = 10 },
+    [pscustomobject]@{ Name = "trae-mcp-user"; Tool = "trae"; Type = "file"; Path = (Join-SharedPath @($TraeUserRoot, "mcp.json")) },
+    [pscustomobject]@{ Name = "trae-mcp-cn"; Tool = "trae"; Type = "file"; Path = (Join-SharedPath @($TraeCnUserRoot, "mcp.json")) },
+    [pscustomobject]@{ Name = "openclaw-sessions"; Tool = "openclaw"; Type = "dir"; Path = (Join-SharedPath @($UserHome, ".openclaw", "agents", "main", "sessions")); Filter = "*.jsonl*"; Recurse = $false; Top = 10 },
+    [pscustomobject]@{ Name = "openclaw-memory"; Tool = "openclaw"; Type = "dir"; Path = (Join-SharedPath @($UserHome, ".openclaw", "workspace", "memory")); Filter = "*.md"; Recurse = $false; Top = 6 },
+    [pscustomobject]@{ Name = "openclaw-user"; Tool = "openclaw"; Type = "file"; Path = (Join-SharedPath @($UserHome, ".openclaw", "workspace", "USER.md")) },
+    [pscustomobject]@{ Name = "openclaw-memory-md"; Tool = "openclaw"; Type = "file"; Path = (Join-SharedPath @($UserHome, ".openclaw", "workspace", "MEMORY.md")) },
+    [pscustomobject]@{ Name = "openclaw-jobs"; Tool = "openclaw"; Type = "file"; Path = (Join-SharedPath @($UserHome, ".openclaw", "cron", "jobs.json")) },
+    [pscustomobject]@{ Name = "openclaw-runs"; Tool = "openclaw"; Type = "file"; Path = (Join-SharedPath @($UserHome, ".openclaw", "subagents", "runs.json")) },
+    [pscustomobject]@{ Name = "openclaw-blackboard-db"; Tool = "openclaw"; Type = "file"; Path = (Join-SharedPath @($UserHome, ".openclaw", "workspace", "ai-shrimp", "blackboard", "tasks.db")) },
     [pscustomobject]@{ Name = "opencode-db"; Tool = "opencode"; Type = "file"; Path = $OpenCodeDbPath },
     [pscustomobject]@{ Name = "copilot-global-files"; Tool = "copilot"; Type = "dir"; Path = $CopilotGlobalStorage; Filter = "*"; Recurse = $true; Top = 8 },
     [pscustomobject]@{ Name = "copilot-workspaces"; Tool = "copilot"; Type = "dir"; Path = $CopilotWorkspaceStorage; Filter = "workspace.json"; Recurse = $true; Top = 20 },
     [pscustomobject]@{ Name = "copilot-chat-sessions"; Tool = "copilot"; Type = "dir"; Path = $CopilotWorkspaceStorage; Filter = "*.jsonl"; Recurse = $true; Top = 12 },
-    [pscustomobject]@{ Name = "copilot-cli-workspaces"; Tool = "copilot"; Type = "dir"; Path = (Join-Path $UserHome ".copilot\session-state"); Filter = "workspace.yaml"; Recurse = $true; Top = 12 },
-    [pscustomobject]@{ Name = "copilot-cli-events"; Tool = "copilot"; Type = "dir"; Path = (Join-Path $UserHome ".copilot\session-state"); Filter = "events.jsonl"; Recurse = $true; Top = 12 }
+    [pscustomobject]@{ Name = "copilot-cli-workspaces"; Tool = "copilot"; Type = "dir"; Path = $CopilotCliSessionRoot; Filter = "workspace.yaml"; Recurse = $true; Top = 12 },
+    [pscustomobject]@{ Name = "copilot-cli-events"; Tool = "copilot"; Type = "dir"; Path = $CopilotCliSessionRoot; Filter = "events.jsonl"; Recurse = $true; Top = 12 }
 )
 
 function Ensure-Directory {
@@ -149,6 +115,83 @@ function Ensure-Directory {
     if (-not (Test-Path -LiteralPath $Path)) {
         [void](New-Item -ItemType Directory -Path $Path -Force)
     }
+}
+
+function Get-NodeExecutable {
+    return (Resolve-SharedNodeExecutable)
+}
+
+function Start-NodeProcess {
+    param(
+        [Parameter(Mandatory = $true)][string]$ScriptPath,
+        [switch]$PassThru
+    )
+
+    $parameters = @{
+        FilePath = (Get-NodeExecutable)
+        ArgumentList = @($ScriptPath)
+        WorkingDirectory = (Split-Path -Parent $ScriptPath)
+    }
+
+    if ($PassThru) {
+        $parameters.PassThru = $true
+    }
+    if (Test-SharedIsWindows) {
+        $parameters.WindowStyle = "Hidden"
+    }
+
+    return Start-Process @parameters
+}
+
+function Get-NodeScriptProcesses {
+    param([Parameter(Mandatory = $true)][string]$ScriptPath)
+
+    if (-not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) {
+        return @()
+    }
+
+    $fullPath = (Get-Item -LiteralPath $ScriptPath).FullName.ToLowerInvariant()
+    $fileName = [System.IO.Path]::GetFileName($fullPath)
+
+    if (Test-SharedIsWindows) {
+        return @(
+            Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
+                Where-Object {
+                    $cmd = [string]$_.CommandLine
+                    if ([string]::IsNullOrWhiteSpace($cmd)) {
+                        return $false
+                    }
+                    $lc = $cmd.ToLowerInvariant()
+                    return $lc.Contains($fullPath) -or $lc.Contains($fileName)
+                } |
+                Sort-Object ProcessId
+        )
+    }
+
+    $psCommand = Get-Command ps -ErrorAction SilentlyContinue
+    if (-not $psCommand) {
+        return @()
+    }
+
+    $records = New-Object System.Collections.Generic.List[object]
+    foreach ($line in @(& $psCommand.Source "-ax" "-o" "pid=,command=" 2>$null)) {
+        $value = [string]$line
+        if ([string]::IsNullOrWhiteSpace($value) -or $value -notmatch '^\s*(\d+)\s+(.+)$') {
+            continue
+        }
+
+        $pid = [int]$Matches[1]
+        $cmd = [string]$Matches[2]
+        $lc = $cmd.ToLowerInvariant()
+        if ($lc.Contains($fullPath) -or $lc.Contains($fileName)) {
+            $records.Add([pscustomobject]@{
+                ProcessId = $pid
+                CommandLine = $cmd
+            }) | Out-Null
+        }
+    }
+
+    return @($records | Sort-Object ProcessId)
 }
 
 function Test-ProcessIdAlive {
@@ -278,7 +321,12 @@ function Invoke-BusSync {
     param([Parameter(Mandatory = $true)][string]$Reason)
 
     try {
-        $syncOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $BusScript -Action SyncAll -Tool system -Project "watchdog" -Quiet 2>&1
+        $syncOutput = Invoke-SharedPowerShellFile -ScriptPath $BusScript -ArgumentList @(
+            "-Action", "SyncAll",
+            "-Tool", "system",
+            "-Project", "watchdog",
+            "-Quiet"
+        ) 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "[watchdog] BusSync failed with exit code $LASTEXITCODE"
         }
@@ -292,9 +340,9 @@ function Invoke-BusSync {
     }
     $script:ClaudeMemCounter++
     if ($script:ClaudeMemCounter % 5 -eq 0) {
-        $syncScript = Resolve-BusPath -Candidates @("sync-claudemem-to-obsidian.ps1", "ops\sync-claudemem-to-obsidian.ps1")
+        $syncScript = Resolve-BusPath -Candidates @("sync-claudemem-to-obsidian.ps1", "ops/sync-claudemem-to-obsidian.ps1")
         if (Test-Path $syncScript) {
-            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $syncScript 2>$null | Out-Null
+            Invoke-SharedPowerShellFile -ScriptPath $syncScript 2>$null | Out-Null
         }
     }
 
@@ -310,11 +358,8 @@ function Get-BlackboardDaemonProcesses {
 
     $scriptPath = (Get-Item -LiteralPath $BlackboardDaemonScript).FullName.ToLowerInvariant()
     $scriptName = [System.IO.Path]::GetFileName($scriptPath)
-    $procs = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue | Where-Object {
+    $procs = @(Get-NodeScriptProcesses -ScriptPath $BlackboardDaemonScript | Where-Object {
         $cmd = [string]$_.CommandLine
-        if ([string]::IsNullOrWhiteSpace($cmd)) {
-            return $false
-        }
         $lc = $cmd.ToLowerInvariant()
         return $lc.Contains($scriptPath) -or ($lc.Contains($scriptName) -and $lc.Contains(".ai-memory"))
     })
@@ -332,16 +377,7 @@ function Test-NodeScriptRunning {
         return $false
     }
 
-    $full = (Get-Item -LiteralPath $ScriptPath).FullName.ToLowerInvariant()
-    $name = [System.IO.Path]::GetFileName($full)
-    $running = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue | Where-Object {
-        $cmd = [string]$_.CommandLine
-        if ([string]::IsNullOrWhiteSpace($cmd)) {
-            return $false
-        }
-        $lc = $cmd.ToLowerInvariant()
-        return $lc.Contains($full) -or $lc.Contains($name)
-    })
+    $running = @(Get-NodeScriptProcesses -ScriptPath $ScriptPath)
     return $running.Count -gt 0
 }
 
@@ -367,16 +403,7 @@ function Ensure-ObsidianBlackboardDaemon {
         return ""
     }
 
-    $nodePath = "node.exe"
-    try {
-        $nodeCmd = Get-Command node.exe -ErrorAction Stop
-        if ($nodeCmd.Source) {
-            $nodePath = $nodeCmd.Source
-        }
-    } catch {
-    }
-
-    Start-Process -FilePath $nodePath -ArgumentList @($BlackboardDaemonScript) -WorkingDirectory (Split-Path -Parent $BlackboardDaemonScript) -WindowStyle Hidden
+    Start-NodeProcess -ScriptPath $BlackboardDaemonScript | Out-Null
     Start-Sleep -Milliseconds 600
     $recheck = @(Get-BlackboardDaemonProcesses)
     if ($recheck.Count -gt 0) {
@@ -393,15 +420,7 @@ function Invoke-OpenClawStructuredSync {
     }
 
     try {
-        $nodePath = "node.exe"
-        try {
-            $nodeCmd = Get-Command node.exe -ErrorAction Stop
-            if ($nodeCmd.Source) {
-                $nodePath = $nodeCmd.Source
-            }
-        } catch {
-        }
-        $proc = Start-Process -FilePath $nodePath -ArgumentList @($OpenClawSyncScript) -WorkingDirectory (Split-Path -Parent $OpenClawSyncScript) -PassThru -WindowStyle Hidden
+        $proc = Start-NodeProcess -ScriptPath $OpenClawSyncScript -PassThru
         if (-not (Wait-Process -Id $proc.Id -Timeout 30 -ErrorAction SilentlyContinue)) {
             try {
                 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
@@ -429,16 +448,7 @@ function Invoke-BuildMemoryLayers {
     }
 
     try {
-        $nodePath = "node.exe"
-        try {
-            $nodeCmd = Get-Command node.exe -ErrorAction Stop
-            if ($nodeCmd.Source) {
-                $nodePath = $nodeCmd.Source
-            }
-        } catch {
-        }
-
-        $proc = Start-Process -FilePath $nodePath -ArgumentList @($BuildMemoryLayersScript) -WorkingDirectory (Split-Path -Parent $BuildMemoryLayersScript) -PassThru -WindowStyle Hidden
+        $proc = Start-NodeProcess -ScriptPath $BuildMemoryLayersScript -PassThru
         if (-not (Wait-Process -Id $proc.Id -Timeout 30 -ErrorAction SilentlyContinue)) {
             try {
                 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
@@ -468,16 +478,7 @@ function Invoke-BuildHandoffPack {
     }
 
     try {
-        $nodePath = "node.exe"
-        try {
-            $nodeCmd = Get-Command node.exe -ErrorAction Stop
-            if ($nodeCmd.Source) {
-                $nodePath = $nodeCmd.Source
-            }
-        } catch {
-        }
-
-        $proc = Start-Process -FilePath $nodePath -ArgumentList @($BuildHandoffPackScript) -WorkingDirectory (Split-Path -Parent $BuildHandoffPackScript) -PassThru -WindowStyle Hidden
+        $proc = Start-NodeProcess -ScriptPath $BuildHandoffPackScript -PassThru
         if (-not (Wait-Process -Id $proc.Id -Timeout 30 -ErrorAction SilentlyContinue)) {
             try {
                 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
@@ -510,12 +511,12 @@ function Invoke-MemoryDream {
     }
 
     try {
-        $args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $MemoryDreamScript)
+        $args = @()
         if ($Force) {
             $args += "-Force"
         }
 
-        $proc = Start-Process -FilePath "powershell.exe" -ArgumentList $args -WorkingDirectory (Split-Path -Parent $MemoryDreamScript) -PassThru -WindowStyle Hidden
+        $proc = Start-SharedPowerShellFile -ScriptPath $MemoryDreamScript -ArgumentList $args -WorkingDirectory (Split-Path -Parent $MemoryDreamScript)
         if (-not (Wait-Process -Id $proc.Id -Timeout 45 -ErrorAction SilentlyContinue)) {
             try {
                 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
@@ -575,15 +576,7 @@ function Invoke-EmbeddingsRefresh {
     }
 
     try {
-        $nodePath = "node.exe"
-        try {
-            $nodeCmd = Get-Command node.exe -ErrorAction Stop
-            if ($nodeCmd.Source) {
-                $nodePath = $nodeCmd.Source
-            }
-        } catch {
-        }
-        Start-Process -FilePath $nodePath -ArgumentList @($EmbeddingsScript) -WorkingDirectory (Split-Path -Parent $EmbeddingsScript) -WindowStyle Hidden
+        Start-NodeProcess -ScriptPath $EmbeddingsScript | Out-Null
         $script:LastEmbeddingsRunAt = Get-Date
         return $true
     } catch {
@@ -617,7 +610,7 @@ function Ensure-SharedMcp {
 
     if (Test-Path -LiteralPath $SharedMcpStatusScript -PathType Leaf) {
         try {
-            $status = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SharedMcpStatusScript | ConvertFrom-Json
+            $status = Invoke-SharedPowerShellFile -ScriptPath $SharedMcpStatusScript | ConvertFrom-Json
             foreach ($id in $expected) {
                 $record = @($status | Where-Object { $_.id -eq $id } | Select-Object -First 1)
                 if ($record.Count -eq 0 -or -not [bool]$record[0].running) {
@@ -635,7 +628,7 @@ function Ensure-SharedMcp {
         return ""
     }
 
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SharedMcpStartScript | Out-Null
+    Invoke-SharedPowerShellFile -ScriptPath $SharedMcpStartScript | Out-Null
     return "shared-mcp-restarted:" + ([string]::Join(",", $missing))
 }
 
