@@ -230,6 +230,150 @@ function Get-SharedPowerShellFileArguments {
     return @($prefix + @($ArgumentList))
 }
 
+function ConvertTo-ShellLiteral {
+    param([AllowEmptyString()][string]$Value)
+
+    if ($null -eq $Value) {
+        return '""'
+    }
+
+    if (Test-SharedIsWindows) {
+        return '"' + ([string]$Value -replace '"', '\"') + '"'
+    }
+
+    $singleQuote = [string][char]39
+    $doubleQuote = [string][char]34
+    $replacement = $singleQuote + $doubleQuote + $singleQuote + $doubleQuote + $singleQuote
+    $escapedValue = [string]$Value -replace [regex]::Escape($singleQuote), $replacement
+    return "'$escapedValue'"
+}
+
+function ConvertTo-SharedWindowsCommandArgument {
+    param([AllowEmptyString()][string]$Value)
+
+    if ($null -eq $Value) {
+        return '""'
+    }
+
+    $text = [string]$Value
+    if ($text.Length -eq 0) {
+        return '""'
+    }
+
+    if ($text -notmatch '[\s"]') {
+        return $text
+    }
+
+    $builder = New-Object System.Text.StringBuilder
+    [void]$builder.Append('"')
+    $backslashCount = 0
+    foreach ($character in $text.ToCharArray()) {
+        if ($character -eq '\') {
+            $backslashCount++
+            continue
+        }
+
+        if ($character -eq '"') {
+            [void]$builder.Append(([string]::new('\', ($backslashCount * 2) + 1)))
+            [void]$builder.Append('"')
+            $backslashCount = 0
+            continue
+        }
+
+        if ($backslashCount -gt 0) {
+            [void]$builder.Append(([string]::new('\', $backslashCount)))
+            $backslashCount = 0
+        }
+
+        [void]$builder.Append($character)
+    }
+
+    if ($backslashCount -gt 0) {
+        [void]$builder.Append(([string]::new('\', $backslashCount * 2)))
+    }
+
+    [void]$builder.Append('"')
+    return $builder.ToString()
+}
+
+function ConvertTo-SharedPowerShellLiteral {
+    param([AllowEmptyString()][string]$Value)
+
+    if ($null -eq $Value) {
+        return "''"
+    }
+
+    return "'" + ([string]$Value -replace "'", "''") + "'"
+}
+
+function Join-SharedWindowsProcessArguments {
+    param([string[]]$Arguments = @())
+
+    return [string]::Join(" ", @($Arguments | ForEach-Object { ConvertTo-SharedWindowsCommandArgument -Value ([string]$_) }))
+}
+
+function ConvertTo-SharedPowerShellEncodedCommand {
+    param([Parameter(Mandatory = $true)][string]$Command)
+
+    return [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($Command))
+}
+
+function Build-SharedPowerShellInvocation {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$ArgumentList = @()
+    )
+
+    $parts = New-Object System.Collections.Generic.List[string]
+    $parts.Add("&") | Out-Null
+    $parts.Add((ConvertTo-SharedPowerShellLiteral -Value $FilePath)) | Out-Null
+    foreach ($arg in @($ArgumentList)) {
+        $parts.Add((ConvertTo-SharedPowerShellLiteral -Value ([string]$arg))) | Out-Null
+    }
+
+    return [string]::Join(" ", @($parts))
+}
+
+function Start-SharedWindowsHiddenPowerShell {
+    param(
+        [Parameter(Mandatory = $true)][string]$Command,
+        [string]$WorkingDirectory = ""
+    )
+
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = Resolve-SharedPowerShellExecutable
+    $startInfo.Arguments = Join-SharedWindowsProcessArguments -Arguments @(
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-WindowStyle", "Hidden",
+        "-EncodedCommand", (ConvertTo-SharedPowerShellEncodedCommand -Command $Command)
+    )
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+        $startInfo.WorkingDirectory = $WorkingDirectory
+    }
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $startInfo
+    [void]$process.Start()
+    return $process
+}
+
+function ConvertTo-SharedPosixShellLiteral {
+    param([AllowEmptyString()][string]$Value)
+
+    if ($null -eq $Value) {
+        return '""'
+    }
+
+    $singleQuote = [string][char]39
+    $doubleQuote = [string][char]34
+    $replacement = $singleQuote + $doubleQuote + $singleQuote + $doubleQuote + $singleQuote
+    $escapedValue = [string]$Value -replace [regex]::Escape($singleQuote), $replacement
+    return "'$escapedValue'"
+}
+
 function Invoke-SharedPowerShellFile {
     param(
         [Parameter(Mandatory = $true)][string]$ScriptPath,
@@ -239,6 +383,88 @@ function Invoke-SharedPowerShellFile {
     $executable = Resolve-SharedPowerShellExecutable
     $args = Get-SharedPowerShellFileArguments -ScriptPath $ScriptPath -ArgumentList $ArgumentList
     & $executable @args
+}
+
+function ConvertTo-SharedProcessCommand {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$ArgumentList = @()
+    )
+
+    $parts = New-Object System.Collections.Generic.List[string]
+    if (Test-SharedIsWindows) {
+        $parts.Add((ConvertTo-SharedWindowsCommandArgument -Value $FilePath)) | Out-Null
+        foreach ($arg in @($ArgumentList)) {
+            $parts.Add((ConvertTo-SharedWindowsCommandArgument -Value ([string]$arg))) | Out-Null
+        }
+    } else {
+        $parts.Add((ConvertTo-SharedPosixShellLiteral -Value $FilePath)) | Out-Null
+        foreach ($arg in @($ArgumentList)) {
+            $parts.Add((ConvertTo-SharedPosixShellLiteral -Value ([string]$arg))) | Out-Null
+        }
+    }
+
+    return [string]::Join(" ", @($parts))
+}
+
+function Start-SharedBackgroundProcess {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$ArgumentList = @(),
+        [hashtable]$Environment = @{},
+        [string]$WorkingDirectory = "",
+        [string]$StdoutPath = "",
+        [string]$StderrPath = ""
+    )
+
+    if (Test-SharedIsWindows) {
+        $effectiveWorkingDirectory = if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+            $WorkingDirectory
+        } else {
+            try {
+                (Get-Location).ProviderPath
+            } catch {
+                ""
+            }
+        }
+
+        $lines = New-Object System.Collections.Generic.List[string]
+        $lines.Add('$ErrorActionPreference = ''Stop''') | Out-Null
+        if (-not [string]::IsNullOrWhiteSpace($effectiveWorkingDirectory)) {
+            $lines.Add(("Set-Location -LiteralPath {0}" -f (ConvertTo-SharedPowerShellLiteral -Value $effectiveWorkingDirectory))) | Out-Null
+        }
+        foreach ($entry in @($Environment.GetEnumerator())) {
+            $lines.Add(('$env:{0} = {1}' -f [string]$entry.Key, (ConvertTo-SharedPowerShellLiteral -Value ([string]$entry.Value)))) | Out-Null
+        }
+
+        $invocation = Build-SharedPowerShellInvocation -FilePath $FilePath -ArgumentList $ArgumentList
+        if (-not [string]::IsNullOrWhiteSpace($StdoutPath)) {
+            $invocation += " 1> " + (ConvertTo-SharedPowerShellLiteral -Value $StdoutPath)
+        }
+        if (-not [string]::IsNullOrWhiteSpace($StderrPath)) {
+            $invocation += " 2> " + (ConvertTo-SharedPowerShellLiteral -Value $StderrPath)
+        }
+        $lines.Add($invocation) | Out-Null
+
+        return Start-SharedWindowsHiddenPowerShell -Command ([string]::Join("`n", @($lines))) -WorkingDirectory $effectiveWorkingDirectory
+    }
+
+    $parameters = @{
+        FilePath = $FilePath
+        ArgumentList = $ArgumentList
+        PassThru = $true
+    }
+    if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+        $parameters.WorkingDirectory = $WorkingDirectory
+    }
+    if (-not [string]::IsNullOrWhiteSpace($StdoutPath)) {
+        $parameters.RedirectStandardOutput = $StdoutPath
+    }
+    if (-not [string]::IsNullOrWhiteSpace($StderrPath)) {
+        $parameters.RedirectStandardError = $StderrPath
+    }
+
+    return Start-Process @parameters
 }
 
 function Invoke-SharedShellCommand {
@@ -280,25 +506,13 @@ function Start-SharedPowerShellFile {
     param(
         [Parameter(Mandatory = $true)][string]$ScriptPath,
         [string[]]$ArgumentList = @(),
+        [hashtable]$Environment = @{},
         [string]$WorkingDirectory = ""
     )
 
     $executable = Resolve-SharedPowerShellExecutable
     $args = Get-SharedPowerShellFileArguments -ScriptPath $ScriptPath -ArgumentList $ArgumentList
-    $parameters = @{
-        FilePath = $executable
-        ArgumentList = $args
-        PassThru = $true
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
-        $parameters.WorkingDirectory = $WorkingDirectory
-    }
-    if (Test-SharedIsWindows) {
-        $parameters.WindowStyle = "Hidden"
-    }
-
-    return Start-Process @parameters
+    return Start-SharedBackgroundProcess -FilePath $executable -ArgumentList $args -Environment $Environment -WorkingDirectory $WorkingDirectory
 }
 
 function Get-SharedObsidianConfigCandidates {
@@ -532,33 +746,27 @@ function Get-SharedMutexName {
 function Start-SharedShellProcess {
     param(
         [Parameter(Mandatory = $true)][string]$Command,
+        [hashtable]$Environment = @{},
+        [string]$WorkingDirectory = "",
         [string]$StdoutPath = "",
         [string]$StderrPath = ""
     )
 
-    $parameters = @{
-        PassThru = $true
-    }
-
     if (Test-SharedIsWindows) {
-        $parameters.FilePath = "cmd.exe"
-        $parameters.ArgumentList = @("/d", "/s", "/c", $Command)
-        $parameters.WindowStyle = "Hidden"
-    } else {
-        $shell = Get-Command bash -ErrorAction SilentlyContinue
-        $shellPath = if ($shell) { $shell.Source } else { "/bin/bash" }
-        $parameters.FilePath = $shellPath
-        $parameters.ArgumentList = @("-lc", $Command)
+        return Start-SharedBackgroundProcess -FilePath "cmd.exe" -ArgumentList @("/d", "/s", "/c", $Command) -Environment $Environment -WorkingDirectory $WorkingDirectory -StdoutPath $StdoutPath -StderrPath $StderrPath
     }
 
-    if (-not [string]::IsNullOrWhiteSpace($StdoutPath)) {
-        $parameters.RedirectStandardOutput = $StdoutPath
+    $shell = Get-Command bash -ErrorAction SilentlyContinue
+    $shellPath = if ($shell) { $shell.Source } else { "/bin/bash" }
+    $effectiveCommand = $Command
+    if ($Environment.Count -gt 0) {
+        $exports = New-Object System.Collections.Generic.List[string]
+        foreach ($entry in @($Environment.GetEnumerator())) {
+            $exports.Add(('export {0}={1}' -f [string]$entry.Key, (ConvertTo-SharedPosixShellLiteral -Value ([string]$entry.Value)))) | Out-Null
+        }
+        $effectiveCommand = ([string]::Join("; ", @($exports))) + "; " + $effectiveCommand
     }
-    if (-not [string]::IsNullOrWhiteSpace($StderrPath)) {
-        $parameters.RedirectStandardError = $StderrPath
-    }
-
-    return Start-Process @parameters
+    return Start-SharedBackgroundProcess -FilePath $shellPath -ArgumentList @("-lc", $effectiveCommand) -WorkingDirectory $WorkingDirectory -StdoutPath $StdoutPath -StderrPath $StderrPath
 }
 
 function New-SharedDirectoryLink {
