@@ -6,12 +6,30 @@ This repository packages the architecture, runtime scripts, shared MCP services,
 
 The source tree is grouped by responsibility (`bus/`, `ops/`, `retrieval/`, `shared-mcp/`), while the installed runtime under `~/.ai-memory` stays intentionally flat for compatibility with existing startup hooks and client configs. That source-to-install contract is defined in `scripts/install-layout.psd1`.
 
+## Start Here
+- Quick start:
+  see `## Minimal Quick Start` below for the install, verify, and pressure-test path
+- Integration shape:
+  read [`docs/INTEGRATION-MODES.md`](docs/INTEGRATION-MODES.md) before deciding between shared MCP, skill, or plugin
+- Template kits:
+  copy from [`templates/agents/README.md`](templates/agents/README.md) when onboarding a new host
+- Validation:
+  use [`docs/VALIDATION.md`](docs/VALIDATION.md) as the hard acceptance checklist
+- Release notes:
+  latest operator-facing summary is [`docs/releases/RELEASE-NOTES-2026-04-03.md`](docs/releases/RELEASE-NOTES-2026-04-03.md)
+
 ## Project Status
 - Ready for real local use on Windows
 - Portable install/startup entrypoints now ship for macOS and Linux
 - Local-first by default, with optional remote embeddings
 - Best suited for one machine hosting many agents and tools
 - Public template-quality bundle, but still opinionated and evolving
+
+## Latest Release Notes
+- Windows background launch hardening now keeps shared MCP and watchdog flows out of foreground console windows.
+- Shared proxy startup no longer passes resolved runtime environment payloads on the command line.
+- Shared MCP `start/status/stop` now recover cleanly from abandoned mutexes after interrupted runs.
+- Portable `skill` and `thin plugin` starter templates are now included under [`templates/agents/`](templates/agents/).
 
 ## What This Is
 - A reusable local memory bus template for multi-agent setups
@@ -213,6 +231,8 @@ The generated onboarding packs under `generated/onboarding/<agent>/` are designe
 - a portable skill template
 - a thin plugin-adapter guide
 - platform guidance for Windows, macOS, and Linux
+
+If you want a repo-local starter instead of generated output, copy the reusable template skeletons from [`templates/agents/README.md`](templates/agents/README.md).
 
 ## Verification Story
 - Shared MCP services for `context7`, `fetch`, `time`, `sequential-thinking`, `obsidian`, `MiniMax`, and `memory` were validated on `9331-9336` and `9338`
@@ -416,6 +436,7 @@ Use the included probe and benchmark scripts before doing any full reindex.
 - [`docs/NEW-AGENT-INTEGRATION.md`](docs/NEW-AGENT-INTEGRATION.md)
 - [`docs/INTEGRATION-MODES.md`](docs/INTEGRATION-MODES.md)
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md)
+- [`docs/releases/RELEASE-NOTES-2026-04-03.md`](docs/releases/RELEASE-NOTES-2026-04-03.md)
 - [`docs/RELEASING.md`](docs/RELEASING.md)
 - [`docs/ROADMAP.md`](docs/ROADMAP.md)
 - [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)

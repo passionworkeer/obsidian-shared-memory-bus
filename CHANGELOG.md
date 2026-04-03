@@ -3,6 +3,11 @@
 All notable changes to this project should be documented here.
 
 ## Unreleased
+- **ADR-002 (Unified Memory Architecture v2)**: Complete redesign of memory architecture based on cross-system benchmarking (OpenClaw + Claude Code + claude-mem). Key additions: SQLite chunk schema with FTS5+BM25 Phase 1 content index, chunk-native session logs with hash tracking, typed promotion contract now enforced in frontmatter schema (not just documented), embedding cache table, MMR + temporal decay result reranking, Phase 3 consolidation lock, session-end compaction trigger. Supersedes ADR-001.
+- Hardened Windows background process launch so shared MCP and watchdog flows avoid foreground console windows more reliably
+- Removed shared proxy environment payloads from command-line arguments and moved them back into process environment propagation
+- Taught shared MCP `start/status/stop` scripts to recover from abandoned mutexes after interrupted runs
+- Added reusable `templates/agents/portable-skill` and `templates/agents/thin-plugin` starter kits
 - Expanded generated onboarding packs to bundle shared HTTP MCP snippets, a portable skill template, and a thin plugin-adapter guide
 - Documented the recommended cross-platform `MCP + skill + thin plugin` integration bundle more explicitly
 - Sanitized tracked public overlay files to use portable placeholders instead of workstation-specific absolute paths

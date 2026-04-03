@@ -492,6 +492,7 @@ async function ensureSearchWorker() {
   searchWorkerStartupPromise = new Promise((resolve, reject) => {
     const child = spawn(PYTHON.command, withPythonArgs(PYTHON, [SEARCH_SCRIPT, "--server"]), {
       stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
       env: {
         ...PYTHON_SPAWN_ENV,
         AI_MEMORY_OBSIDIAN_VAULT: VAULT_ROOT,
@@ -605,6 +606,7 @@ function spawnProcess(executable, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(executable, args, {
       stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
       ...options,
     });
 
