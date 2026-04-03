@@ -236,6 +236,7 @@ function spawnChildProcess() {
   child = spawn(stdioCommand, {
     shell: true,
     stdio: ['pipe', 'pipe', 'pipe'],
+    windowsHide: true,
     env: {
       ...process.env,
       ...childExtraEnv,
