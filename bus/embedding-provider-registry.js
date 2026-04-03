@@ -83,12 +83,18 @@ json.dump([vector.tolist() for vector in vectors], sys.stdout)
     return new Promise((resolve, reject) => {
       const child = spawn(pythonRuntime.command, withPythonArgs(pythonRuntime, ["-c", script]), {
         stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
         env: {
           ...process.env,
           TF_CPP_MIN_LOG_LEVEL: "3",
           TF_ENABLE_ONEDNN_OPTS: "0",
           PYTHONUTF8: "1",
           PYTHONIOENCODING: "utf-8",
+          // HuggingFace proxy — ensures sentence-transformers can download models
+          HTTP_PROXY: process.env.HTTP_PROXY || "http://127.0.0.1:7892",
+          HTTPS_PROXY: process.env.HTTPS_PROXY || "http://127.0.0.1:7892",
+          http_proxy: process.env.http_proxy || "http://127.0.0.1:7892",
+          https_proxy: process.env.https_proxy || "http://127.0.0.1:7892",
         },
       });
 
