@@ -143,13 +143,21 @@ $manifest = Get-Content -Raw -LiteralPath $manifestPath -Encoding utf8 | Convert
 $state = @{}
 if (Test-Path -LiteralPath $statePath) {
     $mutex = New-Object System.Threading.Mutex($false, $stateMutexName)
-    [void]$mutex.WaitOne()
+    $mutexAcquired = $false
+    try {
+        [void]$mutex.WaitOne()
+        $mutexAcquired = $true
+    } catch [System.Threading.AbandonedMutexException] {
+        $mutexAcquired = $true
+    }
     try {
         $state = Read-State
     } finally {
-        try {
-            [void]$mutex.ReleaseMutex()
-        } catch {
+        if ($mutexAcquired) {
+            try {
+                [void]$mutex.ReleaseMutex()
+            } catch {
+            }
         }
         $mutex.Dispose()
     }

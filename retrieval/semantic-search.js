@@ -40,6 +40,7 @@ function main() {
   const stdio = parsed.serverMode ? "inherit" : ["ignore", "pipe", "pipe"];
   const child = spawn(PYTHON.command, withPythonArgs(PYTHON, args), {
     stdio,
+    windowsHide: true,
     env: {
       ...process.env,
       PYTHONUTF8: "1",
