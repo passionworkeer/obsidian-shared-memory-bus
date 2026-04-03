@@ -30,3 +30,7 @@ reports/
 
 # Backup fragments
 *.bak.*
+.tmp-hidden-start-smoke.json
+.tmp-old-start-smoke.json
+.tmp-visible-console-node-old.json
+.tmp-visible-console-old.json

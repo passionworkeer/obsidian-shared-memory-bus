@@ -85,7 +85,13 @@ function Write-State {
 
 $manifest = Get-Content -Raw -LiteralPath $manifestPath -Encoding utf8 | ConvertFrom-Json
 $mutex = New-Object System.Threading.Mutex($false, $stateMutexName)
-[void]$mutex.WaitOne()
+$mutexAcquired = $false
+try {
+    [void]$mutex.WaitOne()
+    $mutexAcquired = $true
+} catch [System.Threading.AbandonedMutexException] {
+    $mutexAcquired = $true
+}
 
 try {
     $state = Read-State
@@ -171,9 +177,11 @@ try {
     Write-State -State $remaining
     $results | ConvertTo-Json -Depth 5
 } finally {
-    try {
-        [void]$mutex.ReleaseMutex()
-    } catch {
+    if ($mutexAcquired) {
+        try {
+            [void]$mutex.ReleaseMutex()
+        } catch {
+        }
     }
     $mutex.Dispose()
 }

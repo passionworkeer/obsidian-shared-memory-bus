@@ -149,4 +149,4 @@ ADR-002 closes key performance gaps identified in ADR-001:
 | Concurrent consolidation | race condition possible | Phase 3 lock serializes writes |
 | Retrieval quality | keyword fallback | hybrid BM25 + dense + MMR |
 
-See [`ADR-002-unified-memory-architecture-v2.md`](ADR-002-unified-memory-architecture-v2.md) for the full ADR benchmarking evidence.
+See [`ADR-002-unified-memory-architecture-v2.md`](../adr/ADR-002-unified-memory-architecture-v2.md) for the full ADR benchmarking evidence.
