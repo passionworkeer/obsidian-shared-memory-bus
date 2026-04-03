@@ -92,6 +92,7 @@ function runNodeScript(scriptPath) {
   const result = spawnSync(process.execPath, [scriptPath], {
     cwd: path.dirname(scriptPath),
     encoding: "utf8",
+    windowsHide: true,
   });
 
   return {
@@ -117,6 +118,7 @@ function runPowerShellScript(scriptPath, args = []) {
   const result = spawnSync(executable, commandArgs, {
     cwd: path.dirname(scriptPath),
     encoding: "utf8",
+    windowsHide: true,
   });
 
   return {

@@ -177,20 +177,16 @@ function Start-NodeProcess {
         [switch]$PassThru
     )
 
-    $parameters = @{
-        FilePath = (Get-NodeExecutable)
-        ArgumentList = @($ScriptPath)
-        WorkingDirectory = (Split-Path -Parent $ScriptPath)
-    }
+    $process = Start-SharedBackgroundProcess `
+        -FilePath (Get-NodeExecutable) `
+        -ArgumentList @($ScriptPath) `
+        -WorkingDirectory (Split-Path -Parent $ScriptPath)
 
     if ($PassThru) {
-        $parameters.PassThru = $true
-    }
-    if (Test-SharedIsWindows) {
-        $parameters.WindowStyle = "Hidden"
+        return $process
     }
 
-    return Start-Process @parameters
+    return $null
 }
 
 function Get-NodeScriptProcesses {
@@ -327,21 +323,13 @@ function Invoke-PowerShellFileWithTimeout {
     $stderrPath = Join-Path $AiMemoryRoot ("tmp-" + [guid]::NewGuid().ToString("N") + ".stderr.log")
 
     try {
-        $parameters = @{
-            FilePath = (Resolve-SharedPowerShellExecutable)
-            ArgumentList = (Get-SharedPowerShellFileArguments -ScriptPath $ScriptPath -ArgumentList $ArgumentList)
-            PassThru = $true
-            RedirectStandardOutput = $stdoutPath
-            RedirectStandardError = $stderrPath
-        }
-        if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
-            $parameters.WorkingDirectory = $WorkingDirectory
-        }
-        if (Test-SharedIsWindows) {
-            $parameters.WindowStyle = "Hidden"
-        }
-
-        $proc = Start-Process @parameters
+        $proc = Start-SharedShellProcess `
+            -Command (ConvertTo-SharedProcessCommand `
+                -FilePath (Resolve-SharedPowerShellExecutable) `
+                -ArgumentList (Get-SharedPowerShellFileArguments -ScriptPath $ScriptPath -ArgumentList $ArgumentList)) `
+            -WorkingDirectory $WorkingDirectory `
+            -StdoutPath $stdoutPath `
+            -StderrPath $stderrPath
         $resolvedHeartbeatReason = if ([string]::IsNullOrWhiteSpace($HeartbeatReason)) {
             "watchdog-subprocess:" + [System.IO.Path]::GetFileName($ScriptPath)
         } else {

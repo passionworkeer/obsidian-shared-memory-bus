@@ -404,42 +404,52 @@ function Resolve-StdioEnvironment {
 function Start-ManagedHttpProcess {
     param(
         [Parameter(Mandatory = $true)][string]$Command,
+        [hashtable]$Environment = @{},
         [Parameter(Mandatory = $true)][string]$StdoutPath,
         [Parameter(Mandatory = $true)][string]$StderrPath
     )
 
-    return Start-SharedShellProcess -Command $Command -StdoutPath $StdoutPath -StderrPath $StderrPath
+    return Start-SharedShellProcess -Command $Command -Environment $Environment -WorkingDirectory $root -StdoutPath $StdoutPath -StderrPath $StderrPath
 }
 
 function Start-ProxyProcess {
     param(
         [Parameter(Mandatory = $true)][string]$NodeExecutable,
         [Parameter(Mandatory = $true)][string[]]$ArgumentList,
+        [hashtable]$Environment = @{},
         [Parameter(Mandatory = $true)][string]$StdoutPath,
         [Parameter(Mandatory = $true)][string]$StderrPath
     )
 
-    $parameters = @{
-        FilePath = $NodeExecutable
-        ArgumentList = $ArgumentList
-        RedirectStandardOutput = $StdoutPath
-        RedirectStandardError = $StderrPath
-        PassThru = $true
-        WorkingDirectory = $root
-    }
-
     if (Test-SharedIsWindows) {
-        $parameters.WindowStyle = "Hidden"
+        return Start-SharedBackgroundProcess `
+            -FilePath $NodeExecutable `
+            -ArgumentList $ArgumentList `
+            -Environment $Environment `
+            -WorkingDirectory $root `
+            -StdoutPath $StdoutPath `
+            -StderrPath $StderrPath
     }
 
-    return Start-Process @parameters
+    return Start-SharedShellProcess `
+        -Command (ConvertTo-SharedProcessCommand -FilePath $NodeExecutable -ArgumentList $ArgumentList) `
+        -Environment $Environment `
+        -WorkingDirectory $root `
+        -StdoutPath $StdoutPath `
+        -StderrPath $StderrPath
 }
 
 Ensure-Directory -Path $logRoot
 $manifest = Get-Content -Raw -LiteralPath $manifestPath -Encoding utf8 | ConvertFrom-Json
 $nodeExecutable = Resolve-SharedNodeExecutable
 $mutex = New-Object System.Threading.Mutex($false, $stateMutexName)
-[void]$mutex.WaitOne()
+$mutexAcquired = $false
+try {
+    [void]$mutex.WaitOne()
+    $mutexAcquired = $true
+} catch [System.Threading.AbandonedMutexException] {
+    $mutexAcquired = $true
+}
 
 try {
     $state = Read-State
@@ -546,7 +556,6 @@ try {
             }
 
             $encodedCommand = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($resolvedCommand))
-            $encodedEnv = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes((($resolvedEnv | ConvertTo-Json -Compress).Trim())))
             $argumentList = @(
                 $proxyScriptPath,
                 "--server-id", [string]$server.id,
@@ -554,11 +563,10 @@ try {
                 "--path", [string]$manifest.defaults.path,
                 "--health-path", [string]$manifest.defaults.healthPath,
                 "--protocol-version", "2024-11-05",
-                "--stdio-command-b64", $encodedCommand,
-                "--env-json-b64", $encodedEnv
+                "--stdio-command-b64", $encodedCommand
             )
 
-            $process = Start-ProxyProcess -NodeExecutable $nodeExecutable -ArgumentList $argumentList -StdoutPath $stdoutPath -StderrPath $stderrPath
+            $process = Start-ProxyProcess -NodeExecutable $nodeExecutable -ArgumentList $argumentList -Environment $resolvedEnv -StdoutPath $stdoutPath -StderrPath $stderrPath
         }
 
         $healthy = $false
@@ -600,9 +608,11 @@ try {
     Write-State -State $state
     $results | ConvertTo-Json -Depth 6
 } finally {
-    try {
-        [void]$mutex.ReleaseMutex()
-    } catch {
+    if ($mutexAcquired) {
+        try {
+            [void]$mutex.ReleaseMutex()
+        } catch {
+        }
     }
     $mutex.Dispose()
 }
