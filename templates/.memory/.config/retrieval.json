@@ -1,0 +1,20 @@
+{
+  "_schema": "retrieval-config-v1",
+  "vectorWeight": 0.7,
+  "textWeight": 0.3,
+  "candidateMultiplier": 4,
+  "maxResults": 6,
+  "minScore": 0.35,
+  "mmr": {
+    "enabled": true,
+    "lambda": 0.7
+  },
+  "temporalDecay": {
+    "enabled": true,
+    "halfLifeDays": 30
+  },
+  "embeddingProvider": "transformers",
+  "embeddingModel": "all-MiniLM-L6-v2",
+  "chunkSizeTokens": 800,
+  "chunkOverlapTokens": 80
+}
