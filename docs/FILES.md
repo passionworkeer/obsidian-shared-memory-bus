@@ -66,9 +66,28 @@
 - `templates/agents/thin-plugin/.codex-plugin/plugin.json`
 - `templates/config/runtime.json`
 
-## Architecture Decision Records
-- `docs/ADR-001-shared-memory-architecture.md` — Superseded by ADR-002
-- `docs/ADR-002-unified-memory-architecture-v2.md` — Unified architecture (OpenClaw + Claude Code + claude-mem benchmark)
+## Architecture Decision Records (`docs/adr/`)
+- `docs/adr/README.md` — ADR index
+- `docs/adr/ADR-001-shared-memory-architecture.md` — Superseded by ADR-002
+- `docs/adr/ADR-002-unified-memory-architecture-v2.md` — Unified architecture (OpenClaw + Claude Code + claude-mem benchmark)
+
+## Research & Analysis (`docs/research/`)
+- `docs/research/README.md` — Research index
+- `docs/research/openclaw-memory-architecture.md` — OpenClaw architecture analysis (Chinese)
+
+## Release Notes (`docs/releases/`)
+- `docs/releases/README.md` — Release notes index
+- `docs/releases/RELEASE-NOTES-2026-04-03.md` — 2026-04-03 operator release summary
+
+## Technical Reference (`docs/reference/`)
+- `docs/reference/README.md` — Reference index
+- `docs/reference/QUICKSTART.md` — 5-step 30-minute getting-started guide
+- `docs/reference/DATA-FLOW.md` — End-to-end data flow, write/read paths, cross-language call chains
+- `docs/reference/CROSS-LANGUAGE-MAP.md` — PowerShell/Node.js/Python ownership matrix and calling conventions
+- `docs/reference/PERFORMANCE.md` — Retrieval latency, scale limits, BM25 vs dense vs hybrid benchmarks
+- `docs/reference/OBSERVABILITY.md` — Log format, key metrics, alert thresholds, error taxonomy
+- `docs/reference/MCP-TOOLS.md` — All MCP tool definitions, input/output schemas
+- `docs/reference/MCP-TOOLS.schema.json` — Machine-readable JSON Schema (Draft-07) for MCP tools
 
 ## Repo Metadata
 - `AGENTS.md`

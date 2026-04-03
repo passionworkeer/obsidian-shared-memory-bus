@@ -36,5 +36,5 @@ The following documents live in the parent `docs/` folder:
 - [`ARCHITECTURE.md`](../ARCHITECTURE.md) — System architecture overview
 - [`OPERATIONS.md`](../OPERATIONS.md) — Day-to-day management commands
 - [`TROUBLESHOOTING.md`](../TROUBLESHOOTING.md) — Common issues and fixes
-- [`ADR-002-unified-memory-architecture-v2.md`](../ADR-002-unified-memory-architecture-v2.md) — ADR-002 design decision record
+- [`ADR-002-unified-memory-architecture-v2.md`](../adr/ADR-002-unified-memory-architecture-v2.md) — ADR-002 design decision record
 - [`MEMORY-ARCHITECTURE-CRITIQUE.md`](../MEMORY-ARCHITECTURE-CRITIQUE.md) — Known limitations and design debt
