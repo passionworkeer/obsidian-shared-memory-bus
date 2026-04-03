@@ -301,6 +301,53 @@ function Start-BackgroundRuntime {
     Start-SharedPowerShellFile -ScriptPath $ScriptPath -ArgumentList $ArgumentList -WorkingDirectory $workingDirectory | Out-Null
 }
 
+function Stop-ManagedRuntimeBeforeInstall {
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetRoot,
+        [Parameter(Mandatory = $true)][string]$ManifestPath
+    )
+
+    if (-not (Test-Path -LiteralPath $TargetRoot -PathType Container)) {
+        return
+    }
+
+    $watchdogStatePath = Join-Path $TargetRoot "watchdog-state.json"
+    if (Test-Path -LiteralPath $watchdogStatePath -PathType Leaf) {
+        try {
+            $watchdogState = Get-Content -Raw -LiteralPath $watchdogStatePath -Encoding utf8 | ConvertFrom-Json
+            $watchdogPid = if ($null -ne $watchdogState.pid) { [int]$watchdogState.pid } else { 0 }
+            if ($watchdogPid -gt 0) {
+                Stop-SharedProcessTree -ProcessId $watchdogPid
+            }
+        } catch {
+            Write-Warning ("Unable to stop previous watchdog from {0}: {1}" -f $watchdogStatePath, $_.Exception.Message)
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
+        return
+    }
+
+    try {
+        $manifest = Get-Content -Raw -LiteralPath $ManifestPath -Encoding utf8 | ConvertFrom-Json
+        foreach ($server in @($manifest.servers)) {
+            if (-not ($server.PSObject.Properties.Name -contains "port")) {
+                continue
+            }
+
+            foreach ($listenerPid in @(Get-SharedListeningProcessIds -Port ([int]$server.port))) {
+                if ([int]$listenerPid -gt 0) {
+                    Stop-SharedProcessTree -ProcessId ([int]$listenerPid)
+                }
+            }
+        }
+    } catch {
+        Write-Warning ("Unable to stop previous shared MCP listeners before install: {0}" -f $_.Exception.Message)
+    }
+
+    Start-Sleep -Milliseconds 750
+}
+
 function Get-UvManagedPythonCandidates {
     $candidates = New-Object System.Collections.Generic.List[string]
     $roots = @()
@@ -988,6 +1035,9 @@ WantedBy=default.target
     Write-Warning ("systemctl --user is unavailable; generated XDG autostart entries in {0} instead." -f $autostartDir)
 }
 
+$sourceSharedMcpManifestPath = Join-Path $sourceRoot (Join-Path "shared-mcp" "manifest.json")
+Stop-ManagedRuntimeBeforeInstall -TargetRoot $TargetRoot -ManifestPath $sourceSharedMcpManifestPath
+
 Ensure-Directory -Path $TargetRoot
 Ensure-Directory -Path (Join-SharedPath @($TargetRoot, "shared-mcp"))
 
@@ -1059,6 +1109,64 @@ foreach ($name in @($layout.TemplateFiles)) {
         Ensure-Directory -Path (Split-Path -Parent $dstPath)
         Copy-Item -LiteralPath $srcPath -Destination $dstPath -Force
     }
+}
+
+# ADR-002 Phase 0.2: Initialize .memory/ directory structure
+function Initialize-MemoryDirectory {
+    param(
+        [string]$TargetRoot
+    )
+    $memoryRoot = Join-Path $TargetRoot ".memory"
+    $subdirs = @("user", "feedback", "project", "reference", "sessions", "archived", ".index", ".lock", ".config")
+    foreach ($subdir in $subdirs) {
+        $dirPath = Join-Path $memoryRoot $subdir
+        if (-not (Test-Path -LiteralPath $dirPath)) {
+            Ensure-Directory -Path $dirPath
+            Write-Host "[init] Created $dirPath"
+        }
+    }
+    # Copy .memory/ templates from templates/.memory/
+    $templateSrc = Join-Path $sourceRoot "templates" ".memory"
+    if (Test-Path -LiteralPath $templateSrc -PathType Container) {
+        foreach ($tmpl in @("MEMORY.md", "README.md", "TEMPLATE.md")) {
+            $src = Join-Path $templateSrc $tmpl
+            $dst = Join-Path $memoryRoot $tmpl
+            if ((Test-Path -LiteralPath $src -PathType Leaf) -and -not (Test-Path -LiteralPath $dst)) {
+                Copy-Item -LiteralPath $src -Destination $dst -Force
+                Write-Host "[init] Copied $tmpl to .memory/"
+            }
+        }
+        # Copy config files
+        $configSrc = Join-Path $templateSrc ".config"
+        if (Test-Path -LiteralPath $configSrc -PathType Container) {
+            $configDst = Join-Path $memoryRoot ".config"
+            foreach ($cfg in @("retrieval.json", "retention-policy.json")) {
+                $src = Join-Path $configSrc $cfg
+                $dst = Join-Path $configDst $cfg
+                if ((Test-Path -LiteralPath $src -PathType Leaf) -and -not (Test-Path -LiteralPath $dst)) {
+                    Copy-Item -LiteralPath $src -Destination $dst -Force
+                    Write-Host "[init] Copied .config/$cfg"
+                }
+            }
+        }
+    }
+    Write-Host "[init] .memory/ directory structure ready at $memoryRoot"
+}
+
+Initialize-MemoryDirectory -TargetRoot $TargetRoot
+
+# ADR-002 Phase 0.3: Initialize SQLite schema (sqlite-vec 0.1.9)
+$initSchemaScript = Join-Path $TargetRoot "ops" "init-sqlite-schema.js"
+if (Test-Path -LiteralPath $initSchemaScript -PathType Leaf) {
+    Write-Host "[init] Running SQLite schema init..."
+    $schemaResult = & node $initSchemaScript 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "[init] SQLite schema OK: $schemaResult"
+    } else {
+        Write-Warning "[init] SQLite schema init had issues (exit $LASTEXITCODE): $schemaResult"
+    }
+} else {
+    Write-Warning "[init] ops/init-sqlite-schema.js not found — SQLite schema not initialized"
 }
 
 $generatedShellWrappers = Get-GeneratedShellWrapperFiles -Layout $layout
