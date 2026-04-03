@@ -16,7 +16,7 @@ The source tree is grouped by responsibility (`bus/`, `ops/`, `retrieval/`, `sha
 - Validation:
   use [`docs/VALIDATION.md`](docs/VALIDATION.md) as the hard acceptance checklist
 - Release notes:
-  latest operator-facing summary is [`docs/RELEASE-NOTES-2026-04-03.md`](docs/RELEASE-NOTES-2026-04-03.md)
+  latest operator-facing summary is [`docs/releases/RELEASE-NOTES-2026-04-03.md`](docs/releases/RELEASE-NOTES-2026-04-03.md)
 
 ## Project Status
 - Ready for real local use on Windows
@@ -436,7 +436,7 @@ Use the included probe and benchmark scripts before doing any full reindex.
 - [`docs/NEW-AGENT-INTEGRATION.md`](docs/NEW-AGENT-INTEGRATION.md)
 - [`docs/INTEGRATION-MODES.md`](docs/INTEGRATION-MODES.md)
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md)
-- [`docs/RELEASE-NOTES-2026-04-03.md`](docs/RELEASE-NOTES-2026-04-03.md)
+- [`docs/releases/RELEASE-NOTES-2026-04-03.md`](docs/releases/RELEASE-NOTES-2026-04-03.md)
 - [`docs/RELEASING.md`](docs/RELEASING.md)
 - [`docs/ROADMAP.md`](docs/ROADMAP.md)
 - [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)
