@@ -78,7 +78,9 @@ The system tried to use OpenAI-compatible embeddings but the API returned an err
 The watchdog polls on a schedule. Embeddings rebuild runs every 15 minutes by default. For immediate indexing, call `rebuild_memory_embeddings` tool manually.
 
 ### What happens if two agents write to the same note simultaneously?
-The system uses last-write-wins at the note level. Chokidar events from `ops/obsidian-blackboard-daemon.js` will fire for each save. Under high concurrency, some writes may be lost. This is a known limitation - there is no conflict detection yet.
+The system protects durable consolidation with a Phase 3 lock (`.lock/consolidation.lock`) that serializes multi-file writes during the consolidation pass — concurrent consolidation agents cannot corrupt each other's durable writes.
+
+For cross-agent blackboard events, last-write-wins still applies: `ops/obsidian-blackboard-daemon.js` fires a Chokidar event per save, and under high concurrency some writes may be overwritten by later saves. This is a known limitation. Conflict-safe event log or lease semantics is tracked in the Roadmap.
 
 ### How do I customize the MCP ports (9331-9338)?
 Currently ports are not configurable via env var. Edit `shared-mcp/manifest.json` directly to change each server's `port` field. Note: changing ports requires updating all client MCP configs.

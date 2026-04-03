@@ -1,5 +1,7 @@
 # File Map
 
+> **Storage note**: The retrieval layer uses Python's standard-library `sqlite3` (no native Node.js bindings required). The shared `memory` MCP and OpenClaw blackboard daemon both route through Python for SQLite access.
+
 ## Core Bus Runtime (`bus/`)
 - `bus/memory-bus.ps1`
 - `bus/memory-watchdog.ps1`
@@ -59,22 +61,14 @@
 
 ## Templates
 - `templates/agents.json`
+- `templates/agents/README.md`
+- `templates/agents/portable-skill/SKILL.md`
+- `templates/agents/thin-plugin/.codex-plugin/plugin.json`
+- `templates/config/runtime.json`
 
-## Docs
-- `docs/DEPLOYMENT-MATRIX.md`
-- `docs/FAQ.md`
-- `docs/FILES.md`
-- `docs/INSTALL.md`
-- `docs/INTEGRATION-MODES.md`
-- `docs/MCP-DEDUP.md`
-- `docs/ARCHITECTURE.md`
-- `docs/NEW-AGENT-INTEGRATION.md`
-- `docs/OPERATIONS.md`
-- `docs/RELEASING.md`
-- `docs/ROADMAP.md`
-- `docs/SECURITY.md`
-- `docs/TROUBLESHOOTING.md`
-- `docs/VALIDATION.md`
+## Architecture Decision Records
+- `docs/ADR-001-shared-memory-architecture.md` — Superseded by ADR-002
+- `docs/ADR-002-unified-memory-architecture-v2.md` — Unified architecture (OpenClaw + Claude Code + claude-mem benchmark)
 
 ## Repo Metadata
 - `AGENTS.md`
