@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import http from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -222,6 +223,102 @@ let searchWorkerCircuitOpen = false;
 let searchWorkerBackpressureRejected = 0;
 const searchWorkerPending = new Map();
 
+// ---------------------------------------------------------------------------
+// Observability / metrics (Prometheus-compatible)
+// ---------------------------------------------------------------------------
+const METRICS = {
+  searches_total: {},          // {route: {ok: N, error: N}}
+  search_latency_seconds: [],  // circular buffer, last 100 values in seconds
+  embeddings_index_age_seconds: 0,
+  embeddings_index_size: 0,
+  structured_files_total: {},   // {filename: count}
+  promotion_queue_size: { promotion: 0, refresh: 0 },
+  search_worker_restarts_total: 0,
+  search_worker_backpressure_rejected: 0,
+  dream_lock_held_seconds: [],   // circular buffer, last 20 values
+  mcp_requests_total: {},       // {tool: count}
+};
+const MAX_LATENCY_BUFFER = 100;
+const MAX_LOCK_BUFFER = 20;
+
+// ---------------------------------------------------------------------------
+// Metrics collection (Prometheus-compatible /metrics endpoint)
+// ---------------------------------------------------------------------------
+
+function collectMetrics() {
+  const lines = [];
+
+  // Counters — search requests
+  for (const [route, statuses] of Object.entries(METRICS.searches_total)) {
+    for (const [status, count] of Object.entries(statuses)) {
+      lines.push(`memory_search_requests_total{route="${route}",status="${status}"} ${count}`);
+    }
+  }
+
+  // Counters — MCP tool requests
+  for (const [tool, count] of Object.entries(METRICS.mcp_requests_total)) {
+    lines.push(`memory_mcp_requests_total{tool="${tool}"} ${count}`);
+  }
+
+  lines.push(`memory_search_worker_restarts_total ${METRICS.search_worker_restarts_total}`);
+  lines.push(`memory_search_worker_backpressure_rejected_total ${METRICS.search_worker_backpressure_rejected}`);
+
+  // Gauges
+  lines.push(`memory_embeddings_index_age_seconds ${METRICS.embeddings_index_age_seconds}`);
+  lines.push(`memory_embeddings_index_size ${METRICS.embeddings_index_size}`);
+  for (const [file, count] of Object.entries(METRICS.structured_files_total)) {
+    lines.push(`memory_structured_records_total{file="${file}"} ${count}`);
+  }
+  lines.push(`memory_promotion_queue_size_promotion ${METRICS.promotion_queue_size.promotion}`);
+  lines.push(`memory_promotion_queue_size_refresh ${METRICS.promotion_queue_size.refresh}`);
+
+  // Histogram approximations (from circular buffers)
+  if (METRICS.search_latency_seconds.length > 0) {
+    const sorted = METRICS.search_latency_seconds.slice().sort((a, b) => a - b);
+    const avg = sorted.reduce((a, b) => a + b, 0) / sorted.length;
+    const p95 = sorted[Math.floor(sorted.length * 0.95)];
+    lines.push(`memory_search_latency_seconds_avg ${avg.toFixed(6)}`);
+    lines.push(`memory_search_latency_seconds_p95 ${p95 != null ? p95.toFixed(6) : 0}`);
+  }
+
+  if (METRICS.dream_lock_held_seconds.length > 0) {
+    const avg = METRICS.dream_lock_held_seconds.reduce((a, b) => a + b, 0) / METRICS.dream_lock_held_seconds.length;
+    lines.push(`memory_dream_lock_held_seconds_avg ${avg.toFixed(6)}`);
+  }
+
+  return lines.join("\n");
+}
+
+function refreshMetricsFromFiles() {
+  try {
+    const hygienePath = path.join(GENERATED_ROOT, "memory_hygiene_report.json");
+    if (fs.existsSync(hygienePath)) {
+      const hygiene = JSON.parse(fs.readFileSync(hygienePath, "utf8"));
+      // Update structured file counts from byScope stats
+      for (const [scope, count] of Object.entries(hygiene.stats?.byScope || {})) {
+        METRICS.structured_files_total[`scope:${scope}`] = count;
+      }
+      // Update promotion queue sizes from dream state
+      const dreamStatePath = path.join(VAULT_ROOT, "00-System", "ai-memory", "state", "auto-dream-state.json");
+      if (fs.existsSync(dreamStatePath)) {
+        const dreamState = JSON.parse(fs.readFileSync(dreamStatePath, "utf8"));
+        METRICS.promotion_queue_size.promotion = Array.isArray(dreamState.promotionQueue)
+          ? dreamState.promotionQueue.length
+          : 0;
+        METRICS.promotion_queue_size.refresh = Array.isArray(dreamState.refreshQueue)
+          ? dreamState.refreshQueue.length
+          : 0;
+      }
+    }
+  } catch (_err) {
+    // Non-fatal — metrics refresh failures should not crash the server.
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Search worker helpers
+// ---------------------------------------------------------------------------
+
 function isSearchWorkerRunning() {
   return Boolean(searchWorker && !searchWorker.killed && searchWorker.exitCode === null);
 }
@@ -379,6 +476,12 @@ function handleSearchWorkerStdout(chunk) {
     }
 
     pending.resolve(payload);
+
+    // Update metrics from search worker health snapshot embedded in response
+    if (payload && typeof payload === "object") {
+      METRICS.embeddings_index_age_seconds = payload.embeddings?.indexAgeSeconds || METRICS.embeddings_index_age_seconds;
+      METRICS.embeddings_index_size = payload.embeddings?.indexedCount || METRICS.embeddings_index_size;
+    }
   }
 }
 
@@ -418,6 +521,7 @@ function handleSearchWorkerExit(code, signal) {
   }
 
   searchWorkerRestartCount += 1;
+  METRICS.search_worker_restarts_total = searchWorkerRestartCount;
   if (searchWorkerRestartCount === 1) {
     searchWorkerFirstFailureAt = now;
   }
@@ -1019,6 +1123,7 @@ async function runSemanticSearch({
   const normalizedRoute = SEARCH_ROUTE_VALUES.has(String(route || "").trim().toLowerCase())
     ? String(route || "").trim().toLowerCase()
     : "auto";
+  const searchStartMs = Date.now();
   try {
     return await requestSearchWorker(
       {
@@ -1039,19 +1144,37 @@ async function runSemanticSearch({
     );
   } catch (error) {
     searchWorkerLastError = String(error?.message || error);
-    return runSemanticSearchOnce({
-      query,
-      mode,
-      route: normalizedRoute,
-      limit,
-      tool,
-      project,
-      scope,
-      sourceKind,
-      workspace,
-      taskState,
-      preferSummaries,
-    });
+    try {
+      return runSemanticSearchOnce({
+        query,
+        mode,
+        route: normalizedRoute,
+        limit,
+        tool,
+        project,
+        scope,
+        sourceKind,
+        workspace,
+        taskState,
+        preferSummaries,
+      });
+    } catch (_fallbackError) {
+      // Fallback also failed — record as error and re-throw so caller sees failure.
+      if (!METRICS.searches_total[normalizedRoute]) METRICS.searches_total[normalizedRoute] = {};
+      METRICS.searches_total[normalizedRoute].error = (METRICS.searches_total[normalizedRoute].error || 0) + 1;
+      throw error;
+    }
+  } finally {
+    const latency = (Date.now() - searchStartMs) / 1000;
+    METRICS.search_latency_seconds.push(latency);
+    if (METRICS.search_latency_seconds.length > MAX_LATENCY_BUFFER) {
+      METRICS.search_latency_seconds.shift();
+    }
+    if (!METRICS.searches_total[normalizedRoute]) METRICS.searches_total[normalizedRoute] = {};
+    // ok is 0 if set, otherwise increment (only first path succeeds lands here without being set)
+    if (METRICS.searches_total[normalizedRoute].ok === undefined) {
+      METRICS.searches_total[normalizedRoute].ok = (METRICS.searches_total[normalizedRoute].ok || 0) + 1;
+    }
   }
 }
 
@@ -1064,6 +1187,7 @@ async function requestSearchWorker(payload, timeoutMs = 120000) {
 
   if (searchWorkerPending.size >= SEARCH_BACKPRESSURE_LIMIT) {
     searchWorkerBackpressureRejected += 1;
+    METRICS.search_worker_backpressure_rejected = searchWorkerBackpressureRejected;
     throw Object.assign(new Error("Search worker overloaded, try again later"), { code: 503 });
   }
 
@@ -1635,6 +1759,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name } = request.params;
   const args = request.params.arguments || {};
 
+  // Track MCP tool request count
+  METRICS.mcp_requests_total[name] = (METRICS.mcp_requests_total[name] || 0) + 1;
+
   try {
     if (name === "memory_status") {
       const embeddingRuntime = readEmbeddingRuntimeSummary();
@@ -1669,6 +1796,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         autoDream: readOptionalJson(AUTO_DREAM_JSON_PATH),
         hygiene,
         claudeMem: await getClaudeMemHealth(),
+        metrics: {
+          searches_total: METRICS.searches_total,
+          search_latency_buffer: {
+            count: METRICS.search_latency_seconds.length,
+            avg_seconds: METRICS.search_latency_seconds.length > 0
+              ? METRICS.search_latency_seconds.reduce((a, b) => a + b, 0) / METRICS.search_latency_seconds.length
+              : null,
+          },
+          embeddings_index: {
+            age_seconds: METRICS.embeddings_index_age_seconds,
+            size: METRICS.embeddings_index_size,
+          },
+          structured_files_total: METRICS.structured_files_total,
+          promotion_queue_size: METRICS.promotion_queue_size,
+          search_worker: {
+            restarts_total: METRICS.search_worker_restarts_total,
+            backpressure_rejected: METRICS.search_worker_backpressure_rejected,
+          },
+          mcp_requests_total: METRICS.mcp_requests_total,
+        },
       });
     }
 
@@ -2119,3 +2266,37 @@ Only include records that are genuinely relevant. Return fewer than max_results 
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
+
+// ---------------------------------------------------------------------------
+// HTTP metrics server (Prometheus-compatible /metrics endpoint)
+// ---------------------------------------------------------------------------
+function startMetricsServer() {
+  const port = Number(firstNonEmptyEnv("AI_MEMORY_METRICS_PORT") || "9090");
+  const metricsServer = http.createServer((req, res) => {
+    if (req.method === "GET" && req.url === "/metrics") {
+      res.writeHead(200, { "Content-Type": "text/plain; version=0.0.4" });
+      res.end(collectMetrics());
+      return;
+    }
+    if (req.method === "GET" && req.url === "/health") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, pid: process.pid }));
+      return;
+    }
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("Not Found");
+  });
+
+  metricsServer.on("error", (err) => {
+    console.error(`[omni-memory] metrics server error: ${err.message}`);
+  });
+
+  metricsServer.listen(port, () => {
+    console.error(`[omni-memory] metrics server listening on :${port}`);
+  });
+}
+
+// Start metrics refresh interval and HTTP server immediately.
+setInterval(refreshMetricsFromFiles, 60_000);
+refreshMetricsFromFiles();
+startMetricsServer();

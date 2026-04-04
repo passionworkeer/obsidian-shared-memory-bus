@@ -69,4 +69,8 @@
         "probe-embedding-models.py"
         "run-shared-stack-pressure-test.ps1"
     )
+    CliFiles = @(
+        "cli/ai-memory.js"
+        "cli/package.json"
+    )
 }
