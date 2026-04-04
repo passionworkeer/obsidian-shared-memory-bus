@@ -4,6 +4,9 @@ const path = require("path");
 
 const MEMORY_RECORD_SCHEMA_VERSION = 2;
 const MEMORY_INTEGRITY_CONTRACT_VERSION = 2;
+// Optional additional fields (not required for validation, pass-through):
+//   name         — optional string, alternate title/identifier
+//   description  — optional string, one-line semantic summary (buildMemoryDescription)
 const ALLOWED_SCOPES = new Set(["user", "feedback", "project", "reference", "summary", "task", "run"]);
 const ALLOWED_VISIBILITY = new Set(["shared", "private"]);
 const ALLOWED_SOURCE_KINDS = new Set(["writeback", "hook", "session", "event", "blackboard", "run", "cron", "task"]);
@@ -70,6 +73,12 @@ const STRUCTURED_LAYER_DEFINITIONS = [
     fileName: "openclaw-journal.jsonl",
     label: "OpenClaw journal",
     requiredFields: ["schemaVersion", "id", "tool", "type", "title", "source", "scope", "memory_level"],
+  },
+  {
+    key: "dailyLogs",
+    fileName: "logs",
+    label: "daily append-only logs",
+    requiredFields: [],
   },
 ];
 
@@ -189,6 +198,13 @@ function validateStructuredRecord(record, requiredFields = []) {
   }
   if (normalizeString(record.content_hash) && !/^[a-f0-9]{64}$/i.test(normalizeString(record.content_hash))) {
     errors.push(`invalid-content-hash:${normalizeString(record.content_hash)}`);
+  }
+  // name and description are optional; validate type if present
+  if (typeof record.name !== "undefined" && typeof record.name !== "string") {
+    errors.push("invalid-name-type");
+  }
+  if (typeof record.description !== "undefined" && typeof record.description !== "string") {
+    errors.push("invalid-description-type");
   }
   if (missingFields.length > 0) {
     errors.push(`missing-fields:${missingFields.join(",")}`);
@@ -382,6 +398,7 @@ function buildGeneratedArtifactMetadata({ structuredRoot, generatedAt = "" } = {
     contractVersion: MEMORY_INTEGRITY_CONTRACT_VERSION,
     recordSchemaVersion: MEMORY_RECORD_SCHEMA_VERSION,
     sourceStructuredSignature: buildStructuredSignature(structuredRoot),
+    description: "Generated artifact tracking structured memory layers and their freshness.",
   };
 }
 

@@ -71,12 +71,14 @@ $OpenClawSyncScript = Resolve-BusPath -Candidates @("sync-openclaw-to-obsidian.j
 $BuildHandoffPackScript = Resolve-BusPath -Candidates @("build-handoff-pack.js", "ops/build-handoff-pack.js")
 $BuildMemoryLayersScript = Resolve-BusPath -Candidates @("build-memory-layers.js", "ops/build-memory-layers.js")
 $MemoryDreamScript = Resolve-BusPath -Candidates @("run-memory-dream.ps1", "ops/run-memory-dream.ps1")
+$BackgroundExtractionScript = Resolve-BusPath -Candidates @("run-background-extraction.ps1", "ops/run-background-extraction.ps1")
 $EmbeddingsScript = Resolve-BusPath -Candidates @("generate-embeddings.js", "bus/generate-embeddings.js")
 $EmbeddingsIndexPath = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "embeddings", "index.jsonl")
 $EmbeddingsCooldownSeconds = 180
 $BusSyncTimeoutSeconds = 300
 $GeneratedArtifactsTimeoutSeconds = 180
 $WatchdogHeartbeatSeconds = [Math]::Max(5, [Math]::Min(15, $PollSeconds))
+$BgExtractionIntervalHours = 6
 $OpenClawWatchSpecNames = @("openclaw-sessions", "openclaw-memory", "openclaw-user", "openclaw-memory-md", "openclaw-jobs", "openclaw-runs", "openclaw-blackboard-db")
 $OpenCodeDbPath = Join-SharedPath @((Get-SharedOpenCodeDataRoot), "opencode.db")
 $VsCodeUserRoot = Get-SharedVsCodeUserRoot -ProductName "Code"
@@ -129,6 +131,7 @@ $WatchSpecs = @(
     [pscustomobject]@{ Name = "copilot-cli-events"; Tool = "copilot"; Type = "dir"; Path = $CopilotCliSessionRoot; Filter = "events.jsonl"; Recurse = $true; Top = 12; MinPollSeconds = 60 }
 )
 $script:LastKnownSyncAt = [datetime]::MinValue
+$script:lastBgExtraction = [datetime]::MinValue
 
 function Ensure-Directory {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -876,6 +879,38 @@ function Invoke-MemoryDream {
     }
 }
 
+function Invoke-BackgroundExtraction {
+    if (-not (Test-Path -LiteralPath $BackgroundExtractionScript -PathType Leaf)) {
+        return $false
+    }
+
+    if ($script:lastBgExtraction -gt [datetime]::MinValue -and
+        ($script:lastBgExtraction).AddHours($BgExtractionIntervalHours) -gt (Get-Date)) {
+        return $false
+    }
+
+    try {
+        $result = Invoke-PowerShellFileWithTimeout `
+            -ScriptPath $BackgroundExtractionScript `
+            -TimeoutSeconds 90 `
+            -HeartbeatReason "background-extraction"
+        if ($result.timedOut) {
+            Write-Warning "[watchdog] background-extraction timed out after 90s"
+            return $false
+        }
+        if ($result.exitCode -ne 0) {
+            $detail = if (-not [string]::IsNullOrWhiteSpace($result.stderr)) { $result.stderr } else { $result.stdout }
+            Write-Warning ("[watchdog] background-extraction failed with exit code {0}: {1}" -f $result.exitCode, $detail)
+            return $false
+        }
+        $script:lastBgExtraction = Get-Date
+        return $true
+    } catch {
+        Write-Warning "[watchdog] background-extraction threw: $_"
+        return $false
+    }
+}
+
 function Invoke-StructuredRefreshPipeline {
     param(
         [Parameter(Mandatory = $true)][string]$Reason,
@@ -905,6 +940,9 @@ function Invoke-ArtifactCatchup {
     if ($structuredChanged -or (Test-StructuredArtifactsNeedRefresh)) {
         Invoke-StructuredRefreshPipeline -Reason $Reason -StructuredChanged:$structuredChanged
     }
+
+    # Background extraction: every $BgExtractionIntervalHours hours, scan for forgotten sessions
+    [void](Invoke-BackgroundExtraction)
 
     return $lastSyncAt
 }
