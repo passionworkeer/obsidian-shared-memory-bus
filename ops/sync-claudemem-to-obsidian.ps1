@@ -3,6 +3,10 @@
 Set-StrictMode -Version 3.0
 $ErrorActionPreference = "Stop"
 
+param(
+    [int]$MaxRecordsPerRun = 500
+)
+
 $helperPath = @(
     (Join-Path $PSScriptRoot "runtime-platform.ps1"),
     (Join-Path $PSScriptRoot "../bus/runtime-platform.ps1")
@@ -247,9 +251,9 @@ while ($true) {
 
     $offset += $limit
 
-    # Cap the initial catch-up to avoid long-running syncs.
-    if ($totalFetched -ge 500) {
-        Write-Host "  [INFO] Import capped at 500 new entries for this run" -ForegroundColor Yellow
+    # Cap per run to avoid long-running syncs.
+    if ($totalFetched -ge $MaxRecordsPerRun) {
+        Write-Host "  [INFO] Import capped at $MaxRecordsPerRun new entries for this run" -ForegroundColor Yellow
         break
     }
 }
@@ -290,8 +294,19 @@ if ($allNew.Count -eq 0) {
 
 $allStructured = @($recordMap.Values | Sort-Object { [string]$_.t }, { [string]$_.id })
 $jsonLines = @($allStructured | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 8 })
-$structuredBody = if ($jsonLines.Count -gt 0) { ($jsonLines -join "`n") + "`n" } else { "" }
-[System.IO.File]::WriteAllText($StructuredFile, $structuredBody, $Utf8NoBom)
+$allLines = if ($jsonLines.Count -gt 0) { $jsonLines -join "`n" } else { "" }
+
+$tempFile = $StructuredFile + ".tmp.$([System.Diagnostics.Process]::GetCurrentProcess().Id)"
+try {
+    Set-Content -Path $tempFile -Value $allLines -Encoding UTF8
+    [System.IO.File]::Flush($tempFile)
+    [System.IO.File]::Move($tempFile, $StructuredFile, $true)
+} catch {
+    if (Test-Path -LiteralPath $tempFile) {
+        Remove-Item -LiteralPath $tempFile -Force -ErrorAction SilentlyContinue
+    }
+    throw
+}
 
 Write-Host ""
 Write-Host "=== claude-mem -> Obsidian sync complete ===" -ForegroundColor Cyan

@@ -76,6 +76,13 @@ function Test-ProcessAlive {
     return $null -ne (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)
 }
 
+# Standalone PID probe used during state-file zombie cleanup.
+function Test-PidAlive {
+    param([Parameter(Mandatory = $true)][int]$Pid)
+
+    return $null -ne (Get-Process -Id $Pid -ErrorAction SilentlyContinue)
+}
+
 function Normalize-RequestedIds {
     param([string[]]$Ids)
 
@@ -451,8 +458,80 @@ try {
     $mutexAcquired = $true
 }
 
+# Scavenge zombie / stale entries from state.json before starting servers.
+# Iterates every recorded entry: if the PID is dead, marks it and re-probes the port.
+function Clean-StateFile {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$State,
+        [Parameter(Mandatory = $true)]$Manifest
+    )
+
+    $dirty = $false
+    $now = (Get-Date).ToString("o")
+
+    foreach ($entry in @($state.GetEnumerator())) {
+        $serverId = [string]$entry.Key
+        $record = $entry.Value
+
+        if (-not $record.ContainsKey("pid")) {
+            continue
+        }
+
+        $recordedPid = [int]$record["pid"]
+        if ($recordedPid -le 0) {
+            continue
+        }
+
+        if (Test-PidAlive -Pid $recordedPid) {
+            # PID is alive — nothing to do.
+            continue
+        }
+
+        # PID is dead. Mark it and re-probe the port.
+        $port = 0
+        if ($record.ContainsKey("port")) {
+            $port = [int]$record["port"]
+        } else {
+            # Look up port from manifest.
+            foreach ($srv in @($manifest.servers)) {
+                if ([string]$srv.id -eq $serverId -and $srv.PSObject.Properties.Name -contains "port") {
+                    $port = [int]$srv.port
+                    break
+                }
+            }
+        }
+
+        $record["status"] = "dead"
+        $record["notes"] = "PID $recordedPid was dead at startup, re-probing"
+        $dirty = $true
+
+        if ($port -gt 0) {
+            $listenerPids = @(Get-SharedListeningProcessIds -Port $port)
+            if ($listenerPids.Count -gt 0) {
+                $freshPid = [int]$listenerPids[0]
+                $record["pid"] = $freshPid
+                $record["status"] = "adopted"
+                $record["notes"] = "PID $recordedPid was dead at startup, adopted fresh PID $freshPid on port $port"
+                Write-Output "[shared-mcp] State cleanup: $serverId — dead PID $recordedPid replaced with live PID $freshPid"
+            } else {
+                Write-Output "[shared-mcp] State cleanup: $serverId — dead PID $recordedPid recorded, port $port is free"
+            }
+        } else {
+            Write-Output "[shared-mcp] State cleanup: $serverId — dead PID $recordedPid recorded, no port to re-probe"
+        }
+    }
+
+    return $dirty
+}
+
 try {
     $state = Read-State
+
+    # Clean zombie PID entries before starting servers.
+    $stateWasDirty = Clean-StateFile -State $state -Manifest $manifest
+    if ($stateWasDirty) {
+        Write-State -State $state
+    }
 
     $requested = @(Normalize-RequestedIds -Ids $Only)
     $results = New-Object System.Collections.Generic.List[object]
