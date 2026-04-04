@@ -118,18 +118,24 @@ memory-watchdog.ps1 detects file-change signature drift
     → triggers embeddings rebuild if structured changed
 ```
 
-### 3. Session Compaction → Durable Promotion (idle trigger)
+### 3. Dream Consolidation → Durable Promotion (idle trigger, `-Writeback` mode)
 ```
 Idle 15min + accumulation threshold
   → memory-watchdog.ps1 → Invoke-MemoryDream
     → run-memory-dream.ps1 (PowerShell)
-      → build-memory-layers.js (Node.js)
-        → reads structured/*.jsonl
-        → applies typed promotion rules
-        → writes durable memories with promotion metadata
+      → reads structured/*.jsonl
+      → builds typed promotion queue (session/event/task → durable)
+      → [writes] durable typed records to structured/shared-inbox.jsonl
+        with source_kind=writeback, memory_level=durable
+      → [writes] MEMORY.md index entries
+      → generates AUTO-DREAM.md + AUTO-DREAM.json (report)
       → build-handoff-pack.js (Node.js)
         → writes HANDOFF.json
 ```
+**Notes**:
+- `build-memory-layers.js` does NOT write durable memories — it only builds the `MEMORY-LAYERS.json` snapshot artifact.
+- Durable writeback is gated by the `-Writeback` flag; without it, `run-memory-dream.ps1` only generates the report.
+- Conflict detection uses SHA-256 `content_hash`比对: identical content is skipped (idempotent); differing content for the same promotion key is appended with `conflict_with`.
 
 ### 4. Blackboard Daemon → Note Watching (real-time)
 ```
