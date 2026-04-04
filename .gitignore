@@ -16,6 +16,7 @@ shared-mcp/logs/*.err.log
 __pycache__/
 *.pyc
 .venv/
+ops/__pycache__/
 
 # Bundles and generated state
 node_modules/
