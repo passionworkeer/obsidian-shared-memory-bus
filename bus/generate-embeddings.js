@@ -9,6 +9,7 @@ const { createEmbeddingProviderRegistry, getProviderHost, normalizeEmbeddingAdap
 const { resolvePythonRuntime, withPythonArgs } = require("./python-runtime.js");
 const { resolveEmbeddingRuntime } = require("./runtime-config.js");
 const { resolveVaultRoot } = require("./vault-root.js");
+const { VECTOR_SCHEMA_VERSION, fnv1a32, buildHashFeatures, buildHashEmbedding } = require("./lsh-hash.js");
 const WINDOWS_ENV_CACHE = new Map();
 
 hydrateProcessEnvFromWindows([
@@ -206,75 +207,10 @@ function buildSearchText(entry) {
 }
 
 // =============================================================================
-// NOTE: This hashing logic (FNV-1a32 + buildHashFeatures) is duplicated in:
-//   - semantic-search.py (Python version, identical logic)
-//   - singleton-stdio-mcp-proxy.mjs (may also use it)
-// When modifying this, sync all copies.
-// See: https://github.com/.../issues/TWIN-BUG
+// NOTE: The FNV-1a32 hashing logic has been extracted to bus/lsh-hash.js.
+// Both Python (retrieval/lsh_utils.py) and JS now share the same algorithm.
+// See: retrieval/lsh_utils.py for the canonical implementation.
 // =============================================================================
-
-function fnv1a32(input) {
-  let hash = 0x811c9dc5;
-  const text = String(input || "");
-  for (let index = 0; index < text.length; index += 1) {
-    hash ^= text.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return hash >>> 0;
-}
-
-function buildHashFeatures(text) {
-  const source = normalizeSpaces(text).toLowerCase();
-  const features = [];
-  const compact = source.replace(/\s+/g, "");
-
-  for (const token of source.match(/[a-z0-9][a-z0-9_\-./:]{1,}/g) || []) {
-    features.push(`w:${token}`);
-  }
-
-  for (const chunk of source.match(/[\u4e00-\u9fff]{2,}/g) || []) {
-    features.push(`c:${chunk}`);
-    for (let index = 0; index < chunk.length - 1; index += 1) {
-      features.push(`c2:${chunk.slice(index, index + 2)}`);
-    }
-    for (let index = 0; index < chunk.length - 2; index += 1) {
-      features.push(`c3:${chunk.slice(index, index + 3)}`);
-    }
-  }
-
-  const maxGramCount = Math.max(0, Math.min(compact.length - 2, 400));
-  for (let index = 0; index < maxGramCount; index += 1) {
-    features.push(`g3:${compact.slice(index, index + 3)}`);
-  }
-
-  if (features.length === 0 && compact) {
-    features.push(`raw:${compact}`);
-  }
-  return features;
-}
-
-function buildHashEmbedding(text, dimension = HASH_DIM) {
-  const vector = new Array(dimension).fill(0);
-  const features = buildHashFeatures(text);
-  for (const feature of features) {
-    const hash = fnv1a32(feature);
-    const slot = hash % dimension;
-    const sign = ((hash >>> 1) & 1) === 0 ? 1 : -1;
-    vector[slot] += sign;
-  }
-
-  let norm = 0;
-  for (const value of vector) {
-    norm += value * value;
-  }
-  norm = Math.sqrt(norm);
-  if (norm > 0) {
-    for (let index = 0; index < vector.length; index += 1) {
-      vector[index] = Number((vector[index] / norm).toFixed(8));
-    }
-  }
-  return vector;
-}
 
 const EMBEDDING_PROVIDER_REGISTRY = createEmbeddingProviderRegistry({
   pythonRuntime: PYTHON,
@@ -437,6 +373,7 @@ async function main() {
         ...current,
         ...document,
         backend: normalizeEmbeddingAdapter(current.backend, current.model),
+        featureSchemaVersion: VECTOR_SCHEMA_VERSION,
       });
       continue;
     }
@@ -506,6 +443,7 @@ async function main() {
         configHash,
         providerHost,
         indexedAt: new Date().toISOString(),
+        featureSchemaVersion: VECTOR_SCHEMA_VERSION,
       });
     }
     writeIndexSnapshot(orderedDocuments, finalRecords);

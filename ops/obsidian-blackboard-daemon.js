@@ -55,19 +55,168 @@ const PYTHON_ENV = {
   PYTHONIOENCODING: "utf-8",
 };
 
-let isUpdating = false;
-let ignoreMdUntil = 0;
 let pendingMdTimer = null;
 let lastMdSignature = getFileSignature(MD_PATH);
 
+// --- Restart-on-crash policy ---
+let restartCount = 0;
+let firstRestartAt = 0;
+let isRespawning = false;
+
+function canRestart() {
+  const now = Date.now();
+  if (firstRestartAt === 0) {
+    firstRestartAt = now;
+  }
+  // Reset window after 5 minutes with no restarts
+  if (now - firstRestartAt > 5 * 60 * 1000) {
+    restartCount = 0;
+    firstRestartAt = now;
+  }
+  return restartCount < 3;
+}
+
+function onCrash(err, label) {
+  console.error(`[blackboard-daemon] ${label}:`, err && err.message ? err.message : err);
+  if (!canRestart()) {
+    console.error(
+      `[blackboard-daemon] FATAL: exceeded 3 restarts within 5 minutes (first at ${new Date(firstRestartAt).toISOString()}). Exiting with code 1.`
+    );
+    process.exit(1);
+  }
+  restartCount++;
+  isRespawning = true;
+  console.log(`[blackboard-daemon] Scheduling respawn (restart ${restartCount}/3, started at ${new Date(firstRestartAt).toISOString()})`);
+  setTimeout(() => {
+    if (!fs.existsSync(MD_PATH)) {
+      console.error("[blackboard-daemon] FATAL: WORKING.md is not accessible before respawn. Exiting with code 1.");
+      process.exit(1);
+    }
+    isRespawning = false;
+    console.log("[blackboard-daemon] Resuming main loop after crash.");
+    attachMdWatcher();
+    syncDbToMd();
+  }, 1000);
+}
+
 process.on("uncaughtException", (err) => {
-  console.error("[blackboard-daemon] uncaughtException:", err && err.message ? err.message : err);
-  process.exit(1);
+  onCrash(err, "uncaughtException");
 });
 
 process.on("unhandledRejection", (reason) => {
-  console.error("[blackboard-daemon] unhandledRejection:", reason);
+  onCrash(reason, "unhandledRejection");
 });
+
+process.on("exit", (code) => {
+  if (code !== 0 && !isRespawning) {
+    // Let the crash handler deal with it
+  }
+});
+
+// --- File-based lock mechanism ---
+
+function acquireLock(lockPath) {
+  const deadline = Date.now() + 5000;
+  let flockAvailable = false;
+  let flock;
+
+  try {
+    flock = require("flock");
+    flockAvailable = true;
+  } catch (_e) {
+    // flock package not available; fall back to pid-file approach
+  }
+
+  if (flockAvailable) {
+    return new Promise((resolve) => {
+      flock(lockPath, { exclusive: true, wait: 5000 }, (err, release) => {
+        if (err || Date.now() > deadline) {
+          console.warn(`[blackboard-daemon] flock lock timed out on ${lockPath}, skipping cycle`);
+          resolve(null);
+          return;
+        }
+        resolve(release);
+      });
+    });
+  }
+
+  // Fallback: pid-file lock with 5-second timeout
+  const pidLockPath = lockPath + ".lock";
+  while (Date.now() < deadline) {
+    try {
+      fs.writeFileSync(pidLockPath, String(process.pid), { mode: 0o600, flag: "wx" });
+      return { fd: null, pidLockPath };
+    } catch (err) {
+      if (err.code === "EEXIST") {
+        // Check if the lock owner is still alive
+        let ownerPid = 0;
+        try {
+          const content = fs.readFileSync(pidLockPath, "utf8").trim();
+          ownerPid = parseInt(content, 10);
+        } catch (_e2) {
+          // Corrupt lockfile; remove and retry
+          try { fs.unlinkSync(pidLockPath); } catch (_e3) { /* ignore */ }
+        }
+        if (ownerPid > 0) {
+          try {
+            process.kill(ownerPid, 0); // throws if process is gone
+          } catch (_e4) {
+            // Owner is dead; remove stale lock and retry
+            try { fs.unlinkSync(pidLockPath); } catch (_e5) { /* ignore */ }
+          }
+        }
+        // Wait a bit before retrying
+        const sleepMs = Math.min(50, deadline - Date.now());
+        if (sleepMs <= 0) break;
+        const start = Date.now();
+        const end = start + sleepMs;
+        while (Date.now() < end) { /* spin */ }
+      } else {
+        // Unexpected error
+        console.warn(`[blackboard-daemon] acquireLock unexpected error: ${err.message}`);
+        break;
+      }
+    }
+  }
+
+  console.warn(`[blackboard-daemon] acquireLock timed out after 5s on ${lockPath}, skipping cycle`);
+  return null;
+}
+
+function releaseLock(releaseHandle, lockPath) {
+  if (!releaseHandle) return;
+
+  // Promise-based flock release
+  if (typeof releaseHandle === "function") {
+    try { releaseHandle(); } catch (_e) { /* ignore */ }
+    return;
+  }
+
+  // Fallback pid-file release
+  const pidLockPath = releaseHandle.pidLockPath;
+  if (pidLockPath) {
+    try { fs.unlinkSync(pidLockPath); } catch (_e) { /* ignore */ }
+  }
+}
+
+// --- Atomic write ---
+
+function atomicWrite(filePath, content) {
+  const tmpPath = filePath + ".tmp." + process.pid;
+  fs.writeFileSync(tmpPath, content, "utf8");
+  fs.fsyncSync(fs.openSync(tmpPath, "r+"));
+  fs.renameSync(tmpPath, filePath);
+}
+
+// --- Content hash (skip no-op writes) ---
+
+function contentHash(content) {
+  let hash = 5381;
+  for (let i = 0; i < content.length; i++) {
+    hash = ((hash << 5) + hash) ^ content.charCodeAt(i);
+  }
+  return (hash >>> 0).toString(16);
+}
 
 function getFileSignature(filePath) {
   try {
@@ -193,10 +342,6 @@ function renderBlackboard(rows) {
 }
 
 function syncDbToMd() {
-  if (isUpdating) {
-    return;
-  }
-
   try {
     if (!fs.existsSync(MD_PATH)) {
       return;
@@ -204,26 +349,59 @@ function syncDbToMd() {
 
     const rows = readBlackboardRows();
     const nextBlock = renderBlackboard(rows);
-    const content = fs.readFileSync(MD_PATH, "utf8");
-    const blockRegex = new RegExp(`${START_TAG}[\\s\\S]*?${END_TAG}`, "m");
-    const nextContent = blockRegex.test(content) ? content.replace(blockRegex, nextBlock) : `${content}\n\n${nextBlock}\n`;
 
-    if (nextContent === content) {
+    let rawContent;
+    try {
+      rawContent = fs.readFileSync(MD_PATH, "utf8");
+    } catch (err) {
+      console.error("[blackboard-daemon] syncDbToMd: cannot read WORKING.md:", err.message);
       return;
     }
 
-    isUpdating = true;
-    ignoreMdUntil = Date.now() + LOCAL_WRITE_SUPPRESS_MS;
-    fs.writeFileSync(MD_PATH, nextContent, "utf8");
-    lastMdSignature = getFileSignature(MD_PATH);
-    console.log(`[blackboard-daemon] Synced ${rows.length} tasks into WORKING.md`);
+    const blockRegex = new RegExp(`${START_TAG}[\\s\\S]*?${END_TAG}`, "m");
+    const nextContent = blockRegex.test(rawContent) ? rawContent.replace(blockRegex, nextBlock) : `${rawContent}\n\n${nextBlock}\n`;
+
+    // Skip no-op write via content hash
+    const nextHash = contentHash(nextContent);
+    const currentHash = contentHash(rawContent);
+    if (nextHash === currentHash) {
+      return;
+    }
+
+    const lockPath = MD_PATH + ".lock";
+    const lockHandle = acquireLock(lockPath);
+    if (!lockHandle) {
+      console.warn("[blackboard-daemon] syncDbToMd: could not acquire lock, skipping cycle");
+      return;
+    }
+
+    try {
+      // Re-read inside the lock to confirm the file hasn't changed underneath us
+      let lockedContent;
+      try {
+        lockedContent = fs.readFileSync(MD_PATH, "utf8");
+      } catch (err) {
+        console.error("[blackboard-daemon] syncDbToMd: cannot read WORKING.md inside lock:", err.message);
+        return;
+      }
+
+      const lockedBlockRegex = new RegExp(`${START_TAG}[\\s\\S]*?${END_TAG}`, "m");
+      const lockedNextContent = lockedBlockRegex.test(lockedContent)
+        ? lockedContent.replace(lockedBlockRegex, nextBlock)
+        : `${lockedContent}\n\n${nextBlock}\n`;
+
+      if (contentHash(lockedNextContent) === contentHash(lockedContent)) {
+        return; // no-op inside lock
+      }
+
+      atomicWrite(MD_PATH, lockedNextContent);
+      lastMdSignature = getFileSignature(MD_PATH);
+      console.log(`[blackboard-daemon] Synced ${rows.length} tasks into WORKING.md`);
+    } finally {
+      releaseLock(lockHandle, lockPath);
+    }
   } catch (error) {
     console.error("[blackboard-daemon] syncDbToMd error:", error && error.message ? error.message : error);
-  } finally {
-    setTimeout(() => {
-      isUpdating = false;
-      lastMdSignature = getFileSignature(MD_PATH);
-    }, LOCAL_WRITE_SUPPRESS_MS);
   }
 }
 
@@ -240,7 +418,7 @@ function extractCheckedTaskIds(content) {
 }
 
 function handleMdChange() {
-  if (isUpdating || Date.now() < ignoreMdUntil || !fs.existsSync(MD_PATH)) {
+  if (!fs.existsSync(MD_PATH)) {
     return;
   }
 
@@ -250,8 +428,22 @@ function handleMdChange() {
   }
   lastMdSignature = currentSignature;
 
+  const lockPath = MD_PATH + ".lock";
+  const lockHandle = acquireLock(lockPath);
+  if (!lockHandle) {
+    console.warn("[blackboard-daemon] handleMdChange: could not acquire lock, skipping cycle");
+    return;
+  }
+
   try {
-    const content = fs.readFileSync(MD_PATH, "utf8");
+    let content;
+    try {
+      content = fs.readFileSync(MD_PATH, "utf8");
+    } catch (err) {
+      console.error("[blackboard-daemon] handleMdChange: cannot read WORKING.md:", err.message);
+      return;
+    }
+
     const blockRegex = new RegExp(`${START_TAG}([\\s\\S]*?)${END_TAG}`, "m");
     const match = content.match(blockRegex);
     if (!match) {
@@ -259,6 +451,10 @@ function handleMdChange() {
     }
 
     const taskIds = extractCheckedTaskIds(match[1]);
+    if (taskIds.length === 0) {
+      return;
+    }
+
     const changes = markTasksComplete(taskIds);
     if (changes > 0) {
       console.log(`[blackboard-daemon] Marked ${changes} tasks as PR_SUBMITTED from WORKING.md`);
@@ -266,6 +462,8 @@ function handleMdChange() {
     }
   } catch (error) {
     console.error("[blackboard-daemon] handleMdChange error:", error && error.message ? error.message : error);
+  } finally {
+    releaseLock(lockHandle, lockPath);
   }
 }
 
@@ -286,9 +484,7 @@ function attachMdWatcher() {
 
   try {
     fs.watch(MD_PATH, { persistent: true }, () => {
-      if (Date.now() >= ignoreMdUntil) {
-        scheduleMdCheck();
-      }
+      scheduleMdCheck();
     });
   } catch (error) {
     console.warn("[blackboard-daemon] fs.watch unavailable:", error && error.message ? error.message : error);

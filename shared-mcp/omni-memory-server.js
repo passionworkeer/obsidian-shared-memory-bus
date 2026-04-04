@@ -214,6 +214,12 @@ let searchWorkerRequestCounter = 0;
 let searchWorkerStartedAt = "";
 let searchWorkerLastError = "";
 let searchWorkerRestartCount = 0;
+let searchWorkerFirstFailureAt = null;
+const SEARCH_WORKER_MAX_RESTARTS = 5;
+const SEARCH_WORKER_CIRCUIT_WINDOW_MS = 300000;
+const SEARCH_BACKPRESSURE_LIMIT = 50;
+let searchWorkerCircuitOpen = false;
+let searchWorkerBackpressureRejected = 0;
 const searchWorkerPending = new Map();
 
 function isSearchWorkerRunning() {
@@ -230,6 +236,14 @@ function getSearchWorkerSnapshot() {
     restartCount: searchWorkerRestartCount,
     lastError: searchWorkerLastError || "",
     mode: "persistent-jsonl-with-oneshot-fallback",
+    circuitBreaker: {
+      circuitOpen: searchWorkerCircuitOpen,
+      restartCount: searchWorkerRestartCount,
+      firstFailureAt: searchWorkerFirstFailureAt ? new Date(searchWorkerFirstFailureAt).toISOString() : null,
+      backpressureRejected: searchWorkerBackpressureRejected,
+      maxRestarts: SEARCH_WORKER_MAX_RESTARTS,
+      circuitWindowMs: SEARCH_WORKER_CIRCUIT_WINDOW_MS,
+    },
   };
 }
 
@@ -368,10 +382,56 @@ function handleSearchWorkerStdout(chunk) {
   }
 }
 
+function resetSearchWorkerHealth() {
+  searchWorkerRestartCount = 0;
+  searchWorkerFirstFailureAt = null;
+  searchWorkerCircuitOpen = false;
+}
+
+function checkSearchWorkerCircuit() {
+  const now = Date.now();
+  if (searchWorkerCircuitOpen) {
+    if (
+      searchWorkerRestartCount < SEARCH_WORKER_MAX_RESTARTS ||
+      now - searchWorkerFirstFailureAt >= SEARCH_WORKER_CIRCUIT_WINDOW_MS
+    ) {
+      // Window has passed — allow one more attempt.
+      resetSearchWorkerHealth();
+      return false;
+    }
+    return true; // circuit still open
+  }
+  return false;
+}
+
 function handleSearchWorkerExit(code, signal) {
   const reason = `search-worker-exited: code=${code ?? "null"} signal=${signal ?? "null"}`;
+  const now = Date.now();
+
+  if (checkSearchWorkerCircuit()) {
+    searchWorkerCircuitOpen = true;
+    console.error(
+      `[omni-memory] FATAL: Search worker circuit breaker open after ${searchWorkerRestartCount} failures, manual restart required`
+    );
+    resetSearchWorkerState(reason);
+    return;
+  }
+
   searchWorkerRestartCount += 1;
+  if (searchWorkerRestartCount === 1) {
+    searchWorkerFirstFailureAt = now;
+  }
+
+  const backoffMs = Math.min(1000 * Math.pow(2, searchWorkerRestartCount - 1), 30_000);
   resetSearchWorkerState(reason);
+
+  setTimeout(async () => {
+    try {
+      await ensureSearchWorker();
+    } catch (error) {
+      console.error(`[omni-memory] Search worker scheduled restart failed: ${error.message}`);
+    }
+  }, backoffMs);
 }
 
 async function stopSearchWorker(reason = "search-worker-stop-requested") {
@@ -974,6 +1034,17 @@ async function runSemanticSearch({
 }
 
 async function requestSearchWorker(payload, timeoutMs = 120000) {
+  if (checkSearchWorkerCircuit()) {
+    throw Object.assign(new Error("Search worker circuit breaker open, manual restart required"), {
+      code: 503,
+    });
+  }
+
+  if (searchWorkerPending.size >= SEARCH_BACKPRESSURE_LIMIT) {
+    searchWorkerBackpressureRejected += 1;
+    throw Object.assign(new Error("Search worker overloaded, try again later"), { code: 503 });
+  }
+
   const child = await ensureSearchWorker();
   return await new Promise((resolve, reject) => {
     const requestId = `search-${Date.now()}-${++searchWorkerRequestCounter}`;
@@ -982,7 +1053,16 @@ async function requestSearchWorker(payload, timeoutMs = 120000) {
       reject(new Error("search-worker-timeout"));
     }, timeoutMs);
 
-    searchWorkerPending.set(requestId, { resolve, reject, timeout });
+    searchWorkerPending.set(requestId, {
+      resolve: (val) => {
+        if (searchWorkerRestartCount > 0) {
+          resetSearchWorkerHealth();
+        }
+        resolve(val);
+      },
+      reject,
+      timeout,
+    });
 
     try {
       child.stdin.write(`${JSON.stringify({ id: requestId, ...payload })}\n`, "utf8");
@@ -1442,6 +1522,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           ...getSearchWorkerSnapshot(),
           health: workerHealth,
         },
+        searchWorkerCircuitBreaker: getSearchWorkerSnapshot().circuitBreaker,
         watchdog: readWatchdogState(),
         memoryIntegrity,
         embeddingRuntime,

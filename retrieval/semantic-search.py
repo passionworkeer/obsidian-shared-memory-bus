@@ -22,6 +22,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 from embedding_providers import (
     DEFAULT_MODEL,
     HASH_MODEL,
+    VECTOR_SCHEMA_VERSION,
     build_embedding_config_hash,
     embed_query_with_runtime,
     get_transformer_model_name,
@@ -820,7 +821,14 @@ def dense_scores(entries_by_id: Dict[str, dict], query: str) -> Tuple[Dict[str, 
     index_records = load_embeddings_index()
     if not index_records:
         return {}, "missing-embeddings-index", {"queryEmbeddingCacheHit": False}
+
     first_record = next(iter(index_records.values()))
+    first_schema_version = int(first_record.get("featureSchemaVersion", 0) or 0)
+    if first_schema_version != VECTOR_SCHEMA_VERSION:
+        return {}, (
+            f"embedding-schema-version-mismatch:stored={first_schema_version},"
+            f"expected={VECTOR_SCHEMA_VERSION};rebuild-memory-embeddings-required"
+        ), {"queryEmbeddingCacheHit": False}
     model_name = str(first_record.get("model", DEFAULT_MODEL)).strip() or DEFAULT_MODEL
     backend = normalize_embedding_adapter(str(first_record.get("backend", "")).strip(), model_name) or "hash"
     if model_name.startswith("hashing-"):
@@ -862,12 +870,23 @@ def dense_scores(entries_by_id: Dict[str, dict], query: str) -> Tuple[Dict[str, 
         }
 
     scores: Dict[str, float] = {}
+    skipped_schema_mismatch = 0
     for record_id, payload in index_records.items():
         if record_id not in entries_by_id:
+            continue
+        record_schema_version = int(payload.get("featureSchemaVersion", 0) or 0)
+        if record_schema_version != VECTOR_SCHEMA_VERSION:
+            skipped_schema_mismatch += 1
             continue
         score = cosine_similarity(query_vector, payload.get("embedding", []))
         if score > 0:
             scores[record_id] = score
+    if skipped_schema_mismatch > 0:
+        sys.stderr.write(
+            f"[dense_scores] skipped {skipped_schema_mismatch} records due to "
+            f"schema version mismatch (expected={VECTOR_SCHEMA_VERSION}); "
+            "run generate-embeddings to rebuild the index\n"
+        )
     return scores, None, {"queryEmbeddingCacheHit": bool(query_embedding_cache_hit)}
 
 
