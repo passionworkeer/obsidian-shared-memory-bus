@@ -167,12 +167,11 @@ Shared MCP deduplicates processes. It does not merge all agent state into one co
   - `ops/run-obsidian-mcp.ps1`
   - `ops/run-minimax-mcp.ps1`
   - `ops/install-client-integrations.ps1`
-  - `ops/verify-integrations.ps1` (compatibility alias to `ops/install-client-integrations.ps1`)
   - `ops/verify-client-integrations.ps1`
   - `ops/sync-shared-skills.ps1`
   - `ops/run-pressure-test.ps1`
   - `ops/cleanup-inbox.ps1`
-  - `ops/repair-codex-runtime.ps1`
+  - `ops/generate-memory-hygiene-report.js`
   - `ops/sync-claudemem-to-obsidian.ps1`
   - `ops/sync-openclaw-to-obsidian.js`
   - `ops/obsidian-blackboard-daemon.js`
@@ -280,7 +279,7 @@ Before install, source-tree direct runs can fall back to `templates/config/runti
 ## Install / Apply / Verify Contract
 - `scripts/install.ps1` and `scripts/install.sh` are the one-click entrypoints. When you pass `-WorkspaceRoot <repo-root>`, they install the flat runtime, regenerate onboarding artifacts, and auto-apply supported client integrations.
 - `install-client-integrations.ps1` is the official side-effecting apply command for updating supported home-scoped client configs plus workspace overlays without reinstalling the runtime.
-- `verify-integrations.ps1` and `verify-integrations.sh` remain only as compatibility aliases for that apply step. They still mutate configs.
+- `verify-integrations.ps1` and `verify-integrations.sh` are compatibility aliases (now archived); use `install-client-integrations.ps1` directly.
 - `verify-client-integrations.ps1` and `verify-client-integrations.sh` are the hard validation gates.
 - The default applied server set is every manifest entry with `mode=shared`, plus shared `playwright`. Shared `MiniMax` is opt-in through `-IncludeOptionalServers` or `-IncludeOptionalClientServers`.
 
@@ -431,7 +430,6 @@ Use the included probe and benchmark scripts before doing any full reindex.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - [`docs/MEMORY-ARCHITECTURE-CRITIQUE.md`](docs/MEMORY-ARCHITECTURE-CRITIQUE.md)
 - [`docs/DEPLOYMENT-MATRIX.md`](docs/DEPLOYMENT-MATRIX.md)
-- [`docs/FILES.md`](docs/FILES.md)
 - [`docs/FAQ.md`](docs/FAQ.md)
 - [`docs/NEW-AGENT-INTEGRATION.md`](docs/NEW-AGENT-INTEGRATION.md)
 - [`docs/INTEGRATION-MODES.md`](docs/INTEGRATION-MODES.md)
