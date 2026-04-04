@@ -66,6 +66,7 @@ $HandoffPackJsonPath = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "
 $AutoDreamJsonPath = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "generated", "AUTO-DREAM.json")
 $StructuredRoot = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "structured")
 $BlackboardDaemonScript = Resolve-BusPath -Candidates @("obsidian-blackboard-daemon.js", "ops/obsidian-blackboard-daemon.js")
+$MD_PATH = Join-Path $VaultRoot "02-KB\WORKING.md"
 $OpenClawSyncScript = Resolve-BusPath -Candidates @("sync-openclaw-to-obsidian.js", "ops/sync-openclaw-to-obsidian.js")
 $BuildHandoffPackScript = Resolve-BusPath -Candidates @("build-handoff-pack.js", "ops/build-handoff-pack.js")
 $BuildMemoryLayersScript = Resolve-BusPath -Candidates @("build-memory-layers.js", "ops/build-memory-layers.js")
@@ -712,6 +713,12 @@ function Ensure-ObsidianBlackboardDaemon {
 
     if ($procs.Count -eq 1) {
         return ""
+    }
+
+    # Verify WORKING.md is still accessible before spawning
+    if (-not (Test-Path -LiteralPath $MD_PATH -PathType Leaf)) {
+        Write-Warning "[watchdog] WORKING.md not accessible at ${MD_PATH}, skipping blackboard-daemon start"
+        return "blackboard-daemon-skipped:working-md-missing"
     }
 
     Start-NodeProcess -ScriptPath $BlackboardDaemonScript | Out-Null

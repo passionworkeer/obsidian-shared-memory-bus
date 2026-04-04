@@ -852,9 +852,16 @@ function Acquire-DreamLock {
         $lockStream = [System.IO.File]::Open($LockPath, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
         Write-LockMeta -Stream $lockStream
         return $lockStream
-    } catch [System.IO.IOException] {
+    } catch {
+        # File.Open failed (IO conflict) — try to read lock metadata via a FileStream with shared-read
         if (Test-Path -LiteralPath $LockPath -PathType Leaf) {
-            $content = Read-Text -Path $LockPath
+            $content = ""
+            try {
+                $content = [System.IO.File]::ReadAllText($LockPath, [System.Text.Encoding]::UTF8)
+            } catch {
+                # Can't read either — another process holds exclusive lock, give up
+                return $null
+            }
             if (-not [string]::IsNullOrWhiteSpace($content)) {
                 try {
                     $meta = $content | ConvertFrom-Json
