@@ -109,6 +109,22 @@ function buildFileStamp(filePath) {
     return "__missing__";
   }
 
+  const stat = fs.statSync(filePath);
+  if (stat.isDirectory()) {
+    // For directories (e.g. daily logs), hash the sorted entry names + mtimes
+    const entries = fs.readdirSync(filePath).sort();
+    const meta = entries.map((e) => {
+      try {
+        const s = fs.statSync(path.join(filePath, e));
+        return `${e}:${s.mtimeMs}:${s.size}`;
+      } catch {
+        return `${e}:missing`;
+      }
+    });
+    const body = `${path.basename(filePath)}/dir:${sha1(meta.join("|"))}:${entries.length}entries`;
+    return body;
+  }
+
   const body = fs.readFileSync(filePath, "utf8");
   return `${path.basename(filePath)}:${sha1(body)}:${Buffer.byteLength(body, "utf8")}`;
 }
@@ -236,6 +252,16 @@ function analyzeStructuredLayer(filePath, layerDefinition, detailLimit = 12) {
   };
 
   if (!summary.exists) {
+    return summary;
+  }
+
+  const stat = fs.statSync(filePath);
+  if (stat.isDirectory()) {
+    // Skip directory-level analysis for layered/daily-log directories
+    summary.recordCount = 0;
+    summary.validRecordCount = 0;
+    summary.invalidRecordCount = 0;
+    summary.malformedLineCount = 0;
     return summary;
   }
 
