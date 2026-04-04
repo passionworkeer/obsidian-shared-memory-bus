@@ -70,6 +70,7 @@ $MD_PATH = Join-Path $VaultRoot "02-KB\WORKING.md"
 $OpenClawSyncScript = Resolve-BusPath -Candidates @("sync-openclaw-to-obsidian.js", "ops/sync-openclaw-to-obsidian.js")
 $BuildHandoffPackScript = Resolve-BusPath -Candidates @("build-handoff-pack.js", "ops/build-handoff-pack.js")
 $BuildMemoryLayersScript = Resolve-BusPath -Candidates @("build-memory-layers.js", "ops/build-memory-layers.js")
+$GenerateHygieneScript = Resolve-BusPath -Candidates @("generate-memory-hygiene-report.js", "ops/generate-memory-hygiene-report.js")
 $MemoryDreamScript = Resolve-BusPath -Candidates @("run-memory-dream.ps1", "ops/run-memory-dream.ps1")
 $BackgroundExtractionScript = Resolve-BusPath -Candidates @("run-background-extraction.ps1", "ops/run-background-extraction.ps1")
 $EmbeddingsScript = Resolve-BusPath -Candidates @("generate-embeddings.js", "bus/generate-embeddings.js")
@@ -836,6 +837,39 @@ function Invoke-BuildHandoffPack {
     }
 }
 
+function Invoke-GenerateHygieneReport {
+    if (-not (Test-Path -LiteralPath $GenerateHygieneScript -PathType Leaf)) {
+        return $false
+    }
+
+    try {
+        $proc = Start-NodeProcess -ScriptPath $GenerateHygieneScript -PassThru
+        $waitResult = Wait-ProcessWithHeartbeat `
+            -Process $proc `
+            -TimeoutSeconds 30 `
+            -Reason ("hygiene-report") `
+            -LastSyncAt (Get-LastKnownSyncAt)
+        if ($waitResult.timedOut) {
+            try {
+                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            } catch {
+            }
+            Write-State -Running $true -LastReason ("hygiene-report-timeout") -ChangedSpecs @()
+            return $false
+        }
+
+        if ($waitResult.exitCode -ne 0) {
+            Write-State -Running $true -LastReason ("hygiene-report-exitcode-" + $waitResult.exitCode) -ChangedSpecs @()
+            return $false
+        }
+
+        return $true
+    } catch {
+        Write-State -Running $true -LastReason ("hygiene-report-failed:" + $_) -ChangedSpecs @()
+        return $false
+    }
+}
+
 function Invoke-MemoryDream {
     param(
         [Parameter(Mandatory = $true)][string]$Reason,
@@ -943,6 +977,9 @@ function Invoke-ArtifactCatchup {
 
     # Background extraction: every $BgExtractionIntervalHours hours, scan for forgotten sessions
     [void](Invoke-BackgroundExtraction)
+
+    # Generate memory hygiene report
+    [void](Invoke-GenerateHygieneReport)
 
     return $lastSyncAt
 }

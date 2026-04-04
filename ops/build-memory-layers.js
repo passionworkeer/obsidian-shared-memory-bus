@@ -129,6 +129,71 @@ function normalizeSpaces(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
+// ---------------------------------------------------------------------------
+// @include directive resolver
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve @include directives in markdown content.
+ * Syntax: @include filename.md
+ * Resolves relative to baseDir.
+ * Nested @include supported up to depth 5.
+ *
+ * @param {string} content
+ * @param {string} baseDir  - directory to resolve relative paths against
+ * @param {number} [maxDepth=5]
+ * @param {number} [currentDepth=0]
+ * @returns {{ content: string, includes_resolved: string[], depth: number }}
+ */
+function resolveIncludes(content, baseDir, maxDepth = 5, currentDepth = 0) {
+  if (currentDepth >= maxDepth) {
+    process.stderr.write(`[resolve-include] max depth ${maxDepth} reached, stopping\n`);
+    return { content, includes_resolved: [], depth: currentDepth };
+  }
+
+  const includePattern = /^@include\s+(.+)$/gm;
+  const includes_resolved = [];
+  let resolved = content;
+  let match;
+
+  // Reset lastIndex before iteration
+  includePattern.lastIndex = 0;
+  while ((match = includePattern.exec(content)) !== null) {
+    const includePath = match[1].trim();
+    const fullPath = path.isAbsolute(includePath)
+      ? includePath
+      : path.resolve(baseDir, includePath);
+
+    if (!fs.existsSync(fullPath)) {
+      process.stderr.write(`[resolve-include] file not found: ${fullPath}\n`);
+      continue;
+    }
+
+    let includedContent;
+    try {
+      includedContent = fs.readFileSync(fullPath, "utf8");
+    } catch (err) {
+      process.stderr.write(`[resolve-include] read error ${fullPath}: ${err.message}\n`);
+      continue;
+    }
+
+    includes_resolved.push(includePath);
+
+    // Recursively resolve nested includes
+    const nested = resolveIncludes(
+      includedContent,
+      path.dirname(fullPath),
+      maxDepth,
+      currentDepth + 1
+    );
+
+    resolved = resolved.replace(match[0], nested.content);
+    includes_resolved.push(...nested.includes_resolved);
+  }
+
+  return { content: resolved, includes_resolved, depth: currentDepth };
+}
+
 function parseTimestamp(rawValue) {
   const candidate = normalizeSpaces(rawValue);
   if (!candidate) {
@@ -836,6 +901,9 @@ function appendDailyLogs(newRecords, dryRun = false) {
       continue;
     }
 
+    // Ensure log directory exists before any file I/O
+    ensureDirectory(logDir);
+
     // Atomic write: read existing, append to temp, fsync, rename
     const existingContent = fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : "";
     const newLines = newEntries.map((e) => JSON.stringify(e)).join("\n") + "\n";
@@ -1145,6 +1213,87 @@ function buildScopedHighlights(records, limitPerScope = 3) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// MEMORY-INDEX.md — rich navigation index
+// ---------------------------------------------------------------------------
+
+/**
+ * Build MEMORY-INDEX.md — a human-navigable table of all durable memory files.
+ * Inspired by restored-cli's MEMORY.md index format.
+ *
+ * @param {object} layers - the memory layers object
+ * @returns {string} markdown content for MEMORY-INDEX.md
+ */
+function buildMemoryIndex(layers) {
+  const durableRecords = [
+    ...(layers.sharedInbox || []),
+    ...(layers.sessionMemory || []),
+    ...(layers.sharedEvents || []),
+    ...(layers.taskMemory || []),
+  ].filter((r) => r.scope !== "task" && r.scope !== "event");
+
+  // Group by scope
+  const byScope = {};
+  for (const rec of durableRecords) {
+    const scope = normalizeSpaces(rec.scope || "summary") || "summary";
+    if (!byScope[scope]) byScope[scope] = [];
+    byScope[scope].push(rec);
+  }
+
+  const lines = [
+    "# Memory Index",
+    "",
+    `> Auto-generated at ${new Date().toISOString()}`,
+    `> ${durableRecords.length} durable records across ${Object.keys(byScope).length} scopes`,
+    "",
+  ];
+
+  const scopeLabels = {
+    user: "用户偏好",
+    feedback: "反馈与规则",
+    project: "项目上下文",
+    reference: "外部引用",
+    summary: "会话摘要",
+    run: "运行记录",
+    job: "任务作业",
+    journal: "日志记录",
+  };
+
+  for (const [scope, records] of Object.entries(byScope)) {
+    const label = scopeLabels[scope] || scope;
+    lines.push(`## ${label} (${scope})`);
+    lines.push("");
+
+    for (const rec of records.slice(0, 20)) {
+      const title = normalizeSpaces(rec.title || rec.id || "(untitled)") || "(untitled)";
+      const desc = normalizeSpaces(
+        (rec.description || String(rec.content || "").substring(0, 60)).replace(/[#*`_~\[\]]/g, "")
+      );
+      const id = normalizeSpaces(rec.id || "") || "";
+      const slug = id.replace(/[^a-zA-Z0-9]/g, "-").substring(0, 20);
+      lines.push(`- [${title}](#${slug}) — ${desc}...`);
+    }
+
+    if (records.length > 20) {
+      lines.push(`- _... 还有 ${records.length - 20} 条记录_`);
+    }
+    lines.push("");
+  }
+
+  lines.push("---");
+  lines.push("");
+  lines.push("## 生成文件导航");
+  lines.push("");
+  lines.push("- [GLOBAL-CONTEXT.body.md](./GLOBAL-CONTEXT.body.md) — 全局上下文主体");
+  lines.push("- [AUTO-DREAM.md](./AUTO-DREAM.md) — 梦境整合摘要");
+  lines.push("- [HANDOFF.md](./HANDOFF.md) — 交接包");
+  lines.push("- [MEMORY-LAYERS.md](./MEMORY-LAYERS.md) — 层级概览");
+  lines.push("");
+  lines.push("> Memory hygiene stats: see `00-System/ai-memory/generated/memory_hygiene_report.json` if present");
+
+  return lines.join("\n");
+}
+
 function buildLayerSummary(layers) {
   const generatedAt = new Date().toISOString();
   const artifactMetadata = buildGeneratedArtifactMetadata({
@@ -1370,8 +1519,28 @@ function main() {
 
   // Token-budgeted GLOBAL-CONTEXT body + meta (body is wrapped by memory-bus.ps1)
   const globalContext = buildGlobalContext(layers);
-  writeText(GLOBAL_CONTEXT_BODY_MD, globalContext.bodyMarkdown);
+
+  // Append @include directives so tools that understand the directive can
+  // lazily pull in AUTO-DREAM and HANDOFF without duplicating content.
+  const bodyWithIncludes = [
+    globalContext.bodyMarkdown.trimEnd(),
+    "",
+    "---",
+    "## 更多详情",
+    "",
+    "@include AUTO-DREAM.md",
+    "@include HANDOFF.md",
+    "",
+  ].join("\n");
+
+  writeText(GLOBAL_CONTEXT_BODY_MD, bodyWithIncludes);
   writeText(GLOBAL_CONTEXT_META_JSON, `${JSON.stringify(globalContext.meta, null, 2)}\n`);
+
+  // Rich navigable MEMORY-INDEX.md
+  const memoryIndex = buildMemoryIndex(layers);
+  const memoryIndexPath = path.join(GENERATED_ROOT, "MEMORY-INDEX.md");
+  writeText(memoryIndexPath, memoryIndex);
+  process.stderr.write(`[memory-index] wrote ${memoryIndexPath} (${memoryIndex.length} chars)\n`);
 
   process.stdout.write(
     JSON.stringify(
@@ -1389,6 +1558,7 @@ function main() {
           globalContextMarkdown: GLOBAL_CONTEXT_MD,
           globalContextMetaJson: GLOBAL_CONTEXT_META_JSON,
           globalContextBodyMarkdown: GLOBAL_CONTEXT_BODY_MD,
+          memoryIndexMarkdown: memoryIndexPath,
         },
       },
       null,
