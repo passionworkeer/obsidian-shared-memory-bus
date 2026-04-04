@@ -508,7 +508,9 @@ function New-TypedDurableQueueItems {
         [Parameter(Mandatory = $false)][hashtable]$ExistingByKey = @{},
         [Parameter(Mandatory = $false)][System.Collections.Generic.HashSet[string]]$DurableContentHashSet,
         [int]$MaxPromotions = 8,
-        [int]$MaxRefresh = 8
+        [int]$MaxRefresh = 8,
+        $PromoteMaxPerScope = @{},
+        $RefreshMaxPerScope = @{}
     )
 
     $promotions = New-Object System.Collections.Generic.List[object]
@@ -516,7 +518,10 @@ function New-TypedDurableQueueItems {
     $seenPromotions = @{}
     $seenRefresh = @{}
 
-    foreach ($record in @($CandidateRecords | Sort-Object { [string]$_.t } -Descending)) {
+    $sortedCandidates = @($CandidateRecords | Sort-Object { [string]$_.id } | Sort-Object { try { [double]$_.sourceConfidence } catch { 0.0 } } -Descending)
+    $scopeCounts = @{}
+    $refreshScopeCounts = @{}
+    foreach ($record in $sortedCandidates) {
         $targetScope = Get-DurableTargetScope -Record $record
         if ([string]::IsNullOrWhiteSpace($targetScope)) {
             continue
@@ -542,8 +547,17 @@ function New-TypedDurableQueueItems {
             $hashDedup = $null -ne $DurableContentHashSet -and $DurableContentHashSet.Contains($sourceContentHash.ToLowerInvariant())
             $passesDedup = -not $idDedup -and -not $hashDedup
             $atMax = $promotions.Count -ge $MaxPromotions
+            $scopeCap = $MaxPromotions
+            if ($null -ne $PromoteMaxPerScope -and $PromoteMaxPerScope.Count -gt 0) {
+                $v = $null
+                try { $v = $PromoteMaxPerScope[$targetScope] } catch {}
+                if ($null -ne $v -and $v -gt 0) { $scopeCap = $v }
+            }
+            $currentScopeCount = 0
+            if ($scopeCounts.ContainsKey($targetScope)) { $currentScopeCount = $scopeCounts[$targetScope] }
+            $scopeAtMax = $currentScopeCount -ge $scopeCap
             $keySeen = $seenPromotions.ContainsKey($key)
-            $wouldSkip = $atMax -or $keySeen
+            $wouldSkip = $atMax -or $scopeAtMax -or $keySeen
             if ($wouldSkip) {
                 continue
             }
@@ -552,6 +566,8 @@ function New-TypedDurableQueueItems {
             }
             if ($null -ne $DurableContentHashSet) { $DurableContentHashSet.Add($sourceContentHash.ToLowerInvariant()) | Out-Null }
             $seenPromotions[$key] = $true
+            $currentScopeCount = if ($scopeCounts.ContainsKey($targetScope)) { $scopeCounts[$targetScope] } else { 0 }
+            $scopeCounts[$targetScope] = $currentScopeCount + 1
             $promotions.Add([ordered]@{
                 tool = [string]$record.tool
                 title = [string]$record.title
@@ -571,7 +587,17 @@ function New-TypedDurableQueueItems {
             continue
         }
 
-        if ($refresh.Count -ge $MaxRefresh -or $seenRefresh.ContainsKey($key)) {
+        $refreshAtMax = $refresh.Count -ge $MaxRefresh
+        $refreshScopeCap = $MaxRefresh
+        if ($null -ne $RefreshMaxPerScope -and $RefreshMaxPerScope.Count -gt 0) {
+            $rv = $null
+            try { $rv = $RefreshMaxPerScope[$targetScope] } catch {}
+            if ($null -ne $rv -and $rv -gt 0) { $refreshScopeCap = $rv }
+        }
+        $currentRefreshScopeCount = 0
+        if ($refreshScopeCounts.ContainsKey($targetScope)) { $currentRefreshScopeCount = $refreshScopeCounts[$targetScope] }
+        $refreshScopeAtMax = $currentRefreshScopeCount -ge $refreshScopeCap
+        if ($refreshAtMax -or $refreshScopeAtMax -or $seenRefresh.ContainsKey($key)) {
             continue
         }
 
@@ -589,6 +615,8 @@ function New-TypedDurableQueueItems {
         }
         if ($null -ne $DurableContentHashSet) { $DurableContentHashSet.Add($refreshContentHash) | Out-Null }
         $seenRefresh[$key] = $true
+        $currentRefreshScopeCount = if ($refreshScopeCounts.ContainsKey($targetScope)) { $refreshScopeCounts[$targetScope] } else { 0 }
+        $refreshScopeCounts[$targetScope] = $currentRefreshScopeCount + 1
         $refresh.Add([ordered]@{
             tool = [string]$record.tool
             title = [string]$record.title
@@ -667,6 +695,20 @@ function Build-CountMap {
 
 $LockExpiryMinutes = 60
 
+$DurablePromoteMaxPerScope = @{
+    user      = 3
+    feedback  = 3
+    project   = 4
+    reference = 2
+}
+
+$DurableRefreshMaxPerScope = @{
+    user      = 2
+    feedback  = 2
+    project   = 3
+    reference = 1
+}
+
 function Write-TypedDurableJsonl {
     param(
         [object[]]$PromotionQueue = @(),
@@ -677,6 +719,7 @@ function Write-TypedDurableJsonl {
     )
 
     $results = New-Object System.Collections.Generic.List[object]
+    $conflicts = New-Object System.Collections.Generic.List[object]
     $existingRecords = @(Get-JsonLines -Path $TargetPath)
     $existingByKey = @{}
     foreach ($rec in $existingRecords) {
@@ -710,6 +753,7 @@ function Write-TypedDurableJsonl {
         $inExisting = $existingByKey.ContainsKey($newId)
         $conflictWith = @()
         $action = "append"
+        $conflictExistingRecord = $null
 
         if ($inExisting) {
             $existingRecord = $existingByKey[$newId]
@@ -719,6 +763,7 @@ function Write-TypedDurableJsonl {
             } elseif (-not [string]::IsNullOrWhiteSpace($existingHash)) {
                 $conflictWith = @([string]$existingRecord.id)
                 $action = "append-conflict"
+                $conflictExistingRecord = $existingRecord
             } else {
                 $existingContent = SafeProp $existingRecord "content"
                 $existingComputedHash = Get-ContentHash -Text $existingContent
@@ -727,6 +772,7 @@ function Write-TypedDurableJsonl {
                 } else {
                     $conflictWith = @([string]$existingRecord.id)
                     $action = "append-conflict"
+                    $conflictExistingRecord = $existingRecord
                 }
             }
         }
@@ -751,6 +797,33 @@ function Write-TypedDurableJsonl {
         }
         if ($conflictWith.Count -gt 0) {
             $promotionMeta["conflict_with"] = $conflictWith
+        }
+        if ($null -ne $conflictExistingRecord) {
+            $existingConfRaw = SafeProp $conflictExistingRecord.metadata.promotion "source_confidence"
+            $existingConf = 0.0
+            if ($null -ne $existingConfRaw) {
+                try { $existingConf = [double]$existingConfRaw } catch {}
+            }
+            $newConf = 0.0
+            try { $newConf = [double]$item.sourceConfidence } catch {}
+            if ($newConf -gt $existingConf) {
+                $promotionMeta["supersedes"] = [string]$conflictExistingRecord.id
+                $conflicts.Add([ordered]@{
+                    newId = $newId
+                    supersededId = [string]$conflictExistingRecord.id
+                    newConfidence = $newConf
+                    existingConfidence = $existingConf
+                    outcome = "superseded"
+                }) | Out-Null
+            } else {
+                $conflicts.Add([ordered]@{
+                    newId = $newId
+                    supersededId = [string]$conflictExistingRecord.id
+                    newConfidence = $newConf
+                    existingConfidence = $existingConf
+                    outcome = "kept_original"
+                }) | Out-Null
+            }
         }
 
         $newRecord = [ordered]@{
@@ -779,7 +852,21 @@ function Write-TypedDurableJsonl {
         }
     }
 
-    return $results.ToArray()
+    $totalConflicts = $conflicts.Count
+    $supersededCount = 0
+    $keptOriginalCount = 0
+    foreach ($c in $conflicts) {
+        if ($c.outcome -eq "superseded") { $supersededCount++ } else { $keptOriginalCount++ }
+    }
+    return [ordered]@{
+        results = $results.ToArray()
+        conflicts = $conflicts.ToArray()
+        conflictResolution = [ordered]@{
+            total_conflicts = $totalConflicts
+            superseded = $supersededCount
+            kept_original = $keptOriginalCount
+        }
+    }
 }
 
 function Merge-DurableMemoryIndex {
@@ -1036,7 +1123,7 @@ try {
             }
         }
     }
-    $typedDurableQueue = New-TypedDurableQueueItems -CandidateRecords ($sessionRecords + $eventRecords + $taskMemoryRecords) -BaselineMap $durableMap -ExistingByKey $existingByKey -DurableContentHashSet $durableContentHashSet -MaxPromotions 8 -MaxRefresh 8
+    $typedDurableQueue = New-TypedDurableQueueItems -CandidateRecords ($sessionRecords + $eventRecords + $taskMemoryRecords) -BaselineMap $durableMap -ExistingByKey $existingByKey -DurableContentHashSet $durableContentHashSet -MaxPromotions 8 -MaxRefresh 8 -PromoteMaxPerScope $DurablePromoteMaxPerScope -RefreshMaxPerScope $DurableRefreshMaxPerScope
     $promotionCandidates = @($typedDurableQueue.promotions)
     $refreshTargets = @($typedDurableQueue.refresh)
     $durableByScope = Build-CountMap -Records $durableRecords -PropertyName "scope"
@@ -1065,15 +1152,18 @@ try {
         $sharedInboxPath = Join-Path $StructuredRoot "shared-inbox.jsonl"
         $dreamInboxPath = Join-Path $StructuredRoot "dream-inbox.jsonl"
 
-        $writebackResults = Write-TypedDurableJsonl `
+        $writebackRaw = Write-TypedDurableJsonl `
             -PromotionQueue $promotionCandidates `
             -RefreshQueue $refreshTargets `
             -AllRecordsByPath $allRecordsByPath `
             -TargetPath $dreamInboxPath `
             -DryRun:$DryRun
+        $writebackResultsArray = @($writebackRaw.results)
+        $writebackResults = $writebackResultsArray
+        $writebackConflictResolution = $writebackRaw.conflictResolution
 
         $memoryIndexResults = Merge-DurableMemoryIndex `
-            -WriteResults $writebackResults `
+            -WriteResults $writebackResultsArray `
             -IndexPath $MemoryIndexPath `
             -DryRun:$DryRun
     }
@@ -1292,8 +1382,18 @@ try {
                         dryRun = [bool]$DryRun
                     }
                 } else { $null }
+                conflictResolution = $writebackConflictResolution
             }
         } else { $null }
+    }
+
+    $jsonPayload.promotionQueueScopeDiversity = @{}
+    foreach ($scope in @('user', 'feedback', 'project', 'reference')) {
+        $count = 0
+        foreach ($item in $typedDurableQueue.promotions) {
+            if ([string]$item.targetScope -eq $scope) { $count++ }
+        }
+        $jsonPayload.promotionQueueScopeDiversity[$scope] = $count
     }
 
     Write-Text -Path $DreamJsonPath -Content (($jsonPayload | ConvertTo-Json -Depth 8) + "`n")

@@ -1,0 +1,8 @@
+{"query": "我的代码风格偏好", "relevant_ids": [], "route": "durable", "relevance_scores": {}}
+{"query": "当前项目有什么待解决的bug", "relevant_ids": [], "route": "task", "relevance_scores": {}}
+{"query": "上次重构的改动内容", "relevant_ids": [], "route": "recent", "relevance_scores": {}}
+{"query": "promotion pipeline是怎么工作的", "relevant_ids": [], "route": "reference", "relevance_scores": {}}
+{"query": "全局记忆里有啥", "relevant_ids": [], "route": "mixed", "relevance_scores": {}}
+{"query": "今天发生了哪些事", "relevant_ids": [], "route": "recent", "relevance_scores": {}}
+{"query": "这个项目的整体架构是什么", "relevant_ids": [], "route": "durable", "relevance_scores": {}}
+{"query": "openclaw最近的运行记录", "relevant_ids": [], "route": "task", "relevance_scores": {}}
