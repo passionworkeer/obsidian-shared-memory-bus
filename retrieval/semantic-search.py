@@ -28,6 +28,7 @@ from embedding_providers import (
     get_transformer_model_name,
     normalize_embedding_adapter,
 )
+from ops.redaction import REDACTION_CONFIG, redact_sensitive
 from runtime_support import first_non_empty_env, normalize_bool, normalize_int, resolve_embedding_runtime, resolve_vault_root
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -476,6 +477,61 @@ def parse_timestamp_seconds(value: str) -> float:
         return 0.0
 
 
+def calculate_age_days(updated_at: str) -> float:
+    """
+    Parse an ISO timestamp and return the number of days since that update.
+
+    Args:
+        updated_at: ISO 8601 timestamp string (e.g. "2026-03-05T14:30:00" or "2026-03-05T14:30:00Z")
+
+    Returns:
+        float: Days elapsed since the timestamp, relative to the current UTC time.
+               Returns 0.0 if the timestamp cannot be parsed or is in the future.
+    """
+    if not updated_at:
+        return 0.0
+    try:
+        normalized = updated_at.strip().replace("Z", "+00:00")
+        ts = datetime.datetime.fromisoformat(normalized).timestamp()
+    except Exception:
+        return 0.0
+    now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+    age_seconds = now - ts
+    if age_seconds < 0:
+        return 0.0
+    return age_seconds / 86400.0
+
+
+def temporal_decay_score(base_score: float, age_days: float, half_life: float = 30.0) -> float:
+    """
+    Apply exponential temporal decay to a relevance score.
+
+    The decay factor halves every `half_life` days:
+        decay_factor = 0.5 ^ (age_days / half_life)
+
+    Formula: decayed_score = base_score * decay_factor
+
+    Args:
+        base_score: The raw relevance score before decay.
+        age_days:   How many days old the entry is.
+        half_life:  Number of days after which the score drops to 50%%. Default 30.
+
+    Returns:
+        float: base_score multiplied by the decay factor.
+               Returns base_score unchanged when half_life is 0 or negative (decay disabled).
+
+    Examples:
+        30 days old, half_life=30  -> 0.5x
+        60 days old, half_life=30  -> 0.25x
+        90 days old, half_life=30  -> 0.125x
+        0 days old                 -> 1.0x
+    """
+    if half_life <= 0.0 or age_days < 0.0:
+        return base_score
+    decay_factor = 0.5 ** (age_days / half_life)
+    return base_score * decay_factor
+
+
 def count_entries_by_layer(entries: List[dict]) -> Dict[str, int]:
     counts: Dict[str, int] = {layer: 0 for layer in KNOWN_LAYERS}
     for entry in entries:
@@ -595,6 +651,7 @@ def score_entry(
     route: Dict[str, object],
     bm25_norm: Dict[str, float],
     dense_norm: Dict[str, float],
+    temporal_decay: Optional[Dict[str, object]] = None,
 ) -> Optional[Tuple[float, Dict[str, object]]]:
     entry_id = str(entry.get("id", "")).strip()
     bm25_component = float(bm25_norm.get(entry_id, 0.0))
@@ -624,6 +681,15 @@ def score_entry(
     coverage_weight = 1.04 if effective_mode == "hybrid" and bm25_component > 0 and dense_component > 0 else 1.0
     final_score = retrieval_score * layer_weight * scope_weight * source_kind_weight * freshness_weight * state_weight * coverage_weight
 
+    # Apply temporal decay: newer content is favored over older content.
+    decay_factor = 1.0
+    if temporal_decay and bool(temporal_decay.get("enabled", False)):
+        updated_at = str(entry.get("t", "")).strip()
+        half_life = float(temporal_decay.get("half_life_days", 30.0))
+        age_days = calculate_age_days(updated_at)
+        decay_factor = 0.5 ** (age_days / half_life) if half_life > 0 else 1.0
+        final_score = final_score * decay_factor
+
     return (
         final_score,
         {
@@ -634,6 +700,7 @@ def score_entry(
             "freshnessWeight": freshness_weight,
             "taskStateWeight": state_weight,
             "coverageWeight": coverage_weight,
+            "decayFactor": round(decay_factor, 6),
         },
     )
 
@@ -700,6 +767,7 @@ def rerank_entries(
     bm25_map: Dict[str, float],
     dense_map: Dict[str, float],
     query_text_lower: str = "",
+    temporal_decay: Optional[Dict[str, object]] = None,
 ) -> Tuple[List[Tuple[str, float]], Dict[str, Dict[str, object]], int]:
     candidate_ids = set()
     if effective_mode in {"bm25", "hybrid"}:
@@ -717,7 +785,7 @@ def rerank_entries(
         entry = entries_by_id.get(entry_id)
         if entry is None:
             continue
-        scored = score_entry(entry, effective_mode, route, bm25_norm, dense_norm)
+        scored = score_entry(entry, effective_mode, route, bm25_norm, dense_norm, temporal_decay)
         if scored is None:
             continue
         final_score, meta = scored
@@ -820,10 +888,22 @@ def build_entry(payload: dict) -> List[dict]:
     Returns a list containing one parent entry (field='content') plus one entry
     per fact (field='fact') and one per concept (field='concept').  Records
     without facts/concepts produce only the parent entry.
+
+    PII redaction is applied to ``content`` and ``title`` fields before any other
+    processing (guarded by ``REDACTION_CONFIG.enabled``).  The noise filter always
+    evaluates the original (pre-redaction) raw text so that redaction placeholders
+    do not silently bypass noise detection.
     """
+    # Preserve originals for the noise filter; redact in-place for the rest.
+    raw_title = normalize_spaces(str(payload.get("title", "")))
+    raw_content = normalize_spaces(str(payload.get("content", "")))
+
+    if REDACTION_CONFIG.enabled:
+        payload = {**payload, "title": redact_sensitive(raw_title), "content": redact_sensitive(raw_content)}
+
     title = normalize_spaces(str(payload.get("title", "")))
     content = normalize_spaces(str(payload.get("content", "")))
-    raw_text = normalize_spaces(" ".join(filter(None, [title, content])))
+    raw_text = normalize_spaces(" ".join(filter(None, [raw_title, raw_content])))
     if is_noise(raw_text):
         return []
 
@@ -1226,6 +1306,111 @@ def format_results(
     return results
 
 
+def mmr_rerank(
+    entries_by_id: Dict[str, dict],
+    relevance_scores: Dict[str, float],
+    top_k: int,
+    lambda_param: float = 0.7,
+) -> List[Tuple[str, float]]:
+    """
+    Maximal Marginal Relevance (MMR) diversity reranking.
+
+    MMR formula: score(i) = λ * rel(i) - (1-λ) * max(sim(i, s)) for s in selected
+
+    Where:
+    - rel(i) = relevance score of candidate i (normalized to [0,1])
+    - sim(i, s) = cosine similarity between embeddings of i and selected item s
+    - λ = trade-off parameter (0 = pure diversity, 1 = pure relevance)
+
+    Selection algorithm:
+    1. Start with the highest relevance item
+    2. For each subsequent pick, choose the item that maximizes MMR score
+    3. Repeat until maxResults reached
+
+    Args:
+        entries_by_id: Map of entry_id -> entry dict (must contain embedding if available)
+        relevance_scores: Map of entry_id -> relevance score (higher = more relevant)
+        top_k: Maximum number of results to return
+        lambda_param: Trade-off between relevance (λ) and diversity (1-λ), default 0.7
+
+    Returns:
+        List of (entry_id, mmr_score) tuples, ordered by selection order
+    """
+    if not relevance_scores or top_k <= 0:
+        return []
+
+    # Clamp lambda to [0, 1]
+    lambda_param = max(0.0, min(1.0, lambda_param))
+
+    # Load embeddings index to get embedding vectors
+    embeddings_index = load_embeddings_index()
+
+    # Build entry_id -> embedding lookup
+    entry_embeddings: Dict[str, List[float]] = {}
+    for entry_id, entry in entries_by_id.items():
+        record_id = str(entry.get("record_id", entry_id))
+        # Try to get embedding from index
+        if record_id in embeddings_index:
+            embedding_data = embeddings_index[record_id]
+            embedding = embedding_data.get("embedding", [])
+            if embedding:
+                entry_embeddings[entry_id] = [float(v) for v in embedding]
+
+    # Normalize relevance scores to [0, 1]
+    max_rel = max(float(v) for v in relevance_scores.values())
+    if max_rel <= 0:
+        return []
+
+    normalized_rel: Dict[str, float] = {
+        entry_id: float(score) / max_rel
+        for entry_id, score in relevance_scores.items()
+        if float(score) > 0
+    }
+
+    # MMR selection
+    selected: List[Tuple[str, float]] = []
+    selected_ids: set = set()
+    remaining = set(normalized_rel.keys())
+
+    while remaining and len(selected) < top_k:
+        best_mmr_score = -float('inf')
+        best_entry_id = None
+
+        for entry_id in remaining:
+            rel_score = normalized_rel.get(entry_id, 0.0)
+
+            if not selected_ids:
+                # First item: pure relevance
+                mmr_score = rel_score
+            else:
+                # Calculate max similarity to already selected items
+                max_sim = 0.0
+                entry_emb = entry_embeddings.get(entry_id)
+
+                if entry_emb is not None:
+                    for sel_id, _ in selected:
+                        sel_emb = entry_embeddings.get(sel_id)
+                        if sel_emb is not None:
+                            sim = cosine_similarity(entry_emb, sel_emb)
+                            max_sim = max(max_sim, sim)
+
+                # MMR formula: λ * rel(i) - (1-λ) * max_sim
+                mmr_score = lambda_param * rel_score - (1.0 - lambda_param) * max_sim
+
+            if mmr_score > best_mmr_score:
+                best_mmr_score = mmr_score
+                best_entry_id = entry_id
+
+        if best_entry_id is None:
+            break
+
+        selected.append((best_entry_id, best_mmr_score))
+        selected_ids.add(best_entry_id)
+        remaining.remove(best_entry_id)
+
+    return selected
+
+
 def normalize_request_payload(payload: Dict[str, object]) -> Dict[str, object]:
     query = normalize_spaces(str(payload.get("query", "")))
     if not query:
@@ -1246,6 +1431,29 @@ def normalize_request_payload(payload: Dict[str, object]) -> Dict[str, object]:
     if route not in ROUTE_VALUES:
         route = "auto"
 
+    # MMR configuration
+    mmr_config = payload.get("mmr", {})
+    if isinstance(mmr_config, dict):
+        mmr_enabled = normalize_bool(mmr_config.get("enabled", False), fallback=False)
+        mmr_lambda = float(mmr_config.get("lambda", mmr_config.get("lambda_param", 0.7)))
+    else:
+        # Support legacy top-level mmr_enabled, mmr_lambda
+        mmr_enabled = normalize_bool(payload.get("mmr_enabled", False), fallback=False)
+        mmr_lambda = float(payload.get("mmr_lambda", 0.7))
+
+    # Temporal decay configuration: favor newer content in results.
+    td_config = payload.get("temporal_decay", {})
+    if isinstance(td_config, dict):
+        td_enabled = normalize_bool(td_config.get("enabled", False), fallback=False)
+        td_half_life = normalize_int(td_config.get("half_life_days", 30), fallback=30, minimum=1)
+    else:
+        # Support legacy top-level boolean
+        td_enabled = normalize_bool(td_config, fallback=False)
+        td_half_life = normalize_int(payload.get("temporal_decay_half_life_days", 30), fallback=30, minimum=1)
+
+    # Clamp lambda to [0, 1]
+    mmr_lambda = max(0.0, min(1.0, mmr_lambda))
+
     return {
         "query": query,
         "top_k": top_k,
@@ -1258,6 +1466,12 @@ def normalize_request_payload(payload: Dict[str, object]) -> Dict[str, object]:
         "workspace": normalize_spaces(str(payload.get("workspace", ""))).lower(),
         "task_state": normalize_spaces(str(payload.get("task_state", payload.get("taskState", "")))).lower(),
         "prefer_summaries": normalize_bool(payload.get("prefer_summaries", payload.get("preferSummaries", False)), fallback=False),
+        "mmr_enabled": mmr_enabled,
+        "mmr_lambda": mmr_lambda,
+        "temporal_decay": {
+            "enabled": td_enabled,
+            "half_life_days": td_half_life,
+        },
     }
 
 
@@ -1398,22 +1612,33 @@ def execute_search(parsed: Dict[str, object], workspace_root: Optional[str] = No
     effective_mode = requested_mode
     fallback_reason = None
     query_lower = query.lower()
+    temporal_decay = parsed.get("temporal_decay")
+    mmr_enabled = bool(parsed.get("mmr_enabled", False))
+    mmr_lambda = float(parsed.get("mmr_lambda", 0.7))
     if requested_mode == "bm25":
-        ranked, rank_meta, candidate_count = rerank_entries(entries_by_id, "bm25", top_k, query_route, bm25_map, dense_map, query_lower)
+        ranked, rank_meta, candidate_count = rerank_entries(entries_by_id, "bm25", top_k, query_route, bm25_map, dense_map, query_lower, temporal_decay)
     elif requested_mode == "dense":
         if dense_map:
-            ranked, rank_meta, candidate_count = rerank_entries(entries_by_id, "dense", top_k, query_route, bm25_map, dense_map, query_lower)
+            ranked, rank_meta, candidate_count = rerank_entries(entries_by_id, "dense", top_k, query_route, bm25_map, dense_map, query_lower, temporal_decay)
         else:
             effective_mode = "bm25"
             fallback_reason = dense_error or "dense-unavailable"
-            ranked, rank_meta, candidate_count = rerank_entries(entries_by_id, "bm25", top_k, query_route, bm25_map, dense_map, query_lower)
+            ranked, rank_meta, candidate_count = rerank_entries(entries_by_id, "bm25", top_k, query_route, bm25_map, dense_map, query_lower, temporal_decay)
     else:
         if dense_map:
-            ranked, rank_meta, candidate_count = rerank_entries(entries_by_id, "hybrid", top_k, query_route, bm25_map, dense_map, query_lower)
+            ranked, rank_meta, candidate_count = rerank_entries(entries_by_id, "hybrid", top_k, query_route, bm25_map, dense_map, query_lower, temporal_decay)
         else:
             effective_mode = "bm25"
-            fallback_reason = dense_error or "hybrid-dense-unavailable"
-            ranked, rank_meta, candidate_count = rerank_entries(entries_by_id, "bm25", top_k, query_route, bm25_map, dense_map, query_lower)
+            fallback_reason = "hybrid-dense-unavailable"
+            ranked, rank_meta, candidate_count = rerank_entries(entries_by_id, "bm25", top_k, query_route, bm25_map, dense_map, query_lower, temporal_decay)
+
+    # Apply MMR diversity reranking if enabled (after initial ranking)
+    if mmr_enabled and ranked:
+        # Build relevance score dict from ranked results for MMR
+        relevance_scores: Dict[str, float] = {eid: score for eid, score in ranked}
+        mmr_ranked = mmr_rerank(entries_by_id, relevance_scores, top_k, mmr_lambda)
+        if mmr_ranked:
+            ranked = mmr_ranked
 
     sources: Dict[str, List[str]] = {}
     for entry_id in bm25_map:
@@ -1449,6 +1674,7 @@ def execute_search(parsed: Dict[str, object], workspace_root: Optional[str] = No
             "workspace": parsed.get("workspace"),
             "taskState": parsed.get("task_state"),
             "preferSummaries": parsed.get("prefer_summaries"),
+            "temporalDecay": parsed.get("temporal_decay"),
         },
         "entryCount": len(entries),
         "candidateCount": candidate_count,
