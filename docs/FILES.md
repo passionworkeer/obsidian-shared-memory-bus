@@ -26,7 +26,8 @@
 - `ops/sync-openclaw-to-obsidian.js`
 - `ops/sync-shared-skills.ps1`
 - `ops/verify-client-integrations.ps1`
-- `ops/verify-integrations.ps1` (compatibility alias to `ops/install-client-integrations.ps1`)
+- `ops/verify-integrations.ps1` — compatibility alias to `ops/install-client-integrations.ps1`
+- `ops/verify-client-integrations.ps1` (generated POSIX entrypoint, created at install time)
 
 ## Retrieval and Embeddings (`retrieval/`)
 - `retrieval/benchmark-architecture.py`
@@ -68,8 +69,8 @@
 
 ## Architecture Decision Records (`docs/adr/`)
 - `docs/adr/README.md` — ADR index
-- `docs/adr/ADR-001-shared-memory-architecture.md` — Superseded by ADR-002
 - `docs/adr/ADR-002-unified-memory-architecture-v2.md` — Unified architecture (OpenClaw + Claude Code + claude-mem benchmark)
+- `docs/adr/archived/ADR-001-shared-memory-architecture.md` — Superseded: original event-sourcing + dream consolidation model
 
 ## Research & Analysis (`docs/research/`)
 - `docs/research/README.md` — Research index
