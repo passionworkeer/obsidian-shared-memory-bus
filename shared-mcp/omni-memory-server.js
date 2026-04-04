@@ -862,6 +862,28 @@ function readMemoryIntegritySummary() {
   });
 }
 
+function readMemoryHygieneReport() {
+  const hygienePath = path.join(GENERATED_ROOT, "memory_hygiene_report.json");
+  if (!fs.existsSync(hygienePath)) {
+    return { ok: false, reason: "report-not-found" };
+  }
+  try {
+    const content = fs.readFileSync(hygienePath, "utf8");
+    const parsed = JSON.parse(content);
+    return {
+      ok: true,
+      generatedAt: parsed.generatedAt || "",
+      reportVersion: parsed.reportVersion || 1,
+      structuredSignature: parsed.structuredSignature || "",
+      stats: parsed.stats || {},
+      health: parsed.health || {},
+      recommendations: parsed.recommendations || [],
+    };
+  } catch (error) {
+    return { ok: false, reason: String(error?.message || error) };
+  }
+}
+
 function buildEmbeddingIndexState(runtimeSummary, embeddingsSummary) {
   const adapter = String(runtimeSummary?.adapter || runtimeSummary?.backend || "hash").trim() || "hash";
   const modelName = adapter === "hash" ? HASH_MODEL : String(runtimeSummary?.model || "").trim();
@@ -1072,6 +1094,45 @@ async function requestSearchWorker(payload, timeoutMs = 120000) {
       reject(error);
     }
   });
+}
+
+// Alias: readOptionalJson already handles missing files gracefully (returns null).
+// Used throughout as loadJsonFile for the get_memory_overview tool.
+const loadJsonFile = readOptionalJson;
+
+async function loadTaskRecords(workspaceRoot) {
+  const structuredDir = path.join(workspaceRoot, "00-System", "ai-memory", "structured");
+  const taskFile = path.join(structuredDir, "task-memory.jsonl");
+  if (!fs.existsSync(taskFile)) {
+    return [];
+  }
+  const lines = fs.readFileSync(taskFile, "utf8").split(/\r?\n/).filter((l) => l.trim());
+  const records = [];
+  for (const line of lines) {
+    try {
+      records.push(JSON.parse(line));
+    } catch {
+      // Skip malformed lines.
+    }
+  }
+  return records;
+}
+
+function detectCurrentProject(workspaceRoot) {
+  // Try to detect project name from git remote or directory name.
+  const gitConfig = path.join(workspaceRoot, ".git", "config");
+  if (fs.existsSync(gitConfig)) {
+    try {
+      const content = fs.readFileSync(gitConfig, "utf8");
+      const remoteMatch = content.match(/url\s*=\s*.*[\/:]([^\/]+\/[^\/]+?)(?:\.git)?$/m);
+      if (remoteMatch) {
+        return remoteMatch[1];
+      }
+    } catch {
+      // Fall through to directory-name detection.
+    }
+  }
+  return path.basename(workspaceRoot);
 }
 
 async function getSearchWorkerHealth() {
@@ -1308,6 +1369,27 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: "object",
         properties: {},
+      },
+    },
+    {
+      name: "get_memory_overview",
+      description:
+        "Get a project-level memory overview for the current workspace. Returns project context, active tasks, recent memory activity, and memory system health. Use this at the start of a session to understand what the shared memory system already knows.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          workspace_root: {
+            type: "string",
+            description:
+              "Optional workspace path. If omitted, uses AI_MEMORY_OBSIDIAN_VAULT or the canonical vault root.",
+          },
+          include_stats: {
+            type: "boolean",
+            default: true,
+            description:
+              "Include memory statistics (record counts, freshness distribution).",
+          },
+        },
       },
     },
     {
@@ -1560,6 +1642,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const embeddingIndexState = buildEmbeddingIndexState(embeddingRuntime, embeddings);
       const memoryIntegrity = readMemoryIntegritySummary();
       const workerHealth = await getSearchWorkerHealth();
+      const hygiene = readMemoryHygieneReport();
       return jsonResult({
         ok: true,
         generatedAt: new Date().toISOString(),
@@ -1584,7 +1667,75 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         handoffPack: readOptionalJson(HANDOFF_PACK_JSON_PATH),
         memoryLayers: readOptionalJson(MEMORY_LAYERS_JSON_PATH),
         autoDream: readOptionalJson(AUTO_DREAM_JSON_PATH),
+        hygiene,
         claudeMem: await getClaudeMemHealth(),
+      });
+    }
+
+    if (name === "get_memory_overview") {
+      const workspaceRoot = args.workspace_root || VAULT_ROOT;
+      const generatedDir = path.join(workspaceRoot, "00-System", "ai-memory", "generated");
+
+      const meta = loadJsonFile(path.join(generatedDir, "GLOBAL-CONTEXT.meta.json"));
+      const dream = loadJsonFile(path.join(generatedDir, "AUTO-DREAM.json"));
+      const hygiene = loadJsonFile(path.join(generatedDir, "memory_hygiene_report.json"));
+      const handoff = loadJsonFile(path.join(generatedDir, "HANDOFF.json"));
+
+      const taskRecords = await loadTaskRecords(workspaceRoot);
+      const openTasks = taskRecords.filter(
+        (r) => r.task_state && !["completed", "aborted", "failed"].includes(r.task_state)
+      );
+
+      // Build segment summaries from meta if present.
+      const segmentSummaries = {};
+      if (meta && meta.segments) {
+        for (const seg of meta.segments) {
+          if (seg && seg.name) {
+            segmentSummaries[seg.name] = {
+              totalCount: seg.totalCount || 0,
+              displayedCount: Array.isArray(seg.displayedRecords) ? seg.displayedRecords.length : 0,
+              truncated: Boolean(seg.truncated),
+              truncatedCount: seg.truncatedCount || 0,
+            };
+          }
+        }
+      }
+
+      return jsonResult({
+        ok: true,
+        workspace: {
+          root: workspaceRoot,
+          detected_project: detectCurrentProject(workspaceRoot),
+        },
+        memory_summary: {
+          total_records: meta?.totalRecords || 0,
+          estimated_tokens: meta?.estimatedTotalTokens || 0,
+          segments: segmentSummaries,
+        },
+        recent_activity: {
+          last_dream_run: dream?.generatedAt || null,
+          dream_promotions: Array.isArray(dream?.promotionQueue) ? dream.promotionQueue.length : 0,
+          dream_refreshes: Array.isArray(dream?.refreshQueue) ? dream.refreshQueue.length : 0,
+        },
+        active_tasks: {
+          count: openTasks.length,
+          samples: openTasks.slice(0, 5).map((t) => ({
+            id: t.id || null,
+            title: t.title || null,
+            state: t.task_state || null,
+            tool: t.tool || null,
+          })),
+        },
+        handoff: {
+          goal: handoff?.goal || null,
+          done: Array.isArray(handoff?.done) ? handoff.done.slice(0, 3) : [],
+          next: Array.isArray(handoff?.next) ? handoff.next.slice(0, 3) : [],
+          blocked: Array.isArray(handoff?.blocked) ? handoff.blocked.slice(0, 3) : [],
+        },
+        health: hygiene?.health || { score: null, grade: "unknown" },
+        recommendations: Array.isArray(hygiene?.recommendations)
+          ? hygiene.recommendations.slice(0, 3)
+          : [],
       });
     }
 
