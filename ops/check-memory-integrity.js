@@ -3,9 +3,15 @@ const path = require("path");
 
 function loadVaultRootHelper() {
   const candidates = [
+    // Script-local (installed flat layout: ~/.ai-memory/vault-root.js)
     path.join(__dirname, "vault-root.js"),
+    // Sibling bus/ (project layout: ops/ and bus/ are siblings under project root)
     path.join(__dirname, "..", "bus", "vault-root.js"),
     path.join(__dirname, "bus", "vault-root.js"),
+    // Bus sibling (installed flat: ~/.ai-memory/bus/vault-root.js)
+    path.join(__dirname, "..", "..", "bus", "vault-root.js"),
+    // AI_MEMORY_ROOT direct (when AI_MEMORY_ROOT is project root)
+    path.join(__dirname, "..", "..", "..", "bus", "vault-root.js"),
   ];
 
   for (const candidate of candidates) {
