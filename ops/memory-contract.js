@@ -8,6 +8,7 @@ const ALLOWED_SCOPES = new Set(["user", "feedback", "project", "reference", "sum
 const ALLOWED_VISIBILITY = new Set(["shared", "private"]);
 const ALLOWED_SOURCE_KINDS = new Set(["writeback", "hook", "session", "event", "blackboard", "run", "cron", "task"]);
 const ALLOWED_MEMORY_LEVELS = new Set(["durable", "session", "event", "task"]);
+const ALLOWED_DURABLE_TYPES = new Set(["user", "feedback", "project", "reference"]);
 
 const STRUCTURED_LAYER_DEFINITIONS = [
   {
@@ -108,6 +109,43 @@ function parseTimestampMs(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function validatePromotionMetadata(promotion) {
+  if (!isPlainObject(promotion)) {
+    return [];
+  }
+  const errors = [];
+  if (promotion.version !== 1) {
+    errors.push(`unknown-promotion-version:${promotion.version}`);
+  }
+  if (normalizeLower(promotion.durable_type) && !ALLOWED_DURABLE_TYPES.has(normalizeLower(promotion.durable_type))) {
+    errors.push(`unknown-promotion-durable-type:${normalizeString(promotion.durable_type)}`);
+  }
+  if (!normalizeString(promotion.key)) {
+    errors.push("missing-promotion-key");
+  }
+  if (!normalizeString(promotion.reason)) {
+    errors.push("missing-promotion-reason");
+  }
+  if (!normalizeString(promotion.source_record_id)) {
+    errors.push("missing-promotion-source-record-id");
+  }
+  if (typeof promotion.is_refresh !== "undefined" && typeof promotion.is_refresh !== "boolean") {
+    errors.push("invalid-promotion-is-refresh-type");
+  }
+  if (Array.isArray(promotion.conflict_with) && promotion.conflict_with.some((id) => !normalizeString(id))) {
+    errors.push("invalid-promotion-conflict-with");
+  }
+  if (promotion.is_refresh === true) {
+    if (!normalizeString(promotion.refresh_of_id)) {
+      errors.push("missing-promotion-refresh-of-id");
+    }
+    if (!normalizeString(promotion.refresh_of_t)) {
+      errors.push("missing-promotion-refresh-of-t");
+    }
+  }
+  return errors;
+}
+
 function validateStructuredRecord(record, requiredFields = []) {
   if (!isPlainObject(record)) {
     return {
@@ -142,6 +180,15 @@ function validateStructuredRecord(record, requiredFields = []) {
   }
   if (normalizeLower(record.memory_level || record.memoryLevel) && !ALLOWED_MEMORY_LEVELS.has(normalizeLower(record.memory_level || record.memoryLevel))) {
     errors.push(`unknown-memory-level:${normalizeString(record.memory_level || record.memoryLevel)}`);
+  }
+  if (isPlainObject(record.metadata) && isPlainObject(record.metadata.promotion)) {
+    const promoErrors = validatePromotionMetadata(record.metadata.promotion);
+    if (promoErrors.length > 0) {
+      errors.push(...promoErrors);
+    }
+  }
+  if (normalizeString(record.content_hash) && !/^[a-f0-9]{64}$/i.test(normalizeString(record.content_hash))) {
+    errors.push(`invalid-content-hash:${normalizeString(record.content_hash)}`);
   }
   if (missingFields.length > 0) {
     errors.push(`missing-fields:${missingFields.join(",")}`);
@@ -489,6 +536,7 @@ function buildMemoryIntegrityReport(options = {}) {
 }
 
 module.exports = {
+  ALLOWED_DURABLE_TYPES,
   ALLOWED_MEMORY_LEVELS,
   ALLOWED_SCOPES,
   ALLOWED_SOURCE_KINDS,
@@ -500,5 +548,6 @@ module.exports = {
   buildGeneratedArtifactMetadata,
   buildMemoryIntegrityReport,
   buildStructuredSignature,
+  validatePromotionMetadata,
   validateStructuredRecord,
 };
