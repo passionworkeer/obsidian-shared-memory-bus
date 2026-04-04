@@ -126,3 +126,28 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\veri
 Notes:
 - the shared MCP control plane now trusts the active listener PID on each port, not the cached PID in `shared-mcp/state.json`
 - a clean stop/start cycle should not create new `state.json.corrupt.*` files; if it does, treat that as a control-plane regression
+
+## Maintenance Tools
+
+### Memory Hygiene Report
+
+Detects duplicates, invalid records, and malformed entries across structured JSONL layers. Run periodically to catch data quality issues before they affect retrieval.
+
+```powershell
+node $env:AI_MEMORY_ROOT\ops\generate-memory-hygiene-report.js
+```
+
+### PII Redaction
+
+Scans and redacts sensitive content (emails, API keys, credit cards, phones, URLs with auth) from structured memory before embedding. Not yet wired into the automated pipeline — run manually or integrate into the embedding build step as needed.
+
+```bash
+python $AI_MEMORY_ROOT/ops/redaction.py --input <file> --output <redacted-file>
+```
+
+### Archived One-Off Scripts
+
+Specialized or migration scripts no longer needed in the active pipeline live in `ops/archived/`:
+- `repair-codex-runtime.ps1` — Codex crash recovery (no longer maintained)
+- `migrate-memory-v2.js` — ADR-001 → ADR-002 schema migration (completed)
+
