@@ -53,6 +53,8 @@ const OPENCLAW_BLACKBOARD_JSONL = path.join(STRUCTURED_ROOT, "openclaw-blackboar
 const OPENCLAW_RUNS_JSONL = path.join(STRUCTURED_ROOT, "openclaw-runs.jsonl");
 const OPENCLAW_JOBS_JSONL = path.join(STRUCTURED_ROOT, "openclaw-jobs.jsonl");
 const OPENCLAW_JOURNAL_JSONL = path.join(STRUCTURED_ROOT, "openclaw-journal.jsonl");
+const DAILY_LOG_DIR = path.join(STRUCTURED_ROOT, "logs");
+// Format: logs/YYYY/MM/YYYY-MM-DD.jsonl  (one file per day)
 const MIN_PROMOTION_CONFIDENCE = 0.6;
 const DURABLE_SCOPES = new Set(["user", "feedback", "project", "reference"]);
 
@@ -277,6 +279,24 @@ function buildPromotionMetadata({
   };
 }
 
+/**
+ * Build a one-line semantic description from a record's content/facts/concepts.
+ * Used as a lightweight summary field for relevance matching.
+ * Follows the restored-cli pattern: "one-line hook for this memory".
+ */
+function buildMemoryDescription(record) {
+  const firstFact = Array.isArray(record.facts) && record.facts[0]
+    ? (typeof record.facts[0] === "string" ? record.facts[0] : record.facts[0].value?.[0] || "")
+    : "";
+  const firstConcept = Array.isArray(record.concepts) && record.concepts[0]
+    ? (typeof record.concepts[0] === "string" ? record.concepts[0] : record.concepts[0].value?.[0] || "")
+    : "";
+  const shortContent = (record.content || "").substring(0, 120).trim();
+  const text = firstFact || firstConcept || shortContent;
+  // Clean up: remove markdown artifacts, collapse whitespace
+  return text.replace(/[#*`_~\[\]]/g, "").replace(/\s+/g, " ").trim();
+}
+
 function buildRecord({
   id,
   t,
@@ -328,6 +348,7 @@ function buildRecord({
     type,
     project,
     title: normalizedTitle,
+    description: buildMemoryDescription({ content: normalizedContent, facts, concepts }),
     content: normalizedContent,
     facts,
     concepts,
@@ -613,6 +634,7 @@ function coerceStructuredRecord(payload, defaults = {}) {
     type: normalizedType,
     project: normalizedProject,
     title: title || recordId,
+    description: typeof payload.description === "string" ? payload.description : buildMemoryDescription(payload),
     content: content.slice(0, 6000),
     facts: Array.isArray(payload.facts) ? payload.facts : [],
     concepts: Array.isArray(payload.concepts) ? payload.concepts : [],
@@ -720,6 +742,108 @@ function writeJsonl(filePath, records) {
   ensureDirectory(path.dirname(filePath));
   const body = records.map((record) => JSON.stringify(record)).join("\n");
   writeText(filePath, body ? `${body}\n` : "");
+}
+
+// ---------------------------------------------------------------------------
+// Daily append-only logs  (immutable helpers + side-effecting append)
+// ---------------------------------------------------------------------------
+
+/**
+ * Groups records by date (YYYY-MM-DD from field t).
+ * Returns Map<dateString, record[]> sorted newest-first.
+ * Pure function — does not mutate records.
+ */
+function getRecordsByDate(records) {
+  const byDate = new Map();
+  for (const rec of records) {
+    const t = rec.t || rec.created_at || "";
+    const dateMatch = t.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (!dateMatch) continue;
+    const date = dateMatch[1];
+    if (!byDate.has(date)) byDate.set(date, []);
+    byDate.get(date).push(rec);
+  }
+  return byDate;
+}
+
+/**
+ * Converts a record to a compact daily-log entry (one JSON line).
+ * Pure function — returns a new object, does not mutate rec.
+ */
+function buildDailyLogEntry(record) {
+  const firstFact = Array.isArray(record.facts) ? record.facts[0] : null;
+  const summary =
+    (typeof firstFact === "string" && firstFact.trim()) ||
+    (typeof record.description === "string" && record.description.trim()) ||
+    (String(record.content || "").substring(0, 80).trim()) ||
+    "";
+  return {
+    id: record.id || "",
+    t: record.t || record.created_at || "",
+    type: record.type || "",
+    scope: record.scope || "",
+    tool: record.tool || "",
+    title: record.title || "",
+    summary,
+    promotion: (record.metadata && record.metadata.promotion && record.metadata.promotion.durable_type) || null,
+    content_hash: record.content_hash || "",
+  };
+}
+
+/**
+ * Appends new records to daily log files (logs/YYYY/MM/YYYY-MM-DD.jsonl).
+ * Only appends records from today and yesterday — never rewrites history.
+ * Uses atomic write: write to .tmp, fsync, rename.
+ *
+ * @param {object[]} newRecords - All records to consider (all layers combined).
+ * @param {boolean} dryRun - If true, only log what would be written.
+ */
+function appendDailyLogs(newRecords, dryRun = false) {
+  const recordsByDate = getRecordsByDate(newRecords);
+  const now = new Date();
+  const today = now.toISOString().substring(0, 10);
+  const yesterday = new Date(now.getTime() - 86_400_000).toISOString().substring(0, 10);
+  const targetDates = new Set([today, yesterday]);
+
+  for (const [date, recs] of recordsByDate.entries()) {
+    if (!targetDates.has(date)) continue; // Only append recent days
+
+    const [year, month] = date.split("-");
+    const logDir = path.join(DAILY_LOG_DIR, year, month);
+    const logFile = path.join(logDir, `${date}.jsonl`);
+    const tmpFile = `${logFile}.tmp.${process.pid}`;
+
+    // Read existing entry IDs for this date (to avoid duplicates by id)
+    const existingIds = new Set();
+    if (fs.existsSync(logFile)) {
+      const existing = fs.readFileSync(logFile, "utf8").split(/\r?\n/).filter((l) => l.trim());
+      for (const line of existing) {
+        try {
+          existingIds.add(JSON.parse(line).id);
+        } catch {
+          // skip malformed lines
+        }
+      }
+    }
+
+    // Filter out already-logged records
+    const newEntries = recs.filter((r) => !existingIds.has(r.id)).map(buildDailyLogEntry);
+
+    if (newEntries.length === 0) continue;
+
+    if (dryRun) {
+      process.stderr.write(`[daily-log] dry-run: would append ${newEntries.length} entries to ${logFile}\n`);
+      continue;
+    }
+
+    // Atomic write: read existing, append to temp, fsync, rename
+    const existingContent = fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : "";
+    const newLines = newEntries.map((e) => JSON.stringify(e)).join("\n") + "\n";
+    fs.writeFileSync(tmpFile, existingContent + newLines, "utf8");
+    fs.fsyncSync(fs.openSync(tmpFile, "r+"));
+    fs.renameSync(tmpFile, logFile);
+    process.stderr.write(`[daily-log] appended ${newEntries.length} entries to ${logFile}\n`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1230,6 +1354,15 @@ function main() {
   writeJsonl(SESSION_MEMORY_JSONL, layers.sessionMemory);
   writeJsonl(SHARED_EVENTS_JSONL, layers.sharedEvents);
   writeJsonl(TASK_MEMORY_JSONL, layers.taskMemory);
+
+  // Daily append-only logs (only touches today/yesterday files — never rewrites history)
+  const allRecords = [
+    ...layers.sharedInbox,
+    ...layers.sessionMemory,
+    ...layers.sharedEvents,
+    ...layers.taskMemory,
+  ];
+  appendDailyLogs(allRecords);
 
   const summary = buildLayerSummary(layers);
   writeText(MEMORY_LAYERS_MD, summary.markdown);

@@ -54,6 +54,83 @@ try:
 except Exception:
     BM25Okapi = None
 
+# Patterns that indicate a reference to code artifacts
+FILE_REF_PATTERN = re.compile(r"([a-zA-Z][^\s:;#*`\"'<>|\\{}()\[\]]+\.(js|ts|py|ps1|sh|md|json|yaml|yml|toml|go|rs|java|cpp|c|h|css|html))")
+
+# Loose identifier pattern — only used for targeted context checks, not broad matching
+FUNC_VAR_PATTERN = re.compile(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\b")
+
+
+def check_memory_drift(entry: Dict, workspace_hints: Optional[Dict] = None) -> Dict:
+    """
+    Detect whether a memory record may be pointing to stale or non-existent references.
+
+    This is a pure read-only function: it only inspects the entry and filesystem,
+    never writes anything.
+
+    Returns: { driftRisk: 'low'|'medium'|'high', driftSignals: List[str],
+               missingFileCount: int }
+    """
+    workspace = workspace_hints or {}
+    project_root = workspace.get("project_root", os.getcwd())
+    drift_signals: List[str] = []
+    missing_files: List[str] = []
+
+    content = entry.get("content", "") or ""
+    title = entry.get("title", "") or ""
+    combined = f"{title} {content}"
+
+    # Signal 1: freshness=cold + time-sensitive content
+    # A cold record mentioning deadlines, freezes, releases, deploys, or launches
+    # is more likely to be stale than a general-purpose memory note.
+    freshness = entry.get("freshness", "unknown")
+    cold_indicators = re.findall(r"(20[2-9][0-9]|201[0-9])-[0-9]{2}-[0-9]{2}", combined)
+    if freshness == "cold" and cold_indicators:
+        time_sensitive = ["deadline", "freeze", "release", "deploy", "launch"]
+        if any(word in combined.lower() for word in time_sensitive):
+            drift_signals.append("cold-record-with-time-sensitive-content")
+
+    # Signal 2: referenced files that no longer exist
+    # Cap per-record file checks at 5 to keep drift detection bounded and fast.
+    raw_file_refs = FILE_REF_PATTERN.findall(combined)[:5]
+    # Resolve project_root safely: if it doesn't exist or is inaccessible, skip checks.
+    for ref in raw_file_refs:
+        path = ref[0] if isinstance(ref, tuple) else ref
+        if path.startswith(".") or path.startswith("/"):
+            # Relative-with-dot or absolute path — skip to avoid false positives.
+            continue
+        abs_path = os.path.join(project_root, path)
+        try:
+            if not os.path.exists(abs_path):
+                missing_files.append(path)
+        except OSError:
+            # Permission error, symlink loop, or similar — skip this file.
+            pass
+
+    if missing_files:
+        drift_signals.append(f"referenced-files-missing:{len(missing_files)}")
+
+    # Signal 3: summary-style record that is already cold or warm
+    # Summaries decay quickly; a warm/cold summary is a high-staleness signal.
+    entry_type = entry.get("type", "")
+    if entry_type in ("summary", "session-summary", "daily-summary"):
+        if freshness in ("cold", "warm"):
+            drift_signals.append("summary-record-cold-staleness")
+
+    # Determine risk level
+    if len(drift_signals) >= 2:
+        drift_risk = "high"
+    elif drift_signals:
+        drift_risk = "medium"
+    else:
+        drift_risk = "low"
+
+    return {
+        "driftRisk": drift_risk,
+        "driftSignals": drift_signals[:5],  # cap at 5 for readability
+        "missingFileCount": len(missing_files),
+    }
+
 try:
     import jieba  # type: ignore
 
@@ -561,6 +638,60 @@ def score_entry(
     )
 
 
+def apply_field_match_bonus(
+    scored: List[Tuple[str, float, Dict[str, object]]],
+    entries_by_id: Dict[str, dict],
+    query_text_lower: str,
+) -> List[Tuple[str, float, Dict[str, object]]]:
+    """
+    Apply weight bonuses when query terms match specific fields.
+
+    Based on restored-cli's hybrid ranking:
+      - query matches title (name) exactly → ×1.3
+      - query matches description → ×1.2
+      - matchedField='fact' in hybrid context → ×1.1
+      - matchedField='concept' → ×1.15
+
+    Returns new tuples (immutable — input list is not mutated).
+    """
+    query_terms = set(query_text_lower.split())
+    if not query_terms:
+        return scored
+
+    result: List[Tuple[str, float, Dict[str, object]]] = []
+    for entry_id, final_score, meta in scored:
+        entry = entries_by_id.get(entry_id, {})
+        field = str(entry.get("field", "content"))
+        title_text = str(entry.get("title", "")).lower()
+        desc_text = str(entry.get("description", "")).lower()
+
+        bonus = 1.0
+
+        # Title/name exact match bonus: require at least 2-term overlap
+        if title_text and len(query_terms) >= 2:
+            overlap = len(query_terms & set(title_text.split()))
+            if overlap >= min(2, len(query_terms)):
+                bonus *= 1.3
+
+        # Description match bonus
+        if desc_text and len(query_terms) >= 2:
+            overlap = len(query_terms & set(desc_text.split()))
+            if overlap >= min(2, len(query_terms)):
+                bonus *= 1.2
+
+        # Field type bonus (facts/concepts are more signal-dense than raw content)
+        if field == "fact":
+            bonus *= 1.1
+        elif field == "concept":
+            bonus *= 1.15
+
+        # Build new meta dict (immutable)
+        new_meta = {**meta, "fieldMatchBonus": round(bonus, 6)}
+        result.append((entry_id, final_score * bonus, new_meta))
+
+    return result
+
+
 def rerank_entries(
     entries_by_id: Dict[str, dict],
     effective_mode: str,
@@ -568,6 +699,7 @@ def rerank_entries(
     route: Dict[str, object],
     bm25_map: Dict[str, float],
     dense_map: Dict[str, float],
+    query_text_lower: str = "",
 ) -> Tuple[List[Tuple[str, float]], Dict[str, Dict[str, object]], int]:
     candidate_ids = set()
     if effective_mode in {"bm25", "hybrid"}:
@@ -606,6 +738,9 @@ def rerank_entries(
 
         all_scored.append((entry_id, final_score, meta))
 
+    # Apply field-match weight bonuses (immutable — returns new list)
+    all_scored = apply_field_match_bonus(all_scored, entries_by_id, query_text_lower)
+
     # Deduplicate by record_id: keep the highest-scoring sub-entry per record
     seen_record_ids: set = set()
     deduped_scored: List[Tuple[str, float, Dict[str, object]]] = []
@@ -642,6 +777,7 @@ def _build_entry_fields(payload: dict, entry_id: str, record_id: str, field: str
         "tokens": tokenize(search_text),
         "excerpt": excerpt[:240],
         "title": payload.get("title", "") or excerpt[:120] or entry_id,
+        "description": str(payload.get("description", "")) or "",
         "layer": layer,
         "tool": str(payload.get("tool", "unknown")).strip() or "unknown",
         "type": str(payload.get("type", "")).strip(),
@@ -655,6 +791,7 @@ def _build_entry_fields(payload: dict, entry_id: str, record_id: str, field: str
         "workspace": str(payload.get("workspace", "")).strip(),
         "taskState": str(payload.get("task_state", "")).strip(),
         "freshness": str(payload.get("freshness", "")).strip(),
+        "description": str(payload.get("description", "")).strip(),
         "content": str(payload.get("content", "")).strip(),
     }
 
@@ -1036,6 +1173,7 @@ def format_results(
     bm25_map: Dict[str, float],
     dense_map: Dict[str, float],
     rank_meta: Dict[str, Dict[str, object]],
+    workspace_hints: Optional[Dict] = None,
 ) -> List[dict]:
     results: List[dict] = []
     for index, (entry_id, score) in enumerate(ranked, start=1):
@@ -1050,6 +1188,10 @@ def format_results(
         search_text = entry.get("search_text", "")
         content_text = entry.get("content", "")
         estimated_tokens = (len(search_text) + len(content_text)) // 4
+
+        # Memory drift detection — pure read, never writes.
+        drift_info = check_memory_drift(entry, workspace_hints)
+
         results.append(
             {
                 "rank": index,
@@ -1076,6 +1218,9 @@ def format_results(
                 "denseScore": round(float(dense_map.get(entry_id, 0.0)), 6) if entry_id in dense_map else None,
                 "rankMeta": meta or None,
                 "estimated_tokens": estimated_tokens,
+                "driftRisk": drift_info["driftRisk"],
+                "driftSignals": drift_info["driftSignals"] or None,
+                "missingFileCount": drift_info.get("missingFileCount") or None,
             }
         )
     return results
@@ -1224,7 +1369,7 @@ def apply_summary_boost(scores: Dict[str, float], entries_by_id: Dict[str, dict]
     return boosted
 
 
-def execute_search(parsed: Dict[str, object]) -> Dict[str, object]:
+def execute_search(parsed: Dict[str, object], workspace_root: Optional[str] = None) -> Dict[str, object]:
     query = str(parsed["query"])
     top_k = int(parsed["top_k"])
     requested_mode = str(parsed["mode"])
@@ -1252,22 +1397,23 @@ def execute_search(parsed: Dict[str, object]) -> Dict[str, object]:
 
     effective_mode = requested_mode
     fallback_reason = None
+    query_lower = query.lower()
     if requested_mode == "bm25":
-        ranked, rank_meta, candidate_count = rerank_entries(entries_by_id, "bm25", top_k, query_route, bm25_map, dense_map)
+        ranked, rank_meta, candidate_count = rerank_entries(entries_by_id, "bm25", top_k, query_route, bm25_map, dense_map, query_lower)
     elif requested_mode == "dense":
         if dense_map:
-            ranked, rank_meta, candidate_count = rerank_entries(entries_by_id, "dense", top_k, query_route, bm25_map, dense_map)
+            ranked, rank_meta, candidate_count = rerank_entries(entries_by_id, "dense", top_k, query_route, bm25_map, dense_map, query_lower)
         else:
             effective_mode = "bm25"
             fallback_reason = dense_error or "dense-unavailable"
-            ranked, rank_meta, candidate_count = rerank_entries(entries_by_id, "bm25", top_k, query_route, bm25_map, dense_map)
+            ranked, rank_meta, candidate_count = rerank_entries(entries_by_id, "bm25", top_k, query_route, bm25_map, dense_map, query_lower)
     else:
         if dense_map:
-            ranked, rank_meta, candidate_count = rerank_entries(entries_by_id, "hybrid", top_k, query_route, bm25_map, dense_map)
+            ranked, rank_meta, candidate_count = rerank_entries(entries_by_id, "hybrid", top_k, query_route, bm25_map, dense_map, query_lower)
         else:
             effective_mode = "bm25"
             fallback_reason = dense_error or "hybrid-dense-unavailable"
-            ranked, rank_meta, candidate_count = rerank_entries(entries_by_id, "bm25", top_k, query_route, bm25_map, dense_map)
+            ranked, rank_meta, candidate_count = rerank_entries(entries_by_id, "bm25", top_k, query_route, bm25_map, dense_map, query_lower)
 
     sources: Dict[str, List[str]] = {}
     for entry_id in bm25_map:
@@ -1283,6 +1429,8 @@ def execute_search(parsed: Dict[str, object]) -> Dict[str, object]:
             str(first_embedding.get("backend", "")).strip(),
             str(first_embedding.get("model", DEFAULT_MODEL)).strip() or DEFAULT_MODEL,
         )
+
+    workspace_hints: Optional[Dict] = {"project_root": workspace_root} if workspace_root else None
 
     payload = {
         "ok": True,
@@ -1318,7 +1466,7 @@ def execute_search(parsed: Dict[str, object]) -> Dict[str, object]:
             search_result_cache_hit=False,
             query_embedding_cache_hit=bool(dense_meta.get("queryEmbeddingCacheHit")),
         ),
-        "results": format_results(ranked, entries_by_id, sources, bm25_map, dense_map, rank_meta),
+        "results": format_results(ranked, entries_by_id, sources, bm25_map, dense_map, rank_meta, workspace_hints),
     }
     store_search_result(search_result_cache_key, payload)
     return payload
@@ -1395,8 +1543,9 @@ def run_server() -> None:
                             "type": raw.get("type", ""),
                             "title": raw.get("title", ""),
                             "content": content,
-                            "facts": raw.get("facts"),
-                            "concepts": raw.get("concepts"),
+                            "description": str(raw.get("description", "")).strip(),
+                            "facts": raw.get("facts") if isinstance(raw.get("facts"), list) else [],
+                            "concepts": raw.get("concepts") if isinstance(raw.get("concepts"), list) else [],
                             "files_read": raw.get("filesRead") or raw.get("files_read") or [],
                             "files_modified": raw.get("filesModified") or raw.get("files_modified") or [],
                             "scope": raw.get("scope", ""),
@@ -1509,7 +1658,8 @@ def run_server() -> None:
             if action != "search":
                 raise ValueError(f"unsupported-action:{action}")
 
-            response = execute_search(normalize_request_payload(payload))
+            workspace_root = normalize_spaces(str(payload.get("workspace_root", ""))) or None
+            response = execute_search(normalize_request_payload(payload), workspace_root=workspace_root)
             if request_id:
                 response["id"] = request_id
             write_server_response(response)
