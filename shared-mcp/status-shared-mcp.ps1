@@ -1,3 +1,7 @@
+param(
+    [string[]]$Only
+)
+
 Set-StrictMode -Version 3.0
 $ErrorActionPreference = "Stop"
 
@@ -17,6 +21,28 @@ if (-not $helperPath) {
 $manifestPath = Join-Path $root "manifest.json"
 $statePath = Join-Path $root "state.json"
 $stateMutexName = Get-SharedMutexName -BaseName "WangSharedMcpStateV1"
+
+function Read-State {
+    if (-not (Test-Path -LiteralPath $statePath)) {
+        return @{}
+    }
+
+    try {
+        $content = Get-Content -Raw -LiteralPath $statePath -Encoding utf8
+        $parsed = $content | ConvertFrom-Json
+        $map = @{}
+        foreach ($property in @($parsed.PSObject.Properties)) {
+            $entry = @{}
+            foreach ($child in @($property.Value.PSObject.Properties)) {
+                $entry[$child.Name] = $child.Value
+            }
+            $map[$property.Name] = $entry
+        }
+        return $map
+    } catch {
+        return @{}
+    }
+}
 
 function Test-Health {
     param([string]$Url)
@@ -47,9 +73,7 @@ function Test-McpInitialize {
         params = @{
             protocolVersion = "2024-11-05"
             capabilities = @{
-                roots = @{
-                    listChanged = $true
-                }
+                roots = @{ listChanged = $true }
                 sampling = @{}
             }
             clientInfo = @{
@@ -114,33 +138,64 @@ function Test-ServerReady {
     }
 }
 
-function Read-State {
-    if (-not (Test-Path -LiteralPath $statePath)) {
-        return @{}
+function Get-Uptime {
+    param([string]$StartedAt)
+
+    if ([string]::IsNullOrWhiteSpace($StartedAt)) {
+        return "unknown"
     }
 
     try {
-        $content = Get-Content -Raw -LiteralPath $statePath -Encoding utf8
-        $parsed = $content | ConvertFrom-Json
-        $map = @{}
-        foreach ($property in @($parsed.PSObject.Properties)) {
-            $entry = @{}
-            foreach ($child in @($property.Value.PSObject.Properties)) {
-                $entry[$child.Name] = $child.Value
-            }
-            $map[$property.Name] = $entry
+        $start = [DateTime]::Parse($StartedAt)
+        $elapsed = (Get-Date) - $start
+        if ($elapsed.TotalSeconds -lt 0) {
+            return "unknown"
         }
-        return $map
+        if ($elapsed.TotalDays -ge 1) {
+            return "{0}d {1}h" -f [int]$elapsed.TotalDays, [int]($elapsed.Hours)
+        }
+        if ($elapsed.TotalHours -ge 1) {
+            return "{0}h {1}m" -f [int]$elapsed.TotalHours, [int]$elapsed.Minutes
+        }
+        return "{0}m {1}s" -f [int]$elapsed.TotalMinutes, [int]$elapsed.Seconds
     } catch {
-        $backup = "$statePath.corrupt.$(Get-Date -Format 'yyyyMMddHHmmss')"
-        try { Move-Item -LiteralPath $statePath -Destination $backup -Force } catch {}
-        Write-Warning "[shared-mcp] state.json was corrupt, backed up to $backup"
-        return @{}
+        return "unknown"
     }
+}
+
+# ANSI colour codes — compatible with Windows Terminal, modern shells.
+$ESC = [char]27
+$CLR_RESET   = "${ESC}[0m"
+$CLR_RED     = "${ESC}[91m"
+$CLR_GREEN   = "${ESC}[92m"
+$CLR_YELLOW  = "${ESC}[93m"
+$CLR_DIM     = "${ESC}[2m"
+$CLR_HEADER  = "${ESC}[1m"   # bold header
+$CLR_BOLD    = "${ESC}[1m"
+
+# Normalise a $WhatIf-style boolean to a human label.
+function Get-ProbedStatus {
+    param(
+        [bool]$Alive,
+        [bool]$Healthy,
+        [string]$RecordedStatus
+    )
+
+    if ($RecordedStatus -eq "dead") {
+        return "dead", $CLR_RED
+    }
+    if (-not $Alive) {
+        return "pid-dead", $CLR_RED
+    }
+    if ($Healthy) {
+        return "healthy", $CLR_GREEN
+    }
+    return "unhealthy", $CLR_YELLOW
 }
 
 $manifest = Get-Content -Raw -LiteralPath $manifestPath -Encoding utf8 | ConvertFrom-Json
 $state = @{}
+
 if (Test-Path -LiteralPath $statePath) {
     $mutex = New-Object System.Threading.Mutex($false, $stateMutexName)
     $mutexAcquired = $false
@@ -154,58 +209,160 @@ if (Test-Path -LiteralPath $statePath) {
         $state = Read-State
     } finally {
         if ($mutexAcquired) {
-            try {
-                [void]$mutex.ReleaseMutex()
-            } catch {
-            }
+            try { [void]$mutex.ReleaseMutex() } catch { }
         }
         $mutex.Dispose()
     }
 }
 
-$results = New-Object System.Collections.Generic.List[object]
-foreach ($server in @($manifest.servers)) {
-    $id = [string]$server.id
-    $record = $state[$id]
-    $procId = 0
-    $alive = $false
+$requested = @($Only | ForEach-Object { ([string]$_).Split(",").Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+$rows = New-Object System.Collections.Generic.List[object]
+$allHealthy = $true
 
-    if ($record -and $record.ContainsKey("pid")) {
-        $procId = [int]$record["pid"]
-        $alive = $null -ne (Get-Process -Id $procId -ErrorAction SilentlyContinue)
+foreach ($server in @($manifest.servers)) {
+    if ($server.mode -eq "isolated") {
+        continue
     }
 
-    $url = if ($record -and $record.ContainsKey("url")) { [string]$record["url"] } else { $null }
-    $healthUrl = if ($record -and $record.ContainsKey("healthUrl")) { [string]$record["healthUrl"] } else { $null }
-    if ($server.PSObject.Properties.Name -contains "port") {
+    $id = [string]$server.id
+    if ($requested.Count -gt 0 -and $requested -notcontains $id) {
+        continue
+    }
+
+    $record    = $state[$id]
+    $port      = if ($server.PSObject.Properties.Name -contains "port") { [int]$server.port } else { 0 }
+    $url       = $null
+    $healthUrl = $null
+
+    if ($port -gt 0) {
+        if ($record -and $record.ContainsKey("url")) {
+            $url = [string]$record["url"]
+        }
         if (-not $url) {
             $url = Get-ServerUrl -Server $server
+        }
+        if ($record -and $record.ContainsKey("healthUrl")) {
+            $healthUrl = [string]$record["healthUrl"]
         }
         if (-not $healthUrl) {
             $healthUrl = Get-ServerHealthUrl -Server $server
         }
-        $listenerPid = Get-SharedListeningProcessId -Port ([int]$server.port)
+    }
+
+    # Probe by PID first, then by port.
+    $procId  = 0
+    $alive   = $false
+    $healthy = $false
+
+    if ($record -and $record.ContainsKey("pid")) {
+        $procId = [int]$record["pid"]
+        $alive  = $null -ne (Get-Process -Id $procId -ErrorAction SilentlyContinue)
+    }
+
+    if ($port -gt 0) {
+        $listenerPid = Get-SharedListeningProcessId -Port $port
         if ($listenerPid -gt 0) {
             $procId = $listenerPid
-            $alive = $null -ne (Get-Process -Id $procId -ErrorAction SilentlyContinue)
-        } else {
-            $procId = 0
-            $alive = $false
-        }
-        if ($alive -and $healthUrl) {
-            $alive = Test-ServerReady -Server $server -Url $url -HealthUrl $healthUrl
+            $alive  = $null -ne (Get-Process -Id $procId -ErrorAction SilentlyContinue)
+        } elseif ($procId -eq 0) {
+            $procId  = 0
+            $alive   = $false
         }
     }
 
-    $results.Add([pscustomobject]@{
-        id = $id
-        mode = [string]$server.mode
-        running = $alive
-        pid = $procId
-        url = $url
-        healthUrl = $healthUrl
-        notes = [string]$server.notes
+    if ($alive -and $url) {
+        $healthy = Test-ServerReady -Server $server -Url $url -HealthUrl $healthUrl
+    }
+
+    $recordedStatus = if ($record -and $record.ContainsKey("status")) { [string]$record["status"] } else { $null }
+    $startedAt      = if ($record -and $record.ContainsKey("startedAt")) { [string]$record["startedAt"] } else { $null }
+    $uptime         = Get-Uptime -StartedAt $startedAt
+
+    $statusLabel = if ($port -eq 0 -or $procId -eq 0) {
+        "not-running"
+    } else {
+        $s = if ($recordedStatus -eq "dead") {
+            "dead"
+        } elseif (-not $alive) {
+            "pid-dead"
+        } elseif ($healthy) {
+            "healthy"
+        } else {
+            "unhealthy"
+        }
+        $s
+    }
+
+    $statusColor = if ($statusLabel -eq "healthy") {
+        $CLR_GREEN
+    } elseif ($statusLabel -eq "dead" -or $statusLabel -eq "pid-dead") {
+        $CLR_RED
+    } elseif ($statusLabel -eq "unhealthy") {
+        $CLR_YELLOW
+    } else {
+        $CLR_DIM
+    }
+
+    if ($statusLabel -ne "healthy") {
+        $allHealthy = $false
+    }
+
+    $rows.Add([pscustomobject]@{
+        Server = $id
+        Port   = if ($port -gt 0) { [string]$port } else { "-" }
+        PID    = if ($procId -gt 0) { [string]$procId } else { "-" }
+        Status = $statusLabel
+        Uptime = if ($statusLabel -eq "healthy") { $uptime } else { "-" }
+        _color = $statusColor
+        _recStatus = $recordedStatus
     }) | Out-Null
 }
 
-$results | ConvertTo-Json -Depth 6
+# ---------------------------------------------------------------------------
+# Print formatted table
+# ---------------------------------------------------------------------------
+$colServer = 15
+$colPort   = 6
+$colPid    = 8
+$colStatus = 12
+$colUptime = 14
+
+$sep = "+" + ("-" * ($colServer + 2)) + "+" + ("-" * ($colPort + 2)) + "+" + ("-" * ($colPid + 2)) + "+" + ("-" * ($colStatus + 2)) + "+" + ("-" * ($colUptime + 2)) + "+"
+
+Write-Output ""
+Write-Output "${CLR_BOLD}Shared MCP Status${CLR_RESET}"
+Write-Output $sep
+Write-Output ("${CLR_BOLD}| {0,-$colServer} | {1,-$colPort} | {2,-$colPid} | {3,-$colStatus} | {4,-$colUptime} |${CLR_RESET}" -f "Server", "Port", "PID", "Status", "Uptime")
+Write-Output $sep
+
+if ($rows.Count -eq 0) {
+    Write-Output "${CLR_DIM}| ${CLR_RESET}${"No servers found",-($colServer)}${CLR_RESET} |${CLR_DIM}${"-" * ($colPort)}${CLR_RESET} |${CLR_DIM}${"-" * ($colPid)}${CLR_RESET} |${CLR_DIM}${"-" * ($colStatus)}${CLR_RESET} |${CLR_DIM}${"-" * ($colUptime)}${CLR_RESET} |"
+} else {
+    foreach ($row in $rows) {
+        $server   = $row.Server.PadRight($colServer)
+        $port     = $row.Port.PadLeft($colPort)
+        $pid      = $row.PID.PadLeft($colPort)
+        $status   = $row.Status.PadRight($colStatus)
+        $uptime   = $row.Uptime.PadRight($colUptime)
+        $color    = $row._color
+
+        Write-Output "${color}| ${server} | ${port} | ${pid} | ${status} | ${uptime} |${CLR_RESET}"
+    }
+}
+
+Write-Output $sep
+
+$summary = if ($allHealthy) {
+    "${CLR_GREEN}All servers healthy${CLR_RESET}"
+} else {
+    $unhealthyCount = @($rows | Where-Object { $_.Status -ne "healthy" }).Count
+    "${CLR_YELLOW}${unhealthyCount} server(s) not healthy — see table above${CLR_RESET}"
+}
+Write-Output "  $summary"
+Write-Output ""
+
+if ($allHealthy) {
+    exit 0
+} else {
+    exit 1
+}

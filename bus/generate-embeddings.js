@@ -9,6 +9,7 @@ const { createEmbeddingProviderRegistry, getProviderHost, normalizeEmbeddingAdap
 const { resolvePythonRuntime, withPythonArgs } = require("./python-runtime.js");
 const { resolveEmbeddingRuntime } = require("./runtime-config.js");
 const { resolveVaultRoot } = require("./vault-root.js");
+const { VECTOR_SCHEMA_VERSION, fnv1a32, buildHashFeatures, buildHashEmbedding } = require("./lsh-hash.js");
 const WINDOWS_ENV_CACHE = new Map();
 
 hydrateProcessEnvFromWindows([
@@ -192,7 +193,81 @@ function fallbackId(entry, title, content) {
   return crypto.createHash("sha1").update(seed).digest("hex").slice(0, 16);
 }
 
-function buildSearchText(entry) {
+// buildSearchText is superseded by extractFieldTexts / buildParentSearchText.
+
+/**
+ * index.jsonl schema (v2 - field-level):
+ * { id, record_id, field: "content"|"fact"|"concept", text, vector, configHash, featureSchemaVersion, contentHash }
+ *
+ * - id: unique entry id; for parent entry = record_id, for sub-entries = record_id__fact_N / record_id__concept_N
+ * - record_id: the parent record id all sub-entries link back to (used for deduplication in retrieval)
+ * - field: which field this embedding represents
+ * - text: the raw text that was embedded
+ * - vector: the embedding vector
+ * - configHash: embedding backend+model configuration hash
+ * - featureSchemaVersion: VECTOR_SCHEMA_VERSION (tracks the feature generation algorithm)
+ * - contentHash: SHA-256 of the field text (used for incremental rebuild — field unchanged = vector reusable)
+ *
+ * Legacy v1 records (no record_id, no field, one entry per record) are handled transparently
+ * in retrieval: missing record_id defaults to id, missing field defaults to "content".
+ */
+
+// =============================================================================
+// NOTE: The FNV-1a32 hashing logic has been extracted to bus/lsh-hash.js.
+// Both Python (retrieval/lsh_utils.py) and JS now share the same algorithm.
+// See: retrieval/lsh_utils.py for the canonical implementation.
+// =============================================================================
+
+/**
+ * Extract the three field texts from a structured JSONL record.
+ *
+ * Handles two formats for facts[] and concepts[]:
+ *   - Object format:  { value: string[], Count: number }
+ *   - String format:  plain string
+ *
+ * Returns { title, content, facts: string[], concepts: string[] }.
+ * facts[] and concepts[] contain individual text items extracted from the value arrays.
+ */
+function extractFieldTexts(entry) {
+  const title = normalizeSpaces(entry.title || "");
+  const content = normalizeSpaces(entry.content || "");
+
+  const rawFacts = Array.isArray(entry.facts) ? entry.facts : [];
+  const facts = [];
+  for (const item of rawFacts) {
+    if (typeof item === "string") {
+      const t = normalizeSpaces(item);
+      if (t) facts.push(t);
+    } else if (item && Array.isArray(item.value)) {
+      for (const v of item.value) {
+        const t = normalizeSpaces(String(v || ""));
+        if (t) facts.push(t);
+      }
+    }
+  }
+
+  const rawConcepts = Array.isArray(entry.concepts) ? entry.concepts : [];
+  const concepts = [];
+  for (const item of rawConcepts) {
+    if (typeof item === "string") {
+      const t = normalizeSpaces(item);
+      if (t) concepts.push(t);
+    } else if (item && Array.isArray(item.value)) {
+      for (const v of item.value) {
+        const t = normalizeSpaces(String(v || ""));
+        if (t) concepts.push(t);
+      }
+    }
+  }
+
+  return { title, content, facts, concepts };
+}
+
+/**
+ * Build the parent (field='content') search text from a structured record.
+ * Mirrors the text construction logic used in semantic-search.py build_entry().
+ */
+function buildParentSearchText(entry) {
   return normalizeSpaces(
     [
       entry.title || "",
@@ -205,75 +280,30 @@ function buildSearchText(entry) {
   ).slice(0, 6000);
 }
 
-// =============================================================================
-// NOTE: This hashing logic (FNV-1a32 + buildHashFeatures) is duplicated in:
-//   - semantic-search.py (Python version, identical logic)
-//   - singleton-stdio-mcp-proxy.mjs (may also use it)
-// When modifying this, sync all copies.
-// See: https://github.com/.../issues/TWIN-BUG
-// =============================================================================
-
-function fnv1a32(input) {
-  let hash = 0x811c9dc5;
-  const text = String(input || "");
-  for (let index = 0; index < text.length; index += 1) {
-    hash ^= text.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return hash >>> 0;
+/**
+ * Compute SHA-256 content hash for a field text.
+ * Used to detect whether a field has changed (incremental rebuild).
+ */
+function hashFieldText(text) {
+  return crypto.createHash("sha256").update(text).digest("hex");
 }
 
-function buildHashFeatures(text) {
-  const source = normalizeSpaces(text).toLowerCase();
-  const features = [];
-  const compact = source.replace(/\s+/g, "");
-
-  for (const token of source.match(/[a-z0-9][a-z0-9_\-./:]{1,}/g) || []) {
-    features.push(`w:${token}`);
+/**
+ * Returns true if all field texts in newFieldHashes match the corresponding
+ * stored field texts in existingEntry (which must be a v2 record with fieldTexts).
+ * Used for incremental reuse: only skip re-embedding when ALL field texts are unchanged.
+ */
+function fieldTextsUnchanged(newFieldHashes, existingEntry) {
+  if (!existingEntry || !existingEntry.fieldTexts) {
+    return false;
   }
-
-  for (const chunk of source.match(/[\u4e00-\u9fff]{2,}/g) || []) {
-    features.push(`c:${chunk}`);
-    for (let index = 0; index < chunk.length - 1; index += 1) {
-      features.push(`c2:${chunk.slice(index, index + 2)}`);
-    }
-    for (let index = 0; index < chunk.length - 2; index += 1) {
-      features.push(`c3:${chunk.slice(index, index + 3)}`);
+  const stored = existingEntry.fieldTexts;
+  for (const [fieldName, hash] of Object.entries(newFieldHashes)) {
+    if (stored[fieldName] !== hash) {
+      return false;
     }
   }
-
-  const maxGramCount = Math.max(0, Math.min(compact.length - 2, 400));
-  for (let index = 0; index < maxGramCount; index += 1) {
-    features.push(`g3:${compact.slice(index, index + 3)}`);
-  }
-
-  if (features.length === 0 && compact) {
-    features.push(`raw:${compact}`);
-  }
-  return features;
-}
-
-function buildHashEmbedding(text, dimension = HASH_DIM) {
-  const vector = new Array(dimension).fill(0);
-  const features = buildHashFeatures(text);
-  for (const feature of features) {
-    const hash = fnv1a32(feature);
-    const slot = hash % dimension;
-    const sign = ((hash >>> 1) & 1) === 0 ? 1 : -1;
-    vector[slot] += sign;
-  }
-
-  let norm = 0;
-  for (const value of vector) {
-    norm += value * value;
-  }
-  norm = Math.sqrt(norm);
-  if (norm > 0) {
-    for (let index = 0; index < vector.length; index += 1) {
-      vector[index] = Number((vector[index] / norm).toFixed(8));
-    }
-  }
-  return vector;
+  return true;
 }
 
 const EMBEDDING_PROVIDER_REGISTRY = createEmbeddingProviderRegistry({
@@ -285,32 +315,24 @@ const EMBEDDING_PROVIDER_REGISTRY = createEmbeddingProviderRegistry({
   hashModel: HASH_MODEL,
 });
 
+// buildDocument is superseded by field-level extraction in collectDocuments.
 function buildDocument(entry) {
-  const title = normalizeSpaces(entry.title || "");
-  const content = normalizeSpaces(entry.content || "");
-  const rawText = normalizeSpaces([title, content].filter(Boolean).join(" "));
-  if (isNoise(rawText)) {
-    return null;
-  }
-
-  const id = String(entry.id || "").trim() || fallbackId(entry, title, content);
-  const text = buildSearchText(entry);
-  const contentHash = crypto.createHash("sha256").update(text).digest("hex");
-
-  return {
-    id,
-    tool: normalizeSpaces(entry.tool || "unknown") || "unknown",
-    type: normalizeSpaces(entry.type || ""),
-    project: normalizeSpaces(entry.project || ""),
-    agent: normalizeSpaces(entry.agent || ""),
-    t: normalizeSpaces(entry.t || ""),
-    title: title || rawText.slice(0, 120) || id,
-    excerpt: (content || rawText || text).slice(0, 240),
-    text,
-    contentHash,
-  };
+  return null; // intentionally broken — do not use
 }
 
+/**
+ * Collect structured records and extract their field-level texts.
+ *
+ * Returns a Map keyed by record_id (parent id).  Each value is a "record doc"
+ * object with:
+ *   { record_id, tool, type, project, agent, t, title, fieldTexts, fieldHashes }
+ *
+ * fieldTexts:  { "content": "...", "fact_0": "...", "concept_0": "...", ... }
+ * fieldHashes: { "content": "<sha256>", "fact_0": "<sha256>", ... }
+ *
+ * Only non-empty, non-noise fields are included.
+ * The title + raw content are kept for metadata (not embedded directly).
+ */
 function collectDocuments() {
   const documents = new Map();
   if (!fs.existsSync(STRUCTURED_DIR)) {
@@ -329,10 +351,63 @@ function collectDocuments() {
       }
       try {
         const entry = JSON.parse(line);
-        const document = buildDocument(entry);
-        if (document) {
-          documents.set(document.id, document);
+        const { title, content, facts, concepts } = extractFieldTexts(entry);
+        const rawText = [title, content].filter(Boolean).join(" ");
+
+        if (isNoise(rawText)) {
+          continue;
         }
+
+        const recordId = String(entry.id || "").trim() || fallbackId(entry, title, content);
+
+        // Build parent content search text (mirrors semantic-search.py build_entry)
+        const parentText = buildParentSearchText(entry);
+
+        const fieldTexts = {};
+        const fieldHashes = {};
+
+        // Parent content field
+        if (parentText) {
+          fieldTexts.content = parentText;
+          fieldHashes.content = hashFieldText(parentText);
+        }
+
+        // Fact sub-fields: each item in the facts array becomes a separate fact_N field
+        for (let i = 0; i < facts.length; i++) {
+          const factText = facts[i];
+          if (factText && !isNoise(factText)) {
+            const key = `fact_${i}`;
+            fieldTexts[key] = factText;
+            fieldHashes[key] = hashFieldText(factText);
+          }
+        }
+
+        // Concept sub-fields: each item in the concepts array becomes a separate concept_N field
+        for (let i = 0; i < concepts.length; i++) {
+          const conceptText = concepts[i];
+          if (conceptText && !isNoise(conceptText)) {
+            const key = `concept_${i}`;
+            fieldTexts[key] = conceptText;
+            fieldHashes[key] = hashFieldText(conceptText);
+          }
+        }
+
+        if (Object.keys(fieldTexts).length === 0) {
+          continue;
+        }
+
+        documents.set(recordId, {
+          recordId,
+          tool: normalizeSpaces(entry.tool || "unknown") || "unknown",
+          type: normalizeSpaces(entry.type || ""),
+          project: normalizeSpaces(entry.project || ""),
+          agent: normalizeSpaces(entry.agent || ""),
+          t: normalizeSpaces(entry.t || ""),
+          title: title || rawText.slice(0, 120) || recordId,
+          excerpt: (content || rawText || "").slice(0, 240),
+          fieldTexts,
+          fieldHashes,
+        });
       } catch (err) {
         // Ignore malformed records during rebuild.
         console.error(`[generate-embeddings] JSON parse error (skipping line): ${err.message}`);
@@ -343,6 +418,17 @@ function collectDocuments() {
   return documents;
 }
 
+/**
+ * Load the existing index.jsonl (v1 or v2 format).
+ *
+ * Returns a Map keyed by entry_id (sub-entry id).  Each value is the parsed
+ * index record with an added `fieldTexts` dict derived from its `contentHash`
+ * map for the reuse check.
+ *
+ * v2 records (with record_id/field) are preferred; legacy v1 records
+ * (one entry per record_id, no record_id/field) are also loaded and treated
+ * as having field="content".
+ */
 function loadExistingIndex() {
   const existing = new Map();
   if (!fs.existsSync(INDEX_FILE)) {
@@ -356,8 +442,34 @@ function loadExistingIndex() {
     }
     try {
       const record = JSON.parse(line);
-      if (record && record.id) {
-        existing.set(record.id, record);
+      if (!record || !record.id) {
+        continue;
+      }
+      const entryId = String(record.id).trim();
+
+      // Reconstruct fieldTexts from the stored record:
+      // v2: record has { record_id, field, text, contentHash: { fieldName -> hash } }
+      // v1 (legacy): no record_id/field — treat as { field: "content", text: record.text || record.search_text }
+      if (record.record_id !== undefined && record.field !== undefined) {
+        // v2 format — contentHash is { fieldName -> hash }
+        const fieldTexts = {};
+        if (record.contentHash && typeof record.contentHash === "object" && !Array.isArray(record.contentHash)) {
+          for (const [fname, h] of Object.entries(record.contentHash)) {
+            fieldTexts[fname] = String(h || "");
+          }
+        } else if (typeof record.contentHash === "string") {
+          // Legacy single-hash string: treat as content field
+          fieldTexts.content = String(record.contentHash);
+        }
+        existing.set(entryId, { ...record, fieldTexts });
+      } else {
+        // v1 legacy format — one entry per record_id with a single contentHash
+        const recordId = entryId;
+        const fieldTexts = {};
+        if (record.contentHash && typeof record.contentHash === "string") {
+          fieldTexts.content = String(record.contentHash);
+        }
+        existing.set(entryId, { ...record, fieldTexts, record_id: recordId, field: "content" });
       }
     } catch (err) {
       // Ignore malformed lines and continue rebuilding.
@@ -368,12 +480,17 @@ function loadExistingIndex() {
   return existing;
 }
 
-function writeIndexSnapshot(orderedDocuments, finalRecords) {
-  const orderedRecords = orderedDocuments
-    .map((document) => finalRecords.get(document.id))
-    .filter(Boolean)
-    .sort((left, right) => left.id.localeCompare(right.id));
-
+/**
+ * Write all field-level records to index.jsonl (v2 format).
+ *
+ * orderedRecords: flat list of entry records, each with
+ *   { id, record_id, field, text, embedding, dim, backend, model, configHash,
+ *     providerHost, indexedAt, featureSchemaVersion, contentHash, tool }
+ *
+ * Each call overwrites the file atomically (partial write on crash is acceptable
+ * for a personal-memory scale index).
+ */
+function writeIndexSnapshot(orderedRecords) {
   const body = orderedRecords.map((record) => JSON.stringify(record)).join("\n");
   fs.writeFileSync(INDEX_FILE, body ? `${body}\n` : "", "utf8");
   return orderedRecords;
@@ -416,37 +533,60 @@ async function main() {
     modelName: preferredModelName,
     baseUrl: EMBED_RUNTIME.baseUrl || "",
   });
-  const orderedDocuments = Array.from(documents.values()).sort((left, right) => left.id.localeCompare(right.id));
-  const finalRecords = new Map();
-  const pending = [];
 
-  for (const document of orderedDocuments) {
-    const current = existing.get(document.id);
-    const isReusable =
-      !force &&
-      current &&
-      current.contentHash === document.contentHash &&
-      normalizeEmbeddingAdapter(current.backend, current.model) === preferredBackend &&
-      current.model === preferredModelName &&
-      current.configHash === preferredConfigHash &&
-      Array.isArray(current.embedding) &&
-      current.embedding.length > 0;
+  // Build the flat list of (recordId, fieldName) pairs to embed
+  const orderedRecordIds = Array.from(documents.values()).sort((l, r) => l.recordId.localeCompare(r.recordId));
+  const finalRecords = new Map();   // entryId -> v2 output record
+  const pending = [];               // [{ recordId, fieldName, text, recordDoc }]
 
-    if (isReusable) {
-      finalRecords.set(document.id, {
-        ...current,
-        ...document,
-        backend: normalizeEmbeddingAdapter(current.backend, current.model),
-      });
-      continue;
+  // Group: existing entries by record_id for fast lookup
+  const existingByRecord = new Map();
+  for (const [entryId, rec] of existing.entries()) {
+    const rid = String(rec.record_id || entryId);
+    if (!existingByRecord.has(rid)) {
+      existingByRecord.set(rid, new Map());
     }
-
-    pending.push(document);
+    existingByRecord.get(rid).set(String(rec.field || "content"), rec);
   }
 
-  console.log(`Structured documents: ${orderedDocuments.length}`);
-  console.log(`Existing vectors: ${existing.size}`);
-  console.log(`Pending vectors: ${pending.length}`);
+  for (const doc of orderedRecordIds) {
+    const storedByField = existingByRecord.get(doc.recordId) || new Map();
+    let allFieldsReusable = true;
+
+    for (const [fieldName, fieldText] of Object.entries(doc.fieldTexts)) {
+      const entryId = fieldName === "content" ? doc.recordId : `${doc.recordId}__${fieldName}`;
+      const stored = storedByField.get(fieldName);
+
+      const isFieldReusable =
+        !force &&
+        stored &&
+        normalizeEmbeddingAdapter(stored.backend, stored.model) === preferredBackend &&
+        stored.model === preferredModelName &&
+        stored.configHash === preferredConfigHash &&
+        stored.fieldTexts &&
+        stored.fieldTexts[fieldName] === doc.fieldHashes[fieldName] &&
+        Array.isArray(stored.embedding) &&
+        stored.embedding.length > 0;
+
+      if (isFieldReusable) {
+        finalRecords.set(entryId, {
+          ...stored,
+          record_id: doc.recordId,
+          field: fieldName,
+          text: fieldText,
+          backend: normalizeEmbeddingAdapter(stored.backend, stored.model),
+          featureSchemaVersion: VECTOR_SCHEMA_VERSION,
+        });
+      } else {
+        allFieldsReusable = false;
+        pending.push({ entryId, recordId: doc.recordId, fieldName, text: fieldText, doc });
+      }
+    }
+  }
+
+  console.log(`Structured records: ${orderedRecordIds.length}`);
+  console.log(`Existing entry slots: ${existing.size}`);
+  console.log(`Pending embeddings: ${pending.length}`);
   console.log(`Target backend: ${preferredBackend}`);
   console.log(`Target model: ${preferredModelName}`);
   if (ACTIVE_EMBED_PROFILE) {
@@ -468,7 +608,7 @@ async function main() {
     console.log(`Target provider host: ${getProviderHost(EMBED_RUNTIME.baseUrl || "") || "unknown"}`);
   }
 
-  if (orderedDocuments.length === 0) {
+  if (orderedRecordIds.length === 0) {
     fs.writeFileSync(INDEX_FILE, "", "utf8");
     console.log("No structured documents found. Wrote empty embeddings index.");
     return;
@@ -479,7 +619,7 @@ async function main() {
     const batch = pending.slice(offset, offset + batchSize);
     const batchNumber = Math.floor(offset / batchSize) + 1;
     const batchCount = Math.ceil(pending.length / batchSize);
-    process.stdout.write(`Embedding batch ${batchNumber}/${batchCount} (${batch.length} docs)... `);
+    process.stdout.write(`Embedding batch ${batchNumber}/${batchCount} (${batch.length} fields)... `);
     const batchRuntime = {
       ...EMBED_RUNTIME,
       model: preferredModelName,
@@ -487,7 +627,7 @@ async function main() {
       backend: preferredBackend,
     };
     const { vectors, modelName, backendName, providerHost = "" } = await embedBatch(
-      batch.map((document) => document.text.slice(0, 3000)),
+      batch.map((item) => item.text.slice(0, 3000)),
       batchRuntime
     );
     const configHash = buildEmbeddingConfigHash({
@@ -495,10 +635,19 @@ async function main() {
       modelName,
       baseUrl: batchRuntime.baseUrl || "",
     });
+
     for (let index = 0; index < batch.length; index += 1) {
-      const document = batch[index];
-      finalRecords.set(document.id, {
-        ...document,
+      const { entryId, recordId, fieldName, text, doc } = batch[index];
+      // contentHash: { fieldName -> sha256(fieldText) } for ALL fields in this record.
+      // Stored on every sub-entry so each line can independently validate field changes.
+      const contentHash = { ...doc.fieldHashes };
+
+      finalRecords.set(entryId, {
+        id: entryId,
+        record_id: recordId,
+        field: fieldName,
+        text,
+        contentHash,
         embedding: vectors[index],
         dim: Array.isArray(vectors[index]) ? vectors[index].length : 0,
         backend: backendName,
@@ -506,13 +655,24 @@ async function main() {
         configHash,
         providerHost,
         indexedAt: new Date().toISOString(),
+        featureSchemaVersion: VECTOR_SCHEMA_VERSION,
+        tool: doc.tool,
+        type: doc.type,
+        project: doc.project,
+        agent: doc.agent,
+        t: doc.t,
+        title: doc.title,
+        excerpt: doc.excerpt,
       });
     }
-    writeIndexSnapshot(orderedDocuments, finalRecords);
+
+    const orderedRecords = Array.from(finalRecords.values()).sort((l, r) => l.id.localeCompare(r.id));
+    writeIndexSnapshot(orderedRecords);
     console.log("done");
   }
 
-  const orderedRecords = writeIndexSnapshot(orderedDocuments, finalRecords);
+  const orderedRecords = Array.from(finalRecords.values()).sort((l, r) => l.id.localeCompare(r.id));
+  writeIndexSnapshot(orderedRecords);
 
   const byTool = {};
   for (const record of orderedRecords) {
@@ -520,8 +680,8 @@ async function main() {
   }
 
   console.log(`Rebuilt embeddings index: ${INDEX_FILE}`);
-  console.log(`Final vectors: ${orderedRecords.length}`);
-  for (const [tool, count] of Object.entries(byTool).sort((left, right) => left[0].localeCompare(right[0]))) {
+  console.log(`Final entries: ${orderedRecords.length}`);
+  for (const [tool, count] of Object.entries(byTool).sort((l, r) => l[0].localeCompare(r[0]))) {
     console.log(`  ${tool}: ${count}`);
   }
 }
