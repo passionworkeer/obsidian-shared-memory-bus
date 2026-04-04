@@ -1,0 +1,91 @@
+{
+  "generated_at": "2026-04-04T09:04:04Z",
+  "elapsed_seconds": 81.08,
+  "judgments_file": "E:\\desktop\\obsidian-shared-memory-bus\\retrieval\\eval/judgments-sample.jsonl",
+  "judgment_count": 8,
+  "top_k": 10,
+  "summary": {
+    "auto": {
+      "queries": 8,
+      "ndcg@5": 0.0,
+      "ndcg@10": 0.0,
+      "mrr@5": 0.0,
+      "mrr@10": 0.0,
+      "recall@10": 0.0,
+      "intent_acc": 0.25
+    },
+    "mixed": {
+      "queries": 8,
+      "ndcg@5": 0.0,
+      "ndcg@10": 0.0,
+      "mrr@5": 0.0,
+      "mrr@10": 0.0,
+      "recall@10": 0.0,
+      "intent_acc": 0.125
+    },
+    "durable": {
+      "queries": 8,
+      "ndcg@5": 0.0,
+      "ndcg@10": 0.0,
+      "mrr@5": 0.0,
+      "mrr@10": 0.0,
+      "recall@10": 0.0,
+      "intent_acc": 0.25
+    },
+    "task": {
+      "queries": 8,
+      "ndcg@5": 0.0,
+      "ndcg@10": 0.0,
+      "mrr@5": 0.0,
+      "mrr@10": 0.0,
+      "recall@10": 0.0,
+      "intent_acc": 0.25
+    },
+    "recent": {
+      "queries": 8,
+      "ndcg@5": 0.0,
+      "ndcg@10": 0.0,
+      "mrr@5": 0.0,
+      "mrr@10": 0.0,
+      "recall@10": 0.0,
+      "intent_acc": 0.25
+    },
+    "reference": {
+      "queries": 8,
+      "ndcg@5": 0.0,
+      "ndcg@10": 0.0,
+      "mrr@5": 0.0,
+      "mrr@10": 0.0,
+      "recall@10": 0.0,
+      "intent_acc": 0.125
+    }
+  },
+  "recommendations": {
+    "best_overall": {
+      "route": "auto",
+      "score": 0.025
+    },
+    "best_by_metric": {
+      "ndcg@5": {
+        "route": "auto",
+        "score": 0.0
+      },
+      "ndcg@10": {
+        "route": "auto",
+        "score": 0.0
+      },
+      "mrr@5": {
+        "route": "auto",
+        "score": 0.0
+      },
+      "recall@10": {
+        "route": "auto",
+        "score": 0.0
+      },
+      "intent_acc": {
+        "route": "auto",
+        "score": 0.25
+      }
+    }
+  }
+}
