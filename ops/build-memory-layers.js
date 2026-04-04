@@ -36,6 +36,12 @@ const STRUCTURED_ROOT = path.join(AI_MEMORY_ROOT, "structured");
 const GENERATED_ROOT = path.join(AI_MEMORY_ROOT, "generated");
 const MEMORY_LAYERS_MD = path.join(GENERATED_ROOT, "MEMORY-LAYERS.md");
 const MEMORY_LAYERS_JSON = path.join(GENERATED_ROOT, "MEMORY-LAYERS.json");
+const GLOBAL_CONTEXT_MD = path.join(GENERATED_ROOT, "GLOBAL-CONTEXT.md");
+const GLOBAL_CONTEXT_META_JSON = path.join(GENERATED_ROOT, "GLOBAL-CONTEXT.meta.json");
+// Body file: the full token-budgeted memory content.
+// memory-bus.ps1 reads this and wraps it in the outer GLOBAL-CONTEXT.md header
+// to avoid a read/write cycle on the same file path.
+const GLOBAL_CONTEXT_BODY_MD = path.join(GENERATED_ROOT, "GLOBAL-CONTEXT.body.md");
 const SHARED_INBOX_JSONL = path.join(STRUCTURED_ROOT, "shared-inbox.jsonl");
 const DREAM_INBOX_JSONL = path.join(STRUCTURED_ROOT, "dream-inbox.jsonl");
 const SESSION_MEMORY_JSONL = path.join(STRUCTURED_ROOT, "session-memory.jsonl");
@@ -49,6 +55,17 @@ const OPENCLAW_JOBS_JSONL = path.join(STRUCTURED_ROOT, "openclaw-jobs.jsonl");
 const OPENCLAW_JOURNAL_JSONL = path.join(STRUCTURED_ROOT, "openclaw-journal.jsonl");
 const MIN_PROMOTION_CONFIDENCE = 0.6;
 const DURABLE_SCOPES = new Set(["user", "feedback", "project", "reference"]);
+
+// Token-budget and progressive-rendering config for GLOBAL-CONTEXT.md generation
+const CONTEXT_LIMITS = {
+  user: 5,          // max user records to display
+  feedback: 5,
+  project: 8,
+  reference: 8,
+  event_task: 8,    // combined event + task
+  estimated_chars_per_token: 4,
+  max_file_size_chars: 8000, // warn if exceeded
+};
 const NON_PROMOTABLE_PROMOTION_TYPES = new Set([
   "summary",
   "session-summary",
@@ -124,6 +141,24 @@ function parseTimestamp(rawValue) {
 
 function sha1(value) {
   return crypto.createHash("sha1").update(String(value || ""), "utf8").digest("hex");
+}
+
+function sha256(value) {
+  return crypto.createHash("sha256").update(String(value || ""), "utf8").digest("hex");
+}
+
+/**
+ * 30-second dedup window: skip inbox entries whose content_hash matches
+ * an existing record written within the last 30 seconds.
+ * This prevents burst writes (e.g., multiple tools writing the same observation)
+ * from creating duplicate records.
+ */
+function shouldSkipAsRecentDuplicate(newRecord, existingRecordsByHash, nowMs) {
+  const hash = newRecord.content_hash || sha256(newRecord.content || "");
+  const existing = existingRecordsByHash.get(hash);
+  if (!existing) return false;
+  const existingMs = new Date(existing.t || existing.created_at || 0).getTime();
+  return (nowMs - existingMs) < 30_000; // 30 seconds
 }
 
 function getFreshness(isoTimestamp) {
@@ -264,6 +299,7 @@ function buildRecord({
   task_state = "",
   confidence = 0.5,
   metadata = {},
+  content_hash = "",
 }) {
   const normalizedTitle = normalizeSpaces(title || content).slice(0, 140) || id;
   const normalizedContent = String(content || "").trim();
@@ -307,6 +343,7 @@ function buildRecord({
     freshness: getFreshness(t),
     confidence,
     metadata: normalizedMetadata,
+    content_hash,
   };
 }
 
@@ -336,6 +373,7 @@ function parseInboxEntries() {
       const content = match.groups.content.trim();
       const classification = classifyScope(content, tool);
       const id = `inbox-${sha1(`${tool}|${project}|${match.groups.timestamp}|${content}`)}`;
+      const contentHash = sha256(content);
       records.push(
         buildRecord({
           id,
@@ -355,6 +393,7 @@ function parseInboxEntries() {
           metadata: {
             origin_path: filePath,
           },
+          content_hash: contentHash,
         })
       );
     }
@@ -683,6 +722,258 @@ function writeJsonl(filePath, records) {
   writeText(filePath, body ? `${body}\n` : "");
 }
 
+// ---------------------------------------------------------------------------
+// Token-budget and progressive-rendering helpers (immutable)
+// ---------------------------------------------------------------------------
+
+/**
+ * Estimate token count for a record using char_count / chars_per_token.
+ * Returns a new summary object — does not mutate the original record.
+ */
+function withTokenEstimate(record) {
+  const charCount = String(record.content || "").length;
+  const estimatedTokens = Math.ceil(charCount / CONTEXT_LIMITS.estimated_chars_per_token);
+  // Return a new summary object with the extra field
+  return {
+    id: record.id,
+    title: record.title,
+    scope: record.scope,
+    freshness: record.freshness,
+    estimatedTokens,
+    charCount,
+  };
+}
+
+/**
+ * Freshness score for sorting: higher = more important to show.
+ * Returns a new value — does not mutate anything.
+ */
+function freshnessScore(record) {
+  switch (record.freshness) {
+    case "hot":   return 3;
+    case "warm":  return 2;
+    case "cold":  return 1;
+    default:      return 0;
+  }
+}
+
+/**
+ * Sort records by freshness desc, then timestamp desc.
+ * Returns a new sorted array — does not mutate the input.
+ */
+function sortByFreshnessDesc(records) {
+  return [...records].sort((left, right) => {
+    const scoreDiff = freshnessScore(right) - freshnessScore(left);
+    if (scoreDiff !== 0) return scoreDiff;
+    return String(right.t || "").localeCompare(String(left.t || ""));
+  });
+}
+
+/**
+ * Build per-segment summaries with token budgets from the memory layers.
+ * Returns a new object — does not mutate the input layers.
+ *
+ * Segments:
+ *   user       — durable records with scope === "user"
+ *   feedback   — durable records with scope === "feedback"
+ *   project    — durable records with scope === "project"
+ *   reference  — durable records with scope === "reference"
+ *   event_task — combined sharedEvents + taskMemory (scopes: event, task, run, job)
+ */
+function buildScopedSummaries(layers) {
+  const allRecords = [
+    ...(layers.sharedInbox || []),
+    ...(layers.sessionMemory || []),
+    ...(layers.sharedEvents || []),
+    ...(layers.taskMemory || []),
+  ];
+
+  const segments = {
+    user: {
+      name: "用户偏好（user）",
+      scope: ["user"],
+      budget: CONTEXT_LIMITS.user,
+      records: sortByFreshnessDesc(
+        allRecords.filter((r) => (r.scope || "") === "user")
+      ),
+    },
+    feedback: {
+      name: "反馈与规则（feedback）",
+      scope: ["feedback"],
+      budget: CONTEXT_LIMITS.feedback,
+      records: sortByFreshnessDesc(
+        allRecords.filter((r) => (r.scope || "") === "feedback")
+      ),
+    },
+    project: {
+      name: "项目上下文（project）",
+      scope: ["project"],
+      budget: CONTEXT_LIMITS.project,
+      records: sortByFreshnessDesc(
+        allRecords.filter((r) => (r.scope || "") === "project")
+      ),
+    },
+    reference: {
+      name: "参考与链接（reference）",
+      scope: ["reference"],
+      budget: CONTEXT_LIMITS.reference,
+      records: sortByFreshnessDesc(
+        allRecords.filter((r) => (r.scope || "") === "reference")
+      ),
+    },
+    event_task: {
+      name: "事件与任务（event/task）",
+      scope: ["event", "task", "run", "job", "journal"],
+      budget: CONTEXT_LIMITS.event_task,
+      records: sortByFreshnessDesc(
+        allRecords.filter((r) =>
+          ["event", "task", "run", "job", "journal"].includes(r.scope || "")
+        )
+      ),
+    },
+  };
+
+  // Compute token estimates for all records and detect truncation per segment
+  let totalRecords = 0;
+  let estimatedTotalTokens = 0;
+  let anyTruncated = false;
+
+  for (const segment of Object.values(segments)) {
+    const estimated = segment.records.map(withTokenEstimate);
+    estimatedTotalTokens += estimated.reduce((sum, r) => sum + r.estimatedTokens, 0);
+    totalRecords += segment.records.length;
+
+    if (estimated.length > segment.budget) {
+      anyTruncated = true;
+      segment.displayedRecords = estimated.slice(0, segment.budget);
+      segment.truncatedCount = estimated.length - segment.budget;
+    } else {
+      segment.displayedRecords = estimated;
+      segment.truncatedCount = 0;
+    }
+  }
+
+  return { segments, totalRecords, estimatedTotalTokens, anyTruncated };
+}
+
+/**
+ * Render one markdown segment section.
+ * Pure function — returns new strings, mutates nothing.
+ */
+function renderSegmentMarkdown(segment) {
+  const lines = [`## ${segment.name}`, ""];
+
+  if (segment.displayedRecords.length === 0) {
+    lines.push("（暂无记录）", "");
+    return lines.join("\n");
+  }
+
+  for (const record of segment.displayedRecords) {
+    lines.push(`- **${record.title}** _[~${record.estimatedTokens} tokens]_`);
+  }
+
+  if (segment.truncatedCount > 0) {
+    const totalTokens = segment.displayedRecords.reduce((s, r) => s + r.estimatedTokens, 0);
+    lines.push(`- _... 还有 ${segment.truncatedCount} 条记录，估算 ${totalTokens} tokens，超出显示预算_`);
+  }
+
+  lines.push("");
+  return lines.join("\n");
+}
+
+/**
+ * Build GLOBAL-CONTEXT.md and GLOBAL-CONTEXT.meta.json from memory layers.
+ * Returns a new object { markdown, meta } — does not mutate layers.
+ */
+function buildGlobalContext(layers) {
+  const generatedAt = new Date().toISOString();
+  const { segments, totalRecords, estimatedTotalTokens, anyTruncated } =
+    buildScopedSummaries(layers);
+
+  // Accumulate markdown sections
+  const headerComment = [
+    `<!-- GLOBAL-CONTEXT: generated at ${generatedAt} -->`,
+    `<!-- total_records: ${totalRecords} | estimated_total_tokens: ${estimatedTotalTokens} | budgeted_display_tokens: ${CONTEXT_LIMITS.max_file_size_chars / CONTEXT_LIMITS.estimated_chars_per_token} -->`,
+    "",
+  ].join("\n");
+
+  const lines = [
+    "# Shared AI Memory — Global Context",
+    "",
+    `> Generated at: ${generatedAt}`,
+    `> Token budget: ${CONTEXT_LIMITS.max_file_size_chars} chars / ~${Math.round(CONTEXT_LIMITS.max_file_size_chars / CONTEXT_LIMITS.estimated_chars_per_token)} tokens  ·  ${totalRecords} records in store · ~${estimatedTotalTokens} estimated tokens`,
+    "",
+  ];
+
+  lines.push(renderSegmentMarkdown(segments.user));
+  lines.push(renderSegmentMarkdown(segments.feedback));
+  lines.push(renderSegmentMarkdown(segments.project));
+  lines.push(renderSegmentMarkdown(segments.reference));
+  lines.push(renderSegmentMarkdown(segments.event_task));
+
+  // Long-term accumulation footer
+  lines.push("## 长期积累", "");
+  const remainingByScope = {};
+  for (const [key, seg] of Object.entries(segments)) {
+    if (seg.truncatedCount > 0) {
+      remainingByScope[key] = seg.truncatedCount;
+    }
+  }
+  const remainingTotal = Object.values(remainingByScope).reduce((s, n) => s + n, 0);
+  if (remainingTotal > 0) {
+    lines.push(
+      `> 还有 ${remainingTotal} 条记录超出显示预算，保存在结构化存储中：`,
+      Object.entries(remainingByScope)
+        .map(([k, n]) => `- ${k}: ${n} 条`)
+        .join("\n"),
+      "",
+      "完整记录请查看 `00-System/ai-memory/structured/` 下的 JSONL 文件。",
+      ""
+    );
+  } else {
+    lines.push("（所有记录均已在上面展示）", "");
+  }
+
+  const markdown = headerComment + lines.join("\n");
+
+  // Size warning
+  if (markdown.length > CONTEXT_LIMITS.max_file_size_chars) {
+    process.stderr.write(
+      `[build-global-context] WARNING: GLOBAL-CONTEXT.md (${markdown.length} chars) exceeds ` +
+        `soft limit of ${CONTEXT_LIMITS.max_file_size_chars} chars.\n`
+    );
+  }
+
+  // Build meta JSON (immutable — constructed from scratch)
+  const metaSegments = Object.entries(segments).map(([key, seg]) => ({
+    name: seg.name,
+    scope: seg.scope,
+    budget: seg.budget,
+    totalCount: seg.records.length,
+    displayedRecords: seg.displayedRecords.map((r) => ({
+      id: r.id,
+      title: r.title,
+      scope: r.scope,
+      freshness: r.freshness,
+      estimatedTokens: r.estimatedTokens,
+    })),
+    truncated: seg.truncatedCount > 0,
+    truncatedCount: seg.truncatedCount,
+  }));
+
+  const meta = {
+    generatedAt,
+    totalRecords,
+    estimatedTotalTokens,
+    budgetedDisplayTokens: Math.round(CONTEXT_LIMITS.max_file_size_chars / CONTEXT_LIMITS.estimated_chars_per_token),
+    fileSizeChars: markdown.length,
+    truncated: anyTruncated,
+    segments: metaSegments,
+  };
+
+  return { markdown, meta, bodyMarkdown: markdown };
+}
+
 function buildScopeCounts(records) {
   const counts = {};
   for (const record of records) {
@@ -861,13 +1152,33 @@ function buildLayerSummary(layers) {
   };
 }
 
-function deduplicateSharedInbox(newInboxEntries, dreamRecords) {
+function deduplicateSharedInbox(newInboxEntries, dreamRecords, existingRecordsByHash, nowMs) {
   // Build dedup map from inbox entries (inbox entries take priority:
   // they reflect latest inbox content; dream records are append-only)
   const byId = new Map();
+  // Also index new inbox entries by content_hash for the 30s dedup window
+  const newByHash = new Map();
+
   for (const rec of newInboxEntries) {
-    if (rec && rec.id) byId.set(rec.id, rec);
+    if (!rec || !rec.id) continue;
+
+    const hash = rec.content_hash || sha256(rec.content || "");
+
+    // 30-second dedup: skip if a matching hash was written very recently
+    if (shouldSkipAsRecentDuplicate(rec, existingRecordsByHash, nowMs)) {
+      const existing = existingRecordsByHash.get(hash);
+      const existingId = existing ? existing.id : "unknown";
+      process.stderr.write(
+        `skipping duplicate inbox entry (30s window): ${rec.id} matches ${existingId} ` +
+        `(hash: ${hash.substring(0, 8)})\n`
+      );
+      continue;
+    }
+
+    byId.set(rec.id, rec);
+    newByHash.set(hash, rec);
   }
+
   // Append dream records that have unique IDs (not already covered by inbox entries)
   for (const rec of dreamRecords) {
     if (rec && rec.id && !byId.has(rec.id)) byId.set(rec.id, rec);
@@ -888,8 +1199,28 @@ function main() {
   const existingSharedRecords = readJsonl(SHARED_INBOX_JSONL);
   const dreamRecords = readJsonl(DREAM_INBOX_JSONL);
 
+  // Build content_hash -> record index from existing structured records.
+  // This is used by the 30-second dedup window in deduplicateSharedInbox.
+  const existingRecordsByHash = new Map();
+  for (const rec of [...existingSharedRecords, ...dreamRecords]) {
+    if (!rec || !rec.id) continue;
+    const hash = rec.content_hash || sha256(rec.content || "");
+    // Keep the most recent record per hash (by latest t)
+    const existing = existingRecordsByHash.get(hash);
+    if (!existing) {
+      existingRecordsByHash.set(hash, rec);
+    } else {
+      const existingTs = new Date(existing.t || 0).getTime();
+      const recTs = new Date(rec.t || 0).getTime();
+      if (recTs > existingTs) {
+        existingRecordsByHash.set(hash, rec);
+      }
+    }
+  }
+
+  const nowMs = Date.now();
   const layers = {
-    sharedInbox: deduplicateSharedInbox(newInboxEntries, dreamRecords),
+    sharedInbox: deduplicateSharedInbox(newInboxEntries, dreamRecords, existingRecordsByHash, nowMs),
     sessionMemory: parseSessionMemoryEntries(),
     sharedEvents: parseEventEntries(),
     taskMemory: parseTaskMemoryEntries(),
@@ -904,6 +1235,11 @@ function main() {
   writeText(MEMORY_LAYERS_MD, summary.markdown);
   writeText(MEMORY_LAYERS_JSON, `${JSON.stringify(summary.json, null, 2)}\n`);
 
+  // Token-budgeted GLOBAL-CONTEXT body + meta (body is wrapped by memory-bus.ps1)
+  const globalContext = buildGlobalContext(layers);
+  writeText(GLOBAL_CONTEXT_BODY_MD, globalContext.bodyMarkdown);
+  writeText(GLOBAL_CONTEXT_META_JSON, `${JSON.stringify(globalContext.meta, null, 2)}\n`);
+
   process.stdout.write(
     JSON.stringify(
       {
@@ -917,6 +1253,9 @@ function main() {
           taskMemory: TASK_MEMORY_JSONL,
           layersMarkdown: MEMORY_LAYERS_MD,
           layersJson: MEMORY_LAYERS_JSON,
+          globalContextMarkdown: GLOBAL_CONTEXT_MD,
+          globalContextMetaJson: GLOBAL_CONTEXT_META_JSON,
+          globalContextBodyMarkdown: GLOBAL_CONTEXT_BODY_MD,
         },
       },
       null,

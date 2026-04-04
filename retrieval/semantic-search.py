@@ -577,8 +577,9 @@ def rerank_entries(
 
     bm25_norm = normalize_score_map(bm25_map)
     dense_norm = normalize_score_map(dense_map)
-    ranked: List[Tuple[str, float]] = []
-    rank_meta: Dict[str, Dict[str, object]] = {}
+
+    # Collect all scored entries
+    all_scored: List[Tuple[str, float, Dict[str, object]]] = []
 
     for entry_id in candidate_ids:
         entry = entries_by_id.get(entry_id)
@@ -588,22 +589,111 @@ def rerank_entries(
         if scored is None:
             continue
         final_score, meta = scored
-        ranked.append((entry_id, final_score))
-        rank_meta[entry_id] = meta
 
-    ranked.sort(key=lambda item: item[1], reverse=True)
-    return ranked[:top_k], rank_meta, len(candidate_ids)
+        # Determine which field contributed the highest retrieval signal
+        field = str(entry.get("field", "content"))
+        bm25_v = float(bm25_norm.get(entry_id, 0.0))
+        dense_v = float(dense_norm.get(entry_id, 0.0))
+        if effective_mode == "bm25":
+            primary_v = bm25_v
+        elif effective_mode == "dense":
+            primary_v = dense_v
+        else:
+            primary_v = 0.58 * bm25_v + 0.42 * dense_v
+
+        matched_field = field if primary_v > 0 else "content"
+        meta["matchedField"] = matched_field
+
+        all_scored.append((entry_id, final_score, meta))
+
+    # Deduplicate by record_id: keep the highest-scoring sub-entry per record
+    seen_record_ids: set = set()
+    deduped_scored: List[Tuple[str, float, Dict[str, object]]] = []
+    for entry_id, final_score, meta in sorted(all_scored, key=lambda x: x[1], reverse=True):
+        record_id = str(entries_by_id.get(entry_id, {}).get("record_id", entry_id))
+        if record_id not in seen_record_ids:
+            seen_record_ids.add(record_id)
+            deduped_scored.append((entry_id, final_score, meta))
+
+    # Build rank_meta ONLY from entries that survived deduplication, so that
+    # matchedField always refers to the entry that actually appears in results.
+    rank_meta: Dict[str, Dict[str, object]] = {
+        entry_id: meta for entry_id, _, meta in deduped_scored
+    }
+
+    # Apply top-K on deduplicated entries
+    top_entries = deduped_scored[:top_k]
+    ranked: List[Tuple[str, float]] = [(eid, score) for eid, score, _ in top_entries]
+    return ranked, rank_meta, len(candidate_ids)
 
 
-def build_entry(payload: dict) -> Optional[dict]:
+def _build_entry_fields(payload: dict, entry_id: str, record_id: str, field: str, search_text: str, layer: str) -> dict:
+    """Shared field construction for parent and sub-entries.
+
+    `entry_id`  — the unique key for this entry (parent id or parent_id__fact/concept_N)
+    `record_id` — the parent record id all sub-entries link back to (used for deduplication)
+    """
+    excerpt = search_text
+    return {
+        "id": entry_id,
+        "record_id": record_id,
+        "field": field,
+        "search_text": search_text[:6000],
+        "tokens": tokenize(search_text),
+        "excerpt": excerpt[:240],
+        "title": payload.get("title", "") or excerpt[:120] or entry_id,
+        "layer": layer,
+        "tool": str(payload.get("tool", "unknown")).strip() or "unknown",
+        "type": str(payload.get("type", "")).strip(),
+        "project": str(payload.get("project", "")).strip(),
+        "agent": str(payload.get("agent", "")).strip(),
+        "t": str(payload.get("t", "")).strip(),
+        "scope": str(payload.get("scope", "")).strip(),
+        "visibility": str(payload.get("visibility", "")).strip(),
+        "sourceKind": str(payload.get("source_kind", "")).strip(),
+        "memoryLevel": str(payload.get("memory_level", "")).strip(),
+        "workspace": str(payload.get("workspace", "")).strip(),
+        "taskState": str(payload.get("task_state", "")).strip(),
+        "freshness": str(payload.get("freshness", "")).strip(),
+        "content": str(payload.get("content", "")).strip(),
+    }
+
+
+def _extract_item_text(item) -> str:
+    """Extract display text from a fact or concept item.
+
+    Handles two formats:
+      - Object format:  { "value": [...string items...], "Count": N }
+        -> returns all string items joined with " / "
+      - String format:  plain string
+        -> returns the string as-is
+    """
+    if isinstance(item, str):
+        return normalize_spaces(item)
+    if isinstance(item, dict) and isinstance(item.get("value"), list):
+        parts = [normalize_spaces(str(v)) for v in item["value"] if v]
+        return " / ".join(parts)
+    return normalize_spaces(str(item) if item else "")
+
+
+def build_entry(payload: dict) -> List[dict]:
+    """
+    Build search entries for one structured record.
+
+    Returns a list containing one parent entry (field='content') plus one entry
+    per fact (field='fact') and one per concept (field='concept').  Records
+    without facts/concepts produce only the parent entry.
+    """
     title = normalize_spaces(str(payload.get("title", "")))
     content = normalize_spaces(str(payload.get("content", "")))
     raw_text = normalize_spaces(" ".join(filter(None, [title, content])))
     if is_noise(raw_text):
-        return None
+        return []
 
-    entry_id = str(payload.get("id", "")).strip() or fallback_id(payload, title, content)
-    search_text = normalize_spaces(
+    record_id = str(payload.get("id", "")).strip() or fallback_id(payload, title, content)
+    layer = derive_entry_layer(payload)
+
+    parent_search = normalize_spaces(
         " ".join(
             filter(
                 None,
@@ -618,31 +708,45 @@ def build_entry(payload: dict) -> Optional[dict]:
             )
         )
     )[:6000]
-    excerpt = content or search_text
-    return {
-        "id": entry_id,
-        "tool": str(payload.get("tool", "unknown")).strip() or "unknown",
-        "type": str(payload.get("type", "")).strip(),
-        "project": str(payload.get("project", "")).strip(),
-        "agent": str(payload.get("agent", "")).strip(),
-        "t": str(payload.get("t", "")).strip(),
-        "title": title or excerpt[:120] or entry_id,
-        "excerpt": excerpt[:240],
-        "text": search_text,
-        "tokens": tokenize(search_text),
-        "scope": str(payload.get("scope", "")).strip(),
-        "visibility": str(payload.get("visibility", "")).strip(),
-        "sourceKind": str(payload.get("source_kind", "")).strip(),
-        "memoryLevel": str(payload.get("memory_level", "")).strip(),
-        "workspace": str(payload.get("workspace", "")).strip(),
-        "taskState": str(payload.get("task_state", "")).strip(),
-        "freshness": str(payload.get("freshness", "")).strip(),
-        "layer": derive_entry_layer(payload),
-    }
+
+    entries: List[dict] = [
+        _build_entry_fields(payload, record_id, record_id, "content", parent_search, layer)
+    ]
+
+    for i, fact in enumerate(payload.get("facts", [])):
+        fact_text = _extract_item_text(fact)
+        if fact_text and not is_noise(fact_text):
+            entries.append(
+                _build_entry_fields(
+                    payload,
+                    f"{record_id}__fact_{i}",
+                    record_id,
+                    "fact",
+                    fact_text,
+                    layer,
+                )
+            )
+
+    for i, concept in enumerate(payload.get("concepts", [])):
+        concept_text = _extract_item_text(concept)
+        if concept_text and not is_noise(concept_text):
+            entries.append(
+                _build_entry_fields(
+                    payload,
+                    f"{record_id}__concept_{i}",
+                    record_id,
+                    "concept",
+                    concept_text,
+                    layer,
+                )
+            )
+
+    return entries
 
 
 def _load_entries_uncached() -> List[dict]:
-    entries: Dict[str, dict] = {}
+    seen_ids: set = set()
+    entries: List[dict] = []
     if not os.path.isdir(STRUCTURED_DIR):
         return []
 
@@ -660,13 +764,14 @@ def _load_entries_uncached() -> List[dict]:
                         payload = json.loads(line)
                     except Exception:
                         continue
-                    entry = build_entry(payload)
-                    if entry is not None:
-                        entries[entry["id"]] = entry
+                    for entry in build_entry(payload):
+                        if entry["id"] not in seen_ids:
+                            seen_ids.add(entry["id"])
+                            entries.append(entry)
         except Exception:
             continue
 
-    return list(entries.values())
+    return entries
 
 
 def load_entries() -> List[dict]:
@@ -818,6 +923,17 @@ def embed_query(query: str, runtime: Dict[str, object], model_name: str = "") ->
 
 
 def dense_scores(entries_by_id: Dict[str, dict], query: str) -> Tuple[Dict[str, float], Optional[str], Dict[str, object]]:
+    """
+    Score all field-level sub-entries in the index against the query embedding.
+
+    Returns a dict keyed by entry_id (sub-entry id) with cosine similarity scores.
+    For records with multiple field sub-entries (content, fact_*, concept_*),
+    only the highest-scoring sub-entry per record_id is returned after deduplication.
+
+    Handles legacy v1 index records (no record_id/field) transparently:
+    - Missing record_id  -> use id as record_id
+    - Missing field      -> default to "content"
+    """
     index_records = load_embeddings_index()
     if not index_records:
         return {}, "missing-embeddings-index", {"queryEmbeddingCacheHit": False}
@@ -869,24 +985,43 @@ def dense_scores(entries_by_id: Dict[str, dict], query: str) -> Tuple[Dict[str, 
             "queryEmbeddingCacheHit": bool(query_embedding_cache_hit)
         }
 
-    scores: Dict[str, float] = {}
+    # Score every sub-entry individually; deduplicate by record_id keeping the best.
+    best_by_record: Dict[str, Tuple[str, float, dict]] = {}  # record_id -> (entry_id, score, payload)
     skipped_schema_mismatch = 0
-    for record_id, payload in index_records.items():
-        if record_id not in entries_by_id:
-            continue
+    for entry_id, payload in index_records.items():
         record_schema_version = int(payload.get("featureSchemaVersion", 0) or 0)
         if record_schema_version != VECTOR_SCHEMA_VERSION:
             skipped_schema_mismatch += 1
             continue
+
+        # Determine record_id and field (handle legacy v1 records)
+        record_id = str(payload.get("record_id", entry_id))
+        field = str(payload.get("field", "content"))
+
         score = cosine_similarity(query_vector, payload.get("embedding", []))
-        if score > 0:
-            scores[record_id] = score
+        if score <= 0:
+            continue
+
+        # Keep highest-scoring sub-entry per record_id
+        existing = best_by_record.get(record_id)
+        if existing is None or score > existing[1]:
+            best_by_record[record_id] = (entry_id, score, {**payload, "record_id": record_id, "field": field})
+
     if skipped_schema_mismatch > 0:
         sys.stderr.write(
             f"[dense_scores] skipped {skipped_schema_mismatch} records due to "
             f"schema version mismatch (expected={VECTOR_SCHEMA_VERSION}); "
             "run generate-embeddings to rebuild the index\n"
         )
+
+    # Normalize scores to [0, 1] range using max-score scaling
+    if not best_by_record:
+        return {}, None, {"queryEmbeddingCacheHit": bool(query_embedding_cache_hit)}
+    max_score = max(float(v[1]) for v in best_by_record.values())
+    scores: Dict[str, float] = {}
+    for record_id, (entry_id, raw_score, _payload) in best_by_record.items():
+        scores[entry_id] = float(raw_score) / max_score if max_score > 0 else 0.0
+
     return scores, None, {"queryEmbeddingCacheHit": bool(query_embedding_cache_hit)}
 
 
@@ -912,10 +1047,15 @@ def format_results(
             key: round(float(value), 6) if isinstance(value, (int, float)) else value
             for key, value in raw_meta.items()
         }
+        search_text = entry.get("search_text", "")
+        content_text = entry.get("content", "")
+        estimated_tokens = (len(search_text) + len(content_text)) // 4
         results.append(
             {
                 "rank": index,
                 "id": entry_id,
+                "record_id": entry.get("record_id", entry_id),
+                "field": entry.get("field", "content"),
                 "score": round(float(score), 6),
                 "tool": entry["tool"],
                 "project": entry["project"],
@@ -935,6 +1075,7 @@ def format_results(
                 "bm25Score": round(float(bm25_map.get(entry_id, 0.0)), 6) if entry_id in bm25_map else None,
                 "denseScore": round(float(dense_map.get(entry_id, 0.0)), 6) if entry_id in dense_map else None,
                 "rankMeta": meta or None,
+                "estimated_tokens": estimated_tokens,
             }
         )
     return results
@@ -1224,6 +1365,143 @@ def run_server() -> None:
                         "action": "clear_cache",
                         "includeDataCaches": include_data_caches,
                         "cacheState": clear_search_runtime_caches(include_data_caches),
+                    }
+                )
+                continue
+
+            if action == "get_records":
+                record_ids = payload.get("ids", [])
+                if not isinstance(record_ids, list):
+                    raise ValueError("ids must be an array")
+                record_ids = [normalize_spaces(str(rid)) for rid in record_ids if normalize_spaces(str(rid))]
+                if not record_ids:
+                    raise ValueError("ids cannot be empty")
+
+                entries = load_entries()
+                entries_by_id = {entry["id"]: entry for entry in entries}
+                records = []
+                found = []
+                for record_id in record_ids:
+                    raw = entries_by_id.get(record_id)
+                    if raw is None:
+                        continue
+                    found.append(record_id)
+                    content = str(raw.get("content", "") or raw.get("text", ""))
+                    records.append(
+                        {
+                            "id": raw["id"],
+                            "t": raw.get("t", ""),
+                            "tool": raw.get("tool", ""),
+                            "type": raw.get("type", ""),
+                            "title": raw.get("title", ""),
+                            "content": content,
+                            "facts": raw.get("facts"),
+                            "concepts": raw.get("concepts"),
+                            "files_read": raw.get("filesRead") or raw.get("files_read") or [],
+                            "files_modified": raw.get("filesModified") or raw.get("files_modified") or [],
+                            "scope": raw.get("scope", ""),
+                            "memory_level": raw.get("memoryLevel", ""),
+                            "freshness": raw.get("freshness", ""),
+                            "confidence": raw.get("confidence"),
+                            "project": raw.get("project", ""),
+                            "agent": raw.get("agent", ""),
+                            "workspace": raw.get("workspace", ""),
+                            "task_state": raw.get("taskState", ""),
+                            "visibility": raw.get("visibility", ""),
+                            "source_kind": raw.get("sourceKind", ""),
+                            "layer": raw.get("layer", ""),
+                            "estimated_tokens": math.ceil(len(content) / 4),
+                        }
+                    )
+                write_server_response(
+                    {
+                        "id": request_id,
+                        "ok": True,
+                        "action": "get_records",
+                        "requested": len(record_ids),
+                        "found": found,
+                        "records": records,
+                    }
+                )
+                continue
+
+            if action == "timeline":
+                anchor_id = normalize_spaces(str(payload.get("anchor_id", "")))
+                if not anchor_id:
+                    raise ValueError("anchor_id is required")
+                depth_before = normalize_int(payload.get("depth_before"), fallback=3, minimum=0)
+                depth_after = normalize_int(payload.get("depth_after"), fallback=3, minimum=0)
+
+                entries = load_entries()
+                raw_lookup: Dict[str, dict] = {}
+                for file_name in STRUCTURED_FILES:
+                    file_path = os.path.join(STRUCTURED_DIR, file_name)
+                    if not os.path.isfile(file_path):
+                        continue
+                    try:
+                        with open(file_path, "r", encoding="utf-8") as handle:
+                            for line_text in handle:
+                                line_text = line_text.strip()
+                                if not line_text:
+                                    continue
+                                try:
+                                    raw_entry = json.loads(line_text)
+                                except Exception:
+                                    continue
+                                eid = normalize_spaces(str(raw_entry.get("id", "")))
+                                if eid and eid not in raw_lookup:
+                                    raw_lookup[eid] = raw_entry
+                    except Exception:
+                        continue
+
+                def entry_timestamp(entry: dict) -> float:
+                    return parse_timestamp_seconds(str(entry.get("t", "")))
+
+                entries_sorted = sorted(entries, key=entry_timestamp)
+                anchor_index = next((i for i, e in enumerate(entries_sorted) if e["id"] == anchor_id), None)
+                if anchor_index is None:
+                    raise ValueError(f"anchor_id not found: {anchor_id}")
+
+                start = max(0, anchor_index - depth_before)
+                end = min(len(entries_sorted), anchor_index + depth_after + 1)
+                window = entries_sorted[start:end]
+
+                raw_map: Dict[str, dict] = {e["id"]: raw_lookup.get(e["id"], {}) for e in window}
+                items = []
+                for e in window:
+                    content = str(e.get("content", "") or e.get("text", ""))
+                    items.append(
+                        {
+                            "id": e["id"],
+                            "t": e.get("t", ""),
+                            "tool": e.get("tool", ""),
+                            "type": e.get("type", ""),
+                            "title": e.get("title", ""),
+                            "scope": e.get("scope", ""),
+                            "memory_level": e.get("memoryLevel", ""),
+                            "is_anchor": e["id"] == anchor_id,
+                            "excerpt": content[:240],
+                        }
+                    )
+
+                anchor_entry = entries_sorted[anchor_index]
+                write_server_response(
+                    {
+                        "id": request_id,
+                        "ok": True,
+                        "action": "timeline",
+                        "anchor": {
+                            "id": anchor_entry["id"],
+                            "t": anchor_entry.get("t", ""),
+                            "tool": anchor_entry.get("tool", ""),
+                            "type": anchor_entry.get("type", ""),
+                            "title": anchor_entry.get("title", ""),
+                            "scope": anchor_entry.get("scope", ""),
+                            "memory_level": anchor_entry.get("memoryLevel", ""),
+                            "excerpt": str(anchor_entry.get("content", "") or anchor_entry.get("text", ""))[:240],
+                        },
+                        "items": items,
+                        "total_count": len(window),
                     }
                 )
                 continue

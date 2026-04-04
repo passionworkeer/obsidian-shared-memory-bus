@@ -1348,6 +1348,36 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: "get_memory_records",
+      description:
+        "Fetch full structured records by ID from the canonical shared Obsidian memory bus. Returns all available fields including content, facts, concepts, files_read, files_modified, scope, memory_level, freshness, and confidence.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          ids: {
+            type: "array",
+            items: { type: "string" },
+            description: "Array of record IDs to fetch.",
+          },
+        },
+        required: ["ids"],
+      },
+    },
+    {
+      name: "get_memory_timeline",
+      description:
+        "Given an anchor record ID, return chronologically interleaved nearby records. Useful for navigating backward and forward from a known record.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          anchor_id: { type: "string", description: "The anchor record ID." },
+          depth_before: { type: "number", default: 3, description: "Number of records to return before the anchor." },
+          depth_after: { type: "number", default: 3, description: "Number of records to return after the anchor." },
+        },
+        required: ["anchor_id"],
+      },
+    },
+    {
       name: "clear_shared_memory_search_cache",
       description:
         "Clear the persistent shared retrieval worker's in-memory search caches. Optionally also clear loaded entry/index data so the next query fully reloads state from disk.",
@@ -1553,6 +1583,32 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         taskState: String(args.taskState || ""),
         preferSummaries: Boolean(args.preferSummaries),
       });
+      return jsonResult(payload);
+    }
+
+    if (name === "get_memory_records") {
+      const ids = Array.isArray(args.ids) ? args.ids.map((v) => String(v || "").trim()).filter(Boolean) : [];
+      if (ids.length === 0) {
+        return errorResult("ids is required and must be a non-empty array");
+      }
+      const payload = await requestSearchWorker({ action: "get_records", ids }, 60000);
+      return jsonResult(payload);
+    }
+
+    if (name === "get_memory_timeline") {
+      const anchorId = String(args.anchor_id || "").trim();
+      if (!anchorId) {
+        return errorResult("anchor_id is required");
+      }
+      const payload = await requestSearchWorker(
+        {
+          action: "timeline",
+          anchor_id: anchorId,
+          depth_before: Math.max(0, Number(args.depth_before) || 3),
+          depth_after: Math.max(0, Number(args.depth_after) || 3),
+        },
+        60000
+      );
       return jsonResult(payload);
     }
 
