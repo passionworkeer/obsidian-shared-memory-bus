@@ -1,5 +1,7 @@
 param(
     [switch]$Force,
+    [switch]$DryRun,
+    [switch]$Writeback,
     [int]$MinHours = 24,
     [int]$MinRecords = 10
 )
@@ -84,6 +86,19 @@ function Get-StringHash {
     }
 }
 
+function Get-ContentHash {
+    param([AllowEmptyString()][string]$Text)
+
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$Text)
+        $hashBytes = $sha256.ComputeHash($bytes)
+        return ([System.BitConverter]::ToString($hashBytes)).Replace("-", "").ToLowerInvariant()
+    } finally {
+        $sha256.Dispose()
+    }
+}
+
 function Get-FileStamp {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -97,13 +112,22 @@ function Get-FileStamp {
     return "{0}:{1}:{2}" -f $item.Name, $hash, $item.Length
 }
 
+function SafeProp {
+    param([Parameter(Mandatory = $true)][object]$Record, [Parameter(Mandatory = $true)][string]$Name)
+    try {
+        return [string]$Record.$Name
+    } catch {
+        return ""
+    }
+}
+
 function New-BulletLine {
     param([Parameter(Mandatory = $true)][object]$Record)
 
-    $tool = if ([string]::IsNullOrWhiteSpace([string]$Record.tool)) { "unknown" } else { [string]$Record.tool }
-    $scope = if ([string]::IsNullOrWhiteSpace([string]$Record.scope)) { "" } else { " [$([string]$Record.scope)]" }
-    $title = if ([string]::IsNullOrWhiteSpace([string]$Record.title)) { [string]$Record.content } else { [string]$Record.title }
-    $taskState = if ([string]::IsNullOrWhiteSpace([string]$Record.task_state)) { "" } else { " {$([string]$Record.task_state)}" }
+    $tool = if ([string]::IsNullOrWhiteSpace((SafeProp $Record "tool"))) { "unknown" } else { SafeProp $Record "tool" }
+    $scope = if ([string]::IsNullOrWhiteSpace((SafeProp $Record "scope"))) { "" } else { " [$(SafeProp $Record 'scope')]" }
+    $title = if ([string]::IsNullOrWhiteSpace((SafeProp $Record "title"))) { SafeProp $Record "content" } else { SafeProp $Record "title" }
+    $taskState = if ([string]::IsNullOrWhiteSpace((SafeProp $Record "task_state"))) { "" } else { " {$(SafeProp $Record 'task_state')}" }
     return "- [$tool]$scope$taskState $($title.Trim())"
 }
 
@@ -111,11 +135,11 @@ function Normalize-RecordText {
     param([Parameter(Mandatory = $true)][object]$Record)
 
     $parts = @(
-        [string]$Record.project,
-        [string]$Record.title,
-        [string]$Record.content,
-        [string]$Record.scope,
-        [string]$Record.task_state
+        (SafeProp $Record "project"),
+        (SafeProp $Record "title"),
+        (SafeProp $Record "content"),
+        (SafeProp $Record "scope"),
+        (SafeProp $Record "task_state")
     ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
 
     $text = [string]::Join(" ", $parts).ToLowerInvariant()
@@ -140,8 +164,8 @@ function Get-RecordSimilarityKey {
         return ""
     }
 
-    $effectiveScope = if ([string]::IsNullOrWhiteSpace($ScopeOverride)) { [string]$Record.scope } else { $ScopeOverride }
-    $prefix = "{0}|{1}" -f ([string]$Record.project).ToLowerInvariant(), ([string]$effectiveScope).ToLowerInvariant()
+    $effectiveScope = if ([string]::IsNullOrWhiteSpace($ScopeOverride)) { SafeProp $Record "scope" } else { $ScopeOverride }
+    $prefix = "{0}|{1}" -f ((SafeProp $Record "project").ToLowerInvariant()), ($effectiveScope.ToLowerInvariant())
     return (Get-StringHash -Text ($prefix + "|" + ($tokens -join " ")))
 }
 
@@ -481,6 +505,8 @@ function New-TypedDurableQueueItems {
     param(
         [Parameter(Mandatory = $true)][object[]]$CandidateRecords,
         [Parameter(Mandatory = $true)][hashtable]$BaselineMap,
+        [Parameter(Mandatory = $false)][hashtable]$ExistingByKey = @{},
+        [Parameter(Mandatory = $false)][System.Collections.Generic.HashSet[string]]$DurableContentHashSet,
         [int]$MaxPromotions = 8,
         [int]$MaxRefresh = 8
     )
@@ -508,10 +534,23 @@ function New-TypedDurableQueueItems {
         $baseline = if ($BaselineMap.ContainsKey($key)) { $BaselineMap[$key] } else { $null }
 
         if ($null -eq $baseline) {
-            if ($promotions.Count -ge $MaxPromotions -or $seenPromotions.ContainsKey($key)) {
+            $sourceRecordId = [string]$record.id
+            $sourceContent = [string]$record.content
+            $sourceContentHash = Get-ContentHash -Text $sourceContent
+            $itemNewId = ("dream-" + (Get-ContentHash -Text ($sourceRecordId + $key)).Substring(0, 16)).ToLowerInvariant()
+            $idDedup = $ExistingByKey.ContainsKey($itemNewId)
+            $hashDedup = $null -ne $DurableContentHashSet -and $DurableContentHashSet.Contains($sourceContentHash.ToLowerInvariant())
+            $passesDedup = -not $idDedup -and -not $hashDedup
+            $atMax = $promotions.Count -ge $MaxPromotions
+            $keySeen = $seenPromotions.ContainsKey($key)
+            $wouldSkip = $atMax -or $keySeen
+            if ($wouldSkip) {
                 continue
             }
-
+            if (-not $passesDedup) {
+                continue
+            }
+            if ($null -ne $DurableContentHashSet) { $DurableContentHashSet.Add($sourceContentHash.ToLowerInvariant()) | Out-Null }
             $seenPromotions[$key] = $true
             $promotions.Add([ordered]@{
                 tool = [string]$record.tool
@@ -523,8 +562,10 @@ function New-TypedDurableQueueItems {
                 sourceKind = [string]$record.source_kind
                 sourceType = $sourceType
                 sourceConfidence = $sourceConfidence
-                sourceRecordId = [string]$record.id
+                sourceRecordId = $sourceRecordId
                 promotionKey = $key
+                newId = $itemNewId
+                contentHash = $sourceContentHash
                 promotionReason = Get-PromotionReason -Record $record -TargetScope $targetScope -SourceLayer $sourceLayer
             }) | Out-Null
             continue
@@ -539,6 +580,14 @@ function New-TypedDurableQueueItems {
             continue
         }
 
+        $sourceRecordId = [string]$record.id
+        $refreshContentHash = (Get-ContentHash -Text ([string]$record.content)).ToLowerInvariant()
+        $itemNewId = ("dream-" + (Get-ContentHash -Text ($sourceRecordId + $key)).Substring(0, 16)).ToLowerInvariant()
+        $hashInSet = $null -ne $DurableContentHashSet -and $DurableContentHashSet.Contains($refreshContentHash)
+        if ($null -ne $DurableContentHashSet -and $DurableContentHashSet.Contains($refreshContentHash)) {
+            continue
+        }
+        if ($null -ne $DurableContentHashSet) { $DurableContentHashSet.Add($refreshContentHash) | Out-Null }
         $seenRefresh[$key] = $true
         $refresh.Add([ordered]@{
             tool = [string]$record.tool
@@ -550,8 +599,10 @@ function New-TypedDurableQueueItems {
             sourceKind = [string]$record.source_kind
             sourceType = $sourceType
             sourceConfidence = $sourceConfidence
-            sourceRecordId = [string]$record.id
+            sourceRecordId = $sourceRecordId
             promotionKey = $key
+            newId = $itemNewId
+            contentHash = $refreshContentHash
             promotionReason = Get-PromotionReason -Record $record -TargetScope $targetScope -SourceLayer $sourceLayer -Refresh
             refreshOf = [ordered]@{
                 id = [string]$baseline.id
@@ -614,13 +665,219 @@ function Build-CountMap {
     return $sorted
 }
 
+$LockExpiryMinutes = 60
+
+function Write-TypedDurableJsonl {
+    param(
+        [object[]]$PromotionQueue = @(),
+        [object[]]$RefreshQueue = @(),
+        [Parameter(Mandatory = $true)][hashtable]$AllRecordsByPath,
+        [Parameter(Mandatory = $true)][string]$TargetPath,
+        [switch]$DryRun
+    )
+
+    $results = New-Object System.Collections.Generic.List[object]
+    $existingRecords = @(Get-JsonLines -Path $TargetPath)
+    $existingByKey = @{}
+    foreach ($rec in $existingRecords) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$rec.id)) {
+            $existingByKey[$rec.id] = $rec
+        }
+    }
+
+    $recordsToWrite = @()
+    $allItems = @($PromotionQueue) + @($RefreshQueue)
+
+    foreach ($item in $allItems) {
+        $sourceRecord = $null
+        foreach ($path in $AllRecordsByPath.Keys) {
+            $recs = $AllRecordsByPath[$path]
+            foreach ($rec in $recs) {
+                if ([string]$rec.id -eq [string]$item.sourceRecordId) {
+                    $sourceRecord = $rec
+                    break
+                }
+            }
+            if ($null -ne $sourceRecord) { break }
+        }
+
+        $contentText = if ($null -ne $sourceRecord) { [string]$sourceRecord.content } else { "" }
+        $titleText = if ($null -ne $sourceRecord) { [string]$sourceRecord.title } else { [string]$item.title }
+        $newId = $item.newId
+        $itemContentHash = $item.contentHash
+        $newContentHash = if (-not [string]::IsNullOrWhiteSpace($itemContentHash)) { $itemContentHash } else { Get-ContentHash -Text $contentText }
+        $isRefresh = ($null -ne $item.PSObject.Properties['refreshOf']) -and ($null -ne $item.refreshOf)
+        $inExisting = $existingByKey.ContainsKey($newId)
+        $conflictWith = @()
+        $action = "append"
+
+        if ($inExisting) {
+            $existingRecord = $existingByKey[$newId]
+            $existingHash = SafeProp $existingRecord "content_hash"
+            if (-not [string]::IsNullOrWhiteSpace($existingHash) -and $existingHash -eq $newContentHash) {
+                $action = "skip-identical"
+            } elseif (-not [string]::IsNullOrWhiteSpace($existingHash)) {
+                $conflictWith = @([string]$existingRecord.id)
+                $action = "append-conflict"
+            } else {
+                $existingContent = SafeProp $existingRecord "content"
+                $existingComputedHash = Get-ContentHash -Text $existingContent
+                if ($existingComputedHash -eq $newContentHash) {
+                    $action = "skip-identical"
+                } else {
+                    $conflictWith = @([string]$existingRecord.id)
+                    $action = "append-conflict"
+                }
+            }
+        }
+
+        if ($action -eq "skip-identical") {
+            $results.Add([ordered]@{ action = "skip"; id = $newId; reason = "content-identical" }) | Out-Null
+            continue
+        }
+
+        $promotionMeta = [ordered]@{
+            version = 1
+            durable_type = $item.targetScope
+            key = $item.promotionKey
+            reason = $item.promotionReason
+            source_layer = $item.sourceLayer
+            source_record_id = $item.sourceRecordId
+            is_refresh = $isRefresh
+        }
+        if ($isRefresh -and $null -ne $item.refreshOf) {
+            $promotionMeta["refresh_of_id"] = $item.refreshOf.id
+            $promotionMeta["refresh_of_t"] = $item.refreshOf.t
+        }
+        if ($conflictWith.Count -gt 0) {
+            $promotionMeta["conflict_with"] = $conflictWith
+        }
+
+        $newRecord = [ordered]@{
+            id = $newId
+            type = $item.sourceType
+            scope = $item.targetScope
+            memory_level = "durable"
+            source_kind = "writeback"
+            tool = $item.tool
+            title = $titleText
+            content = $contentText
+            t = (Get-Date).ToUniversalTime().ToString("o")
+            content_hash = $newContentHash
+            metadata = [ordered]@{
+                promotion = $promotionMeta
+            }
+        }
+
+        if ($DryRun) {
+            $results.Add([ordered]@{ action = $action; id = $newId; targetScope = $item.targetScope; promotionReason = $item.promotionReason; isRefresh = $isRefresh; record = $newRecord }) | Out-Null
+        } else {
+            $jsonLine = ($newRecord | ConvertTo-Json -Compress) + "`n"
+            [System.IO.File]::AppendAllText($TargetPath, $jsonLine, $Utf8NoBom)
+            $existingByKey[$newId] = $newRecord
+            $results.Add([ordered]@{ action = $action; id = $newId; targetScope = $item.targetScope; promotionReason = $item.promotionReason; isRefresh = $isRefresh }) | Out-Null
+        }
+    }
+
+    return $results.ToArray()
+}
+
+function Merge-DurableMemoryIndex {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$WriteResults,
+        [Parameter(Mandatory = $true)][string]$IndexPath,
+        [switch]$DryRun
+    )
+
+    $entries = New-Object System.Collections.Generic.List[string]
+    $appended = 0
+
+    foreach ($result in $WriteResults) {
+        if ($result.action -eq "skip") { continue }
+        $scopeTag = "[{0}]" -f $result.targetScope
+        $rawReason = if ($null -ne $result.promotionReason -and $result.promotionReason -ne "") { " ({0})" -f $result.promotionReason } else { "" }
+        if ($result.isRefresh) {
+            $line = "- {0} promotion_key: {1} — source: dream-refresh — refreshed: {2}{3}" -f $scopeTag, $result.id, (Get-Date).ToString("yyyy-MM-dd"), $rawReason
+        } else {
+            $line = "- {0} promotion_key: {1} — source: dream — promoted: {2}{3}" -f $scopeTag, $result.id, (Get-Date).ToString("yyyy-MM-dd"), $rawReason
+        }
+        $entries.Add($line) | Out-Null
+        $appended++
+    }
+
+    if ($entries.Count -eq 0) { return @{ appended = 0; entries = @() } }
+
+    if ($DryRun) {
+        return @{ appended = $appended; entries = @($entries.ToArray()); dryRun = $true }
+    }
+
+    Ensure-Directory -Path (Split-Path -Parent $IndexPath)
+    $sep = "`n"
+    [System.IO.File]::AppendAllText($IndexPath, ($sep + ($entries.ToArray() -join $sep) + "`n"), $Utf8NoBom)
+    return @{ appended = $appended; entries = @($entries.ToArray()); dryRun = $false }
+}
+
+function Build-AllRecordsByPath {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$SourceFiles
+    )
+
+    $byPath = @{}
+    foreach ($filePath in $SourceFiles) {
+        if (Test-Path -LiteralPath $filePath -PathType Leaf) {
+            $byPath[$filePath] = @(Get-JsonLines -Path $filePath)
+        }
+    }
+    return $byPath
+}
+
+function Write-LockMeta {
+    param(
+        [Parameter(Mandatory = $true)][System.IO.FileStream]$Stream
+    )
+
+    $now = (Get-Date).ToUniversalTime().ToString("o")
+    $pidLine = (@{ pid = $PID; mtime = $now } | ConvertTo-Json -Compress) + "`n"
+    $Stream.SetLength(0)
+    $sw = [System.IO.StreamWriter]::new($Stream, $Utf8NoBom)
+    $sw.Write($pidLine)
+    $sw.Flush()
+}
+
 function Acquire-DreamLock {
     param([Parameter(Mandatory = $true)][string]$LockPath)
 
     Ensure-Directory -Path (Split-Path -Parent $LockPath)
     try {
-        return [System.IO.File]::Open($LockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+        $lockStream = [System.IO.File]::Open($LockPath, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+        Write-LockMeta -Stream $lockStream
+        return $lockStream
     } catch [System.IO.IOException] {
+        if (Test-Path -LiteralPath $LockPath -PathType Leaf) {
+            $content = Read-Text -Path $LockPath
+            if (-not [string]::IsNullOrWhiteSpace($content)) {
+                try {
+                    $meta = $content | ConvertFrom-Json
+                    $lockPid = [int]$meta.pid
+                    $lockMtime = [datetime]::ParseExact([string]$meta.mtime, "o", $null)
+                    if (((Get-Date) - $lockMtime).TotalMinutes -gt $LockExpiryMinutes) {
+                        Write-Verbose "Lock stale (PID $lockPid, mtime=$($lockMtime.ToString('o'))), breaking."
+                        try {
+                            Remove-Item -LiteralPath $LockPath -Force -ErrorAction SilentlyContinue
+                        } catch {
+                        }
+                        try {
+                            $lockStream = [System.IO.File]::Open($LockPath, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+                            Write-LockMeta -Stream $lockStream
+                            return $lockStream
+                        } catch {
+                            return $null
+                        }
+                    }
+                } catch {
+                }
+            }
+        }
         return $null
     }
 }
@@ -654,7 +911,8 @@ $StateRoot = Join-SharedPath @($AiMemoryRoot, "state")
 $DreamMarkdownPath = Join-Path $GeneratedRoot "AUTO-DREAM.md"
 $DreamJsonPath = Join-Path $GeneratedRoot "AUTO-DREAM.json"
 $DreamStatePath = Join-Path $StateRoot "auto-dream-state.json"
-$DreamLockPath = Join-Path $StateRoot "auto-dream.lock"
+$MemoryIndexPath = Join-Path $GeneratedRoot "MEMORY.md"
+$DreamLockPath = Join-Path (Join-Path $VaultRoot ".lock") "consolidation.lock"
 $TaskMemoryPath = Join-Path $StructuredRoot "task-memory.jsonl"
 $ClaudeCodeStructuredPath = Join-Path $StructuredRoot "claude-code.jsonl"
 $OpenClawSessionStructuredPath = Join-Path $StructuredRoot "openclaw.jsonl"
@@ -748,7 +1006,30 @@ try {
     $sessionHighlights = @(Select-RecentUniqueRecords -Records ($sessionRecords + $eventRecords) -MaxItems 8)
     $taskHighlights = @(Select-RecentUniqueRecords -Records $taskMemoryRecords -MaxItems 10)
     $durableMap = New-KeyRecordMap -Records $durableRecords
-    $typedDurableQueue = New-TypedDurableQueueItems -CandidateRecords ($sessionRecords + $eventRecords + $taskMemoryRecords) -BaselineMap $durableMap -MaxPromotions 8 -MaxRefresh 8
+    # Build ExistingByKey and durableContentHashSet from dream-inbox.jsonl
+    # - ExistingByKey: dedup by dream-xxx ID (stable across session rebuilds)
+    # - durableContentHashSet: dedup by content hash (handles same content with different session IDs)
+    $dreamInboxPath = Join-Path $StructuredRoot "dream-inbox.jsonl"
+    $existingByKey = @{}
+    $durableContentHashSet = New-Object System.Collections.Generic.HashSet[string]
+    if (Test-Path -LiteralPath $dreamInboxPath) {
+        foreach ($rec in @(Get-JsonLines -Path $dreamInboxPath)) {
+            $recId = SafeProp $rec "id"
+            if (-not [string]::IsNullOrWhiteSpace($recId)) {
+                $existingByKey[$recId] = $rec
+            }
+            $ch = SafeProp $rec "content_hash"
+            if (-not [string]::IsNullOrWhiteSpace($ch)) {
+                $durableContentHashSet.Add($ch.ToLowerInvariant()) | Out-Null
+            } else {
+                $existingContent = SafeProp $rec "content"
+                if (-not [string]::IsNullOrWhiteSpace($existingContent)) {
+                    $durableContentHashSet.Add((Get-ContentHash -Text $existingContent).ToLowerInvariant()) | Out-Null
+                }
+            }
+        }
+    }
+    $typedDurableQueue = New-TypedDurableQueueItems -CandidateRecords ($sessionRecords + $eventRecords + $taskMemoryRecords) -BaselineMap $durableMap -ExistingByKey $existingByKey -DurableContentHashSet $durableContentHashSet -MaxPromotions 8 -MaxRefresh 8
     $promotionCandidates = @($typedDurableQueue.promotions)
     $refreshTargets = @($typedDurableQueue.refresh)
     $durableByScope = Build-CountMap -Records $durableRecords -PropertyName "scope"
@@ -756,6 +1037,40 @@ try {
     $refreshTargetCounts = Build-CountMap -Records $refreshTargets -PropertyName "targetScope"
 
     $generatedAt = (Get-Date).ToString("o")
+
+    # --- Durable writeback (Phase 2 writeback) ---
+    $writebackResults = $null
+    $memoryIndexResults = $null
+    if ($Writeback -or $DryRun) {
+        $allSourceFiles = @(
+            (Join-Path $StructuredRoot "shared-inbox.jsonl"),
+            (Join-Path $StructuredRoot "session-memory.jsonl"),
+            (Join-Path $StructuredRoot "shared-events.jsonl"),
+            $TaskMemoryPath,
+            $ClaudeCodeStructuredPath,
+            $OpenClawSessionStructuredPath,
+            $OpenClawBlackboardPath,
+            $OpenClawRunsPath,
+            $OpenClawJobsPath,
+            $OpenClawJournalPath
+        )
+        $allRecordsByPath = Build-AllRecordsByPath -SourceFiles $allSourceFiles
+        $sharedInboxPath = Join-Path $StructuredRoot "shared-inbox.jsonl"
+        $dreamInboxPath = Join-Path $StructuredRoot "dream-inbox.jsonl"
+
+        $writebackResults = Write-TypedDurableJsonl `
+            -PromotionQueue $promotionCandidates `
+            -RefreshQueue $refreshTargets `
+            -AllRecordsByPath $allRecordsByPath `
+            -TargetPath $dreamInboxPath `
+            -DryRun:$DryRun
+
+        $memoryIndexResults = Merge-DurableMemoryIndex `
+            -WriteResults $writebackResults `
+            -IndexPath $MemoryIndexPath `
+            -DryRun:$DryRun
+    }
+
     $markdownLines = New-Object System.Collections.Generic.List[string]
     $markdownLines.Add("# Auto Dream Summary") | Out-Null
     $markdownLines.Add("") | Out-Null
@@ -841,6 +1156,33 @@ try {
     $markdownLines.Add("- Typed durable promotion only routes into `user`, `feedback`, `project`, and `reference`, so durable writeback targets stay auditable.") | Out-Null
     $markdownLines.Add("- Typed promotion queue items now carry source layer, source scope, target scope, source type, source confidence, source record id, and a promotion reason for downstream writeback decisions.") | Out-Null
     $markdownLines.Add("- Typed refresh targets are newer task/session/event signals that overlap an older durable memory after target-scope routing and may deserve a writeback update.") | Out-Null
+    if ($null -ne $writebackResults -and $writebackResults.Count -gt 0) {
+        $wbApplies = @($writebackResults | Where-Object { (SafeProp $_ "action") -ne "skip" })
+        $wbSkips = @($writebackResults | Where-Object { (SafeProp $_ "action") -eq "skip" })
+        if ($DryRun) {
+            $dryRunTag = " [DRY-RUN — no files written]"
+            $markdownLines.Add("") | Out-Null
+            $markdownLines.Add("## Writeback Preview$dryRunTag") | Out-Null
+            $markdownLines.Add("") | Out-Null
+            $markdownLines.Add(("- Would write {0} records, skip {1} (identical):" -f $wbApplies.Count, $wbSkips.Count)) | Out-Null
+        } else {
+            $markdownLines.Add("") | Out-Null
+            $markdownLines.Add("## Writeback Summary") | Out-Null
+            $markdownLines.Add("") | Out-Null
+            $markdownLines.Add(("- Wrote {0} records to shared-inbox.jsonl" -f $wbApplies.Count)) | Out-Null
+            $markdownLines.Add(("- Appended {0} entries to MEMORY.md" -f $memoryIndexResults.appended)) | Out-Null
+            if ($wbSkips.Count -gt 0) {
+                $markdownLines.Add(("- Skipped {0} records (content identical to existing)" -f $wbSkips.Count)) | Out-Null
+            }
+        }
+        foreach ($result in $wbApplies) {
+            $scope = if ([string]::IsNullOrWhiteSpace([string](SafeProp $result "targetScope"))) { "?" } else { [string](SafeProp $result "targetScope") }
+            $action = SafeProp $result "action"
+            $pr = SafeProp $result "promotionReason"
+            $detailReason = if ($null -ne $pr -and $pr -ne "") { " ($pr)" } else { "" }
+            $markdownLines.Add(("- [{0}/{1}] id={2}{3}" -f $scope, $action, (SafeProp $result "id"), $detailReason)) | Out-Null
+        }
+    }
 
     $markdown = ($markdownLines.ToArray() -join "`n").Trim() + "`n"
     Write-Text -Path $DreamMarkdownPath -Content $markdown
@@ -924,6 +1266,27 @@ try {
                 }
             })
         }
+        writeback = if ($null -ne $writebackResults -and @($writebackResults).Count -gt 0) {
+            [ordered]@{
+                dryRun = [bool]$DryRun
+                records = @($writebackResults | ForEach-Object -Process {
+                    $item = $_
+                    [ordered]@{
+                        action = SafeProp $item "action"
+                        id = SafeProp $item "id"
+                        targetScope = SafeProp $item "targetScope"
+                        promotionReason = SafeProp $item "promotionReason"
+                        isRefresh = [bool](SafeProp $item "isRefresh")
+                    }
+                })
+                memoryIndex = if ($null -ne $memoryIndexResults) {
+                    [ordered]@{
+                        appended = $memoryIndexResults.appended
+                        dryRun = [bool]$DryRun
+                    }
+                } else { $null }
+            }
+        } else { $null }
     }
 
     Write-Text -Path $DreamJsonPath -Content (($jsonPayload | ConvertTo-Json -Depth 8) + "`n")
