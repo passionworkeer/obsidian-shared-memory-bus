@@ -214,6 +214,12 @@ let searchWorkerRequestCounter = 0;
 let searchWorkerStartedAt = "";
 let searchWorkerLastError = "";
 let searchWorkerRestartCount = 0;
+let searchWorkerFirstFailureAt = null;
+const SEARCH_WORKER_MAX_RESTARTS = 5;
+const SEARCH_WORKER_CIRCUIT_WINDOW_MS = 300000;
+const SEARCH_BACKPRESSURE_LIMIT = 50;
+let searchWorkerCircuitOpen = false;
+let searchWorkerBackpressureRejected = 0;
 const searchWorkerPending = new Map();
 
 function isSearchWorkerRunning() {
@@ -230,6 +236,14 @@ function getSearchWorkerSnapshot() {
     restartCount: searchWorkerRestartCount,
     lastError: searchWorkerLastError || "",
     mode: "persistent-jsonl-with-oneshot-fallback",
+    circuitBreaker: {
+      circuitOpen: searchWorkerCircuitOpen,
+      restartCount: searchWorkerRestartCount,
+      firstFailureAt: searchWorkerFirstFailureAt ? new Date(searchWorkerFirstFailureAt).toISOString() : null,
+      backpressureRejected: searchWorkerBackpressureRejected,
+      maxRestarts: SEARCH_WORKER_MAX_RESTARTS,
+      circuitWindowMs: SEARCH_WORKER_CIRCUIT_WINDOW_MS,
+    },
   };
 }
 
@@ -368,10 +382,56 @@ function handleSearchWorkerStdout(chunk) {
   }
 }
 
+function resetSearchWorkerHealth() {
+  searchWorkerRestartCount = 0;
+  searchWorkerFirstFailureAt = null;
+  searchWorkerCircuitOpen = false;
+}
+
+function checkSearchWorkerCircuit() {
+  const now = Date.now();
+  if (searchWorkerCircuitOpen) {
+    if (
+      searchWorkerRestartCount < SEARCH_WORKER_MAX_RESTARTS ||
+      now - searchWorkerFirstFailureAt >= SEARCH_WORKER_CIRCUIT_WINDOW_MS
+    ) {
+      // Window has passed — allow one more attempt.
+      resetSearchWorkerHealth();
+      return false;
+    }
+    return true; // circuit still open
+  }
+  return false;
+}
+
 function handleSearchWorkerExit(code, signal) {
   const reason = `search-worker-exited: code=${code ?? "null"} signal=${signal ?? "null"}`;
+  const now = Date.now();
+
+  if (checkSearchWorkerCircuit()) {
+    searchWorkerCircuitOpen = true;
+    console.error(
+      `[omni-memory] FATAL: Search worker circuit breaker open after ${searchWorkerRestartCount} failures, manual restart required`
+    );
+    resetSearchWorkerState(reason);
+    return;
+  }
+
   searchWorkerRestartCount += 1;
+  if (searchWorkerRestartCount === 1) {
+    searchWorkerFirstFailureAt = now;
+  }
+
+  const backoffMs = Math.min(1000 * Math.pow(2, searchWorkerRestartCount - 1), 30_000);
   resetSearchWorkerState(reason);
+
+  setTimeout(async () => {
+    try {
+      await ensureSearchWorker();
+    } catch (error) {
+      console.error(`[omni-memory] Search worker scheduled restart failed: ${error.message}`);
+    }
+  }, backoffMs);
 }
 
 async function stopSearchWorker(reason = "search-worker-stop-requested") {
@@ -974,6 +1034,17 @@ async function runSemanticSearch({
 }
 
 async function requestSearchWorker(payload, timeoutMs = 120000) {
+  if (checkSearchWorkerCircuit()) {
+    throw Object.assign(new Error("Search worker circuit breaker open, manual restart required"), {
+      code: 503,
+    });
+  }
+
+  if (searchWorkerPending.size >= SEARCH_BACKPRESSURE_LIMIT) {
+    searchWorkerBackpressureRejected += 1;
+    throw Object.assign(new Error("Search worker overloaded, try again later"), { code: 503 });
+  }
+
   const child = await ensureSearchWorker();
   return await new Promise((resolve, reject) => {
     const requestId = `search-${Date.now()}-${++searchWorkerRequestCounter}`;
@@ -982,7 +1053,16 @@ async function requestSearchWorker(payload, timeoutMs = 120000) {
       reject(new Error("search-worker-timeout"));
     }, timeoutMs);
 
-    searchWorkerPending.set(requestId, { resolve, reject, timeout });
+    searchWorkerPending.set(requestId, {
+      resolve: (val) => {
+        if (searchWorkerRestartCount > 0) {
+          resetSearchWorkerHealth();
+        }
+        resolve(val);
+      },
+      reject,
+      timeout,
+    });
 
     try {
       child.stdin.write(`${JSON.stringify({ id: requestId, ...payload })}\n`, "utf8");
@@ -1268,6 +1348,59 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: "get_memory_records",
+      description:
+        "Fetch full structured records by ID from the canonical shared Obsidian memory bus. Returns all available fields including content, facts, concepts, files_read, files_modified, scope, memory_level, freshness, and confidence.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          ids: {
+            type: "array",
+            items: { type: "string" },
+            description: "Array of record IDs to fetch.",
+          },
+        },
+        required: ["ids"],
+      },
+    },
+    {
+      name: "refine_memory_selection",
+      description:
+        "Given a query and a list of memory record IDs, use an LLM to select the most relevant subset. Use this after get_memory_records returns too many results and you need the top-N most relevant to your current task.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "The current task or question context" },
+          ids: {
+            type: "array",
+            items: { type: "string" },
+            description: "Array of memory record IDs to refine from (from get_memory_records)",
+            maxItems: 50,
+          },
+          max_results: {
+            type: "number",
+            default: 5,
+            description: "Maximum number of records to return (default 5)",
+          },
+        },
+        required: ["query", "ids"],
+      },
+    },
+    {
+      name: "get_memory_timeline",
+      description:
+        "Given an anchor record ID, return chronologically interleaved nearby records. Useful for navigating backward and forward from a known record.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          anchor_id: { type: "string", description: "The anchor record ID." },
+          depth_before: { type: "number", default: 3, description: "Number of records to return before the anchor." },
+          depth_after: { type: "number", default: 3, description: "Number of records to return after the anchor." },
+        },
+        required: ["anchor_id"],
+      },
+    },
+    {
       name: "clear_shared_memory_search_cache",
       description:
         "Clear the persistent shared retrieval worker's in-memory search caches. Optionally also clear loaded entry/index data so the next query fully reloads state from disk.",
@@ -1442,6 +1575,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           ...getSearchWorkerSnapshot(),
           health: workerHealth,
         },
+        searchWorkerCircuitBreaker: getSearchWorkerSnapshot().circuitBreaker,
         watchdog: readWatchdogState(),
         memoryIntegrity,
         embeddingRuntime,
@@ -1472,6 +1606,219 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         taskState: String(args.taskState || ""),
         preferSummaries: Boolean(args.preferSummaries),
       });
+      return jsonResult(payload);
+    }
+
+    if (name === "get_memory_records") {
+      const ids = Array.isArray(args.ids) ? args.ids.map((v) => String(v || "").trim()).filter(Boolean) : [];
+      if (ids.length === 0) {
+        return errorResult("ids is required and must be a non-empty array");
+      }
+      const payload = await requestSearchWorker({ action: "get_records", ids }, 60000);
+      return jsonResult(payload);
+    }
+
+    if (name === "refine_memory_selection") {
+      const ids = Array.isArray(args.ids)
+        ? args.ids.map((v) => String(v || "").trim()).filter(Boolean)
+        : [];
+      if (ids.length === 0) {
+        return errorResult("ids is required and must be a non-empty array");
+      }
+      const maxResults = Math.max(1, Number(args.max_results) || 5);
+      const query = String(args.query || "").trim();
+      if (!query) {
+        return errorResult("query is required");
+      }
+
+      // 1. Fetch full records via the search worker
+      let records;
+      try {
+        const recordsPayload = await requestSearchWorker({ action: "get_records", ids }, 60000);
+        records = recordsPayload?.records || [];
+      } catch (err) {
+        return errorResult(`get_memory_records failed: ${err.message}`);
+      }
+
+      if (records.length === 0) {
+        return jsonResult({ ok: true, selected: [], reasoning: "No records found for the given IDs." });
+      }
+
+      // 2. Build the LLM prompt
+      const recordsSection = records
+        .map((rec) => {
+          const facts = Array.isArray(rec.facts)
+            ? rec.facts.map((f) => (typeof f === "string" ? f : JSON.stringify(f))).join("; ")
+            : "";
+          const concepts = Array.isArray(rec.concepts)
+            ? rec.concepts.map((c) => (typeof c === "string" ? c : JSON.stringify(c))).join("; ")
+            : "";
+          return [
+            `---`,
+            `ID: ${rec.id}`,
+            `Type: ${rec.type || ""} | Scope: ${rec.scope || ""} | Tool: ${rec.tool || ""}`,
+            `Title: ${(rec.title || "").trim()}`,
+            `Description: ${(rec.description || "").trim()}`,
+            `Content: ${(rec.content || "").trim().slice(0, 2000)}`,
+            facts ? `Facts: ${facts}` : "",
+            concepts ? `Concepts: ${concepts}` : "",
+          ]
+            .filter(Boolean)
+            .join("\n");
+        })
+        .join("\n");
+
+      const refinementPrompt = `You are a memory relevance selector. Given a query and a list of memory records, select the top-N most relevant ones.
+
+QUERY: ${query}
+
+MEMORY RECORDS:
+${recordsSection}
+---
+
+Return a JSON object with:
+{
+  "selected": [{"id": "...", "reason": "why this is relevant"}, ...],
+  "reasoning": "brief explanation of the overall selection strategy"
+}
+
+Select at most ${maxResults} records. Prioritize records that directly address the query.
+Only include records that are genuinely relevant. Return fewer than max_results if appropriate.`;
+
+      // 3. Resolve LLM API configuration
+      const apiKey =
+        firstNonEmptyEnv("OPENAI_API_KEY") ||
+        firstNonEmptyEnv("ANTHROPIC_API_KEY") ||
+        firstNonEmptyEnv("AI_MEMORY_EMBED_API_KEY") ||
+        "";
+
+      if (!apiKey) {
+        // Fallback: return top max_results by original order
+        const fallback = ids.slice(0, maxResults);
+        return jsonResult({
+          ok: true,
+          fallback: true,
+          selected: fallback.map((id) => ({ id, reason: "LLM unavailable, returning by original order" })),
+          reasoning: "No LLM API key configured (checked OPENAI_API_KEY, ANTHROPIC_API_KEY, AI_MEMORY_EMBED_API_KEY). Returned top N by original order.",
+        });
+      }
+
+      const baseUrl = (firstNonEmptyEnv("AI_MEMORY_EMBED_BASE_URL") || "https://api.openai.com/v1").replace(/\/+$/, "");
+      const model = firstNonEmptyEnv("AI_MEMORY_REFINE_MODEL") || "gpt-4o-mini";
+      const isAnthropic = Boolean(firstNonEmptyEnv("ANTHROPIC_API_KEY")) && !firstNonEmptyEnv("OPENAI_API_KEY");
+
+      // 4. Call the LLM
+      let llmResponse;
+      try {
+        const body = isAnthropic
+          ? {
+              model,
+              max_tokens: 1024,
+              messages: [{ role: "user", content: refinementPrompt }],
+            }
+          : {
+              model,
+              max_tokens: 1024,
+              temperature: 0.2,
+              messages: [{ role: "user", content: refinementPrompt }],
+            };
+
+        const response = await fetch(`${baseUrl}/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(isAnthropic ? { "x-api-key": apiKey, "anthropic-version": "2023-05-31" } : { Authorization: `Bearer ${apiKey}` }),
+          },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(30000),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => "");
+          throw new Error(`LLM API error ${response.status}: ${errorText}`);
+        }
+
+        const data = await response.json();
+        llmResponse = isAnthropic
+          ? data.content?.[0]?.text || ""
+          : data.choices?.[0]?.message?.content || "";
+      } catch (err) {
+        // Fallback on LLM failure
+        const fallbackIds = ids.slice(0, maxResults);
+        return jsonResult({
+          ok: true,
+          fallback: true,
+          selected: fallbackIds.map((id) => ({ id, reason: `LLM call failed: ${err.message}` })),
+          reasoning: `LLM call failed (${err.message}). Returned top N by original order.`,
+        });
+      }
+
+      // 5. Parse the LLM response
+      let parsed = null;
+      try {
+        // Strip markdown code fences if present
+        const stripped = llmResponse
+          .replace(/^```json\s*/i, "")
+          .replace(/^```\s*/i, "")
+          .replace(/\s*```$/i, "")
+          .trim();
+        parsed = JSON.parse(stripped);
+      } catch {
+        // Try extracting JSON object from response
+        const match = llmResponse.match(/\{[\s\S]*\}/);
+        if (match) {
+          try {
+            parsed = JSON.parse(match[0]);
+          } catch {
+            // fall through to error
+          }
+        }
+      }
+
+      if (
+        !parsed ||
+        !Array.isArray(parsed.selected) ||
+        parsed.selected.length === 0 ||
+        !parsed.selected[0]?.id
+      ) {
+        const fallbackIds = ids.slice(0, maxResults);
+        return jsonResult({
+          ok: true,
+          fallback: true,
+          selected: fallbackIds.map((id) => ({ id, reason: "LLM response was not parseable" })),
+          reasoning: `LLM returned unparseable response. Returned top N by original order.\n\nRaw: ${llmResponse.slice(0, 300)}`,
+        });
+      }
+
+      // 6. Validate selected IDs exist in the input set
+      const validIdSet = new Set(ids);
+      const validSelected = parsed.selected
+        .filter((s) => s?.id && validIdSet.has(String(s.id).trim()))
+        .slice(0, maxResults)
+        .map((s) => ({ id: String(s.id).trim(), reason: String(s.reason || "").trim() }));
+
+      return jsonResult({
+        ok: true,
+        selected: validSelected,
+        reasoning: String(parsed.reasoning || "").trim(),
+        llmModel: model,
+      });
+    }
+
+    if (name === "get_memory_timeline") {
+      const anchorId = String(args.anchor_id || "").trim();
+      if (!anchorId) {
+        return errorResult("anchor_id is required");
+      }
+      const payload = await requestSearchWorker(
+        {
+          action: "timeline",
+          anchor_id: anchorId,
+          depth_before: Math.max(0, Number(args.depth_before) || 3),
+          depth_after: Math.max(0, Number(args.depth_after) || 3),
+        },
+        60000
+      );
       return jsonResult(payload);
     }
 

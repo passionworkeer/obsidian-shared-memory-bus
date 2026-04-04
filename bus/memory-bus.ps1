@@ -3640,7 +3640,15 @@ function Generate-Artifacts {
     $memoryText = Read-Text -Path $Script:CanonicalMemory
     $workingText = Read-Text -Path $Script:CanonicalWorking
     $vaultAgentsText = Read-Text -Path $Script:VaultAgents
-    $memoryLayersText = Read-Text -Path $Script:MemoryLayersGuidePath
+    # Read the token-budgeted GLOBAL-CONTEXT.md produced by ops/build-memory-layers.js
+    $globalContextMdText = Read-Text -Path $Script:GlobalContextPath
+    # Read the token-budgeted memory body produced by ops/build-memory-layers.js
+    $globalContextBodyPath = Join-Path $Script:GeneratedRoot "GLOBAL-CONTEXT.body.md"
+    $globalContextBodyText = if (Test-Path -LiteralPath $globalContextBodyPath) {
+        Read-Text -Path $globalContextBodyPath
+    } else {
+        ""
+    }
     $autoDreamText = Read-Text -Path $Script:AutoDreamGuidePath
     $sharedSkillsText = Read-Text -Path $Script:SharedSkillsGuidePath
     $imported = Get-ImportedHighlights
@@ -3693,7 +3701,7 @@ $(Clip-Lines -Text $memoryText -MaxLines 120)
 $(Clip-Lines -Text $workingText -MaxLines 80)
 
 ## Memory Layers
-$(if ([string]::IsNullOrWhiteSpace($memoryLayersText)) { "(memory layers summary not generated yet)" } else { Clip-Lines -Text $memoryLayersText -MaxLines 80 })
+$(if ([string]::IsNullOrWhiteSpace($globalContextBodyText)) { "(memory layers summary not generated yet)" } else { $globalContextBodyText })
 
 ## Auto Dream
 $(if ([string]::IsNullOrWhiteSpace($autoDreamText)) { "(auto dream summary not generated yet)" } else { Clip-Lines -Text $autoDreamText -MaxLines 80 })
@@ -3720,6 +3728,7 @@ $(if ($inboxSections.Count -gt 0) { [string]::Join("`n`n", $inboxSections) } els
             memory = $Script:CanonicalMemory
             working = $Script:CanonicalWorking
             globalContext = $Script:GlobalContextPath
+            globalContextBody = $globalContextBodyPath
             memoryLayers = $Script:MemoryLayersGuidePath
             autoDream = $Script:AutoDreamGuidePath
             sharedSkills = $Script:SharedSkillsGuidePath

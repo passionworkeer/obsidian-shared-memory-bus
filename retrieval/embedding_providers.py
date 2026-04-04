@@ -11,62 +11,12 @@ import urllib.error
 import urllib.request
 from typing import Dict, List, Optional, Tuple
 
+from lsh_utils import HASH_DIM, VECTOR_SCHEMA_VERSION, build_hash_embedding, fnv1a32
 from runtime_support import normalize_embedding_adapter
 
 DEFAULT_MODEL = "all-MiniLM-L6-v2"
 HASH_MODEL = "hashing-v1"
-HASH_DIM = 384
 _TRANSFORMER_MODEL_CACHE: Dict[str, object] = {"name": "", "model": None}
-
-
-def normalize_spaces(text: str) -> str:
-    return re.sub(r"\s+", " ", text or "").strip()
-
-
-def fnv1a32(value: str) -> int:
-    hash_value = 0x811C9DC5
-    for character in value:
-        hash_value ^= ord(character)
-        hash_value = (hash_value * 0x01000193) & 0xFFFFFFFF
-    return hash_value
-
-
-def build_hash_features(text: str) -> List[str]:
-    source = normalize_spaces(text).lower()
-    compact = re.sub(r"\s+", "", source)
-    features: List[str] = []
-
-    for token in re.findall(r"[a-z0-9][a-z0-9_\-./:]{1,}", source):
-        features.append(f"w:{token}")
-
-    for chunk in re.findall(r"[\u4e00-\u9fff]{2,}", source):
-        features.append(f"c:{chunk}")
-        for index in range(len(chunk) - 1):
-            features.append(f"c2:{chunk[index:index + 2]}")
-        for index in range(len(chunk) - 2):
-            features.append(f"c3:{chunk[index:index + 3]}")
-
-    max_gram_count = max(0, min(len(compact) - 2, 400))
-    for index in range(max_gram_count):
-        features.append(f"g3:{compact[index:index + 3]}")
-
-    if not features and compact:
-        features.append(f"raw:{compact}")
-    return features
-
-
-def build_hash_embedding(text: str, dimension: int = HASH_DIM) -> List[float]:
-    vector = [0.0] * dimension
-    for feature in build_hash_features(text):
-        hash_value = fnv1a32(feature)
-        slot = hash_value % dimension
-        sign = 1.0 if ((hash_value >> 1) & 1) == 0 else -1.0
-        vector[slot] += sign
-
-    norm = sum(value * value for value in vector) ** 0.5
-    if norm > 0:
-        return [round(value / norm, 8) for value in vector]
-    return vector
 
 
 def build_embedding_config_hash(adapter: str, model_name: str, base_url: str = "") -> str:
