@@ -1,0 +1,270 @@
+/**
+ * memory-bridge.js
+ *
+ * Handles all external-bridge / interoperability tools:
+ *   query_claude_mem
+ *   insert_claude_mem
+ *   get_blackboard_tasks
+ *   write_blackboard_task
+ *
+ * Exposes a factory: createMemoryBridge(params) => { tools, handlers }
+ */
+
+import fs from "node:fs";
+import { spawn } from "node:child_process";
+
+function jsonResult(payload) {
+  return {
+    content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+  };
+}
+
+function errorResult(message) {
+  return {
+    content: [{ type: "text", text: JSON.stringify({ ok: false, error: String(message) }, null, 2) }],
+    isError: true,
+  };
+}
+
+function spawnProcess(executable, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(executable, args, {
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+      ...options,
+    });
+
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      resolve({ code: code || 0, stdout, stderr });
+    });
+
+    if (options.input !== undefined) {
+      child.stdin.end(options.input);
+    } else {
+      child.stdin.end();
+    }
+  });
+}
+
+/**
+ * @param {Object} params
+ * @param {string} params.CLAUDE_MEM_BASE  - Base URL for claude-mem API (e.g. "http://127.0.0.1:37778")
+ * @param {Object} params.PYTHON           - Python runtime descriptor {command, available, error, version, argsPrefix}
+ * @param {Object} params.PYTHON_SPAWN_ENV  - Merged env object for spawning Python
+ * @param {Function} params.withPythonArgs  - Helper: [pythonExe, ...pythonArgs, ...scriptArgs]
+ * @param {string} params.BLACKBOARD_DB_PATH
+ */
+export function createMemoryBridge(params) {
+
+  async function runBlackboardPython(payload) {
+    const { PYTHON, BLACKBOARD_DB_PATH, PYTHON_SPAWN_ENV, withPythonArgs } = params;
+
+    if (!fs.existsSync(BLACKBOARD_DB_PATH)) {
+      return { ok: false, error: `blackboard-db-missing: ${BLACKBOARD_DB_PATH}` };
+    }
+    if (!PYTHON.available) {
+      return { ok: false, error: `python-runtime-unavailable: ${PYTHON.error || "unknown-error"}` };
+    }
+
+    const script = `
+import json
+import sqlite3
+import sys
+
+payload = json.load(sys.stdin)
+db = sqlite3.connect(payload["db"])
+db.row_factory = sqlite3.Row
+
+try:
+    if payload["op"] == "query":
+        states = [str(item).strip().upper() for item in payload.get("states", []) if str(item).strip()]
+        where = ""
+        params = []
+        if states:
+            where = " WHERE state IN ({})".format(",".join("?" for _ in states))
+            params.extend(states)
+        params.append(max(1, int(payload.get("limit", 10))))
+        sql = "SELECT id, repo, issue_number, issue_title, state, assigned_agent, processor, updated_at FROM tasks{} ORDER BY updated_at DESC LIMIT ?".format(where)
+        rows = [dict(row) for row in db.execute(sql, params)]
+        print(json.dumps({"ok": True, "rows": rows}, ensure_ascii=False))
+    elif payload["op"] == "insert":
+        repo = str(payload["repo"]).strip()
+        issue_number = int(payload["issue_number"])
+        assigned_agent = str(payload.get("assigned_agent") or "intel").strip() or "intel"
+        issue_title = str(payload.get("issue_title") or "{}#{}".format(repo, issue_number)).strip()
+        cursor = db.execute(
+            "INSERT INTO tasks (repo, issue_number, assigned_agent, issue_title, state) VALUES (?, ?, ?, ?, 'PENDING')",
+            (repo, issue_number, assigned_agent, issue_title),
+        )
+        db.commit()
+        print(json.dumps({"ok": True, "insertedId": cursor.lastrowid}, ensure_ascii=False))
+    else:
+        print(json.dumps({"ok": False, "error": "unsupported-op"}, ensure_ascii=False))
+finally:
+    db.close()
+`;
+
+    const result = await spawnProcess(PYTHON.command, withPythonArgs(PYTHON, ["-c", script]), {
+      env: PYTHON_SPAWN_ENV,
+      input: JSON.stringify({
+        ...payload,
+        db: BLACKBOARD_DB_PATH,
+      }),
+    });
+
+    if (result.code !== 0) {
+      return {
+        ok: false,
+        error: result.stderr.trim() || result.stdout.trim() || `blackboard-exit-${result.code}`,
+      };
+    }
+
+    try {
+      return JSON.parse(result.stdout || "{}");
+    } catch (error) {
+      return { ok: false, error: `blackboard-json-parse-failed: ${error.message}` };
+    }
+  }
+
+  async function handleQueryClaudeMem(args) {
+    const query = String(args.query || "").trim();
+    if (!query) {
+      return errorResult("query is required");
+    }
+    const limit = Math.max(1, Number(args.limit) || 5);
+    const url = `${params.CLAUDE_MEM_BASE}/api/search?query=${encodeURIComponent(query)}&limit=${limit}`;
+    const response = await fetch(url);
+    return jsonResult({
+      ok: true,
+      query,
+      response: await response.json(),
+    });
+  }
+
+  async function handleInsertClaudeMem(args) {
+    const content = String(args.content || "").trim();
+    if (!content) {
+      return errorResult("content is required");
+    }
+    const response = await fetch(`${params.CLAUDE_MEM_BASE}/api/memories`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, metadata: args.metadata || {} }),
+    });
+    return jsonResult({
+      ok: true,
+      response: await response.json(),
+    });
+  }
+
+  async function handleGetBlackboardTasks(args) {
+    const normalizedStates = Array.isArray(args.states)
+      ? args.states.map((value) => String(value || "").trim().toUpperCase()).filter(Boolean)
+      : [];
+    if (normalizedStates.length === 0 && String(args.state || "").trim()) {
+      normalizedStates.push(String(args.state).trim().toUpperCase());
+    }
+
+    const result = await runBlackboardPython({
+      op: "query",
+      limit: Math.max(1, Number(args.limit) || 10),
+      states: normalizedStates,
+    });
+    return jsonResult(result);
+  }
+
+  async function handleWriteBlackboardTask(args) {
+    const repo = String(args.repo || "").trim();
+    const issueNumber = Number(args.issue_number);
+    if (!repo || !Number.isFinite(issueNumber)) {
+      return errorResult("repo and issue_number are required");
+    }
+    const result = await runBlackboardPython({
+      op: "insert",
+      repo,
+      issue_number: issueNumber,
+      assigned_agent: String(args.assigned_agent || "intel"),
+      issue_title: String(args.issue_title || ""),
+    });
+    return jsonResult(result);
+  }
+
+  return {
+    tools: [
+      {
+        name: "query_claude_mem",
+        description:
+          "Query the local claude-mem semantic memory API directly. Use search_shared_memory for the canonical cross-tool shared layer.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "Semantic query." },
+            limit: { type: "number", default: 5, description: "Maximum number of results." },
+          },
+          required: ["query"],
+        },
+      },
+      {
+        name: "insert_claude_mem",
+        description: "Insert a new item into the local claude-mem store.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            content: { type: "string", description: "Memory content to insert." },
+            metadata: { type: "object", description: "Optional metadata." },
+          },
+          required: ["content"],
+        },
+      },
+      {
+        name: "get_blackboard_tasks",
+        description: "Read recent OpenClaw blackboard tasks from the shared AI Shrimp SQLite blackboard.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            limit: { type: "number", default: 10, description: "Maximum rows to return." },
+            state: { type: "string", description: "Optional single state filter." },
+            states: {
+              type: "array",
+              items: { type: "string" },
+              description: "Optional task states to filter, e.g. ['PENDING', 'ACTIVE']",
+            },
+          },
+        },
+      },
+      {
+        name: "write_blackboard_task",
+        description: "Insert a new task into the OpenClaw blackboard.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            repo: { type: "string", description: "Repository name, e.g. browser-use/browser-use." },
+            issue_number: { type: "number", description: "Issue number." },
+            assigned_agent: {
+              type: "string",
+              default: "intel",
+              description: "OpenClaw agent lane, usually intel or developer.",
+            },
+            issue_title: { type: "string", description: "Optional issue title." },
+          },
+          required: ["repo", "issue_number"],
+        },
+      },
+    ],
+    handlers: {
+      query_claude_mem: handleQueryClaudeMem,
+      insert_claude_mem: handleInsertClaudeMem,
+      get_blackboard_tasks: handleGetBlackboardTasks,
+      write_blackboard_task: handleWriteBlackboardTask,
+    },
+  };
+}

@@ -1,0 +1,248 @@
+/**
+ * memory-embeddings.js
+ *
+ * Handles all embedding management tools:
+ *   rebuild_memory_embeddings / rebuild_shared_embeddings
+ *   list_embedding_runtimes
+ *   set_embedding_runtime
+ *
+ * Exposes a factory: createMemoryEmbeddings(params) => { tools, handlers }
+ */
+
+import fs from "node:fs";
+import { spawn } from "node:child_process";
+
+function jsonResult(payload) {
+  return {
+    content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+  };
+}
+
+function spawnProcess(executable, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(executable, args, {
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+      ...options,
+    });
+
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      resolve({ code: code || 0, stdout, stderr });
+    });
+
+    if (options.input !== undefined) {
+      child.stdin.end(options.input);
+    } else {
+      child.stdin.end();
+    }
+  });
+}
+
+/**
+ * @param {Object} params
+ * @param {string}  params.EMBEDDINGS_SCRIPT        - Absolute path to generate-embeddings.js
+ * @param {string}  params.VAULT_ROOT
+ * @param {Object}  params.RUNTIME_ENV
+ * @param {Object}  params.EMBEDDING_RUNTIME_DEFAULTS
+ * @param {string}  params.AI_MEMORY_ROOT
+ * @param {Object}  params.EMBEDDINGS_INDEX_PATH
+ * @param {Object}  params.METRICS                 - Shared metrics object (modified in-place)
+ * @param {Function} params.firstNonEmptyEnv
+ * @param {Function} params.readEmbeddingsSummary
+ * @param {Function} params.readEmbeddingRuntimeSummary
+ * @param {Function} params.readEmbeddingRuntimeCatalog
+ * @param {Function} params.buildEmbeddingIndexState
+ * @param {Function} params.annotateEmbeddingRuntimeCatalog
+ * @param {Function} params.updateEmbeddingRuntimeSelection
+ * @param {Function} params.buildEmbeddingRuntimeRestartSignature
+ * @param {Object}  params.METRICS                 - Shared metrics
+ * @param {Function} params.getSearchWorkerSnapshot
+ * @param {Function} params.getSearchWorkerHealth
+ * @param {Function} params.isSearchWorkerRunning
+ * @param {Function} params.restartSearchWorker
+ */
+export function createMemoryEmbeddings(params) {
+
+  async function handleRebuildMemoryEmbeddings(args) {
+    const { EMBEDDINGS_SCRIPT, VAULT_ROOT, RUNTIME_ENV, METRICS } = params;
+
+    if (!fs.existsSync(EMBEDDINGS_SCRIPT)) {
+      throw new Error(`embeddings-script-missing: ${EMBEDDINGS_SCRIPT}`);
+    }
+
+    const args_ = [EMBEDDINGS_SCRIPT];
+    if (args.force) {
+      args_.push("--force");
+    }
+
+    const result = await spawnProcess(process.execPath, args_, {
+      env: {
+        ...RUNTIME_ENV,
+        AI_MEMORY_OBSIDIAN_VAULT: VAULT_ROOT,
+      },
+    });
+
+    if (result.code !== 0) {
+      throw new Error(result.stderr.trim() || result.stdout.trim() || `embeddings-exit-${result.code}`);
+    }
+
+    // Refresh metrics after rebuild
+    try {
+      const summary = params.readEmbeddingsSummary();
+      METRICS.embeddings_index_size = summary.count || 0;
+    } catch {
+      // Non-fatal — metrics refresh failure should not break the response
+    }
+
+    return jsonResult({
+      ok: true,
+      command: `${process.execPath} ${args_.join(" ")}`,
+      stdout: result.stdout.trim(),
+      stderr: result.stderr.trim(),
+      summary: params.readEmbeddingsSummary(),
+    });
+  }
+
+  async function handleListEmbeddingRuntimes() {
+    const { readEmbeddingsSummary, readEmbeddingRuntimeCatalog, annotateEmbeddingRuntimeCatalog, buildEmbeddingIndexState } = params;
+    const embeddings = readEmbeddingsSummary();
+    const catalog = annotateEmbeddingRuntimeCatalog(readEmbeddingRuntimeCatalog(), embeddings);
+    return jsonResult({
+      ok: true,
+      catalog,
+      embeddingIndexState: buildEmbeddingIndexState(catalog.runtime, embeddings),
+    });
+  }
+
+  async function handleSetEmbeddingRuntime(args) {
+    const {
+      AI_MEMORY_ROOT,
+      METRICS,
+      EMBEDDING_RUNTIME_DEFAULTS,
+      readEmbeddingRuntimeSummary,
+      readEmbeddingsSummary,
+      buildEmbeddingIndexState,
+      annotateEmbeddingRuntimeCatalog,
+      buildEmbeddingRuntimeRestartSignature,
+      getSearchWorkerSnapshot,
+      getSearchWorkerHealth,
+      isSearchWorkerRunning,
+      restartSearchWorker,
+      firstNonEmptyEnv,
+      updateEmbeddingRuntimeSelection,
+    } = params;
+
+    const previousRuntime = readEmbeddingRuntimeSummary();
+    const workerWasRunning = isSearchWorkerRunning();
+
+    const payload = updateEmbeddingRuntimeSelection({
+      rootPath: AI_MEMORY_ROOT,
+      getEnvValue: firstNonEmptyEnv,
+      defaults: EMBEDDING_RUNTIME_DEFAULTS,
+      profile: String(args.profile || ""),
+      provider: String(args.provider || ""),
+      clearProfile: Boolean(args.clearProfile),
+      clearProvider: Boolean(args.clearProvider),
+    });
+
+    const embeddings = readEmbeddingsSummary();
+    const catalog = annotateEmbeddingRuntimeCatalog(payload.catalog, embeddings);
+    const runtimeSignatureBefore = buildEmbeddingRuntimeRestartSignature(previousRuntime);
+    const runtimeSignatureAfter = buildEmbeddingRuntimeRestartSignature(catalog.runtime || payload.runtime || {});
+    const runtimeChanged = runtimeSignatureBefore !== runtimeSignatureAfter;
+    const workerSnapshot = getSearchWorkerSnapshot();
+
+    const searchWorkerRestart =
+      runtimeChanged && workerWasRunning
+        ? await restartSearchWorker("embedding-runtime-changed")
+        : {
+            ok: true,
+            requested: runtimeChanged,
+            reason: runtimeChanged ? "embedding-runtime-updated-worker-idle" : "embedding-runtime-unchanged",
+            workerWasRunning,
+            previousPid: workerSnapshot.pid,
+            currentPid: workerSnapshot.pid,
+            pidChanged: false,
+            stop: {
+              ok: true,
+              stopped: false,
+              previousPid: workerSnapshot.pid,
+              reason: runtimeChanged ? "search-worker-idle-no-restart-needed" : "embedding-runtime-unchanged",
+            },
+            before: workerSnapshot,
+            after: workerSnapshot,
+            health: workerWasRunning ? await getSearchWorkerHealth() : null,
+          };
+
+    return jsonResult({
+      ...payload,
+      runtimeChanged,
+      catalog,
+      embeddingIndexState: buildEmbeddingIndexState(catalog.runtime, embeddings),
+      searchWorkerRestart,
+    });
+  }
+
+  return {
+    tools: [
+      {
+        name: "rebuild_memory_embeddings",
+        description: "Rebuild the dense embeddings index from shared Obsidian structured memory.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            force: { type: "boolean", default: false, description: "Re-embed even unchanged records." },
+          },
+        },
+      },
+      {
+        name: "rebuild_shared_embeddings",
+        description: "Alias for rebuild_memory_embeddings.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            force: { type: "boolean", default: false },
+          },
+        },
+      },
+      {
+        name: "list_embedding_runtimes",
+        description:
+          "List the configured embedding defaults, providers, and profiles, along with the currently resolved active runtime and whether the dense index is aligned or needs a rebuild.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
+      {
+        name: "set_embedding_runtime",
+        description:
+          "Activate an embedding profile or provider in the runtime config. Returns the updated runtime selection and whether the dense embeddings index now needs a rebuild.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            profile: { type: "string", description: "Configured embedding profile name to activate." },
+            provider: { type: "string", description: "Configured provider name to activate directly." },
+            clearProfile: { type: "boolean", default: false, description: "Clear the persisted activeProfile selection." },
+            clearProvider: { type: "boolean", default: false, description: "Clear the persisted activeProvider selection." },
+          },
+        },
+      },
+    ],
+    handlers: {
+      rebuild_memory_embeddings: handleRebuildMemoryEmbeddings,
+      rebuild_shared_embeddings: handleRebuildMemoryEmbeddings,
+      list_embedding_runtimes: handleListEmbeddingRuntimes,
+      set_embedding_runtime: handleSetEmbeddingRuntime,
+    },
+  };
+}

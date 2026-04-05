@@ -6,3 +6,25 @@
 {"query": "今天发生了哪些事", "relevant_ids": [], "route": "recent", "relevance_scores": {}}
 {"query": "这个项目的整体架构是什么", "relevant_ids": [], "route": "durable", "relevance_scores": {}}
 {"query": "openclaw最近的运行记录", "relevant_ids": [], "route": "task", "relevance_scores": {}}
+{"query": "我上次提到的密码是什么", "relevant_ids": [], "route": "reference", "relevance_scores": {}}
+{"query": "哪些文档提到了这个API的设计决策", "relevant_ids": [], "route": "reference", "relevance_scores": {}}
+{"query": "session里有哪些待办任务", "relevant_ids": [], "route": "task", "relevance_scores": {}}
+{"query": "最近一次claude-code对话的主题是什么", "relevant_ids": [], "route": "recent", "relevance_scores": {}}
+{"query": "这个项目的README在哪里", "relevant_ids": [], "route": "durable", "relevance_scores": {}}
+{"query": "搜索所有包含架构图的内容", "relevant_ids": [], "route": "reference", "relevance_scores": {}}
+{"query": "我之前告诉你的团队成员名字", "relevant_ids": [], "route": "durable", "relevance_scores": {}}
+{"query": "最近30分钟写入的记忆内容", "relevant_ids": [], "route": "recent", "relevance_scores": {}}
+{"query": "哪个文件定义了memory watchdog的行为", "relevant_ids": [], "route": "task", "relevance_scores": {}}
+{"query": "openclaw blackboard上有什么临时信息", "relevant_ids": [], "route": "task", "relevance_scores": {}}
+{"query": "obsidian shared memory bus的安装步骤是什么", "relevant_ids": [], "route": "reference", "relevance_scores": {}}
+{"query": "我在工作区根目录下有哪些文件", "relevant_ids": [], "route": "mixed", "relevance_scores": {}}
+{"query": "检索记忆中的邮箱地址和手机号", "relevant_ids": [], "route": "mixed", "relevance_scores": {}}
+{"query": "用户偏好里设置了哪些键盘快捷键", "relevant_ids": [], "route": "durable", "relevance_scores": {}}
+{"query": "最近触发了哪些memory hook事件", "relevant_ids": [], "route": "recent", "relevance_scores": {}}
+{"query": "cron任务最近一次运行是什么时候", "relevant_ids": [], "route": "task", "relevance_scores": {}}
+{"query": "这个仓库的长期目标和愿景是什么", "relevant_ids": [], "route": "durable", "relevance_scores": {}}
+{"query": "模糊查询：关于缓存的设计", "relevant_ids": [], "route": "mixed", "relevance_scores": {}}
+{"query": "跨层搜索：用户反馈中提到的性能问题", "relevant_ids": [], "route": "mixed", "relevance_scores": {}}
+{"query": "查找所有待promote的task memory", "relevant_ids": [], "route": "task", "relevance_scores": {}}
+{"query": "session事件中是否有任何异常记录", "relevant_ids": [], "route": "recent", "relevance_scores": {}}
+{"query": "reference层有没有相关的RFC或设计文档", "relevant_ids": [], "route": "reference", "relevance_scores": {}}
