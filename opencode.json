@@ -1,0 +1,46 @@
+{
+    "$schema":  "https://opencode.ai/config.json",
+    "instructions":  [
+                         "AGENTS.md",
+                         ".claude/rules/*.md",
+                         ".cursor/rules/*.md",
+                         ".github/copilot-instructions.md"
+                     ],
+    "mcp":  {
+                "context7":  {
+                                 "type":  "remote",
+                                 "url":  "http://127.0.0.1:9331/mcp",
+                                 "enabled":  true
+                             },
+                "fetch":  {
+                              "type":  "remote",
+                              "url":  "http://127.0.0.1:9332/mcp",
+                              "enabled":  true
+                          },
+                "time":  {
+                             "type":  "remote",
+                             "url":  "http://127.0.0.1:9333/mcp",
+                             "enabled":  true
+                         },
+                "sequential-thinking":  {
+                                            "type":  "remote",
+                                            "url":  "http://127.0.0.1:9334/mcp",
+                                            "enabled":  true
+                                        },
+                "obsidian":  {
+                                 "type":  "remote",
+                                 "url":  "http://127.0.0.1:9335/mcp",
+                                 "enabled":  true
+                             },
+                "memory":  {
+                               "type":  "remote",
+                               "url":  "http://127.0.0.1:9338/mcp",
+                               "enabled":  true
+                           },
+                "playwright":  {
+                                   "type":  "remote",
+                                   "url":  "http://127.0.0.1:9337/mcp",
+                                   "enabled":  true
+                               }
+            }
+}

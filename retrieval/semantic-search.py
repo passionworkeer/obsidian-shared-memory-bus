@@ -28,7 +28,10 @@ from embedding_providers import (
     get_transformer_model_name,
     normalize_embedding_adapter,
 )
-from ops.redaction import REDACTION_CONFIG, redact_sensitive
+try:
+    from ops.redaction import REDACTION_CONFIG, redact_sensitive
+except ModuleNotFoundError:
+    from redaction import REDACTION_CONFIG, redact_sensitive
 from runtime_support import first_non_empty_env, normalize_bool, normalize_int, resolve_embedding_runtime, resolve_vault_root
 
 if hasattr(sys.stdout, "reconfigure"):

@@ -181,6 +181,21 @@ const HANDOFF_PACK_SCRIPT = resolveRuntimePath("build-handoff-pack.js", path.joi
 const MEMORY_LAYERS_SCRIPT = resolveRuntimePath("build-memory-layers.js", path.join("ops", "build-memory-layers.js"));
 const MEMORY_DREAM_SCRIPT = resolveRuntimePath("run-memory-dream.ps1", path.join("ops", "run-memory-dream.ps1"));
 const WATCHDOG_STATE_PATH = path.join(AI_MEMORY_ROOT, "watchdog-state.json");
+const WATCHDOG_SUPERVISOR_VBS_PATH = IS_WINDOWS
+  ? path.join(
+      process.env.APPDATA || path.join(USER_HOME, "AppData", "Roaming"),
+      "Microsoft",
+      "Windows",
+      "Start Menu",
+      "Programs",
+      "Startup",
+      "AI Memory Watchdog.vbs",
+    )
+  : "";
+const WATCHDOG_SUPERVISOR_SCRIPT_PATH = resolveRuntimePath(
+  "memory-watchdog-supervisor.ps1",
+  path.join("bus", "memory-watchdog-supervisor.ps1"),
+);
 const RUNTIME_ENV = buildMergedEnv();
 const OPENCLAW_HOME = firstNonEmptyEnv("OPENCLAW_HOME") || path.join(USER_HOME, ".openclaw");
 const BLACKBOARD_DB_PATH =
@@ -222,6 +237,10 @@ const SEARCH_BACKPRESSURE_LIMIT = 50;
 let searchWorkerCircuitOpen = false;
 let searchWorkerBackpressureRejected = 0;
 const searchWorkerPending = new Map();
+let watchdogSupervisorCache = {
+  checkedAt: 0,
+  alive: false,
+};
 
 // ---------------------------------------------------------------------------
 // Observability / metrics (Prometheus-compatible)
@@ -370,6 +389,81 @@ function isProcessAlive(pid) {
   } catch (_error) {
     return false;
   }
+}
+
+function runWindowsPowerShellProbe(scriptLines = []) {
+  if (!IS_WINDOWS || !Array.isArray(scriptLines) || scriptLines.length === 0) {
+    return { ok: false, stdout: "", stderr: "", status: null };
+  }
+
+  try {
+    const probe = spawnSync("powershell.exe", ["-NoProfile", "-Command", scriptLines.join("\n")], {
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    return {
+      ok: !probe.error && probe.status === 0,
+      stdout: String(probe.stdout || "").trim(),
+      stderr: String(probe.stderr || "").trim(),
+      status: probe.status,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      stdout: "",
+      stderr: String(error || ""),
+      status: null,
+    };
+  }
+}
+
+function isHiddenWindowsScriptAlive(scriptPath, processFilter, commandMatchLines = []) {
+  if (!IS_WINDOWS || !scriptPath || !fs.existsSync(scriptPath)) {
+    return false;
+  }
+
+  const target = scriptPath.replace(/'/g, "''").toLowerCase();
+  const probe = runWindowsPowerShellProbe([
+    "$selfPid = $PID",
+    `$target = '${target}'`,
+    `$proc = Get-CimInstance Win32_Process -Filter "${processFilter}" -ErrorAction SilentlyContinue |`,
+    "  Where-Object {",
+    "    $cmd = [string]$_.CommandLine;",
+    "    $_.ProcessId -ne $selfPid -and",
+    "    -not [string]::IsNullOrWhiteSpace($cmd) -and",
+    ...commandMatchLines,
+    "  } | Select-Object -First 1",
+    "if ($proc) { [Console]::Out.Write('1') }",
+  ]);
+  return probe.ok && probe.stdout === "1";
+}
+
+function isWatchdogSupervisorAlive() {
+  if (!IS_WINDOWS) {
+    return false;
+  }
+
+  if (Date.now() - watchdogSupervisorCache.checkedAt < 3000) {
+    return watchdogSupervisorCache.alive;
+  }
+
+  const vbsAlive = isHiddenWindowsScriptAlive(
+    WATCHDOG_SUPERVISOR_VBS_PATH,
+    "Name='wscript.exe'",
+    ["$cmd.ToLowerInvariant().Contains($target)"],
+  );
+  const scriptAlive = isHiddenWindowsScriptAlive(
+    WATCHDOG_SUPERVISOR_SCRIPT_PATH,
+    "Name='powershell.exe' or Name='pwsh.exe'",
+    ["$cmd.ToLowerInvariant().Contains('-file') -and", "$cmd.ToLowerInvariant().Contains($target)"],
+  );
+  const alive = vbsAlive || scriptAlive;
+
+  watchdogSupervisorCache = {
+    checkedAt: Date.now(),
+    alive,
+  };
+  return alive;
 }
 
 const VAULT_ROOT = resolveVaultRoot();
@@ -834,15 +928,27 @@ function readWatchdogState() {
           (Number(payload?.staleMinutes || 0) || 0) * 60_000
         )
       : false;
-    const running = reportedRunning && pidAlive && !staleByAge;
+    const supervisorAlive = isWatchdogSupervisorAlive();
+    const recovering = reportedRunning && !pidAlive && supervisorAlive && !staleByAge;
+    const running = reportedRunning && !staleByAge && (pidAlive || supervisorAlive);
+    const stale = (reportedRunning && !pidAlive && !supervisorAlive) || staleByAge;
+    const status = running
+      ? "running"
+      : supervisorAlive
+        ? (staleByAge ? "stale" : "recovering")
+        : pidAlive
+          ? "stale"
+          : "stopped";
     return {
       ...payload,
       pidAlive,
+      supervisorAlive,
       reportedRunning,
+      recovering,
       running,
-      stale: (reportedRunning && !pidAlive) || staleByAge,
+      stale,
       stateAgeSeconds,
-      status: running ? "running" : pidAlive ? "stale" : "stopped",
+      status,
     };
   } catch (error) {
     return { ok: false, error: String(error) };

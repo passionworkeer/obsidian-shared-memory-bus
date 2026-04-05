@@ -1,6 +1,7 @@
 ﻿param(
     [switch]$Daemon,
     [switch]$Once,
+    [switch]$KeepRunningState,
     [int]$PollSeconds = 15,
     [int]$StaleMinutes = 5
 )
@@ -56,6 +57,8 @@ $AiMemoryRoot = if (-not [string]::IsNullOrWhiteSpace($env:AI_MEMORY_ROOT)) { $e
 $BusScript = Resolve-BusPath -Candidates @("memory-bus.ps1", "bus/memory-bus.ps1")
 $LockPath = Join-Path $AiMemoryRoot "watchdog.lock"
 $StatePath = Join-Path $AiMemoryRoot "watchdog-state.json"
+$ErrorLogPath = Join-Path $AiMemoryRoot "watchdog-error.log"
+$TraceLogPath = Join-Path $AiMemoryRoot "watchdog-trace.log"
 $SharedMcpRoot = Join-Path $AiMemoryRoot "shared-mcp"
 $SharedMcpStartScript = Join-Path $SharedMcpRoot "start-default-shared-mcp.ps1"
 $SharedMcpStatusScript = Join-Path $SharedMcpRoot "status-shared-mcp.ps1"
@@ -141,6 +144,82 @@ function Ensure-Directory {
     }
 }
 
+function Write-WatchdogErrorLog {
+    param(
+        [Parameter(Mandatory = $true)]$ErrorRecord,
+        [string]$Context = ""
+    )
+
+    try {
+        Ensure-Directory -Path (Split-Path -Parent $ErrorLogPath)
+        $details = [ordered]@{
+            timestamp = (Get-Date).ToString("o")
+            pid = $PID
+            daemon = [bool]$Daemon
+            context = $Context
+            message = [string]$ErrorRecord
+            exception = if ($null -ne $ErrorRecord.Exception) { [string]$ErrorRecord.Exception } else { "" }
+            scriptStackTrace = if ($null -ne $ErrorRecord.ScriptStackTrace) { [string]$ErrorRecord.ScriptStackTrace } else { "" }
+            lastReason = if (Test-Path -LiteralPath $StatePath -PathType Leaf) {
+                try {
+                    ((Get-Content -Raw -LiteralPath $StatePath -Encoding utf8 | ConvertFrom-Json).lastReason | Out-String).Trim()
+                } catch {
+                    ""
+                }
+            } else {
+                ""
+            }
+        }
+        Add-Content -LiteralPath $ErrorLogPath -Value (($details | ConvertTo-Json -Depth 6 -Compress) + [Environment]::NewLine) -Encoding UTF8
+    } catch {
+    }
+}
+
+function Test-WatchdogTraceEnabled {
+    foreach ($value in @(
+            $env:AI_MEMORY_WATCHDOG_TRACE,
+            [Environment]::GetEnvironmentVariable("AI_MEMORY_WATCHDOG_TRACE", "Process"),
+            [Environment]::GetEnvironmentVariable("AI_MEMORY_WATCHDOG_TRACE", "User"),
+            [Environment]::GetEnvironmentVariable("AI_MEMORY_WATCHDOG_TRACE", "Machine")
+        )) {
+        if ([string]::IsNullOrWhiteSpace([string]$value)) {
+            continue
+        }
+
+        switch (([string]$value).Trim().ToLowerInvariant()) {
+            "1" { return $true }
+            "true" { return $true }
+            "yes" { return $true }
+            "on" { return $true }
+        }
+    }
+
+    return $false
+}
+
+function Write-WatchdogTrace {
+    param(
+        [Parameter(Mandatory = $true)][string]$Step,
+        [hashtable]$Data = @{}
+    )
+
+    if (-not (Test-WatchdogTraceEnabled)) {
+        return
+    }
+
+    try {
+        Ensure-Directory -Path (Split-Path -Parent $TraceLogPath)
+        $payload = [ordered]@{
+            timestamp = (Get-Date).ToString("o")
+            pid = $PID
+            step = $Step
+            data = $Data
+        }
+        Add-Content -LiteralPath $TraceLogPath -Value (($payload | ConvertTo-Json -Depth 8 -Compress) + [Environment]::NewLine) -Encoding UTF8
+    } catch {
+    }
+}
+
 function Get-NodeExecutable {
     return (Resolve-SharedNodeExecutable)
 }
@@ -182,10 +261,18 @@ function Start-NodeProcess {
         [switch]$PassThru
     )
 
-    $process = Start-SharedBackgroundProcess `
-        -FilePath (Get-NodeExecutable) `
-        -ArgumentList @($ScriptPath) `
-        -WorkingDirectory (Split-Path -Parent $ScriptPath)
+    $workingDirectory = Split-Path -Parent $ScriptPath
+    if (-not $PassThru -and (Test-SharedIsWindows)) {
+        $process = Start-SharedWindowsHeadlessProcess `
+            -FilePath (Get-NodeExecutable) `
+            -ArgumentList @($ScriptPath) `
+            -WorkingDirectory $workingDirectory
+    } else {
+        $process = Start-SharedBackgroundProcess `
+            -FilePath (Get-NodeExecutable) `
+            -ArgumentList @($ScriptPath) `
+            -WorkingDirectory $workingDirectory
+    }
 
     if ($PassThru) {
         return $process
@@ -253,6 +340,84 @@ function Test-ProcessIdAlive {
     }
 
     return $null -ne (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)
+}
+
+function Get-PowerShellScriptProcesses {
+    param([Parameter(Mandatory = $true)][string]$ScriptPath)
+
+    if (-not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) {
+        return @()
+    }
+
+    $fullPath = (Get-Item -LiteralPath $ScriptPath).FullName.ToLowerInvariant()
+    $fileName = [System.IO.Path]::GetFileName($fullPath)
+
+    if (Test-SharedIsWindows) {
+        return @(
+            Get-CimInstance Win32_Process -Filter "Name='powershell.exe' or Name='pwsh.exe'" -ErrorAction SilentlyContinue |
+                Where-Object {
+                    $cmd = [string]$_.CommandLine
+                    if ([string]::IsNullOrWhiteSpace($cmd)) {
+                        return $false
+                    }
+
+                    $lc = $cmd.ToLowerInvariant()
+                    return $lc.Contains($fullPath) -or $lc.Contains($fileName)
+                } |
+                Sort-Object ProcessId
+        )
+    }
+
+    $psCommand = Get-Command ps -ErrorAction SilentlyContinue
+    if (-not $psCommand) {
+        return @()
+    }
+
+    $records = New-Object System.Collections.Generic.List[object]
+    foreach ($line in @(& $psCommand.Source "-ax" "-o" "pid=,command=" 2>$null)) {
+        $value = [string]$line
+        if ([string]::IsNullOrWhiteSpace($value) -or $value -notmatch '^\s*(\d+)\s+(.+)$') {
+            continue
+        }
+
+        $pid = [int]$Matches[1]
+        $cmd = [string]$Matches[2]
+        $lc = $cmd.ToLowerInvariant()
+        if ($lc.Contains($fullPath) -or $lc.Contains($fileName)) {
+            $records.Add([pscustomobject]@{
+                ProcessId = $pid
+                CommandLine = $cmd
+            }) | Out-Null
+        }
+    }
+
+    return @($records | Sort-Object ProcessId)
+}
+
+function Test-PowerShellScriptRunning {
+    param([Parameter(Mandatory = $true)][string]$ScriptPath)
+
+    return @(Get-PowerShellScriptProcesses -ScriptPath $ScriptPath).Count -gt 0
+}
+
+function Start-DetachedPowerShellScript {
+    param(
+        [Parameter(Mandatory = $true)][string]$ScriptPath,
+        [string[]]$ArgumentList = @()
+    )
+
+    $workingDirectory = Split-Path -Parent $ScriptPath
+    if (Test-SharedIsWindows) {
+        return (Start-SharedWindowsDetachedPowerShellFile `
+                -ScriptPath $ScriptPath `
+                -ArgumentList $ArgumentList `
+                -WorkingDirectory $workingDirectory)
+    }
+
+    return (Start-SharedPowerShellFile `
+            -ScriptPath $ScriptPath `
+            -ArgumentList $ArgumentList `
+            -WorkingDirectory $workingDirectory)
 }
 
 function Acquire-WatchdogLock {
@@ -326,6 +491,12 @@ function Invoke-PowerShellFileWithTimeout {
 
     $stdoutPath = Join-Path $AiMemoryRoot ("tmp-" + [guid]::NewGuid().ToString("N") + ".stdout.log")
     $stderrPath = Join-Path $AiMemoryRoot ("tmp-" + [guid]::NewGuid().ToString("N") + ".stderr.log")
+    Write-WatchdogTrace -Step "subprocess.start" -Data @{
+        script = $ScriptPath
+        timeoutSeconds = $TimeoutSeconds
+        workingDirectory = $WorkingDirectory
+        heartbeatReason = $HeartbeatReason
+    }
 
     try {
         $proc = Start-SharedShellProcess `
@@ -354,6 +525,11 @@ function Invoke-PowerShellFileWithTimeout {
             Start-Sleep -Milliseconds 150
         }
 
+        Write-WatchdogTrace -Step "subprocess.finish" -Data @{
+            script = $ScriptPath
+            timedOut = $timedOut
+            exitCode = if ($timedOut) { $null } else { $waitResult.exitCode }
+        }
         return [pscustomobject]@{
             timedOut = $timedOut
             exitCode = if ($timedOut) { $null } else { $waitResult.exitCode }
@@ -428,7 +604,10 @@ function Wait-ProcessWithHeartbeat {
         }
 
         if (-not $Process.HasExited) {
-            Write-State -Running $true -LastReason $Reason -ChangedSpecs @() -LastSyncAt $LastSyncAt
+            Write-WatchdogTrace -Step "subprocess.heartbeat" -Data @{
+                reason = $Reason
+                lastSyncAt = if ($LastSyncAt -gt [datetime]::MinValue) { $LastSyncAt.ToString("o") } else { $null }
+            }
         }
     }
 
@@ -589,28 +768,28 @@ function Invoke-BusSync {
     param([Parameter(Mandatory = $true)][string]$Reason)
 
     $lastSyncAt = [datetime]::MinValue
-    try {
-        $syncProcess = Start-SharedPowerShellFile -ScriptPath $BusScript -ArgumentList @(
-            "-Action", "SyncAll",
-            "-Tool", "system",
-            "-Project", "watchdog",
-            "-Quiet"
-        ) -WorkingDirectory (Split-Path -Parent $BusScript)
-        $syncResult = Wait-ProcessWithHeartbeat `
-            -Process $syncProcess `
-            -TimeoutSeconds $BusSyncTimeoutSeconds `
-            -Reason ("watchdog-sync:" + $Reason) `
-            -LastSyncAt $lastSyncAt
-        if ($syncResult.timedOut) {
-            Write-Warning ("[watchdog] BusSync timed out after {0}s" -f $BusSyncTimeoutSeconds)
-        } elseif ($syncResult.exitCode -ne 0) {
-            Write-Warning ("[watchdog] BusSync failed with exit code {0}" -f $syncResult.exitCode)
-        } else {
+    if (Test-PowerShellScriptRunning -ScriptPath $BusScript) {
+        Write-WatchdogTrace -Step "bussync.already-running" -Data @{ reason = $Reason }
+        $lastSyncAt = Get-LastKnownSyncAt
+    } else {
+        try {
+            Start-DetachedPowerShellScript `
+                -ScriptPath $BusScript `
+                -ArgumentList @("-Action", "SyncAll", "-Tool", "system", "-Project", "watchdog", "-Quiet") | Out-Null
             $lastSyncAt = Get-Date
             Set-LastKnownSyncAt -Value $lastSyncAt
+            Write-WatchdogTrace -Step "bussync.launched" -Data @{
+                reason = $Reason
+                lastSyncAt = $lastSyncAt.ToString("o")
+            }
+        } catch {
+            Write-WatchdogTrace -Step "bussync.catch" -Data @{
+                reason = $Reason
+                message = $_.Exception.Message
+                type = if ($null -ne $_.Exception) { $_.Exception.GetType().FullName } else { "" }
+            }
+            Write-Warning "[watchdog] BusSync threw: $_"
         }
-    } catch {
-        Write-Warning "[watchdog] BusSync threw: $_"
     }
 
     # Sync claude-mem observations → Obsidian structured/ (every 5th sync)
@@ -622,12 +801,9 @@ function Invoke-BusSync {
         $syncScript = Resolve-BusPath -Candidates @("sync-claudemem-to-obsidian.ps1", "ops/sync-claudemem-to-obsidian.ps1")
         if (Test-Path $syncScript) {
             try {
-                $claudeMemSync = Invoke-PowerShellFileWithTimeout -ScriptPath $syncScript -TimeoutSeconds 60 -HeartbeatReason "claude-mem-sync"
-                if ($claudeMemSync.timedOut) {
-                    Write-Warning "[watchdog] sync-claudemem-to-obsidian timed out after 60s"
-                } elseif ($claudeMemSync.exitCode -ne 0) {
-                    $detail = if (-not [string]::IsNullOrWhiteSpace($claudeMemSync.stderr)) { $claudeMemSync.stderr } else { $claudeMemSync.stdout }
-                    Write-Warning ("[watchdog] sync-claudemem-to-obsidian failed with exit code {0}: {1}" -f $claudeMemSync.exitCode, $detail)
+                if (-not (Test-PowerShellScriptRunning -ScriptPath $syncScript)) {
+                    Start-DetachedPowerShellScript -ScriptPath $syncScript | Out-Null
+                    Write-WatchdogTrace -Step "claudememsync.launched" -Data @{ reason = $Reason }
                 }
             } catch {
                 Write-Warning "[watchdog] sync-claudemem-to-obsidian threw: $_"
@@ -635,32 +811,32 @@ function Invoke-BusSync {
         }
     }
 
+    Write-WatchdogTrace -Step "bussync.state.begin" -Data @{
+        reason = $Reason
+        lastSyncAt = if ($lastSyncAt -gt [datetime]::MinValue) { $lastSyncAt.ToString("o") } else { $null }
+    }
     Write-State -Running $true -LastReason $Reason -ChangedSpecs @() -LastSyncAt $lastSyncAt
+    Write-WatchdogTrace -Step "bussync.state.end" -Data @{
+        reason = $Reason
+        lastSyncAt = if ($lastSyncAt -gt [datetime]::MinValue) { $lastSyncAt.ToString("o") } else { $null }
+    }
     return $lastSyncAt
 }
 
 function Invoke-RefreshGeneratedArtifacts {
     param([Parameter(Mandatory = $true)][string]$Reason)
 
-    try {
-        $refreshProcess = Start-SharedPowerShellFile -ScriptPath $BusScript -ArgumentList @(
-            "-Action", "RefreshDerivedArtifacts",
-            "-Quiet"
-        ) -WorkingDirectory (Split-Path -Parent $BusScript)
-        $refreshResult = Wait-ProcessWithHeartbeat `
-            -Process $refreshProcess `
-            -TimeoutSeconds $GeneratedArtifactsTimeoutSeconds `
-            -Reason ("watchdog-refresh-generated:" + $Reason)
-        if ($refreshResult.timedOut) {
-            Write-State -Running $true -LastReason ("generated-artifacts-timeout:" + $Reason) -ChangedSpecs @()
-            return $false
-        }
-        if ($refreshResult.exitCode -ne 0) {
-            Write-State -Running $true -LastReason ("generated-artifacts-exitcode-" + $refreshResult.exitCode + ":" + $Reason) -ChangedSpecs @()
-            return $false
-        }
+    if (Test-PowerShellScriptRunning -ScriptPath $BusScript) {
+        Write-WatchdogTrace -Step "generatedartifacts.already-running" -Data @{ reason = $Reason }
+        return $false
+    }
 
-        return $true
+    try {
+        Start-DetachedPowerShellScript `
+            -ScriptPath $BusScript `
+            -ArgumentList @("-Action", "RefreshDerivedArtifacts", "-Quiet") | Out-Null
+        Write-WatchdogTrace -Step "generatedartifacts.launched" -Data @{ reason = $Reason }
+        return $false
     } catch {
         Write-State -Running $true -LastReason ("generated-artifacts-failed:" + $Reason) -ChangedSpecs @()
         return $false
@@ -1046,38 +1222,42 @@ function Get-ExpectedSharedMcpIds {
     return $ids
 }
 
+function Get-ExpectedSharedMcpPorts {
+    $ports = [ordered]@{
+        context7 = 9331
+        fetch = 9332
+        time = 9333
+        "sequential-thinking" = 9334
+        obsidian = 9335
+        MiniMax = 9336
+        memory = 9338
+    }
+
+    $records = New-Object System.Collections.Generic.List[object]
+    foreach ($id in @(Get-ExpectedSharedMcpIds)) {
+        if ($ports.Contains($id)) {
+            $records.Add([pscustomobject]@{
+                id = $id
+                port = [int]$ports[$id]
+            }) | Out-Null
+        }
+    }
+
+    return @($records.ToArray())
+}
+
 function Ensure-SharedMcp {
     if (-not (Test-Path -LiteralPath $SharedMcpStartScript -PathType Leaf)) {
         return ""
     }
 
-    $expected = @(Get-ExpectedSharedMcpIds)
+    $expected = @(Get-ExpectedSharedMcpPorts)
     $missing = New-Object System.Collections.Generic.List[string]
 
-    if (Test-Path -LiteralPath $SharedMcpStatusScript -PathType Leaf) {
-        try {
-            $statusResult = Invoke-PowerShellFileWithTimeout -ScriptPath $SharedMcpStatusScript -TimeoutSeconds 20 -HeartbeatReason "shared-mcp-status"
-            if ($statusResult.timedOut -or $statusResult.exitCode -ne 0 -or [string]::IsNullOrWhiteSpace($statusResult.stdout)) {
-                foreach ($expectedId in $expected) {
-                    [void]$missing.Add([string]$expectedId)
-                }
-            } else {
-                $status = $statusResult.stdout | ConvertFrom-Json
-                foreach ($id in $expected) {
-                    $record = @($status | Where-Object { $_.id -eq $id } | Select-Object -First 1)
-                    if ($record.Count -eq 0 -or -not [bool]$record[0].running) {
-                        [void]$missing.Add($id)
-                    }
-                }
-            }
-        } catch {
-            foreach ($expectedId in $expected) {
-                [void]$missing.Add([string]$expectedId)
-            }
-        }
-    } else {
-        foreach ($expectedId in $expected) {
-            [void]$missing.Add([string]$expectedId)
+    foreach ($server in $expected) {
+        $listenerPids = @(Get-SharedListeningProcessIds -Port ([int]$server.port) | Sort-Object -Unique)
+        if ($listenerPids.Count -eq 0) {
+            [void]$missing.Add([string]$server.id)
         }
     }
 
@@ -1085,21 +1265,36 @@ function Ensure-SharedMcp {
         return ""
     }
 
-    $startResult = Invoke-PowerShellFileWithTimeout -ScriptPath $SharedMcpStartScript -TimeoutSeconds 60 -HeartbeatReason ("shared-mcp-start:" + ([string]::Join(",", $missing)))
-    if ($startResult.timedOut) {
-        return "shared-mcp-restart-timeout:" + ([string]::Join(",", $missing))
+    try {
+        if (Test-SharedIsWindows) {
+            # On Windows, a direct hidden PowerShell host keeps the spawned shared MCP proxies alive
+            # more reliably than the detached temp-launcher wrapper used for short-lived scripts.
+            Start-SharedBackgroundProcess `
+                -FilePath (Resolve-SharedPowerShellExecutable) `
+                -ArgumentList (Get-SharedPowerShellFileArguments -ScriptPath $SharedMcpStartScript -ArgumentList @()) `
+                -WorkingDirectory (Split-Path -Parent $SharedMcpStartScript) | Out-Null
+        } else {
+            Start-SharedPowerShellFile `
+                -ScriptPath $SharedMcpStartScript `
+                -WorkingDirectory (Split-Path -Parent $SharedMcpStartScript) | Out-Null
+        }
+    } catch {
+        return "shared-mcp-bootstrap-failed:" + ([string]::Join(",", $missing))
     }
-    if ($startResult.exitCode -ne 0) {
-        return "shared-mcp-restart-failed:" + ([string]::Join(",", $missing))
-    }
-    return "shared-mcp-restarted:" + ([string]::Join(",", $missing))
+    return "shared-mcp-bootstrap-launched:" + ([string]::Join(",", $missing))
 }
 
 if (-not (Acquire-WatchdogLock)) {
-    exit 0
+    return
 }
 
 try {
+    Write-WatchdogTrace -Step "watchdog.enter" -Data @{
+        daemon = [bool]$Daemon
+        once = [bool]$Once
+        pollSeconds = $PollSeconds
+        staleMinutes = $StaleMinutes
+    }
     Write-State -Running $true -LastReason "watchdog-startup-scan" -ChangedSpecs @() -LastSyncAt (Get-LastKnownSyncAt)
     $stamps = @{}
     $nextStampRefresh = @{}
@@ -1109,10 +1304,18 @@ try {
     }
 
     $startupStructuredSignatureBefore = Get-StructuredDataSignature
+    Write-WatchdogTrace -Step "startup.blackboard.begin"
     $blackboardReason = Ensure-ObsidianBlackboardDaemon
+    Write-WatchdogTrace -Step "startup.blackboard.end" -Data @{ reason = $blackboardReason }
+    Write-WatchdogTrace -Step "startup.openclaw.begin"
     $startupOpenClawSynced = Invoke-OpenClawStructuredSync -Reason "watchdog-startup"
+    Write-WatchdogTrace -Step "startup.openclaw.end" -Data @{ synced = [bool]$startupOpenClawSynced }
+    Write-WatchdogTrace -Step "startup.sharedmcp.begin"
     $sharedMcpReason = Ensure-SharedMcp
+    Write-WatchdogTrace -Step "startup.sharedmcp.end" -Data @{ reason = $sharedMcpReason }
+    Write-WatchdogTrace -Step "startup.bussync.begin"
     $lastSyncAt = Invoke-BusSync -Reason "watchdog-startup"
+    Write-WatchdogTrace -Step "startup.bussync.end" -Data @{ lastSyncAt = if ($lastSyncAt -gt [datetime]::MinValue) { $lastSyncAt.ToString("o") } else { $null } }
     $startupStructuredSignatureAfter = Get-StructuredDataSignature
     $startupStructuredChanged = ($startupStructuredSignatureBefore -cne $startupStructuredSignatureAfter) -or $startupOpenClawSynced
     if ($startupStructuredChanged -or (Test-StructuredArtifactsNeedRefresh)) {
@@ -1127,21 +1330,28 @@ try {
         Write-State -Running $true -LastReason $sharedMcpReason -ChangedSpecs @() -LastSyncAt $lastSyncAt
     }
     if ($Once -and -not $Daemon) {
-        exit 0
+        return
     }
 
     Write-State -Running $true -LastReason "watchdog-idle" -ChangedSpecs @() -LastSyncAt $lastSyncAt
     while ($true) {
+        Write-WatchdogTrace -Step "loop.begin"
         Start-Sleep -Seconds $PollSeconds
+        Write-WatchdogTrace -Step "loop.after-sleep"
+        Write-WatchdogTrace -Step "loop.blackboard.begin"
         $blackboardReason = Ensure-ObsidianBlackboardDaemon
+        Write-WatchdogTrace -Step "loop.blackboard.end" -Data @{ reason = $blackboardReason }
         if (-not [string]::IsNullOrWhiteSpace($blackboardReason)) {
             Write-State -Running $true -LastReason $blackboardReason -ChangedSpecs @() -LastSyncAt $lastSyncAt
         }
+        Write-WatchdogTrace -Step "loop.sharedmcp.begin"
         $sharedMcpReason = Ensure-SharedMcp
+        Write-WatchdogTrace -Step "loop.sharedmcp.end" -Data @{ reason = $sharedMcpReason }
         if (-not [string]::IsNullOrWhiteSpace($sharedMcpReason)) {
             Write-State -Running $true -LastReason $sharedMcpReason -ChangedSpecs @() -LastSyncAt $lastSyncAt
         }
         $changed = New-Object System.Collections.Generic.List[string]
+        Write-WatchdogTrace -Step "loop.scan.begin"
         foreach ($spec in $WatchSpecs) {
             $scanNow = Get-Date
             if ($nextStampRefresh.ContainsKey($spec.Name) -and ([datetime]$nextStampRefresh[$spec.Name]) -gt $scanNow) {
@@ -1155,6 +1365,7 @@ try {
                 [void]$changed.Add($spec.Name)
             }
         }
+        Write-WatchdogTrace -Step "loop.scan.end" -Data @{ changed = @($changed.ToArray()) }
 
         $needsStaleRefresh = $false
         if (Test-Path -LiteralPath $GlobalContextPath) {
@@ -1167,17 +1378,24 @@ try {
         }
 
         if ($changed.Count -gt 0) {
+            Write-WatchdogTrace -Step "loop.changed.begin" -Data @{ changed = @($changed.ToArray()) }
             $structuredSignatureBefore = Get-StructuredDataSignature
             $openClawChanged = @($changed | Where-Object { $OpenClawWatchSpecNames -contains $_ }).Count -gt 0
             if ($openClawChanged) {
+                Write-WatchdogTrace -Step "loop.changed.openclaw.begin" -Data @{ changed = @($changed.ToArray()) }
                 [void](Invoke-OpenClawStructuredSync -Reason ("watchdog-change:" + ([string]::Join(",", $changed))))
+                Write-WatchdogTrace -Step "loop.changed.openclaw.end" -Data @{ changed = @($changed.ToArray()) }
             }
             $reason = "watchdog-change:" + ([string]::Join(",", $changed))
+            Write-WatchdogTrace -Step "loop.changed.bussync.begin" -Data @{ reason = $reason }
             $lastSyncAt = Invoke-BusSync -Reason $reason
+            Write-WatchdogTrace -Step "loop.changed.bussync.end" -Data @{ reason = $reason; lastSyncAt = if ($lastSyncAt -gt [datetime]::MinValue) { $lastSyncAt.ToString("o") } else { $null } }
             $structuredSignatureAfter = Get-StructuredDataSignature
             $structuredChanged = ($structuredSignatureBefore -cne $structuredSignatureAfter)
             if ($structuredChanged -or (Test-StructuredArtifactsNeedRefresh)) {
+                Write-WatchdogTrace -Step "loop.changed.refresh.begin" -Data @{ reason = $reason; structuredChanged = [bool]$structuredChanged }
                 Invoke-StructuredRefreshPipeline -Reason $reason -StructuredChanged:$structuredChanged
+                Write-WatchdogTrace -Step "loop.changed.refresh.end" -Data @{ reason = $reason }
             } else {
                 [void](Invoke-EmbeddingsRefresh -Reason ($reason + "-index-check"))
             }
@@ -1211,9 +1429,19 @@ try {
             break
         }
     }
+} catch {
+    Write-WatchdogTrace -Step "watchdog.catch" -Data @{
+        message = $_.Exception.Message
+        type = if ($null -ne $_.Exception) { $_.Exception.GetType().FullName } else { "" }
+    }
+    Write-WatchdogErrorLog -ErrorRecord $_ -Context "top-level"
+    throw
 } finally {
+    Write-WatchdogTrace -Step "watchdog.finally"
     try {
-        Write-State -Running $false -LastReason "watchdog-exit" -ChangedSpecs @()
+        if (-not $KeepRunningState) {
+            Write-State -Running $false -LastReason "watchdog-exit" -ChangedSpecs @()
+        }
     } finally {
         Release-WatchdogLock
     }

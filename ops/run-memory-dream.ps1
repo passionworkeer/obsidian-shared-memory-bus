@@ -11,6 +11,7 @@ $ErrorActionPreference = "Stop"
 
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [Console]::OutputEncoding = $Utf8NoBom
+$UnixEpochTicks = ([datetimeoffset]::Parse("1970-01-01T00:00:00+00:00", [System.Globalization.CultureInfo]::InvariantCulture)).Ticks
 
 $helperPath = @(
     (Join-Path $PSScriptRoot "runtime-platform.ps1"),
@@ -99,14 +100,40 @@ function Get-ContentHash {
     }
 }
 
+function Get-UnixTimeMillisecondsString {
+    param([Parameter(Mandatory = $true)][datetime]$TimestampUtc)
+
+    $milliseconds = [decimal]($TimestampUtc.ToUniversalTime().Ticks - $UnixEpochTicks) / [decimal]10000
+    return [string]::Format(
+        [System.Globalization.CultureInfo]::InvariantCulture,
+        "{0:0.###}",
+        $milliseconds
+    )
+}
+
 function Get-FileStamp {
     param([Parameter(Mandatory = $true)][string]$Path)
 
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    if (-not (Test-Path -LiteralPath $Path)) {
         return "__missing__"
     }
 
     $item = Get-Item -LiteralPath $Path
+    if ($item.PSIsContainer) {
+        $entries = Get-ChildItem -LiteralPath $Path -Force | Sort-Object Name
+        $meta = foreach ($entry in $entries) {
+            try {
+                $mtimeMs = Get-UnixTimeMillisecondsString -TimestampUtc $entry.LastWriteTimeUtc
+                $size = if ($entry.PSIsContainer) { 0 } else { [int64]$entry.Length }
+                "{0}:{1}:{2}" -f $entry.Name, $mtimeMs, $size
+            } catch {
+                "{0}:missing" -f $entry.Name
+            }
+        }
+        $hash = Get-StringHash -Text ([string]::Join("|", @($meta)))
+        return "{0}/dir:{1}:{2}entries" -f $item.Name, $hash, @($entries).Count
+    }
+
     $content = Read-Text -Path $Path
     $hash = Get-StringHash -Text $content
     return "{0}:{1}:{2}" -f $item.Name, $hash, $item.Length
@@ -1014,6 +1041,7 @@ $OpenClawRunsPath = Join-Path $StructuredRoot "openclaw-runs.jsonl"
 $OpenClawJobsPath = Join-Path $StructuredRoot "openclaw-jobs.jsonl"
 $OpenClawBlackboardPath = Join-Path $StructuredRoot "openclaw-blackboard.jsonl"
 $OpenClawJournalPath = Join-Path $StructuredRoot "openclaw-journal.jsonl"
+$LogsPath = Join-Path $StructuredRoot "logs"
 
 $SourceFiles = @(
     (Join-Path $StructuredRoot "shared-inbox.jsonl"),
@@ -1025,7 +1053,8 @@ $SourceFiles = @(
     $OpenClawBlackboardPath,
     $OpenClawRunsPath,
     $OpenClawJobsPath,
-    $OpenClawJournalPath
+    $OpenClawJournalPath,
+    $LogsPath
 )
 
 $lockStream = Acquire-DreamLock -LockPath $DreamLockPath

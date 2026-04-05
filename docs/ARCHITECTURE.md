@@ -167,7 +167,7 @@ Typed durable promotion now exists in the structured record contract instead of 
 
 - `ops/build-memory-layers.js` stamps `metadata.promotion` onto governed records
 - the current typed durable buckets are `user`, `feedback`, `project`, and `reference`
-- `metadata.promotion` currently carries `version`, `durable_type`, `key`, `reason`, `source_type`, and `source_confidence`
+- `metadata.promotion` currently carries `version`, `durable_type`, `key`, `reason`, `source_type`, `source_confidence`, and `source_record_id`
 - promotion keys are token-fingerprint based rather than full-text exact hashes, so refresh matching tolerates light wording drift better than exact-text identity
 - summary-like and task-journal/task-run style records are explicitly blocked with reasons such as `non-promotable-type:summary`, and low-confidence candidates are held back with `low-confidence:*`
 - `ops/run-memory-dream.ps1` consumes that metadata first and only falls back to heuristic scope inference for older records that do not yet carry promotion metadata

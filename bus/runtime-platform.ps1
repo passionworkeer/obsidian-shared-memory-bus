@@ -171,6 +171,236 @@ function Resolve-SharedNodeExecutable {
     throw "Node.js was not found on PATH."
 }
 
+function Get-SharedUvManagedPythonCandidates {
+    $candidates = New-Object System.Collections.Generic.List[string]
+    $roots = New-Object System.Collections.Generic.List[string]
+
+    if (Test-SharedIsWindows) {
+        $roots.Add((Join-SharedPath @((Get-SharedConfigHome), "uv", "python"))) | Out-Null
+    } else {
+        $roots.Add((Join-SharedPath @((Get-SharedDataHome), "uv", "python"))) | Out-Null
+    }
+
+    foreach ($uvPythonRoot in @($roots | Select-Object -Unique)) {
+        if (-not (Test-Path -LiteralPath $uvPythonRoot -PathType Container)) {
+            continue
+        }
+
+        foreach ($candidate in @(
+            Get-ChildItem -LiteralPath $uvPythonRoot -Directory -ErrorAction SilentlyContinue |
+                Sort-Object Name -Descending |
+                ForEach-Object {
+                    if (Test-SharedIsWindows) {
+                        Join-SharedPath @($_.FullName, "python.exe")
+                    } else {
+                        Join-SharedPath @($_.FullName, "bin", "python3")
+                    }
+                } |
+                Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
+        )) {
+            $candidates.Add([string]$candidate) | Out-Null
+        }
+    }
+
+    return @($candidates | Select-Object -Unique)
+}
+
+function Get-SharedPyLauncherExecutable {
+    if (-not (Test-SharedIsWindows)) {
+        return ""
+    }
+
+    $launcherCandidates = @(
+        (Join-SharedPath @((Get-SharedUserHome), "AppData", "Local", "Programs", "Python", "Launcher", "py.exe"))
+    )
+
+    foreach ($candidate in @("py.exe", "py")) {
+        $command = Get-Command $candidate -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($command -and -not [string]::IsNullOrWhiteSpace([string]$command.Source)) {
+            $launcherCandidates += [string]$command.Source
+        }
+    }
+
+    foreach ($candidate in @($launcherCandidates | Select-Object -Unique)) {
+        if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            return (Get-Item -LiteralPath $candidate).FullName
+        }
+    }
+
+    return ""
+}
+
+function Get-SharedPyLauncherPythonCandidates {
+    if (-not (Test-SharedIsWindows)) {
+        return @()
+    }
+
+    $launcherPath = Get-SharedPyLauncherExecutable
+    if ([string]::IsNullOrWhiteSpace($launcherPath)) {
+        return @()
+    }
+
+    $candidates = New-Object System.Collections.Generic.List[string]
+    try {
+        $lines = & $launcherPath -0p 2>$null
+    } catch {
+        $lines = @()
+    }
+
+    foreach ($line in @($lines)) {
+        $match = [regex]::Match([string]$line, '^\s*-V:[^\s]+\s+\*?\s*(.+?)\s*$')
+        if (-not $match.Success) {
+            continue
+        }
+
+        $candidate = $match.Groups[1].Value.Trim()
+        if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            $candidates.Add((Get-Item -LiteralPath $candidate).FullName) | Out-Null
+        }
+    }
+
+    return @($candidates | Select-Object -Unique)
+}
+
+function Get-SharedPythonVersionInfo {
+    param([Parameter(Mandatory = $true)][string]$PythonPath)
+
+    if (-not (Test-Path -LiteralPath $PythonPath -PathType Leaf)) {
+        return $null
+    }
+
+    $probeScript = @'
+import sys
+import encodings
+
+print(str(sys.version_info[0]) + '|' + str(sys.version_info[1]) + '|' + sys.executable)
+'@
+
+    try {
+        $raw = & $PythonPath -c $probeScript 2>$null
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace([string]$raw)) {
+            return $null
+        }
+
+        $parts = ([string]$raw).Trim().Split("|")
+        if ($parts.Length -lt 3) {
+            return $null
+        }
+
+        return [pscustomobject]@{
+            major = [int]$parts[0]
+            minor = [int]$parts[1]
+            executable = [string]::Join("|", @($parts | Select-Object -Skip 2))
+        }
+    } catch {
+        return $null
+    }
+}
+
+function Test-SharedPythonUsable {
+    param(
+        [Parameter(Mandatory = $true)][string]$PythonPath,
+        [int]$Major = 0,
+        [int]$Minor = 0
+    )
+
+    $info = Get-SharedPythonVersionInfo -PythonPath $PythonPath
+    if ($null -eq $info) {
+        return $false
+    }
+
+    if ($Major -le 0) {
+        return $true
+    }
+
+    if ([int]$info.major -gt $Major) {
+        return $true
+    }
+    if ([int]$info.major -lt $Major) {
+        return $false
+    }
+
+    return ([int]$info.minor -ge $Minor)
+}
+
+function Get-SharedPythonExecutableCandidates {
+    $candidates = New-Object System.Collections.Generic.List[string]
+
+    foreach ($envName in @("AI_MEMORY_MCP_PYTHON", "AI_MEMORY_PYTHON")) {
+        $override = Get-SharedEnvValue -Name $envName
+        if (-not [string]::IsNullOrWhiteSpace($override) -and (Test-Path -LiteralPath $override -PathType Leaf)) {
+            $candidates.Add((Get-Item -LiteralPath $override).FullName) | Out-Null
+        }
+    }
+
+    foreach ($commandName in @("python.exe", "python", "python3")) {
+        $command = Get-Command $commandName -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($command -and -not [string]::IsNullOrWhiteSpace([string]$command.Source) -and ([string]$command.Source -notmatch "WindowsApps")) {
+            $candidates.Add([string]$command.Source) | Out-Null
+        }
+    }
+
+    foreach ($candidate in @(Get-SharedPyLauncherPythonCandidates)) {
+        $candidates.Add([string]$candidate) | Out-Null
+    }
+
+    foreach ($candidate in @(Get-SharedUvManagedPythonCandidates)) {
+        $candidates.Add([string]$candidate) | Out-Null
+    }
+
+    if (Test-SharedIsWindows) {
+        $userHome = Get-SharedUserHome
+        foreach ($candidate in @(
+            (Join-Path $userHome "AppData\Local\Programs\Python\Python313\python.exe"),
+            (Join-Path $userHome "AppData\Local\Programs\Python\Python312\python.exe"),
+            (Join-Path $userHome "AppData\Local\Programs\Python\Python311\python.exe"),
+            (Join-Path $userHome "AppData\Local\Programs\Python\Python310\python.exe"),
+            "D:\python\python.exe",
+            "C:\Python313\python.exe",
+            "C:\Python312\python.exe",
+            "C:\Python311\python.exe",
+            "C:\Python310\python.exe"
+        )) {
+            if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+                $candidates.Add((Get-Item -LiteralPath $candidate).FullName) | Out-Null
+            }
+        }
+    } else {
+        foreach ($candidate in @(
+            (Join-SharedPath @((Get-SharedUserHome), ".local", "bin", "python3")),
+            "/usr/bin/python3",
+            "/usr/local/bin/python3",
+            "/opt/homebrew/bin/python3"
+        )) {
+            if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+                $candidates.Add((Get-Item -LiteralPath $candidate).FullName) | Out-Null
+            }
+        }
+    }
+
+    return @($candidates | Select-Object -Unique)
+}
+
+function Resolve-SharedPythonRuntime {
+    param(
+        [int]$Major = 0,
+        [int]$Minor = 0,
+        [string[]]$ExtraCandidates = @()
+    )
+
+    foreach ($candidate in @(@($ExtraCandidates) + @(Get-SharedPythonExecutableCandidates))) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) {
+            continue
+        }
+
+        if (Test-SharedPythonUsable -PythonPath $candidate -Major $Major -Minor $Minor) {
+            return (Get-Item -LiteralPath $candidate).FullName
+        }
+    }
+
+    return ""
+}
+
 function Get-SharedOpenCodeDataRoot {
     $userHome = Get-SharedUserHome
     if (Test-SharedIsWindows) {
@@ -228,6 +458,55 @@ function Get-SharedPowerShellFileArguments {
     }
 
     return @($prefix + @($ArgumentList))
+}
+
+function ConvertTo-SharedStringArray {
+    param([AllowNull()]$Value)
+
+    $items = New-Object System.Collections.Generic.List[string]
+    foreach ($entry in @($Value)) {
+        if ($null -eq $entry) {
+            continue
+        }
+
+        foreach ($piece in ([string]$entry).Split(",")) {
+            $trimmed = $piece.Trim()
+            if (-not [string]::IsNullOrWhiteSpace($trimmed)) {
+                $items.Add($trimmed) | Out-Null
+            }
+        }
+    }
+
+    return @($items | Select-Object -Unique)
+}
+
+function Resolve-SharedOptionalPathArgument {
+    param(
+        [AllowEmptyString()][string]$Path,
+        [Parameter(Mandatory = $true)][string]$ParameterName,
+        [switch]$RequireExisting
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return ""
+    }
+
+    $trimmed = $Path.Trim()
+    if (($trimmed -eq "-") -or ($trimmed -eq "--") -or ($trimmed -match '^[/-]{1,2}[A-Za-z0-9][A-Za-z0-9-]*$')) {
+        throw ("Invalid value for -{0}: '{1}' looks like another switch. Pass a real directory path after -{0}." -f $ParameterName, $trimmed)
+    }
+
+    try {
+        $fullPath = [System.IO.Path]::GetFullPath($trimmed)
+    } catch {
+        throw ("Invalid value for -{0}: '{1}'. {2}" -f $ParameterName, $trimmed, $_.Exception.Message)
+    }
+
+    if ($RequireExisting -and -not (Test-Path -LiteralPath $fullPath -PathType Container)) {
+        throw ("Invalid value for -{0}: '{1}' does not exist." -f $ParameterName, $fullPath)
+    }
+
+    return $fullPath
 }
 
 function ConvertTo-ShellLiteral {
@@ -360,6 +639,258 @@ function Start-SharedWindowsHiddenPowerShell {
     return $process
 }
 
+function Resolve-SharedWindowsScriptHostExecutable {
+    if (-not (Test-SharedIsWindows)) {
+        return ""
+    }
+
+    $command = Get-Command wscript.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($command -and -not [string]::IsNullOrWhiteSpace([string]$command.Source)) {
+        return $command.Source
+    }
+
+    return "wscript.exe"
+}
+
+function Start-SharedWindowsDetachedHiddenCommand {
+    param(
+        [Parameter(Mandatory = $true)][string]$Command,
+        [hashtable]$Environment = @{},
+        [string]$WorkingDirectory = ""
+    )
+
+    $effectiveWorkingDirectory = if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+        $WorkingDirectory
+    } else {
+        try {
+            (Get-Location).ProviderPath
+        } catch {
+            ""
+        }
+    }
+
+    $launcherPath = [System.IO.Path]::ChangeExtension((New-TemporaryFile).FullName, ".vbs")
+    try {
+        $lines = New-Object System.Collections.Generic.List[string]
+        $lines.Add('Set shell = CreateObject("Wscript.Shell")') | Out-Null
+        if (-not [string]::IsNullOrWhiteSpace($effectiveWorkingDirectory)) {
+            $lines.Add(('shell.CurrentDirectory = "{0}"' -f ($effectiveWorkingDirectory -replace '"', '""'))) | Out-Null
+        }
+        foreach ($entry in @($Environment.GetEnumerator())) {
+            $key = ([string]$entry.Key -replace '"', '""')
+            $value = ([string]$entry.Value -replace '"', '""')
+            $lines.Add(('shell.Environment("Process")("{0}") = "{1}"' -f $key, $value)) | Out-Null
+        }
+        $lines.Add(('shell.Run "{0}", 0, False' -f ($Command -replace '"', '""'))) | Out-Null
+        [System.IO.File]::WriteAllText($launcherPath, ([string]::Join([Environment]::NewLine, @($lines)) + [Environment]::NewLine), (New-Object System.Text.UTF8Encoding($false)))
+
+        $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $startInfo.FileName = Resolve-SharedWindowsScriptHostExecutable
+        $startInfo.Arguments = Join-SharedWindowsProcessArguments -Arguments @("//B", "//NoLogo", $launcherPath)
+        $startInfo.UseShellExecute = $false
+        $startInfo.CreateNoWindow = $true
+        if (-not [string]::IsNullOrWhiteSpace($effectiveWorkingDirectory)) {
+            $startInfo.WorkingDirectory = $effectiveWorkingDirectory
+        }
+
+        $process = New-Object System.Diagnostics.Process
+        $process.StartInfo = $startInfo
+        [void]$process.Start()
+
+        $cleanupPath = $launcherPath
+        $cleanupAction = {
+            param($sender, $eventArgs)
+            try {
+                if (-not [string]::IsNullOrWhiteSpace($cleanupPath) -and (Test-Path -LiteralPath $cleanupPath -PathType Leaf)) {
+                    Remove-Item -LiteralPath $cleanupPath -Force -ErrorAction SilentlyContinue
+                }
+            } catch {
+            }
+        }.GetNewClosure()
+        $cleanupHandler = [System.EventHandler]$cleanupAction
+        $process.EnableRaisingEvents = $true
+        $process.add_Exited($cleanupHandler)
+        return $process
+    } catch {
+        if (-not [string]::IsNullOrWhiteSpace($launcherPath) -and (Test-Path -LiteralPath $launcherPath -PathType Leaf)) {
+            Remove-Item -LiteralPath $launcherPath -Force -ErrorAction SilentlyContinue
+        }
+        throw
+    }
+}
+
+function Start-SharedWindowsDetachedPowerShellFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$ScriptPath,
+        [string[]]$ArgumentList = @(),
+        [hashtable]$Environment = @{},
+        [string]$WorkingDirectory = ""
+    )
+
+    $executable = Resolve-SharedPowerShellExecutable
+    $arguments = Get-SharedPowerShellFileArguments -ScriptPath $ScriptPath -ArgumentList $ArgumentList
+    $command = Join-SharedWindowsProcessArguments -Arguments (@($executable) + @($arguments))
+    return Start-SharedWindowsDetachedHiddenCommand -Command $command -Environment $Environment -WorkingDirectory $WorkingDirectory
+}
+
+function Start-SharedWindowsDetachedProcess {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$ArgumentList = @(),
+        [hashtable]$Environment = @{},
+        [string]$WorkingDirectory = "",
+        [string]$StdoutPath = "",
+        [string]$StderrPath = ""
+    )
+
+    $effectiveWorkingDirectory = if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+        $WorkingDirectory
+    } else {
+        try {
+            (Get-Location).ProviderPath
+        } catch {
+            ""
+        }
+    }
+
+    foreach ($capturePath in @($StdoutPath, $StderrPath)) {
+        if ([string]::IsNullOrWhiteSpace($capturePath)) {
+            continue
+        }
+
+        $captureParent = Split-Path -Parent $capturePath
+        if (-not [string]::IsNullOrWhiteSpace($captureParent) -and -not (Test-Path -LiteralPath $captureParent -PathType Container)) {
+            [void](New-Item -ItemType Directory -Path $captureParent -Force)
+        }
+    }
+
+    $specPath = [System.IO.Path]::ChangeExtension((New-TemporaryFile).FullName, ".json")
+    $launcherScriptPath = [System.IO.Path]::ChangeExtension((New-TemporaryFile).FullName, ".ps1")
+
+    try {
+        $invocationSpec = @{
+            executable = $FilePath
+            arguments = @($ArgumentList)
+            workingDirectory = $effectiveWorkingDirectory
+            stdoutPath = $StdoutPath
+            stderrPath = $StderrPath
+        } | ConvertTo-Json -Depth 8
+        [System.IO.File]::WriteAllText($specPath, $invocationSpec, (New-Object System.Text.UTF8Encoding($false)))
+
+        $specLiteral = $specPath -replace "'", "''"
+        $launcherTemplate = @'
+$ErrorActionPreference = 'Stop'
+$spec = Get-Content -Raw -LiteralPath '__SPEC_PATH__' -Encoding utf8 | ConvertFrom-Json
+$launcherPath = $MyInvocation.MyCommand.Path
+$arguments = @()
+foreach ($argument in @($spec.arguments)) {
+    $arguments += [string]$argument
+}
+if (-not [string]::IsNullOrWhiteSpace([string]$spec.workingDirectory)) {
+    Set-Location -LiteralPath ([string]$spec.workingDirectory)
+}
+
+$stdoutPath = [string]$spec.stdoutPath
+$stderrPath = [string]$spec.stderrPath
+try {
+    if (Test-Path -LiteralPath '__SPEC_PATH__' -PathType Leaf) {
+        Remove-Item -LiteralPath '__SPEC_PATH__' -Force -ErrorAction SilentlyContinue
+    }
+} catch {
+}
+
+$exitCode = 0
+try {
+    if (-not [string]::IsNullOrWhiteSpace($stdoutPath) -and -not [string]::IsNullOrWhiteSpace($stderrPath)) {
+        & ([string]$spec.executable) @arguments 1> $stdoutPath 2> $stderrPath
+    } elseif (-not [string]::IsNullOrWhiteSpace($stdoutPath)) {
+        & ([string]$spec.executable) @arguments 1> $stdoutPath
+    } elseif (-not [string]::IsNullOrWhiteSpace($stderrPath)) {
+        & ([string]$spec.executable) @arguments 2> $stderrPath
+    } else {
+        & ([string]$spec.executable) @arguments
+    }
+    $exitCode = $LASTEXITCODE
+} finally {
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($launcherPath) -and (Test-Path -LiteralPath $launcherPath -PathType Leaf)) {
+            Remove-Item -LiteralPath $launcherPath -Force -ErrorAction SilentlyContinue
+        }
+    } catch {
+    }
+}
+exit $exitCode
+'@
+        $launcherContent = $launcherTemplate.Replace('__SPEC_PATH__', $specLiteral)
+        [System.IO.File]::WriteAllText($launcherScriptPath, $launcherContent, (New-Object System.Text.UTF8Encoding($false)))
+
+        $process = Start-SharedWindowsDetachedPowerShellFile `
+            -ScriptPath $launcherScriptPath `
+            -Environment $Environment `
+            -WorkingDirectory $effectiveWorkingDirectory
+        return $process
+    } catch {
+        foreach ($tempPath in @($specPath, $launcherScriptPath)) {
+            if ([string]::IsNullOrWhiteSpace($tempPath)) {
+                continue
+            }
+
+            try {
+                if (Test-Path -LiteralPath $tempPath -PathType Leaf) {
+                    Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+                }
+            } catch {
+            }
+        }
+        throw
+    }
+}
+
+function Start-SharedWindowsDetachedShellProcess {
+    param(
+        [Parameter(Mandatory = $true)][string]$Command,
+        [hashtable]$Environment = @{},
+        [string]$WorkingDirectory = "",
+        [string]$StdoutPath = "",
+        [string]$StderrPath = ""
+    )
+
+    return Start-SharedWindowsDetachedProcess `
+        -FilePath "cmd.exe" `
+        -ArgumentList @("/d", "/s", "/c", $Command) `
+        -Environment $Environment `
+        -WorkingDirectory $WorkingDirectory `
+        -StdoutPath $StdoutPath `
+        -StderrPath $StderrPath
+}
+
+function Start-SharedWindowsHeadlessProcess {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$ArgumentList = @(),
+        [hashtable]$Environment = @{},
+        [string]$WorkingDirectory = ""
+    )
+
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $FilePath
+    $startInfo.Arguments = Join-SharedWindowsProcessArguments -Arguments $ArgumentList
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+        $startInfo.WorkingDirectory = $WorkingDirectory
+    }
+
+    foreach ($entry in @($Environment.GetEnumerator())) {
+        $startInfo.EnvironmentVariables[[string]$entry.Key] = [string]$entry.Value
+    }
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $startInfo
+    [void]$process.Start()
+    return $process
+}
+
 function ConvertTo-SharedPosixShellLiteral {
     param([AllowEmptyString()][string]$Value)
 
@@ -418,6 +949,14 @@ function Start-SharedBackgroundProcess {
     )
 
     if (Test-SharedIsWindows) {
+        if ([string]::IsNullOrWhiteSpace($StdoutPath) -and [string]::IsNullOrWhiteSpace($StderrPath)) {
+            return Start-SharedWindowsHeadlessProcess `
+                -FilePath $FilePath `
+                -ArgumentList $ArgumentList `
+                -Environment $Environment `
+                -WorkingDirectory $WorkingDirectory
+        }
+
         $effectiveWorkingDirectory = if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
             $WorkingDirectory
         } else {
@@ -428,25 +967,99 @@ function Start-SharedBackgroundProcess {
             }
         }
 
-        $lines = New-Object System.Collections.Generic.List[string]
-        $lines.Add('$ErrorActionPreference = ''Stop''') | Out-Null
-        if (-not [string]::IsNullOrWhiteSpace($effectiveWorkingDirectory)) {
-            $lines.Add(("Set-Location -LiteralPath {0}" -f (ConvertTo-SharedPowerShellLiteral -Value $effectiveWorkingDirectory))) | Out-Null
-        }
-        foreach ($entry in @($Environment.GetEnumerator())) {
-            $lines.Add(('$env:{0} = {1}' -f [string]$entry.Key, (ConvertTo-SharedPowerShellLiteral -Value ([string]$entry.Value)))) | Out-Null
+        foreach ($capturePath in @($StdoutPath, $StderrPath)) {
+            if ([string]::IsNullOrWhiteSpace($capturePath)) {
+                continue
+            }
+
+            $captureParent = Split-Path -Parent $capturePath
+            if (-not [string]::IsNullOrWhiteSpace($captureParent) -and -not (Test-Path -LiteralPath $captureParent -PathType Container)) {
+                [void](New-Item -ItemType Directory -Path $captureParent -Force)
+            }
         }
 
-        $invocation = Build-SharedPowerShellInvocation -FilePath $FilePath -ArgumentList $ArgumentList
-        if (-not [string]::IsNullOrWhiteSpace($StdoutPath)) {
-            $invocation += " 1> " + (ConvertTo-SharedPowerShellLiteral -Value $StdoutPath)
-        }
-        if (-not [string]::IsNullOrWhiteSpace($StderrPath)) {
-            $invocation += " 2> " + (ConvertTo-SharedPowerShellLiteral -Value $StderrPath)
-        }
-        $lines.Add($invocation) | Out-Null
+        $specPath = [System.IO.Path]::ChangeExtension((New-TemporaryFile).FullName, ".json")
+        $launcherScriptPath = [System.IO.Path]::ChangeExtension((New-TemporaryFile).FullName, ".ps1")
 
-        return Start-SharedWindowsHiddenPowerShell -Command ([string]::Join("`n", @($lines))) -WorkingDirectory $effectiveWorkingDirectory
+        try {
+            $invocationSpec = @{
+                executable = $FilePath
+                arguments = @($ArgumentList)
+                workingDirectory = $effectiveWorkingDirectory
+                stdoutPath = $StdoutPath
+                stderrPath = $StderrPath
+            } | ConvertTo-Json -Depth 8
+            [System.IO.File]::WriteAllText($specPath, $invocationSpec, (New-Object System.Text.UTF8Encoding($false)))
+
+            $specLiteral = $specPath -replace "'", "''"
+            $launcherTemplate = @'
+$ErrorActionPreference = 'Stop'
+$spec = Get-Content -Raw -LiteralPath '__SPEC_PATH__' -Encoding utf8 | ConvertFrom-Json
+$arguments = @()
+foreach ($argument in @($spec.arguments)) {
+    $arguments += [string]$argument
+}
+if (-not [string]::IsNullOrWhiteSpace([string]$spec.workingDirectory)) {
+    Set-Location -LiteralPath ([string]$spec.workingDirectory)
+}
+
+$stdoutPath = [string]$spec.stdoutPath
+$stderrPath = [string]$spec.stderrPath
+if (-not [string]::IsNullOrWhiteSpace($stdoutPath) -and -not [string]::IsNullOrWhiteSpace($stderrPath)) {
+    & ([string]$spec.executable) @arguments 1> $stdoutPath 2> $stderrPath
+} elseif (-not [string]::IsNullOrWhiteSpace($stdoutPath)) {
+    & ([string]$spec.executable) @arguments 1> $stdoutPath
+} elseif (-not [string]::IsNullOrWhiteSpace($stderrPath)) {
+    & ([string]$spec.executable) @arguments 2> $stderrPath
+} else {
+    & ([string]$spec.executable) @arguments
+}
+exit $LASTEXITCODE
+'@
+            $launcherContent = $launcherTemplate.Replace('__SPEC_PATH__', $specLiteral)
+            [System.IO.File]::WriteAllText($launcherScriptPath, $launcherContent, (New-Object System.Text.UTF8Encoding($false)))
+
+            $process = Start-SharedWindowsHeadlessProcess `
+                -FilePath (Resolve-SharedPowerShellExecutable) `
+                -ArgumentList (Get-SharedPowerShellFileArguments -ScriptPath $launcherScriptPath -ArgumentList @()) `
+                -Environment $Environment `
+                -WorkingDirectory $effectiveWorkingDirectory
+
+            $cleanupPaths = @($specPath, $launcherScriptPath)
+            $cleanupAction = {
+                param($sender, $eventArgs)
+                foreach ($path in @($cleanupPaths)) {
+                    if ([string]::IsNullOrWhiteSpace($path)) {
+                        continue
+                    }
+
+                    try {
+                        if (Test-Path -LiteralPath $path -PathType Leaf) {
+                            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+                        }
+                    } catch {
+                    }
+                }
+            }.GetNewClosure()
+            $cleanupHandler = [System.EventHandler]$cleanupAction
+            $process.EnableRaisingEvents = $true
+            $process.add_Exited($cleanupHandler)
+            return $process
+        } catch {
+            foreach ($tempPath in @($specPath, $launcherScriptPath)) {
+                if ([string]::IsNullOrWhiteSpace($tempPath)) {
+                    continue
+                }
+
+                try {
+                    if (Test-Path -LiteralPath $tempPath -PathType Leaf) {
+                        Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+                    }
+                } catch {
+                }
+            }
+            throw
+        }
     }
 
     $parameters = @{

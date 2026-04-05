@@ -19,6 +19,8 @@ Expected result for a clean public branch:
 - no hits in tracked files, or only clearly documented placeholder/examples that are not personal paths
 
 ## Minimum Validation
+This sequence is intentionally mutation-heavy. `install.ps1 -WorkspaceRoot <repo-root>` rewires home-scoped client configs and writes repo overlays, so run it against a clean checkout or use `-ApplyClientIntegrations false` when you only want an install smoke test.
+
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-layout.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -WorkspaceRoot <repo-root>
@@ -32,6 +34,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\veri
 ~/.ai-memory/shared-mcp/start-default-shared-mcp.sh
 pwsh -NoProfile -File ~/.ai-memory/verify-client-integrations.ps1 -WorkspaceRoot <repo-root> -RunCliChecks -RunRuntimeChecks
 ```
+
+If you only want a read-only status snapshot during release triage, use `shared-mcp/status-shared-mcp.ps1 -Json` instead of `verify-client-integrations`; the verify command may restart unhealthy shared MCP services and always writes a report artifact.
 
 Run the pressure test if anything changed in shared MCP behavior, agent wiring, or memory indexing.
 
