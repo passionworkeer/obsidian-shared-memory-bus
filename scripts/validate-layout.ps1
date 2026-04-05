@@ -73,11 +73,13 @@ function Get-LayoutEntries {
 }
 
 $layoutEntries = @()
+$cliFiles = if ($layout.ContainsKey("CliFiles")) { @($layout.CliFiles) } else { @() }
 foreach ($sourceDir in @($layout.FlatRuntimeFiles.Keys | Sort-Object)) {
     $layoutEntries += Get-LayoutEntries -Section ("runtime:{0}" -f $sourceDir) -SourceDir $sourceDir -Names @($layout.FlatRuntimeFiles[$sourceDir])
 }
 $layoutEntries += Get-LayoutEntries -Section "shared-mcp" -SourceDir "shared-mcp" -InstallPrefix "shared-mcp" -Names @($layout.SharedMcpFiles)
 $layoutEntries += Get-LayoutEntries -Section "templates" -SourceDir "templates" -Names @($layout.TemplateFiles)
+$layoutEntries += Get-LayoutEntries -Section "cli" -Names @($cliFiles)
 
 $managedInstallEntries = @($layoutEntries | Where-Object { $_.section -ne "templates" })
 $managedLookup = @{}
@@ -117,6 +119,7 @@ $requiredInstalledFiles = @(
     "runtime-platform.ps1"
     "runtime-config.js"
     "check-memory-integrity.js"
+    "generate-memory-hygiene-report.js"
     "run-pressure-test.ps1"
     "verify-client-integrations.ps1"
     "verify-integrations.ps1"
@@ -124,6 +127,8 @@ $requiredInstalledFiles = @(
     "probe-models.py"
     "runtime_support.py"
     "semantic-search.py"
+    "cli/ai-memory.js"
+    "cli/package.json"
     "shared-mcp/manifest.json"
     "shared-mcp/start-default-shared-mcp.ps1"
     "shared-mcp/start-default-shared-mcp.sh"

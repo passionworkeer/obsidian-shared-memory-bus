@@ -34,6 +34,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -W
 ./scripts/install.sh -WorkspaceRoot <your-project-root>
 ```
 
+`-WorkspaceRoot` is optional. When provided, it must point at an existing repo/workspace root where overlays should be written.
+
 If you are changing the runtime layout itself, validate the contract first:
 
 ```powershell
@@ -73,6 +75,7 @@ source ~/.ai-memory/activate-ai-memory.sh
 ```
 
 If `pwsh` is installed in a non-standard location for your shell environment, set `AI_MEMORY_PWSH` before using the `.sh` wrappers.
+Startup hooks and some internal helpers now launch hidden in the background on Windows, but manual `install`, `start`, `status`, `verify`, and `pressure` commands are still foreground terminal commands by design.
 
 Start the shared MCP stack:
 
@@ -130,6 +133,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\veri
 ~/.ai-memory/verify-client-integrations.sh -WorkspaceRoot <your-project-root> -RunCliChecks -RunRuntimeChecks
 ```
 
+`verify-client-integrations` is a self-healing validation gate, not a read-only status probe. It may restart unhealthy shared MCP services and always refreshes its report file. If you only want to inspect state, use `shared-mcp/status-shared-mcp.ps1 -Json` or `shared-mcp/status-shared-mcp.sh -Json`.
+
 Pressure test before trusting a heavy multi-agent workflow:
 
 ```powershell
@@ -140,7 +145,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\run-
 ~/.ai-memory/run-pressure-test.sh -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks -RunToolCalls -RunClientTaskChecks
 ```
 
-`<your-project-root>` means the repository or workspace root where overlays such as `.cursor/mcp.json`, `.vscode/mcp.json`, `.claude/rules/shared-memory.md`, and `opencode.json` should be written. It is not the user-home config directory itself.
+`<your-project-root>` means the existing repository or workspace root where overlays such as `.cursor/mcp.json`, `.vscode/mcp.json`, `.claude/rules/shared-memory.md`, and `opencode.json` should be written. It is not the user-home config directory itself.
 
 If you need the installer to skip client rewiring entirely, pass `-ApplyClientIntegrations false`. If you want the installer to include optional servers such as `MiniMax` during that automatic apply step, pass `-IncludeOptionalClientServers`.
 

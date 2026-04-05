@@ -1,5 +1,6 @@
 "use strict";
 
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 
@@ -23,8 +24,9 @@ const { resolveVaultRoot } = loadVaultRootHelper();
 
 // Reuse the structured layer definitions from memory-contract so we stay in sync
 let STRUCTURED_LAYER_DEFINITIONS;
+let isExpectedDerivedDuplicate;
 try {
-  ({ STRUCTURED_LAYER_DEFINITIONS } = require("./memory-contract.js"));
+  ({ STRUCTURED_LAYER_DEFINITIONS, isExpectedDerivedDuplicate } = require("./memory-contract.js"));
 } catch (_err) {
   // Inline fallback — used only when memory-contract.js is unavailable
   STRUCTURED_LAYER_DEFINITIONS = [
@@ -39,6 +41,39 @@ try {
     { key: "openclawJobs",      fileName: "openclaw-jobs.jsonl" },
     { key: "openclawJournal",   fileName: "openclaw-journal.jsonl" },
   ];
+  isExpectedDerivedDuplicate = function fallbackExpectedDerivedDuplicate(firstFileName, secondFileName) {
+    const pair = new Set([String(firstFileName || "").trim(), String(secondFileName || "").trim()]);
+    if (pair.has("session-memory.jsonl")) {
+      return pair.has("claude-code.jsonl") || pair.has("openclaw.jsonl");
+    }
+    if (!pair.has("task-memory.jsonl")) {
+      return false;
+    }
+    return (
+      pair.has("openclaw-blackboard.jsonl") ||
+      pair.has("openclaw-runs.jsonl") ||
+      pair.has("openclaw-jobs.jsonl") ||
+      pair.has("openclaw-journal.jsonl")
+    );
+  };
+}
+
+if (typeof isExpectedDerivedDuplicate !== "function") {
+  isExpectedDerivedDuplicate = function fallbackExpectedDerivedDuplicate(firstFileName, secondFileName) {
+    const pair = new Set([String(firstFileName || "").trim(), String(secondFileName || "").trim()]);
+    if (pair.has("session-memory.jsonl")) {
+      return pair.has("claude-code.jsonl") || pair.has("openclaw.jsonl");
+    }
+    if (!pair.has("task-memory.jsonl")) {
+      return false;
+    }
+    return (
+      pair.has("openclaw-blackboard.jsonl") ||
+      pair.has("openclaw-runs.jsonl") ||
+      pair.has("openclaw-jobs.jsonl") ||
+      pair.has("openclaw-journal.jsonl")
+    );
+  };
 }
 
 const ALLOWED_SCOPES = new Set(["user", "feedback", "project", "reference", "summary", "task", "run"]);
@@ -112,6 +147,14 @@ function readJsonlRecords(filePath) {
     .filter(Boolean);
 }
 
+function deriveContentHash(record) {
+  const stored = String((record && record.content_hash) || "").trim();
+  if (stored) return stored;
+  const basis = String((record && record.content) || (record && record.title) || "").trim();
+  if (!basis) return "";
+  return crypto.createHash("sha256").update(basis, "utf8").digest("hex");
+}
+
 function analyzeRecord(record, seenIds, stats) {
   const { byScope, byTool, byFreshness, byMemoryLevel, bySourceKind } = stats;
 
@@ -137,7 +180,7 @@ function analyzeRecord(record, seenIds, stats) {
   bySourceKind[sourceKind] = (bySourceKind[sourceKind] || 0) + 1;
 
   // ---- Hygiene issues ----
-  if (!record.content_hash) {
+  if (!deriveContentHash(record)) {
     stats.missingContentHash += 1;
   }
   if (!record.title) {
@@ -157,10 +200,14 @@ function analyzeRecord(record, seenIds, stats) {
   const recordId = String(record.id || "").trim();
   if (recordId) {
     if (seenIds.has(recordId)) {
+      const firstSeenIn = seenIds.get(recordId);
+      if (isExpectedDerivedDuplicate(firstSeenIn, stats._currentFile || "?")) {
+        return;
+      }
       if (stats.duplicateIds.length < 12) {
         stats.duplicateIds.push({
           id: recordId,
-          firstSeenIn: seenIds.get(recordId),
+          firstSeenIn,
         });
       }
     } else {

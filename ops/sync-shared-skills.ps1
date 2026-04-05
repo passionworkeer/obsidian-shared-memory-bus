@@ -25,6 +25,9 @@ if ([string]::IsNullOrWhiteSpace($AiMemoryRoot)) {
     $AiMemoryRoot = if (-not [string]::IsNullOrWhiteSpace($env:AI_MEMORY_ROOT)) { $env:AI_MEMORY_ROOT } else { Get-SharedDefaultAiMemoryRoot }
 }
 
+$AiMemoryRoot = Resolve-SharedOptionalPathArgument -Path $AiMemoryRoot -ParameterName "AiMemoryRoot"
+$WorkspaceRoot = Resolve-SharedOptionalPathArgument -Path $WorkspaceRoot -ParameterName "WorkspaceRoot" -RequireExisting
+
 function Ensure-Directory {
     param([Parameter(Mandatory = $true)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path)) {

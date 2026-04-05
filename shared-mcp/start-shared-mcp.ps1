@@ -78,9 +78,9 @@ function Test-ProcessAlive {
 
 # Standalone PID probe used during state-file zombie cleanup.
 function Test-PidAlive {
-    param([Parameter(Mandatory = $true)][int]$Pid)
+    param([Parameter(Mandatory = $true)][int]$ProcessId)
 
-    return $null -ne (Get-Process -Id $Pid -ErrorAction SilentlyContinue)
+    return $null -ne (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)
 }
 
 function Normalize-RequestedIds {
@@ -270,25 +270,54 @@ function Get-ServerCommandTemplate {
 }
 
 function Resolve-SharedPythonExecutable {
-    $override = Get-SharedEnvValue -Name "AI_MEMORY_MCP_PYTHON"
-    if (-not [string]::IsNullOrWhiteSpace($override) -and (Test-Path -LiteralPath $override -PathType Leaf)) {
-        return (Get-Item -LiteralPath $override).FullName
+    $resolved = Resolve-SharedPythonRuntime -Major 3 -Minor 10
+    if (-not [string]::IsNullOrWhiteSpace($resolved)) {
+        return $resolved
     }
 
-    $override = Get-SharedEnvValue -Name "AI_MEMORY_PYTHON"
-    if (-not [string]::IsNullOrWhiteSpace($override) -and (Test-Path -LiteralPath $override -PathType Leaf)) {
-        return (Get-Item -LiteralPath $override).FullName
-    }
+    throw "Unable to resolve a usable Python 3.10+ runtime for shared fetch/time MCP services. Set AI_MEMORY_MCP_PYTHON or AI_MEMORY_PYTHON to a working interpreter and reinstall the bundle."
+}
 
-    foreach ($candidate in @(
-            Get-Command python.exe, python3, python -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
-        )) {
-        if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
-            return (Get-Item -LiteralPath $candidate).FullName
+function Resolve-SharedUvxExecutable {
+    foreach ($commandName in @("uvx.exe", "uvx")) {
+        $command = Get-Command $commandName -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($command -and -not [string]::IsNullOrWhiteSpace([string]$command.Source)) {
+            return [string]$command.Source
         }
     }
 
-    throw "Unable to resolve a Python runtime for shared fetch/time MCP services. Set AI_MEMORY_PYTHON or reinstall the bundle."
+    return ""
+}
+
+function Resolve-SharedFetchTimeCommand {
+    param(
+        [Parameter(Mandatory = $true)][string]$ModuleName,
+        [Parameter(Mandatory = $true)][string]$PackageName
+    )
+
+    $python = Resolve-SharedPythonRuntime -Major 3 -Minor 10
+    if (-not [string]::IsNullOrWhiteSpace($python)) {
+        $probeScript = @'
+import importlib.util
+import sys
+
+sys.exit(0 if importlib.util.find_spec(sys.argv[1]) else 1)
+'@
+        try {
+            & $python -c $probeScript $ModuleName 1>$null 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                return "{0} -m {1}" -f (ConvertTo-ShellLiteral $python), $ModuleName
+            }
+        } catch {
+        }
+    }
+
+    $uvx = Resolve-SharedUvxExecutable
+    if (-not [string]::IsNullOrWhiteSpace($uvx)) {
+        return "{0} {1}" -f (ConvertTo-ShellLiteral $uvx), $PackageName
+    }
+
+    throw "Unable to resolve a healthy Python runtime or uvx for shared MCP package $PackageName."
 }
 
 function Resolve-CommandTemplate {
@@ -326,6 +355,15 @@ function Resolve-CommandTemplate {
 
 function Resolve-StdioCommand {
     param([Parameter(Mandatory = $true)]$Server)
+
+    switch ([string]$Server.id) {
+        "fetch" {
+            return Resolve-SharedFetchTimeCommand -ModuleName "mcp_server_fetch" -PackageName "mcp-server-fetch"
+        }
+        "time" {
+            return Resolve-SharedFetchTimeCommand -ModuleName "mcp_server_time" -PackageName "mcp-server-time"
+        }
+    }
 
     $template = Get-ServerCommandTemplate -Server $Server -BaseProperty "stdioCommand"
     if ([string]::IsNullOrWhiteSpace($template)) {
@@ -416,6 +454,10 @@ function Start-ManagedHttpProcess {
         [Parameter(Mandatory = $true)][string]$StderrPath
     )
 
+    if (Test-SharedIsWindows) {
+        return Start-SharedWindowsHeadlessProcess -FilePath "cmd.exe" -ArgumentList @("/d", "/s", "/c", $Command) -Environment $Environment -WorkingDirectory $root
+    }
+
     return Start-SharedShellProcess -Command $Command -Environment $Environment -WorkingDirectory $root -StdoutPath $StdoutPath -StderrPath $StderrPath
 }
 
@@ -429,13 +471,11 @@ function Start-ProxyProcess {
     )
 
     if (Test-SharedIsWindows) {
-        return Start-SharedBackgroundProcess `
+        return Start-SharedWindowsHeadlessProcess `
             -FilePath $NodeExecutable `
             -ArgumentList $ArgumentList `
             -Environment $Environment `
-            -WorkingDirectory $root `
-            -StdoutPath $StdoutPath `
-            -StderrPath $StderrPath
+            -WorkingDirectory $root
     }
 
     return Start-SharedShellProcess `
@@ -469,7 +509,7 @@ function Clean-StateFile {
     $dirty = $false
     $now = (Get-Date).ToString("o")
 
-    foreach ($entry in @($state.GetEnumerator())) {
+    foreach ($entry in @($State.GetEnumerator())) {
         $serverId = [string]$entry.Key
         $record = $entry.Value
 
@@ -482,7 +522,7 @@ function Clean-StateFile {
             continue
         }
 
-        if (Test-PidAlive -Pid $recordedPid) {
+        if (Test-PidAlive -ProcessId $recordedPid) {
             # PID is alive — nothing to do.
             continue
         }
@@ -493,7 +533,7 @@ function Clean-StateFile {
             $port = [int]$record["port"]
         } else {
             # Look up port from manifest.
-            foreach ($srv in @($manifest.servers)) {
+            foreach ($srv in @($Manifest.servers)) {
                 if ([string]$srv.id -eq $serverId -and $srv.PSObject.Properties.Name -contains "port") {
                     $port = [int]$srv.port
                     break
@@ -558,7 +598,7 @@ try {
             $existingPid = [int]$existing["pid"]
         }
 
-        $listenerPids = @(Get-SharedListeningProcessIds -Port $port)
+        $listenerPids = @(Get-SharedListeningProcessIds -Port $port | Select-Object -Unique)
 
         if ($ForceRestart) {
             foreach ($pidToStop in @($listenerPids | Select-Object -Unique)) {
@@ -567,24 +607,42 @@ try {
                 }
             }
             Start-Sleep -Milliseconds 750
-            $listenerPids = @(Get-SharedListeningProcessIds -Port $port)
+            $listenerPids = @(Get-SharedListeningProcessIds -Port $port | Select-Object -Unique)
+        }
+
+        if ($listenerPids.Count -gt 1) {
+            foreach ($pidToStop in @($listenerPids | Select-Object -Unique)) {
+                if ([int]$pidToStop -gt 0) {
+                    Stop-SharedProcessTree -ProcessId ([int]$pidToStop)
+                }
+            }
+            Start-Sleep -Milliseconds 750
+            $listenerPids = @(Get-SharedListeningProcessIds -Port $port | Select-Object -Unique)
         }
 
         $listenerPid = if ($listenerPids.Count -gt 0) { [int]$listenerPids[0] } else { 0 }
-
-        if ($listenerPid -gt 0 -and -not $ForceRestart) {
-            if (Test-ServerReady -Server $server -Url $url -HealthUrl $healthUrl) {
-                $results.Add([pscustomobject]@{
-                        id = [string]$server.id
-                        status = "already-running"
-                        pid = $listenerPid
-                        url = $url
-                    }) | Out-Null
-                continue
+        $listenerHealthy = $false
+        if ($listenerPid -gt 0) {
+            $listenerHealthy = Test-ServerReady -Server $server -Url $url -HealthUrl $healthUrl
+            if (-not $listenerHealthy) {
+                foreach ($pidToStop in @($listenerPids | Select-Object -Unique)) {
+                    if ([int]$pidToStop -gt 0) {
+                        Stop-SharedProcessTree -ProcessId ([int]$pidToStop)
+                    }
+                }
+                Start-Sleep -Milliseconds 750
+                $listenerPids = @(Get-SharedListeningProcessIds -Port $port | Select-Object -Unique)
+                $listenerPid = if ($listenerPids.Count -gt 0) { [int]$listenerPids[0] } else { 0 }
+                $listenerHealthy = $listenerPid -gt 0 -and (Test-ServerReady -Server $server -Url $url -HealthUrl $healthUrl)
             }
         }
 
-        if ($listenerPid -gt 0 -and (Test-ServerReady -Server $server -Url $url -HealthUrl $healthUrl)) {
+        if ($listenerPid -le 0 -and -not $ForceRestart -and $existingPid -gt 0 -and (Test-PidAlive -ProcessId $existingPid)) {
+            Stop-SharedProcessTree -ProcessId $existingPid
+            Start-Sleep -Milliseconds 500
+        }
+
+        if ($listenerPid -gt 0 -and $listenerHealthy) {
             $state[[string]$server.id] = @{
                 id = [string]$server.id
                 pid = $listenerPid
@@ -595,11 +653,12 @@ try {
                 stderrPath = if ($existing) { [string]$existing["stderrPath"] } else { $null }
                 startedAt = if ($existing -and $existing.ContainsKey("startedAt")) { [string]$existing["startedAt"] } else { (Get-Date).ToString("o") }
                 mode = [string]$server.mode
+                status = "healthy"
                 notes = [string]$server.notes
             }
             $results.Add([pscustomobject]@{
                     id = [string]$server.id
-                    status = "adopted"
+                    status = if ($existingPid -eq $listenerPid) { "already-running" } else { "adopted" }
                     pid = $listenerPid
                     url = $url
                 }) | Out-Null
@@ -661,6 +720,38 @@ try {
         $listenerPid = if ($listenerPids.Count -gt 0) { [int]$listenerPids[0] } else { 0 }
         $recordPid = if ($listenerPid -gt 0) { $listenerPid } else { $process.Id }
 
+        if (-not $healthy) {
+            $pidsToStop = New-Object System.Collections.Generic.List[int]
+            foreach ($pidCandidate in @(
+                    $(if ($listenerPid -gt 0) { [int]$listenerPid } else { 0 }),
+                    $(if ($null -ne $process -and $null -ne $process.Id) { [int]$process.Id } else { 0 })
+                )) {
+                if ($pidCandidate -gt 0 -and -not $pidsToStop.Contains($pidCandidate)) {
+                    $pidsToStop.Add($pidCandidate) | Out-Null
+                }
+            }
+
+            foreach ($pidToStop in @($pidsToStop.ToArray())) {
+                Stop-SharedProcessTree -ProcessId $pidToStop
+            }
+
+            Start-Sleep -Milliseconds 750
+            $remainingListenerPids = @(Get-SharedListeningProcessIds -Port $port | Sort-Object -Unique)
+            [void]$state.Remove([string]$server.id)
+
+            $results.Add([pscustomobject]@{
+                    id = [string]$server.id
+                    status = "failed-unhealthy"
+                    pid = $recordPid
+                    url = $url
+                    stdoutPath = $stdoutPath
+                    stderrPath = $stderrPath
+                    cleaned = ($remainingListenerPids.Count -eq 0)
+                    remainingPids = $remainingListenerPids
+                }) | Out-Null
+            continue
+        }
+
         $state[[string]$server.id] = @{
             id = [string]$server.id
             pid = $recordPid
@@ -671,12 +762,13 @@ try {
             stderrPath = $stderrPath
             startedAt = (Get-Date).ToString("o")
             mode = [string]$server.mode
+            status = "healthy"
             notes = [string]$server.notes
         }
 
         $results.Add([pscustomobject]@{
                 id = [string]$server.id
-                status = if ($healthy) { "started" } else { "started-unhealthy" }
+                status = "started"
                 pid = $recordPid
                 url = $url
                 stdoutPath = $stdoutPath
@@ -686,6 +778,9 @@ try {
 
     Write-State -State $state
     $results | ConvertTo-Json -Depth 6
+    if (@($results | Where-Object { @("started", "already-running", "adopted") -notcontains [string]$_.status }).Count -gt 0) {
+        exit 1
+    }
 } finally {
     if ($mutexAcquired) {
         try {

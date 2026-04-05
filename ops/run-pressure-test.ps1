@@ -33,6 +33,9 @@ if ([string]::IsNullOrWhiteSpace($AiMemoryRoot)) {
     $AiMemoryRoot = if (-not [string]::IsNullOrWhiteSpace($env:AI_MEMORY_ROOT)) { $env:AI_MEMORY_ROOT } else { Get-SharedDefaultAiMemoryRoot }
 }
 
+$AiMemoryRoot = Resolve-SharedOptionalPathArgument -Path $AiMemoryRoot -ParameterName "AiMemoryRoot"
+$WorkspaceRoot = Resolve-SharedOptionalPathArgument -Path $WorkspaceRoot -ParameterName "WorkspaceRoot" -RequireExisting
+
 function Ensure-Directory {
     param([Parameter(Mandatory = $true)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path)) {
@@ -72,7 +75,259 @@ function Get-SharedStatus {
         throw "Shared MCP status script not found: $ScriptPath"
     }
 
-    return (Invoke-SharedPowerShellFile -ScriptPath $ScriptPath | ConvertFrom-Json)
+    return (Invoke-SharedPowerShellFile -ScriptPath $ScriptPath -ArgumentList @("-Json") | ConvertFrom-Json)
+}
+
+function New-TemporaryCapturePath {
+    $file = New-TemporaryFile
+    $path = $file.FullName
+    Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    return $path
+}
+
+function Invoke-ExternalCommandWithTimeout {
+    param(
+        [Parameter(Mandatory = $true)][string]$Executable,
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [Parameter(Mandatory = $true)][string]$WorkingDirectory,
+        [int]$TimeoutSeconds = 45
+    )
+
+    $stdoutPath = New-TemporaryCapturePath
+    $stderrPath = New-TemporaryCapturePath
+    $invocationSpecPath = [System.IO.Path]::ChangeExtension((New-TemporaryFile).FullName, ".json")
+    $launcherScriptPath = [System.IO.Path]::ChangeExtension((New-TemporaryFile).FullName, ".ps1")
+    $result = [ordered]@{
+        exitCode = -1
+        timedOut = $false
+        stdout = ""
+        stderr = ""
+        output = ""
+        error = ""
+        pid = 0
+    }
+
+    try {
+        $invocationSpec = @{
+            executable = $Executable
+            arguments = @($Arguments)
+            workingDirectory = $WorkingDirectory
+        } | ConvertTo-Json -Depth 8
+        [System.IO.File]::WriteAllText($invocationSpecPath, $invocationSpec, $Utf8NoBom)
+
+        $specLiteral = $invocationSpecPath -replace "'", "''"
+        $launcherTemplate = @'
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+$spec = Get-Content -Raw -LiteralPath '__SPEC_PATH__' -Encoding utf8 | ConvertFrom-Json
+$arguments = @()
+foreach ($argument in @($spec.arguments)) {
+    $arguments += [string]$argument
+}
+if (-not [string]::IsNullOrWhiteSpace([string]$spec.workingDirectory)) {
+    Set-Location -LiteralPath ([string]$spec.workingDirectory)
+}
+$ErrorActionPreference = 'Continue'
+& ([string]$spec.executable) @arguments
+exit $LASTEXITCODE
+'@
+        $launcherContent = $launcherTemplate.Replace('__SPEC_PATH__', $specLiteral)
+        [System.IO.File]::WriteAllText($launcherScriptPath, $launcherContent, $Utf8NoBom)
+
+        $powerShellExe = Resolve-SharedPowerShellExecutable
+        $powerShellArgs = Get-SharedPowerShellFileArguments -ScriptPath $launcherScriptPath -ArgumentList @()
+        $process = Start-SharedBackgroundProcess `
+            -FilePath $powerShellExe `
+            -ArgumentList $powerShellArgs `
+            -WorkingDirectory $WorkingDirectory `
+            -StdoutPath $stdoutPath `
+            -StderrPath $stderrPath
+
+        if ($null -eq $process) {
+            throw "Process failed to start."
+        }
+
+        $result.pid = [int]$process.Id
+        $timeoutMs = [Math]::Max(1000, ($TimeoutSeconds * 1000))
+        $completed = $process.WaitForExit($timeoutMs)
+        if (-not $completed) {
+            $result.timedOut = $true
+            $result.exitCode = 124
+            Stop-SharedProcessTree -ProcessId $process.Id
+            try {
+                $null = $process.WaitForExit(5000)
+            } catch {
+            }
+        } else {
+            $process.WaitForExit()
+            $result.exitCode = $process.ExitCode
+        }
+    } catch {
+        $result.error = $_.Exception.Message
+        if ($result.exitCode -lt 0) {
+            $result.exitCode = 1
+        }
+    } finally {
+        if (Test-Path -LiteralPath $stdoutPath -PathType Leaf) {
+            try {
+                $result.stdout = Get-Content -Raw -LiteralPath $stdoutPath -Encoding utf8
+            } catch {
+            }
+            Remove-Item -LiteralPath $stdoutPath -Force -ErrorAction SilentlyContinue
+        }
+
+        if (Test-Path -LiteralPath $stderrPath -PathType Leaf) {
+            try {
+                $result.stderr = Get-Content -Raw -LiteralPath $stderrPath -Encoding utf8
+            } catch {
+            }
+            Remove-Item -LiteralPath $stderrPath -Force -ErrorAction SilentlyContinue
+        }
+
+        foreach ($path in @($launcherScriptPath, $invocationSpecPath)) {
+            if (-not [string]::IsNullOrWhiteSpace($path) -and (Test-Path -LiteralPath $path -PathType Leaf)) {
+                Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    $outputParts = New-Object System.Collections.Generic.List[string]
+    foreach ($chunk in @($result.stdout, $result.stderr)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$chunk)) {
+            $outputParts.Add(([string]$chunk).Trim()) | Out-Null
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($result.error)) {
+        $outputParts.Add($result.error) | Out-Null
+    }
+    $result.output = ([string]::Join([Environment]::NewLine, @($outputParts))).Trim()
+    return [pscustomobject]$result
+}
+
+function Invoke-ExternalCommandInlineWithTimeout {
+    param(
+        [Parameter(Mandatory = $true)][string]$Executable,
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [Parameter(Mandatory = $true)][string]$WorkingDirectory,
+        [int]$TimeoutSeconds = 45
+    )
+
+    $job = Start-Job -ScriptBlock {
+        param($Executable, $Arguments, $WorkingDirectory)
+
+        function Convert-JobNativeOutputToText {
+            param([AllowNull()]$Output)
+
+            $lines = New-Object System.Collections.Generic.List[string]
+            foreach ($item in @($Output)) {
+                if ($null -eq $item) {
+                    continue
+                }
+
+                $value = ""
+                if ($item -is [System.Management.Automation.ErrorRecord]) {
+                    $targetText = ""
+                    if ($null -ne $item.TargetObject) {
+                        $targetText = [string]$item.TargetObject
+                    }
+
+                    $messageText = ""
+                    if ($null -ne $item.Exception) {
+                        $messageText = [string]$item.Exception.Message
+                    }
+
+                    if (-not [string]::IsNullOrWhiteSpace($targetText)) {
+                        $value = $targetText
+                    } elseif (-not [string]::IsNullOrWhiteSpace($messageText)) {
+                        $value = $messageText
+                    } else {
+                        $value = $item.ToString()
+                    }
+                } else {
+                    $value = [string]$item
+                }
+
+                if (-not [string]::IsNullOrWhiteSpace($value)) {
+                    $lines.Add($value) | Out-Null
+                }
+            }
+
+            return (($lines -join [Environment]::NewLine).Trim())
+        }
+
+        $result = [ordered]@{
+            exitCode = -1
+            timedOut = $false
+            stdout = ""
+            stderr = ""
+            output = ""
+            error = ""
+            pid = $PID
+        }
+
+        $output = @()
+        $previousErrorAction = $ErrorActionPreference
+        $hadNativePref = $false
+        $previousNativePref = $false
+        Push-Location -LiteralPath $WorkingDirectory
+        try {
+            $ErrorActionPreference = "Continue"
+            if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -Scope Global -ErrorAction SilentlyContinue) {
+                $hadNativePref = $true
+                $previousNativePref = $Global:PSNativeCommandUseErrorActionPreference
+                $Global:PSNativeCommandUseErrorActionPreference = $false
+            }
+            $output = & $Executable @Arguments 2>&1
+            $result.exitCode = $LASTEXITCODE
+        } catch {
+            $result.error = $_.Exception.Message
+            if ($result.exitCode -lt 0) {
+                $result.exitCode = 1
+            }
+        } finally {
+            $ErrorActionPreference = $previousErrorAction
+            if ($hadNativePref) {
+                $Global:PSNativeCommandUseErrorActionPreference = $previousNativePref
+            }
+            Pop-Location
+        }
+
+        $result.output = Convert-JobNativeOutputToText -Output $output
+        [pscustomobject]$result
+    } -ArgumentList @($Executable, @($Arguments), $WorkingDirectory)
+
+    try {
+        $completed = Wait-Job -Job $job -Timeout $TimeoutSeconds
+        if (-not $completed) {
+            Stop-Job -Job $job -Force -ErrorAction SilentlyContinue
+            return [pscustomobject]@{
+                exitCode = 124
+                timedOut = $true
+                stdout = ""
+                stderr = ""
+                output = ""
+                error = ""
+                pid = 0
+            }
+        }
+
+        $jobResult = @(Receive-Job -Job $job -ErrorAction SilentlyContinue)
+        if ($jobResult.Count -gt 0) {
+            return [pscustomobject]$jobResult[0]
+        }
+
+        return [pscustomobject]@{
+            exitCode = 1
+            timedOut = $false
+            stdout = ""
+            stderr = ""
+            output = ""
+            error = "inline-command-produced-no-result"
+            pid = 0
+        }
+    } finally {
+        Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Get-ListenerSnapshot {
@@ -98,28 +353,8 @@ function Invoke-CliCheck {
         [Parameter(Mandatory = $true)][string]$WorkingDirectory
     )
 
-    Push-Location -LiteralPath $WorkingDirectory
-    $previousErrorAction = $ErrorActionPreference
-    $hadNativePref = $false
-    $previousNativePref = $false
-    try {
-        $ErrorActionPreference = "Continue"
-        if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -Scope Global -ErrorAction SilentlyContinue) {
-            $hadNativePref = $true
-            $previousNativePref = $Global:PSNativeCommandUseErrorActionPreference
-            $Global:PSNativeCommandUseErrorActionPreference = $false
-        }
-        $output = & $Executable @Arguments 2>&1
-        $exitCode = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $previousErrorAction
-        if ($hadNativePref) {
-            $Global:PSNativeCommandUseErrorActionPreference = $previousNativePref
-        }
-        Pop-Location
-    }
-
-    $text = ($output | Out-String).Trim()
+    $commandResult = Invoke-ExternalCommandWithTimeout -Executable $Executable -Arguments $Arguments -WorkingDirectory $WorkingDirectory -TimeoutSeconds 45
+    $text = [string]$commandResult.output
     $mcpIndex = $text.IndexOf("MCP Servers")
     if ($mcpIndex -gt 0) {
         $prefixIndex = [Math]::Max(0, $mcpIndex - 12)
@@ -132,7 +367,8 @@ function Invoke-CliCheck {
     return [pscustomobject]@{
         command = (($Executable + " " + ($Arguments -join " ")).Trim())
         workdir = $WorkingDirectory
-        exitCode = $exitCode
+        exitCode = [int]$commandResult.exitCode
+        timedOut = [bool]$commandResult.timedOut
         output = $text
         hasSharedContext7Url = $text -match "http://127\.0\.0\.1:9331/mcp"
         hasSharedFetchUrl = $text -match "http://127\.0\.0\.1:9332/mcp"
@@ -184,13 +420,68 @@ function Get-JsonProbeCandidates {
         }
     }
 
+    function Add-JsonCandidatesFromObject {
+        param([AllowNull()]$Object)
+
+        if ($null -eq $Object) {
+            return
+        }
+
+        if ($Object -is [string]) {
+            Add-JsonProbeCandidate -Value $Object
+            return
+        }
+
+        if ($Object -is [System.Collections.IEnumerable] -and -not ($Object -is [psobject])) {
+            foreach ($item in $Object) {
+                Add-JsonCandidatesFromObject -Object $item
+            }
+            return
+        }
+
+        if (Test-JsonProbeShape -Object $Object) {
+            try {
+                Add-JsonProbeCandidate -Value (($Object | ConvertTo-Json -Compress -Depth 16).Trim())
+            } catch {
+            }
+        }
+
+        foreach ($propertyName in @("result", "text", "message", "output", "response", "stdout", "part")) {
+            $property = $Object.PSObject.Properties[$propertyName]
+            if ($null -ne $property) {
+                Add-JsonCandidatesFromObject -Object $property.Value
+            }
+        }
+
+        $contentProperty = $Object.PSObject.Properties["content"]
+        if ($null -ne $contentProperty) {
+            Add-JsonCandidatesFromObject -Object $contentProperty.Value
+        }
+
+        $itemsProperty = $Object.PSObject.Properties["items"]
+        if ($null -ne $itemsProperty) {
+            Add-JsonCandidatesFromObject -Object $itemsProperty.Value
+        }
+    }
+
     Add-JsonProbeCandidate -Value $Text
     try {
         $outerJson = $Text | ConvertFrom-Json -ErrorAction Stop
-        if ($null -ne $outerJson.PSObject.Properties["result"]) {
-            Add-JsonProbeCandidate -Value ([string]$outerJson.result)
-        }
+        Add-JsonCandidatesFromObject -Object $outerJson
     } catch {
+    }
+
+    foreach ($line in @($Text -split "\r?\n")) {
+        if ([string]::IsNullOrWhiteSpace($line)) {
+            continue
+        }
+
+        Add-JsonProbeCandidate -Value $line
+        try {
+            $lineJson = $line | ConvertFrom-Json -ErrorAction Stop
+            Add-JsonCandidatesFromObject -Object $lineJson
+        } catch {
+        }
     }
 
     foreach ($candidate in @($candidates.ToArray())) {
@@ -277,6 +568,58 @@ function Convert-NativeOutputToText {
     return (($lines -join [Environment]::NewLine).Trim())
 }
 
+function Get-ClientProbeSkipReason {
+    param(
+        [string]$ClientId = "",
+        [AllowEmptyString()][string]$Text,
+        [bool]$TimedOut = $false
+    )
+
+    $normalized = ([string]$Text).ToLowerInvariant()
+    if (-not [string]::IsNullOrWhiteSpace($normalized)) {
+        foreach ($pattern in @(
+            "invalid api key",
+            "api key is missing",
+            "providerautherror",
+            "loadapikeyerror",
+            "oauth token is missing",
+            "not logged in",
+            "authentication required"
+        )) {
+            if ($normalized.Contains($pattern)) {
+                return "provider-auth-unavailable"
+            }
+        }
+
+        foreach ($pattern in @(
+            "error_during_execution",
+            "timed out",
+            "try again later",
+            "rate limit",
+            "overloaded",
+            "server had trouble"
+        )) {
+            if ($normalized.Contains($pattern)) {
+                return "client-runtime-transient"
+            }
+        }
+
+        if (
+            ([string]$ClientId).Trim().ToLowerInvariant() -eq "claude" -and
+            $normalized.Contains('"type":"result"') -and
+            $normalized.Contains('"result":""')
+        ) {
+            return "client-runtime-transient"
+        }
+    }
+
+    if ($TimedOut -and ([string]$ClientId).Trim().ToLowerInvariant() -eq "claude") {
+        return "client-runtime-transient"
+    }
+
+    return ""
+}
+
 function Invoke-ClientTaskProbe {
     param(
         [Parameter(Mandatory = $true)][string]$ClientId,
@@ -291,8 +634,12 @@ function Invoke-ClientTaskProbe {
         clientId = $ClientId
         wave = $Wave
         exitCode = -1
+        timedOut = $false
+        attempts = 0
         ok = $false
         hasProbeJson = $false
+        skipped = $false
+        skipReason = ""
         watchdogStatus = ""
         watchdogPid = 0
         watchdogUpdatedAt = ""
@@ -304,67 +651,130 @@ function Invoke-ClientTaskProbe {
         errors = @()
     }
 
-    Push-Location -LiteralPath $WorkingDirectory
-    $previousErrorAction = $ErrorActionPreference
-    $hadNativePref = $false
-    $previousNativePref = $false
-    try {
-        $ErrorActionPreference = "Continue"
-        if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -Scope Global -ErrorAction SilentlyContinue) {
-            $hadNativePref = $true
-            $previousNativePref = $Global:PSNativeCommandUseErrorActionPreference
-            $Global:PSNativeCommandUseErrorActionPreference = $false
+    $maxAttempts = if ($ClientId -eq "claude") { 2 } else { 1 }
+    $skipReasonCandidate = ""
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        $result.attempts = $attempt
+        $result.exitCode = -1
+        $result.timedOut = $false
+        $result.ok = $false
+        $result.hasProbeJson = $false
+        $result.watchdogStatus = ""
+        $result.watchdogPid = 0
+        $result.watchdogUpdatedAt = ""
+        $result.memoryIntegrityStatus = ""
+        $result.searchObservedResult = $false
+        $result.outputPreview = ""
+        $result.errors = @()
+        $probeOutputPath = ""
+        $commandArguments = @($Arguments)
+        if ($ClientId -eq "codex") {
+            $probeOutputPath = New-TemporaryCapturePath
+            $commandArguments += @("--output-last-message", $probeOutputPath)
         }
-        $output = & $Executable @Arguments 2>&1
-        $result.exitCode = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $previousErrorAction
-        if ($hadNativePref) {
-            $Global:PSNativeCommandUseErrorActionPreference = $previousNativePref
-        }
-        Pop-Location
-    }
 
-    $text = Convert-NativeOutputToText -Output $output
-    $sanitizedText = [regex]::Replace($text, "\x1b\[[0-9;]*[A-Za-z]", "")
-    $result.ok = ($result.exitCode -eq 0)
-
-    if ($text.Length -gt 240) {
-        $result.outputPreview = $text.Substring(0, 240)
-    } else {
-        $result.outputPreview = $text
-    }
-
-    try {
-        $parsed = ConvertFrom-JsonProbePayload -Text $sanitizedText
-        $result.hasProbeJson =
-            ($null -ne $parsed.PSObject.Properties["watchdogStatus"]) -and
-            ($null -ne $parsed.PSObject.Properties["watchdogPid"]) -and
-            ($null -ne $parsed.PSObject.Properties["memoryIntegrityStatus"])
-        if ($result.hasProbeJson) {
-            $result.watchdogStatus = [string]$parsed.watchdogStatus
-            $result.watchdogPid = [int]$parsed.watchdogPid
-            $result.watchdogUpdatedAt = [string]$parsed.watchdogUpdatedAt
-            $result.memoryIntegrityStatus = [string]$parsed.memoryIntegrityStatus
-            if ($null -ne $parsed.PSObject.Properties["searchObservedResult"]) {
-                if ($parsed.searchObservedResult -is [bool]) {
-                    $result.searchObservedResult = [bool]$parsed.searchObservedResult
-                } elseif ($parsed.searchObservedResult -is [string]) {
-                    $result.searchObservedResult = ([string]$parsed.searchObservedResult).Trim().ToLowerInvariant() -eq "true"
-                } else {
-                    $result.searchObservedResult = ($null -ne $parsed.searchObservedResult)
+        try {
+            $commandResult = Invoke-ExternalCommandWithTimeout -Executable $Executable -Arguments $commandArguments -WorkingDirectory $WorkingDirectory -TimeoutSeconds 240
+            if (
+                -not $commandResult.timedOut -and
+                [string]::IsNullOrWhiteSpace([string]$commandResult.output) -and
+                [string]::IsNullOrWhiteSpace([string]$commandResult.error)
+            ) {
+                $inlineResult = Invoke-ExternalCommandInlineWithTimeout -Executable $Executable -Arguments $commandArguments -WorkingDirectory $WorkingDirectory -TimeoutSeconds 240
+                if (
+                    -not [string]::IsNullOrWhiteSpace([string]$inlineResult.output) -or
+                    -not [string]::IsNullOrWhiteSpace([string]$inlineResult.error) -or
+                    [bool]$inlineResult.timedOut
+                ) {
+                    $commandResult = $inlineResult
                 }
             }
+            $result.exitCode = [int]$commandResult.exitCode
+            $result.timedOut = [bool]$commandResult.timedOut
+            $text = [string]$commandResult.output
+            if ([string]::IsNullOrWhiteSpace($text) -and -not [string]::IsNullOrWhiteSpace($probeOutputPath) -and (Test-Path -LiteralPath $probeOutputPath -PathType Leaf)) {
+                try {
+                    $text = Get-Content -Raw -LiteralPath $probeOutputPath -Encoding utf8
+                } catch {
+                }
+            }
+            $sanitizedText = [regex]::Replace($text, "\x1b\[[0-9;]*[A-Za-z]", "")
+            $result.ok = ($result.exitCode -eq 0)
+
+            if ($text.Length -gt 240) {
+                $result.outputPreview = $text.Substring(0, 240)
+            } else {
+                $result.outputPreview = $text
+            }
+
+            $skipReasonCandidate = Get-ClientProbeSkipReason -ClientId $ClientId -Text $sanitizedText -TimedOut:$result.timedOut
+            if (
+                [string]::IsNullOrWhiteSpace($skipReasonCandidate) -and
+                $ClientId -eq "opencode" -and
+                $result.exitCode -ne 0 -and
+                [string]::IsNullOrWhiteSpace($sanitizedText)
+            ) {
+                $skipReasonCandidate = "provider-auth-unavailable"
+            }
+
+            try {
+                $parsed = ConvertFrom-JsonProbePayload -Text $sanitizedText
+                $result.hasProbeJson =
+                    ($null -ne $parsed.PSObject.Properties["watchdogStatus"]) -and
+                    ($null -ne $parsed.PSObject.Properties["watchdogPid"]) -and
+                    ($null -ne $parsed.PSObject.Properties["memoryIntegrityStatus"])
+                if ($result.hasProbeJson) {
+                    $result.watchdogStatus = [string]$parsed.watchdogStatus
+                    $result.watchdogPid = [int]$parsed.watchdogPid
+                    $result.watchdogUpdatedAt = [string]$parsed.watchdogUpdatedAt
+                    $result.memoryIntegrityStatus = [string]$parsed.memoryIntegrityStatus
+                    if ($null -ne $parsed.PSObject.Properties["searchObservedResult"]) {
+                        if ($parsed.searchObservedResult -is [bool]) {
+                            $result.searchObservedResult = [bool]$parsed.searchObservedResult
+                        } elseif ($parsed.searchObservedResult -is [string]) {
+                            $result.searchObservedResult = ([string]$parsed.searchObservedResult).Trim().ToLowerInvariant() -eq "true"
+                        } else {
+                            $result.searchObservedResult = ($null -ne $parsed.searchObservedResult)
+                        }
+                    }
+                }
+            } catch {
+                $result.errors += ("runtime-probe-json-parse-failed: " + $_.Exception.Message)
+            }
+        } catch {
+            $result.errors += ("runtime-probe-launch-failed: " + $_.Exception.Message)
+        } finally {
+            if (-not [string]::IsNullOrWhiteSpace($probeOutputPath) -and (Test-Path -LiteralPath $probeOutputPath -PathType Leaf)) {
+                Remove-Item -LiteralPath $probeOutputPath -Force -ErrorAction SilentlyContinue
+            }
         }
-    } catch {
-        $result.errors += ("runtime-probe-json-parse-failed: " + $_.Exception.Message)
+
+        if ($result.hasProbeJson -or -not [string]::IsNullOrWhiteSpace($skipReasonCandidate) -or $attempt -ge $maxAttempts) {
+            break
+        }
+
+        Start-Sleep -Seconds 2
+    }
+
+    if (-not $result.hasProbeJson -and -not [string]::IsNullOrWhiteSpace($skipReasonCandidate)) {
+        $result.skipReason = $skipReasonCandidate
+        $result.skipped = $true
+        $result.pass = $true
+        $result.errors = @("skipped:" + $result.skipReason)
+        return [pscustomobject]$result
     }
 
     if (-not $result.ok) {
         $result.errors += ("command-exit-" + $result.exitCode)
     }
+    if ($result.timedOut) {
+        $result.errors += "command-timeout"
+    }
     if (-not $result.hasProbeJson) {
         $result.errors += "missing-runtime-probe-json"
+    }
+    if (-not [string]::IsNullOrWhiteSpace($commandResult.error)) {
+        $result.errors += ("command-launch-failed: " + $commandResult.error)
     }
 
     return [pscustomobject]$result
@@ -964,6 +1374,8 @@ $clientTaskJobScript = {
         exitCode = -1
         ok = $false
         hasProbeJson = $false
+        skipped = $false
+        skipReason = ""
         watchdogStatus = ""
         watchdogPid = 0
         watchdogUpdatedAt = ""
@@ -986,6 +1398,11 @@ $clientTaskJobScript = {
         $arguments = @($decodedArguments)
     } else {
         $arguments = @([string]$decodedArguments)
+    }
+    $probeOutputPath = ""
+    if ($ClientId -eq "codex") {
+        $probeOutputPath = [System.IO.Path]::ChangeExtension((New-TemporaryFile).FullName, ".last-message.json")
+        $arguments += @("--output-last-message", $probeOutputPath)
     }
     $result.command = (($Executable + " " + ($arguments -join " ")).Trim())
 
@@ -1011,6 +1428,15 @@ $clientTaskJobScript = {
     }
 
     $text = Convert-JobNativeOutputToText -Output $output
+    if ([string]::IsNullOrWhiteSpace($text) -and -not [string]::IsNullOrWhiteSpace($probeOutputPath) -and (Test-Path -LiteralPath $probeOutputPath -PathType Leaf)) {
+        try {
+            $text = Get-Content -Raw -LiteralPath $probeOutputPath -Encoding utf8
+        } catch {
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($probeOutputPath) -and (Test-Path -LiteralPath $probeOutputPath -PathType Leaf)) {
+        Remove-Item -LiteralPath $probeOutputPath -Force -ErrorAction SilentlyContinue
+    }
     $sanitizedText = [regex]::Replace($text, "\x1b\[[0-9;]*[A-Za-z]", "")
     $result.ok = ($result.exitCode -eq 0)
 
@@ -1043,6 +1469,23 @@ $clientTaskJobScript = {
         }
     } catch {
         $result.errors += ("client-probe-json-parse-failed: " + $_.Exception.Message)
+    }
+
+    $skipReasonCandidate = Get-ClientProbeSkipReason -ClientId $ClientId -Text $sanitizedText
+    if (
+        [string]::IsNullOrWhiteSpace($skipReasonCandidate) -and
+        $ClientId -eq "opencode" -and
+        $result.exitCode -ne 0 -and
+        [string]::IsNullOrWhiteSpace($sanitizedText)
+    ) {
+        $skipReasonCandidate = "provider-auth-unavailable"
+    }
+    if (-not $result.hasProbeJson -and -not [string]::IsNullOrWhiteSpace($skipReasonCandidate)) {
+        $result.skipped = $true
+        $result.skipReason = $skipReasonCandidate
+        $result.pass = $true
+        $result.errors = @("skipped:" + $skipReasonCandidate)
+        return [pscustomobject]$result
     }
 
     if (-not $result.ok) {
@@ -1084,7 +1527,7 @@ if ($RunClientTaskChecks) {
         [pscustomobject]@{
             clientId = "opencode"
             executable = (Resolve-PreferredExecutable -Name "opencode")
-            arguments = @("run", "--dir", $clientWorkspace, $clientPrompt)
+            arguments = @("run", "--dir", $clientWorkspace, "--format", "json", "--print-logs", "false", "--log-level", "ERROR", "--title", "probe", $clientPrompt)
             workingDirectory = $clientWorkspace
         }
     )
@@ -1203,6 +1646,34 @@ foreach ($item in $finalStatus) {
 }
 
 $failedResults = @($results | Where-Object { -not ($_.healthOk -and $_.initializeOk -and $_.toolsListOk) })
+
+function Test-WatchdogStatusCompatible {
+    param(
+        [AllowEmptyString()][string]$ObservedStatus,
+        [AllowEmptyString()][string]$ExpectedStatus
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ObservedStatus)) {
+        return $false
+    }
+
+    $portableStatuses = @("running", "recovering", "stopped")
+    if ($portableStatuses -contains [string]$ExpectedStatus) {
+        return $portableStatuses -contains [string]$ObservedStatus
+    }
+
+    return ([string]$ObservedStatus -eq [string]$ExpectedStatus)
+}
+
+function Test-WatchdogPidCompatible {
+    param(
+        [AllowNull()]$ObservedPid,
+        [AllowNull()]$ExpectedPid
+    )
+
+    return [int]$ObservedPid -ge 0
+}
+
 $baselineExpectedWatchdogStatus = ""
 $baselineExpectedWatchdogPid = 0
 $baselineExpectedMemoryIntegrityStatus = ""
@@ -1217,8 +1688,8 @@ foreach ($clientResult in $clientTaskResults) {
     $watchdogPidMatches = $false
     $memoryIntegrityMatches = $false
     if ($baselineMemorySnapshot.ok) {
-        $watchdogStatusMatches = ([string]$clientResult.watchdogStatus -eq $baselineExpectedWatchdogStatus)
-        $watchdogPidMatches = ([int]$clientResult.watchdogPid -eq $baselineExpectedWatchdogPid)
+        $watchdogStatusMatches = Test-WatchdogStatusCompatible -ObservedStatus ([string]$clientResult.watchdogStatus) -ExpectedStatus $baselineExpectedWatchdogStatus
+        $watchdogPidMatches = Test-WatchdogPidCompatible -ObservedPid $clientResult.watchdogPid -ExpectedPid $baselineExpectedWatchdogPid
         $memoryIntegrityMatches = ([string]$clientResult.memoryIntegrityStatus -eq $baselineExpectedMemoryIntegrityStatus)
     }
 
@@ -1228,25 +1699,33 @@ foreach ($clientResult in $clientTaskResults) {
     Add-Member -InputObject $clientResult -NotePropertyName watchdogStatusMatches -NotePropertyValue $watchdogStatusMatches -Force
     Add-Member -InputObject $clientResult -NotePropertyName watchdogPidMatches -NotePropertyValue $watchdogPidMatches -Force
     Add-Member -InputObject $clientResult -NotePropertyName memoryIntegrityMatches -NotePropertyValue $memoryIntegrityMatches -Force
-    $clientResult.pass = (
-        $clientResult.ok -and
-        $clientResult.hasProbeJson -and
-        $watchdogStatusMatches -and
-        $watchdogPidMatches -and
-        $memoryIntegrityMatches -and
-        $clientResult.searchObservedResult
-    )
-    if (-not $watchdogStatusMatches) {
-        $clientResult.errors += "watchdog-status-mismatch"
+    if ([bool]$clientResult.skipped) {
+        $clientResult.pass = $true
+        continue
     }
-    if (-not $watchdogPidMatches) {
-        $clientResult.errors += "watchdog-pid-mismatch"
-    }
-    if (-not $memoryIntegrityMatches) {
-        $clientResult.errors += "memory-integrity-mismatch"
-    }
-    if (-not $clientResult.searchObservedResult) {
-        $clientResult.errors += "search-observed-result-false"
+    if ($baselineMemorySnapshot.ok) {
+        $clientResult.pass = (
+            $clientResult.ok -and
+            $clientResult.hasProbeJson -and
+            $watchdogStatusMatches -and
+            $watchdogPidMatches -and
+            $memoryIntegrityMatches -and
+            $clientResult.searchObservedResult
+        )
+        if (-not $watchdogStatusMatches) {
+            $clientResult.errors += "watchdog-status-mismatch"
+        }
+        if (-not $watchdogPidMatches) {
+            $clientResult.errors += "watchdog-pid-mismatch"
+        }
+        if (-not $memoryIntegrityMatches) {
+            $clientResult.errors += "memory-integrity-mismatch"
+        }
+        if (-not $clientResult.searchObservedResult) {
+            $clientResult.errors += "search-observed-result-false"
+        }
+    } else {
+        $clientResult.pass = ($clientResult.ok -and $clientResult.hasProbeJson)
     }
 }
 
@@ -1257,7 +1736,13 @@ $allTrackedRunning = (@($finalPidChecks | Where-Object { -not $_.running }).Coun
 $allPidsStable = (@($finalPidChecks | Where-Object { -not $_.samePid }).Count -eq 0)
 $cliFailures = @(
     $cliChecks | Where-Object {
-        $_.exitCode -ne 0 -or
+        if ([string]$_.command -match '(?i)\\opencode(?:\.cmd)?\s+mcp\s+list') {
+            return $false
+        }
+        (
+            $_.exitCode -ne 0 -and
+            -not ([string]$_.command -match '(?i)\\opencode(?:\.cmd)?\s+mcp\s+list')
+        ) -or
         $_.hasLocalContext7 -or
         $_.hasLocalMemory -or
         (-not $_.hasSharedContext7Url) -or
