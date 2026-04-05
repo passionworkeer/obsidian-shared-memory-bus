@@ -542,6 +542,7 @@ function New-TypedDurableQueueItems {
 
     $promotions = New-Object System.Collections.Generic.List[object]
     $refresh = New-Object System.Collections.Generic.List[object]
+    $collisions = New-Object System.Collections.Generic.List[object]
     $seenPromotions = @{}
     $seenRefresh = @{}
 
@@ -584,7 +585,32 @@ function New-TypedDurableQueueItems {
             if ($scopeCounts.ContainsKey($targetScope)) { $currentScopeCount = $scopeCounts[$targetScope] }
             $scopeAtMax = $currentScopeCount -ge $scopeCap
             $keySeen = $seenPromotions.ContainsKey($key)
-            $wouldSkip = $atMax -or $scopeAtMax -or $keySeen
+            if ($keySeen) {
+                $collidingRecord = $seenPromotions[$key]
+                $collidingId = if ($collidingRecord.PSObject.Properties.Name -contains "sourceRecordId") {
+                    [string]$collidingRecord.sourceRecordId
+                } else {
+                    [string]$collidingRecord.id
+                }
+                $collisions.Add([ordered]@{
+                    tool = [string]$record.tool
+                    title = [string]$record.title
+                    sourceLayer = $sourceLayer
+                    sourceScope = [string]$record.scope
+                    targetScope = $targetScope
+                    sourceKind = [string]$record.source_kind
+                    sourceType = $sourceType
+                    sourceConfidence = $sourceConfidence
+                    sourceRecordId = [string]$record.id
+                    promotionKey = $key
+                    collidingWithId = $collidingId
+                    collidingWithTitle = if ($collidingRecord.PSObject.Properties.Name -contains "title") { [string]$collidingRecord.title } else { "" }
+                    collisionType = "promotion-key-collision"
+                    note = "same promotion key as higher-confidence candidate; use sourceRecordId to disambiguate manually"
+                }) | Out-Null
+                continue
+            }
+            $wouldSkip = $atMax -or $scopeAtMax
             if ($wouldSkip) {
                 continue
             }
@@ -592,10 +618,9 @@ function New-TypedDurableQueueItems {
                 continue
             }
             if ($null -ne $DurableContentHashSet) { $DurableContentHashSet.Add($sourceContentHash.ToLowerInvariant()) | Out-Null }
-            $seenPromotions[$key] = $true
             $currentScopeCount = if ($scopeCounts.ContainsKey($targetScope)) { $scopeCounts[$targetScope] } else { 0 }
             $scopeCounts[$targetScope] = $currentScopeCount + 1
-            $promotions.Add([ordered]@{
+            $newItem = [ordered]@{
                 tool = [string]$record.tool
                 title = [string]$record.title
                 t = [string]$record.t
@@ -610,7 +635,9 @@ function New-TypedDurableQueueItems {
                 newId = $itemNewId
                 contentHash = $sourceContentHash
                 promotionReason = Get-PromotionReason -Record $record -TargetScope $targetScope -SourceLayer $sourceLayer
-            }) | Out-Null
+            }
+            $seenPromotions[$key] = $newItem
+            $promotions.Add($newItem) | Out-Null
             continue
         }
 
@@ -671,6 +698,7 @@ function New-TypedDurableQueueItems {
     return [ordered]@{
         promotions = @($promotions.ToArray())
         refresh = @($refresh.ToArray())
+        collisions = @($collisions.ToArray())
     }
 }
 
@@ -1273,6 +1301,28 @@ try {
         }
     }
 
+    $collisions = @($typedDurableQueue.collisions)
+    $collisionCount = $collisions.Count
+    if ($collisionCount -gt 0) {
+        $markdownLines.Add("") | Out-Null
+        $markdownLines.Add("## Promotion Key Collisions") | Out-Null
+        $markdownLines.Add("") | Out-Null
+        $markdownLines.Add("- $collisionCount record(s) share a promotion key with a higher-confidence candidate and were skipped.") | Out-Null
+        $markdownLines.Add("- Use `collidingWithId` in the JSON output to review which record won the key.") | Out-Null
+        foreach ($col in $collisions) {
+            $wid = [string]$col.collidingWithId
+            $cid = [string]$col.sourceRecordId
+            $ttl = [string]$col.collidingWithTitle
+            if ([string]::IsNullOrWhiteSpace($ttl)) { $ttl = $wid }
+            $ctitle = [string]$col.title
+            if ([string]::IsNullOrWhiteSpace($ctitle)) { $ctitle = $cid }
+            $tscp = [string]$col.targetScope
+            $scp = [string]$col.sourceScope
+            $bullet = "- [collision] $ctitle ($scp -> $tscp): ``$cid`` skipped -- same key as ``$ttl``"
+            $markdownLines.Add($bullet) | Out-Null
+        }
+    }
+
     $markdownLines.Add("") | Out-Null
     $markdownLines.Add("## Observations") | Out-Null
     $markdownLines.Add("") | Out-Null
@@ -1389,6 +1439,23 @@ try {
                     refreshOf = $_.refreshOf
                     title = $_.title
                     t = $_.t
+                }
+            })
+            promotionKeyCollisions = @($typedDurableQueue.collisions | ForEach-Object {
+                [ordered]@{
+                    tool = $_.tool
+                    sourceLayer = $_.sourceLayer
+                    sourceScope = $_.sourceScope
+                    targetScope = $_.targetScope
+                    sourceKind = $_.sourceKind
+                    sourceType = $_.sourceType
+                    sourceConfidence = $_.sourceConfidence
+                    sourceRecordId = $_.sourceRecordId
+                    promotionKey = $_.promotionKey
+                    collidingWithId = $_.collidingWithId
+                    collidingWithTitle = $_.collidingWithTitle
+                    collisionType = $_.collisionType
+                    title = $_.title
                 }
             })
         }
