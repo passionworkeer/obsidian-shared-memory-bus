@@ -13,6 +13,7 @@
       "displayName": "Context7",
       "mode": "shared",
       "port": 9331,
+      "probeType": "mcp-initialize",
       "stdioCommandWindows": "npx -y @upstash/context7-mcp@latest",
       "stdioCommandPosix": "npx -y @upstash/context7-mcp@latest",
       "notes": "Stateless documentation/code search MCP. Strong candidate for one shared instance."
@@ -22,6 +23,7 @@
       "displayName": "Fetch",
       "mode": "shared",
       "port": 9332,
+      "probeType": "mcp-initialize",
       "stdioCommandWindows": "{{python}} -m mcp_server_fetch",
       "stdioCommandPosix": "{{python}} -m mcp_server_fetch",
       "notes": "Stateless fetch MCP. Safe to centralize."
@@ -31,6 +33,7 @@
       "displayName": "Time",
       "mode": "shared",
       "port": 9333,
+      "probeType": "mcp-initialize",
       "stdioCommandWindows": "{{python}} -m mcp_server_time",
       "stdioCommandPosix": "{{python}} -m mcp_server_time",
       "notes": "Stateless utility MCP. Safe to centralize."
@@ -40,6 +43,7 @@
       "displayName": "Sequential Thinking",
       "mode": "shared",
       "port": 9334,
+      "probeType": "mcp-initialize",
       "stdioCommandWindows": "npx -y @modelcontextprotocol/server-sequential-thinking@latest",
       "stdioCommandPosix": "npx -y @modelcontextprotocol/server-sequential-thinking@latest",
       "notes": "Mostly stateless reasoning helper. Safe to centralize."
@@ -67,6 +71,7 @@
       "displayName": "Memory",
       "mode": "shared",
       "port": 9338,
+      "probeType": "mcp-initialize",
       "stdioCommandWindows": "{{node}} --experimental-default-type=module {{omniMemoryServer}}",
       "stdioCommandPosix": "{{node}} --experimental-default-type=module {{omniMemoryServer}}",
       "notes": "Unified shared memory interface over canonical Obsidian structured memory with bm25/dense/hybrid retrieval, embeddings rebuild, claude-mem compatibility, and OpenClaw blackboard tools."

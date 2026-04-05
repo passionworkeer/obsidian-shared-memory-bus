@@ -274,13 +274,15 @@ On Windows, the installer writes `AI_MEMORY_ROOT` into your user environment and
 On macOS, startup registration is emitted as LaunchAgents. On Linux, it prefers `systemd --user` units and falls back to XDG autostart when `systemctl --user` is unavailable.
 On macOS/Linux, the installer generates `~/.ai-memory/activate-ai-memory.sh` and `~/.ai-memory/activate-ai-memory.ps1` instead of mutating shell startup files automatically.
 It also generates root-level `.sh` wrappers for installed runtime commands, so macOS/Linux users can call `~/.ai-memory/run-pressure-test.sh`, `~/.ai-memory/verify-client-integrations.sh`, `~/.ai-memory/memory-bus.sh`, and similar entrypoints directly. Those wrappers are POSIX `sh`, not Bash-only scripts.
+`-WorkspaceRoot` is optional. When you provide it, it must point at an existing repo/workspace root where overlays such as `.cursor/mcp.json` and `.claude/rules/shared-memory.md` should be written.
+The hidden-window hardening applies to registered startup hooks and internal helper launches. Manual `install`, `start`, `status`, `verify`, and `pressure` commands still run in your foreground terminal by design.
 Before install, source-tree direct runs can fall back to `templates/config/runtime.json`; the installed runtime should use `~/.ai-memory/config/runtime.json`.
 
 ## Install / Apply / Verify Contract
 - `scripts/install.ps1` and `scripts/install.sh` are the one-click entrypoints. When you pass `-WorkspaceRoot <repo-root>`, they install the flat runtime, regenerate onboarding artifacts, and auto-apply supported client integrations.
 - `install-client-integrations.ps1` is the official side-effecting apply command for updating supported home-scoped client configs plus workspace overlays without reinstalling the runtime.
-- `verify-integrations.ps1` and `verify-integrations.sh` are compatibility aliases (now archived); use `install-client-integrations.ps1` directly.
-- `verify-client-integrations.ps1` and `verify-client-integrations.sh` are the hard validation gates.
+- `verify-integrations.ps1` and `verify-integrations.sh` are retained compatibility aliases that forward to `install-client-integrations.ps1`.
+- `verify-client-integrations.ps1` and `verify-client-integrations.sh` are the hard validation gates. They are self-healing validators, not read-only probes: they may restart unhealthy shared MCP services and they always refresh the verify report file.
 - The default applied server set is every manifest entry with `mode=shared`, plus shared `playwright`. Shared `MiniMax` is opt-in through `-IncludeOptionalServers` or `-IncludeOptionalClientServers`.
 
 ## Maintainer Guardrails
@@ -329,6 +331,13 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\run-
 ```
 
 `scripts/install.ps1` now installs the flat runtime, generates onboarding artifacts, starts the watchdog/shared MCP stack for the current session, and automatically applies supported client integrations when `-WorkspaceRoot` is provided.
+
+Validation notes:
+- `verify-client-integrations` and `run-pressure-test` are the real hard gates. Both now exit non-zero when `summary.overallPass=false`.
+- If you only want a read-only health snapshot, use `shared-mcp/status-shared-mcp.ps1 -Json` or `shared-mcp/status-shared-mcp.sh -Json` instead of `verify-client-integrations`.
+- Runtime probes now run through a hidden wrapper process so long prompts and JSON-mode CLI probes keep their argument boundaries on Windows.
+- A runtime entry marked as `skipped:provider-auth-unavailable` means the client itself is missing a usable model login or API key. That is reported separately and does not mean the shared memory MCP stack is down.
+- For automation, prefer `shared-mcp/status-shared-mcp.ps1 -Json` or `shared-mcp/status-shared-mcp.sh -Json` instead of scraping the human table output.
 
 If you want to re-apply client wiring without reinstalling the runtime, use:
 
@@ -438,12 +447,12 @@ Use the included probe and benchmark scripts before doing any full reindex.
 - [`docs/RELEASING.md`](docs/RELEASING.md)
 - [`docs/ROADMAP.md`](docs/ROADMAP.md)
 - [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)
-- [`docs/SECURITY.md`](docs/SECURITY.md)
+- [`SECURITY.md`](SECURITY.md)
 - [`docs/VALIDATION.md`](docs/VALIDATION.md)
 
 ## Community
 - [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
-- [`docs/SECURITY.md`](docs/SECURITY.md)
+- [`SECURITY.md`](SECURITY.md)
 - [`SUPPORT.md`](SUPPORT.md)
 - [`LICENSE`](LICENSE)

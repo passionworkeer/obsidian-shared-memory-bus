@@ -27,6 +27,8 @@ This document records the current validation story for the public bundle.
 - `scripts/install.ps1 -WorkspaceRoot <repo-root>` now auto-applies supported client wiring, and `verify-integrations.ps1` is retained only as a compatibility alias for that side-effecting apply step
 - runtime client probes now verify real shared-memory tool usage from Codex, Claude Code, and OpenCode by comparing returned `watchdog.pid` / `memoryIntegrity.status` against the live shared `memory_status` snapshot
 - runtime probe JSON extraction now accepts both Claude Code single-result JSON wrappers and OpenCode JSON event streams, so `verify-client-integrations.ps1 -RunRuntimeChecks` no longer depends on one exact CLI output shape
+- runtime probe launch on Windows now goes through a hidden wrapper process with explicit timeout handling, so long prompts and JSON-mode CLI calls keep their argument boundaries and cannot hang forever on one client command
+- runtime probes now classify client-side provider authentication failures such as `invalid api key` or missing model login as `skipped:provider-auth-unavailable` instead of misreporting them as shared-memory stack failures
 - `verify-client-integrations.ps1` now exits non-zero whenever `summary.overallPass` is false, so CI or operator shells can treat it as a real hard gate
 - `run-pressure-test.ps1` now exits non-zero whenever `summary.overallPass` is false, including timeout/no-output waves that previously could disappear from the totals
 - layered memory generation succeeds through `ops/build-memory-layers.js`
@@ -76,6 +78,7 @@ Validated on this workstation on April 2 and April 3, 2026:
 - a fresh April 3, 2026 watchdog recovery pass revalidated the live runtime after a real daemon crash: reinstalling from source, restarting the watchdog, and rerunning `verify-client-integrations.ps1 -RunCliChecks -RunRuntimeChecks` returned `overallPass=true` with `watchdog.status=running`, `watchdogPid=1888`, and `memoryIntegrityStatus=ok`
 - after the watchdog fix, live installed-runtime pressure tests passed again at `Waves 3` and `Waves 5` with `-RunCliChecks -RunToolCalls -RunClientTaskChecks -IncludeOptionalServers`, preserving single listeners and stable shared PIDs across `9331-9338`
 - a later April 3, 2026 runtime-probe hardening pass revalidated the live runtime after reinstall: `verify-client-integrations.ps1 -RunCliChecks -RunRuntimeChecks` returned `overallPass=true` with all Codex, Claude Code, and OpenCode probes matching the same live `watchdogPid=1888` / `memoryIntegrityStatus=ok`, and follow-up mixed pressure runs at `Waves 3` and `Waves 5` stayed green with single listeners and stable PIDs across `9331-9338`
+- live installed-runtime validation on April 5, 2026 passed again after the Windows hidden-process probe hardening: `verify-client-integrations.ps1 -RunCliChecks -RunRuntimeChecks` returned `overallPass=true`, and `run-pressure-test.ps1 -Waves 1 -RunCliChecks -RunToolCalls`, `run-pressure-test.ps1 -Waves 1 -RunClientTaskChecks`, plus the installed-runtime `run-pressure-test.ps1 -Waves 1 -RunClientTaskChecks` replay all returned `overallPass=true` with single listeners and stable shared PIDs
 - a sequential control-plane stop/start probe on April 3, 2026 confirmed `shared-mcp/state.json` remained parseable before and after cycling `time`, and no new `state.json.corrupt.*` backups were created during the test
 - `sync-openclaw-to-obsidian.js` successfully ingested OpenClaw sessions, jobs, runs, blackboard tasks, and journal records
 - direct wrapper probes can now target OpenClaw-specific recall slices without dropping the filters on the floor, for example `node .\retrieval\semantic-search.js --json --mode hybrid --route task --tool openclaw --source-kind blackboard --top-k 3 "shrimp intel"`
@@ -94,6 +97,7 @@ Portable-core CI now also smoke-runs the same wrapper chain on `windows-latest`,
 - some client `mcp list` flows can show false negatives for the shared Playwright backend
 - old already-running sessions may keep old local Playwright trees alive until those sessions close
 - optional third-party integrations can fail independently of the base local shared-memory stack
+- OpenCode runtime task probes can currently land in `skipped:provider-auth-unavailable` on this workstation when its selected model provider lacks a valid API key; that is a client-model auth issue, not a shared MCP transport issue
 
 ## Reproduce The Basic Validation
 ```powershell

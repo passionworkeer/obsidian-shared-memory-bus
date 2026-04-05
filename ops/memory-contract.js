@@ -591,6 +591,7 @@ module.exports = {
   buildGeneratedArtifactMetadata,
   buildMemoryIntegrityReport,
   buildStructuredSignature,
+  isExpectedDerivedDuplicate,
   validatePromotionMetadata,
   validateStructuredRecord,
 };

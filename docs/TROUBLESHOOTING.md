@@ -295,6 +295,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\run-
 ~/.ai-memory/run-pressure-test.sh -WorkspaceRoot <repo-root> -Waves 5 -RunCliChecks -RunToolCalls -RunClientTaskChecks
 ```
 
+`<repo-root>` must be an existing workspace root if you pass it. `verify-client-integrations` is a self-healing validator, not a read-only probe, so it may restart unhealthy shared MCP services and refresh its report file. For a read-only snapshot, use `shared-mcp/status-shared-mcp.ps1 -Json`.
+
 Good signs:
 - one listener per shared port
 - stable PIDs across waves
