@@ -14,6 +14,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
   -WorkspaceRoot E:\desktop\your-project
 ```
 
+`-WorkspaceRoot` is optional, but if you use it here it must point at an existing repo/workspace root.
+
 The installer will:
 1. Copy the runtime to `~/.ai-memory`
 2. Detect your Python runtime (prefers `uv`-managed Python)
@@ -124,6 +126,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 ```
 
 Expected: `overallPass: true` for all clients.
+
+`verify-client-integrations` is a self-healing validator. It may restart unhealthy shared MCP services and writes a report file. If you only want to inspect current state, prefer `status-shared-mcp.ps1 -Json`.
 
 **Trigger a cross-agent sync**:
 ```powershell

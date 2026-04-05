@@ -21,7 +21,11 @@ $platformHelperPath = Join-Path $sourceRoot (Join-Path "bus" "runtime-platform.p
 
 if ([string]::IsNullOrWhiteSpace($TargetRoot)) {
     $TargetRoot = Get-SharedDefaultAiMemoryRoot
+} else {
+    $TargetRoot = Resolve-SharedOptionalPathArgument -Path $TargetRoot -ParameterName "TargetRoot"
 }
+
+$WorkspaceRoot = Resolve-SharedOptionalPathArgument -Path $WorkspaceRoot -ParameterName "WorkspaceRoot" -RequireExisting
 
 function ConvertTo-BooleanOption {
     param(
@@ -78,6 +82,7 @@ function Get-ManagedInstallFiles {
     param([Parameter(Mandatory = $true)]$Layout)
 
     $managedFiles = New-Object System.Collections.Generic.List[string]
+    $cliFiles = if ($Layout.ContainsKey("CliFiles")) { @($Layout.CliFiles) } else { @() }
 
     foreach ($sourceDir in @($Layout.FlatRuntimeFiles.Keys | Sort-Object)) {
         foreach ($name in @($Layout.FlatRuntimeFiles[$sourceDir])) {
@@ -94,6 +99,10 @@ function Get-ManagedInstallFiles {
     }
 
     foreach ($name in @("activate-ai-memory.sh", "activate-ai-memory.ps1")) {
+        [void]$managedFiles.Add((Normalize-RelativeInstallPath -Path $name))
+    }
+
+    foreach ($name in @($cliFiles)) {
         [void]$managedFiles.Add((Normalize-RelativeInstallPath -Path $name))
     }
 
@@ -298,6 +307,11 @@ function Start-BackgroundRuntime {
     }
 
     $workingDirectory = Split-Path -Parent $ScriptPath
+    if (Test-SharedIsWindows) {
+        Start-SharedWindowsDetachedPowerShellFile -ScriptPath $ScriptPath -ArgumentList $ArgumentList -WorkingDirectory $workingDirectory | Out-Null
+        return
+    }
+
     Start-SharedPowerShellFile -ScriptPath $ScriptPath -ArgumentList $ArgumentList -WorkingDirectory $workingDirectory | Out-Null
 }
 
@@ -385,22 +399,9 @@ function Get-UvManagedPythonCandidates {
 function Resolve-PythonRuntime {
     param([switch]$InstallIfMissing)
 
-    $userHome = Get-SharedUserHome
-
-    $explicit = [Environment]::GetEnvironmentVariable("AI_MEMORY_PYTHON", "Process")
-    if (-not [string]::IsNullOrWhiteSpace($explicit) -and (Test-Path -LiteralPath $explicit -PathType Leaf)) {
-        return (Get-Item -LiteralPath $explicit).FullName
-    }
-
-    foreach ($name in @("python", "python3")) {
-        $command = Get-Command $name -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($command -and $command.Source -and $command.Source -notmatch "WindowsApps") {
-            return $command.Source
-        }
-    }
-
-    foreach ($candidate in @(Get-UvManagedPythonCandidates)) {
-        return (Get-Item -LiteralPath $candidate).FullName
+    $resolved = Resolve-SharedPythonRuntime
+    if (-not [string]::IsNullOrWhiteSpace($resolved)) {
+        return $resolved
     }
 
     $uvCommand = Get-Command uv.exe,uv -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -417,7 +418,7 @@ function Resolve-PythonRuntime {
                 $candidate = ""
             }
 
-            if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-SharedPythonUsable -PythonPath $candidate)) {
                 return (Get-Item -LiteralPath $candidate).FullName
             }
         }
@@ -440,39 +441,9 @@ function Resolve-PythonRuntime {
                 $candidate = ""
             }
 
-            if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-SharedPythonUsable -PythonPath $candidate)) {
                 return (Get-Item -LiteralPath $candidate).FullName
             }
-        }
-    }
-
-    $fallbackCandidates = New-Object System.Collections.Generic.List[string]
-    if (Test-SharedIsWindows) {
-        foreach ($candidate in @(
-            (Join-Path $userHome "AppData\Local\Programs\Python\Python313\python.exe"),
-            (Join-Path $userHome "AppData\Local\Programs\Python\Python312\python.exe"),
-            (Join-Path $userHome "AppData\Local\Programs\Python\Python311\python.exe"),
-            "D:\python\python.exe",
-            "C:\Python313\python.exe",
-            "C:\Python312\python.exe",
-            "C:\Python311\python.exe"
-        )) {
-            $fallbackCandidates.Add($candidate) | Out-Null
-        }
-    } else {
-        foreach ($candidate in @(
-            (Join-SharedPath @($userHome, ".local", "bin", "python3")),
-            "/usr/bin/python3",
-            "/usr/local/bin/python3",
-            "/opt/homebrew/bin/python3"
-        )) {
-            $fallbackCandidates.Add($candidate) | Out-Null
-        }
-    }
-
-    foreach ($candidate in @($fallbackCandidates)) {
-        if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
-            return (Get-Item -LiteralPath $candidate).FullName
         }
     }
 
@@ -486,41 +457,7 @@ function Test-PythonVersionAtLeast {
         [int]$Minor = 10
     )
 
-    if (-not (Test-Path -LiteralPath $PythonPath -PathType Leaf)) {
-        return $false
-    }
-
-    try {
-        $versionText = & $PythonPath -c "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')"
-        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($versionText)) {
-            return $false
-        }
-
-        $parts = $versionText.Trim().Split(".")
-        if ($parts.Length -lt 2) {
-            return $false
-        }
-
-        $majorValue = 0
-        $minorValue = 0
-        if (-not [int]::TryParse($parts[0], [ref]$majorValue)) {
-            return $false
-        }
-        if (-not [int]::TryParse($parts[1], [ref]$minorValue)) {
-            return $false
-        }
-
-        if ($majorValue -gt $Major) {
-            return $true
-        }
-        if ($majorValue -lt $Major) {
-            return $false
-        }
-
-        return $minorValue -ge $Minor
-    } catch {
-        return $false
-    }
+    return (Test-SharedPythonUsable -PythonPath $PythonPath -Major $Major -Minor $Minor)
 }
 
 function Resolve-SharedMcpPythonRuntime {
@@ -536,10 +473,9 @@ function Resolve-SharedMcpPythonRuntime {
         return (Get-Item -LiteralPath $userOverride).FullName
     }
 
-    foreach ($candidate in (@($PrimaryPythonPath) + @(Get-UvManagedPythonCandidates))) {
-        if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-PythonVersionAtLeast -PythonPath $candidate)) {
-            return (Get-Item -LiteralPath $candidate).FullName
-        }
+    $resolved = Resolve-SharedPythonRuntime -Major 3 -Minor 10 -ExtraCandidates @($PrimaryPythonPath)
+    if (-not [string]::IsNullOrWhiteSpace($resolved)) {
+        return $resolved
     }
 
     return $null
@@ -783,35 +719,42 @@ function Get-StartupEnvironmentVariables {
     )
 
     $entries = [ordered]@{}
-    $pathSeparator = [string][System.IO.Path]::PathSeparator
-    $pathEntries = New-Object System.Collections.Generic.List[string]
-    foreach ($source in @(
-        [string]$env:PATH,
-        (Join-SharedPath @((Get-SharedUserHome), ".local", "bin")),
-        "/usr/local/bin",
-        "/opt/homebrew/bin",
-        "/usr/bin",
-        "/bin"
-    )) {
-        if ([string]::IsNullOrWhiteSpace($source)) {
-            continue
-        }
-        foreach ($piece in ([string]$source).Split($pathSeparator)) {
-            $clean = [string]$piece
-            if ([string]::IsNullOrWhiteSpace($clean)) {
+    if (-not (Test-SharedIsWindows)) {
+        $pathSeparator = [string][System.IO.Path]::PathSeparator
+        $pathEntries = New-Object System.Collections.Generic.List[string]
+        foreach ($source in @(
+            [string]$env:PATH,
+            (Join-SharedPath @((Get-SharedUserHome), ".local", "bin")),
+            "/usr/local/bin",
+            "/opt/homebrew/bin",
+            "/usr/bin",
+            "/bin"
+        )) {
+            if ([string]::IsNullOrWhiteSpace($source)) {
                 continue
             }
-            if (-not $pathEntries.Contains($clean)) {
-                $pathEntries.Add($clean) | Out-Null
+            foreach ($piece in ([string]$source).Split($pathSeparator)) {
+                $clean = [string]$piece
+                if ([string]::IsNullOrWhiteSpace($clean)) {
+                    continue
+                }
+                if (-not $pathEntries.Contains($clean)) {
+                    $pathEntries.Add($clean) | Out-Null
+                }
             }
         }
+
+        $entries["PATH"] = [string]::Join($pathSeparator, @($pathEntries))
     }
 
-    $entries["PATH"] = [string]::Join($pathSeparator, @($pathEntries))
     $entries["AI_MEMORY_ROOT"] = $TargetRoot
     $pythonPath = Get-SharedEnvValue -Name "AI_MEMORY_PYTHON"
     if (-not [string]::IsNullOrWhiteSpace($pythonPath)) {
         $entries["AI_MEMORY_PYTHON"] = $pythonPath
+    }
+    $sharedMcpPythonPath = Get-SharedEnvValue -Name "AI_MEMORY_MCP_PYTHON"
+    if (-not [string]::IsNullOrWhiteSpace($sharedMcpPythonPath)) {
+        $entries["AI_MEMORY_MCP_PYTHON"] = $sharedMcpPythonPath
     }
     if (-not (Test-SharedIsWindows)) {
         $entries["AI_MEMORY_PWSH"] = $PowerShellExe
@@ -888,13 +831,141 @@ X-GNOME-Autostart-enabled=true
     [System.IO.File]::WriteAllText($desktopPath, $content.Trim() + "`n", $utf8NoBom)
 }
 
+function ConvertTo-VbsStringLiteral {
+    param([AllowEmptyString()][string]$Value)
+
+    return ([string]$Value -replace '"', '""')
+}
+
+function New-VbsEnvironmentAssignments {
+    param([Parameter(Mandatory = $true)][System.Collections.IDictionary]$Variables)
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    if ($null -eq $Variables -or $Variables.Count -eq 0) {
+        return @($lines)
+    }
+
+    $lines.Add('Set env = shell.Environment("Process")') | Out-Null
+    foreach ($key in @($Variables.Keys)) {
+        $escapedKey = ConvertTo-VbsStringLiteral -Value ([string]$key)
+        $escapedValue = ConvertTo-VbsStringLiteral -Value ([string]$Variables[$key])
+        $lines.Add(('env("{0}") = "{1}"' -f $escapedKey, $escapedValue)) | Out-Null
+    }
+
+    return @($lines)
+}
+
+function ConvertTo-WindowsCommandLine {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$Arguments = @()
+    )
+
+    $parts = New-Object System.Collections.Generic.List[string]
+    $parts.Add($FilePath) | Out-Null
+    foreach ($argument in @($Arguments)) {
+        $parts.Add([string]$argument) | Out-Null
+    }
+
+    return (Join-SharedWindowsProcessArguments -Arguments $parts.ToArray())
+}
+
+function Test-WindowsStartupScriptHostRunning {
+    param([Parameter(Mandatory = $true)][string]$ScriptPath)
+
+    if (-not (Test-SharedIsWindows)) {
+        return $false
+    }
+
+    if (-not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) {
+        return $false
+    }
+
+    $fullPath = (Get-Item -LiteralPath $ScriptPath).FullName.ToLowerInvariant()
+    $scriptName = [System.IO.Path]::GetFileName($fullPath)
+
+    $matches = @(
+        Get-CimInstance Win32_Process -Filter "Name='wscript.exe' or Name='cscript.exe'" -ErrorAction SilentlyContinue |
+            Where-Object {
+                $commandLine = [string]$_.CommandLine
+                if ([string]::IsNullOrWhiteSpace($commandLine)) {
+                    return $false
+                }
+
+                $lowered = $commandLine.ToLowerInvariant()
+                return $lowered.Contains($fullPath) -or $lowered.Contains($scriptName)
+            }
+    )
+
+    return $matches.Count -gt 0
+}
+
+function Stop-WindowsStartupScriptHosts {
+    param([Parameter(Mandatory = $true)][string]$ScriptPath)
+
+    if (-not (Test-SharedIsWindows)) {
+        return
+    }
+
+    if ([string]::IsNullOrWhiteSpace($ScriptPath)) {
+        return
+    }
+
+    $fullPath = [System.IO.Path]::GetFullPath($ScriptPath).ToLowerInvariant()
+    $scriptName = [System.IO.Path]::GetFileName($fullPath)
+
+    foreach ($process in @(
+            Get-CimInstance Win32_Process -Filter "Name='wscript.exe' or Name='cscript.exe'" -ErrorAction SilentlyContinue |
+                Where-Object {
+                    $commandLine = [string]$_.CommandLine
+                    if ([string]::IsNullOrWhiteSpace($commandLine)) {
+                        return $false
+                    }
+
+                    $lowered = $commandLine.ToLowerInvariant()
+                    return $lowered.Contains($fullPath) -or $lowered.Contains($scriptName)
+                }
+        )) {
+        try {
+            Stop-Process -Id ([int]$process.ProcessId) -Force -ErrorAction SilentlyContinue
+        } catch {
+        }
+    }
+}
+
+function Test-WindowsPowerShellScriptRunning {
+    param([Parameter(Mandatory = $true)][string]$ScriptPath)
+
+    if (-not (Test-SharedIsWindows)) {
+        return $false
+    }
+
+    if (-not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) {
+        return $false
+    }
+
+    $fullPath = (Get-Item -LiteralPath $ScriptPath).FullName.ToLowerInvariant()
+    return @(
+        Get-CimInstance Win32_Process -Filter "Name='powershell.exe' or Name='pwsh.exe'" -ErrorAction SilentlyContinue |
+            Where-Object {
+                $commandLine = [string]$_.CommandLine
+                if ([string]::IsNullOrWhiteSpace($commandLine)) {
+                    return $false
+                }
+
+                $lowered = $commandLine.ToLowerInvariant()
+                return $lowered.Contains("-file") -and $lowered.Contains($fullPath)
+            }
+    ).Count -gt 0
+}
+
 function Register-StartupHooks {
     param([Parameter(Mandatory = $true)][string]$TargetRoot)
 
     $powerShellExe = Resolve-SharedPowerShellExecutable
-    $watchdogScript = Join-Path $TargetRoot "memory-watchdog.ps1"
+    $watchdogSupervisorScript = Join-Path $TargetRoot "memory-watchdog-supervisor.ps1"
     $sharedMcpScript = Join-SharedPath @($TargetRoot, "shared-mcp", "start-default-shared-mcp.ps1")
-    $watchdogArgs = Get-SharedPowerShellFileArguments -ScriptPath $watchdogScript -ArgumentList @("-Daemon", "-PollSeconds", "15")
+    $watchdogArgs = Get-SharedPowerShellFileArguments -ScriptPath $watchdogSupervisorScript -ArgumentList @()
     $sharedMcpArgs = Get-SharedPowerShellFileArguments -ScriptPath $sharedMcpScript
     $startupEnvironment = Get-StartupEnvironmentVariables -TargetRoot $TargetRoot -PowerShellExe $powerShellExe
 
@@ -903,18 +974,59 @@ function Register-StartupHooks {
         Ensure-Directory -Path $startupDir
 
         $watchdogVbsPath = Join-Path $startupDir "AI Memory Watchdog.vbs"
-        $watchdogCommand = ('"{0}" {1}' -f $powerShellExe, [string]::Join(" ", @($watchdogArgs | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } })))
-        $watchdogVbsContent = 'Set shell = CreateObject("Wscript.Shell")' + "`n" +
-            ('command = "{0}"' -f ($watchdogCommand -replace '"', '""')) + "`n" +
-            'shell.Run command, 0, False' + "`n"
+        $legacySharedMcpVbsPath = Join-Path $startupDir "AI Shared MCP.vbs"
+        $legacyStartupDir = Join-Path $TargetRoot "startup"
+        $legacyWatchdogVbsPath = Join-Path $legacyStartupDir "AI-Memory-Watchdog.vbs"
+        $watchdogCommand = ConvertTo-WindowsCommandLine -FilePath $powerShellExe -Arguments $watchdogArgs
+        $watchdogMatch = $watchdogSupervisorScript.ToLowerInvariant()
+        $watchdogVbsLines = New-Object System.Collections.Generic.List[string]
+        $watchdogVbsLines.Add('Set shell = CreateObject("Wscript.Shell")') | Out-Null
+        foreach ($line in @(New-VbsEnvironmentAssignments -Variables $startupEnvironment)) {
+            $watchdogVbsLines.Add($line) | Out-Null
+        }
+        $watchdogVbsLines.Add('Set wmi = GetObject("winmgmts:\\.\root\cimv2")') | Out-Null
+        $watchdogVbsLines.Add(('command = "{0}"' -f (ConvertTo-VbsStringLiteral -Value $watchdogCommand))) | Out-Null
+        $watchdogVbsLines.Add(('watchdogMatch = "{0}"' -f (ConvertTo-VbsStringLiteral -Value $watchdogMatch))) | Out-Null
+        $watchdogVbsLines.Add('') | Out-Null
+        $watchdogVbsLines.Add('Do') | Out-Null
+        $watchdogVbsLines.Add('  running = False') | Out-Null
+        $watchdogVbsLines.Add('  Set procs = wmi.ExecQuery("Select CommandLine from Win32_Process where Name=''powershell.exe'' or Name=''pwsh.exe''")') | Out-Null
+        $watchdogVbsLines.Add('  For Each proc in procs') | Out-Null
+        $watchdogVbsLines.Add('    If Not IsNull(proc.CommandLine) Then') | Out-Null
+        $watchdogVbsLines.Add('      lc = LCase(proc.CommandLine)') | Out-Null
+        $watchdogVbsLines.Add('      If InStr(lc, "-file") > 0 And InStr(lc, watchdogMatch) > 0 Then') | Out-Null
+        $watchdogVbsLines.Add('        running = True') | Out-Null
+        $watchdogVbsLines.Add('        Exit For') | Out-Null
+        $watchdogVbsLines.Add('      End If') | Out-Null
+        $watchdogVbsLines.Add('    End If') | Out-Null
+        $watchdogVbsLines.Add('  Next') | Out-Null
+        $watchdogVbsLines.Add('') | Out-Null
+        $watchdogVbsLines.Add('  If Not running Then') | Out-Null
+        $watchdogVbsLines.Add('    shell.Run command, 0, False') | Out-Null
+        $watchdogVbsLines.Add('  End If') | Out-Null
+        $watchdogVbsLines.Add('') | Out-Null
+        $watchdogVbsLines.Add('  WScript.Sleep 2000') | Out-Null
+        $watchdogVbsLines.Add('Loop') | Out-Null
+        $watchdogVbsContent = [string]::Join([Environment]::NewLine, @($watchdogVbsLines)) + [Environment]::NewLine
         [System.IO.File]::WriteAllText($watchdogVbsPath, $watchdogVbsContent, $utf8NoBom)
-
-        $sharedMcpVbsPath = Join-Path $startupDir "AI Shared MCP.vbs"
-        $sharedMcpCommand = ('"{0}" {1}' -f $powerShellExe, [string]::Join(" ", @($sharedMcpArgs | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } })))
-        $sharedMcpVbsContent = 'Set shell = CreateObject("Wscript.Shell")' + "`n" +
-            ('command = "{0}"' -f ($sharedMcpCommand -replace '"', '""')) + "`n" +
-            'shell.Run command, 0, False' + "`n"
-        [System.IO.File]::WriteAllText($sharedMcpVbsPath, $sharedMcpVbsContent, $utf8NoBom)
+        Stop-WindowsStartupScriptHosts -ScriptPath $watchdogVbsPath
+        if (Test-Path -LiteralPath $legacySharedMcpVbsPath -PathType Leaf) {
+            Remove-Item -LiteralPath $legacySharedMcpVbsPath -Force
+        }
+        Stop-WindowsStartupScriptHosts -ScriptPath $legacySharedMcpVbsPath
+        if (Test-Path -LiteralPath $legacyWatchdogVbsPath -PathType Leaf) {
+            Remove-Item -LiteralPath $legacyWatchdogVbsPath -Force
+        }
+        try {
+            Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "AI-Memory-Bus-Startup" -ErrorAction SilentlyContinue
+        } catch {
+        }
+        try {
+            if (Get-ScheduledTask -TaskName "AI-Memory-Bus-Sync" -ErrorAction SilentlyContinue) {
+                Unregister-ScheduledTask -TaskName "AI-Memory-Bus-Sync" -Confirm:$false -ErrorAction SilentlyContinue
+            }
+        } catch {
+        }
         return
     }
 
@@ -1067,6 +1179,7 @@ $legacyCleanupFiles = if ($layout.ContainsKey("LegacyCleanupFiles")) {
     @()
 }
 $managedInstallFiles = Get-ManagedInstallFiles -Layout $layout
+$cliFiles = if ($layout.ContainsKey("CliFiles")) { @($layout.CliFiles) } else { @() }
 $installManifestPath = Join-Path $TargetRoot "install-manifest.json"
 Remove-StaleManagedFiles `
     -TargetRoot $TargetRoot `
@@ -1111,6 +1224,18 @@ foreach ($name in @($layout.TemplateFiles)) {
     }
 }
 
+foreach ($name in @($cliFiles)) {
+    $srcPath = Join-Path $sourceRoot $name
+    if (-not (Test-Path -LiteralPath $srcPath -PathType Leaf)) {
+        throw "Install layout manifest references missing CLI file: $srcPath"
+    }
+
+    $destinationPath = Join-Path $TargetRoot $name
+    Ensure-Directory -Path (Split-Path -Parent $destinationPath)
+    Copy-Item -LiteralPath $srcPath -Destination $destinationPath -Force
+    Set-PosixExecutableIfNeeded -Path $destinationPath
+}
+
 # ADR-002 Phase 0.2: Initialize .memory/ directory structure
 function Initialize-MemoryDirectory {
     param(
@@ -1126,7 +1251,7 @@ function Initialize-MemoryDirectory {
         }
     }
     # Copy .memory/ templates from templates/.memory/
-    $templateSrc = Join-Path $sourceRoot "templates" ".memory"
+    $templateSrc = Join-Path (Join-Path $sourceRoot "templates") ".memory"
     if (Test-Path -LiteralPath $templateSrc -PathType Container) {
         foreach ($tmpl in @("MEMORY.md", "README.md", "TEMPLATE.md")) {
             $src = Join-Path $templateSrc $tmpl
@@ -1156,7 +1281,7 @@ function Initialize-MemoryDirectory {
 Initialize-MemoryDirectory -TargetRoot $TargetRoot
 
 # ADR-002 Phase 0.3: Initialize SQLite schema (sqlite-vec 0.1.9)
-$initSchemaScript = Join-Path $TargetRoot "ops" "init-sqlite-schema.js"
+$initSchemaScript = Join-Path (Join-Path $TargetRoot "ops") "init-sqlite-schema.js"
 if (Test-Path -LiteralPath $initSchemaScript -PathType Leaf) {
     Write-Host "[init] Running SQLite schema init..."
     $schemaResult = & node $initSchemaScript 2>&1
@@ -1166,7 +1291,7 @@ if (Test-Path -LiteralPath $initSchemaScript -PathType Leaf) {
         Write-Warning "[init] SQLite schema init had issues (exit $LASTEXITCODE): $schemaResult"
     }
 } else {
-    Write-Warning "[init] ops/init-sqlite-schema.js not found — SQLite schema not initialized"
+    Write-Host "[init] SQLite schema bootstrap script not bundled; skipping explicit SQLite init"
 }
 
 $generatedShellWrappers = Get-GeneratedShellWrapperFiles -Layout $layout
@@ -1245,10 +1370,26 @@ if ($PersistUserEnvironment) {
     }
 }
 
-$shouldStartServicesNow = $RegisterStartup -and (-not $env:CI) -and (-not $env:GITHUB_ACTIONS)
+$shouldStartServicesNow = (-not $env:CI) -and (-not $env:GITHUB_ACTIONS)
 if ($shouldStartServicesNow) {
-    Start-BackgroundRuntime -ScriptPath (Join-Path $TargetRoot "memory-watchdog.ps1") -ArgumentList @("-Daemon", "-PollSeconds", "15")
-    Start-BackgroundRuntime -ScriptPath (Join-SharedPath @($TargetRoot, "shared-mcp", "start-default-shared-mcp.ps1"))
+    if (Test-SharedIsWindows) {
+        $startupDir = Join-SharedPath @((Get-SharedConfigHome), "Microsoft", "Windows", "Start Menu", "Programs", "Startup")
+        $watchdogVbsPath = Join-Path $startupDir "AI Memory Watchdog.vbs"
+        $watchdogSupervisorScript = Join-Path $TargetRoot "memory-watchdog-supervisor.ps1"
+        if (-not (Test-WindowsPowerShellScriptRunning -ScriptPath $watchdogSupervisorScript)) {
+            Start-SharedBackgroundProcess `
+                -FilePath (Resolve-SharedPowerShellExecutable) `
+                -ArgumentList (Get-SharedPowerShellFileArguments -ScriptPath $watchdogSupervisorScript) `
+                -WorkingDirectory $TargetRoot | Out-Null
+        }
+        if (Test-Path -LiteralPath $watchdogVbsPath -PathType Leaf) {
+            Stop-WindowsStartupScriptHosts -ScriptPath $watchdogVbsPath
+            Start-Process -FilePath "wscript.exe" -ArgumentList @($watchdogVbsPath) -WindowStyle Hidden | Out-Null
+        }
+    } else {
+        Start-BackgroundRuntime -ScriptPath (Join-Path $TargetRoot "memory-watchdog.ps1") -ArgumentList @("-Daemon", "-PollSeconds", "15")
+        Start-BackgroundRuntime -ScriptPath (Join-SharedPath @($TargetRoot, "shared-mcp", "start-default-shared-mcp.ps1")) -ArgumentList @("-ForceRestart")
+    }
 }
 
 Write-Output ("Installed shared-memory bus to {0}" -f $TargetRoot)

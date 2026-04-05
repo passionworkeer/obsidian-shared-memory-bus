@@ -1,5 +1,6 @@
 param(
-    [string[]]$Only
+    [string[]]$Only,
+    [switch]$Json
 )
 
 Set-StrictMode -Version 3.0
@@ -281,10 +282,8 @@ foreach ($server in @($manifest.servers)) {
     $statusLabel = if ($port -eq 0 -or $procId -eq 0) {
         "not-running"
     } else {
-        $s = if ($recordedStatus -eq "dead") {
-            "dead"
-        } elseif (-not $alive) {
-            "pid-dead"
+        $s = if (-not $alive) {
+            if ($recordedStatus -eq "dead") { "dead" } else { "pid-dead" }
         } elseif ($healthy) {
             "healthy"
         } else {
@@ -309,13 +308,45 @@ foreach ($server in @($manifest.servers)) {
 
     $rows.Add([pscustomobject]@{
         Server = $id
+        Mode   = [string]$server.mode
         Port   = if ($port -gt 0) { [string]$port } else { "-" }
         PID    = if ($procId -gt 0) { [string]$procId } else { "-" }
         Status = $statusLabel
         Uptime = if ($statusLabel -eq "healthy") { $uptime } else { "-" }
+        Running = [bool]($statusLabel -ne "not-running" -and $statusLabel -ne "pid-dead" -and $statusLabel -ne "dead")
+        Healthy = [bool]$healthy
+        Url = $url
+        HealthUrl = $healthUrl
+        StartedAt = $startedAt
+        Notes = if ($record -and $record.ContainsKey("notes")) { [string]$record["notes"] } else { [string]$server.notes }
         _color = $statusColor
         _recStatus = $recordedStatus
     }) | Out-Null
+}
+
+if ($Json) {
+    @($rows | ForEach-Object {
+            [pscustomobject]@{
+                id = $_.Server
+                mode = $_.Mode
+                port = if ($_.Port -ne "-") { [int]$_.Port } else { $null }
+                pid = if ($_.PID -ne "-") { [int]$_.PID } else { $null }
+                status = $_.Status
+                running = [bool]$_.Running
+                healthy = [bool]$_.Healthy
+                uptime = if ($_.Uptime -ne "-") { $_.Uptime } else { "" }
+                url = $_.Url
+                healthUrl = $_.HealthUrl
+                startedAt = $_.StartedAt
+                notes = $_.Notes
+            }
+        }) | ConvertTo-Json -Depth 6
+
+    if ($allHealthy) {
+        exit 0
+    } else {
+        exit 1
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -341,12 +372,12 @@ if ($rows.Count -eq 0) {
     foreach ($row in $rows) {
         $server   = $row.Server.PadRight($colServer)
         $port     = $row.Port.PadLeft($colPort)
-        $pid      = $row.PID.PadLeft($colPort)
+        $pidText  = $row.PID.PadLeft($colPid)
         $status   = $row.Status.PadRight($colStatus)
         $uptime   = $row.Uptime.PadRight($colUptime)
         $color    = $row._color
 
-        Write-Output "${color}| ${server} | ${port} | ${pid} | ${status} | ${uptime} |${CLR_RESET}"
+        Write-Output "${color}| ${server} | ${port} | ${pidText} | ${status} | ${uptime} |${CLR_RESET}"
     }
 }
 
