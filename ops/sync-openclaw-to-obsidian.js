@@ -87,6 +87,10 @@ function sha1(value) {
   return crypto.createHash("sha1").update(String(value || ""), "utf8").digest("hex");
 }
 
+function sha256(value) {
+  return crypto.createHash("sha256").update(String(value || ""), "utf8").digest("hex");
+}
+
 function isNoise(text) {
   const normalized = normalizeSpaces(text);
   if (!normalized || normalized.length < 8) {
@@ -142,6 +146,8 @@ function buildRecord({
   facts = [],
   metadata = {},
 }) {
+  const normalizedTitle = normalizeSpaces(title || content).slice(0, 140);
+  const normalizedContent = String(content || "").trim().slice(0, 6000);
   return {
     schemaVersion: MEMORY_RECORD_SCHEMA_VERSION,
     id,
@@ -150,8 +156,8 @@ function buildRecord({
     session,
     type,
     project,
-    title: normalizeSpaces(title || content).slice(0, 140),
-    content: String(content || "").trim().slice(0, 6000),
+    title: normalizedTitle,
+    content: normalizedContent,
     facts,
     concepts,
     files_read: [],
@@ -165,6 +171,7 @@ function buildRecord({
     task_state,
     freshness: "hot",
     confidence,
+    content_hash: sha256(normalizedContent),
     metadata,
   };
 }

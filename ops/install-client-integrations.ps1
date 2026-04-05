@@ -34,6 +34,10 @@ if ([string]::IsNullOrWhiteSpace($AiMemoryRoot)) {
     $AiMemoryRoot = if (-not [string]::IsNullOrWhiteSpace($env:AI_MEMORY_ROOT)) { $env:AI_MEMORY_ROOT } else { Get-SharedDefaultAiMemoryRoot }
 }
 
+$AiMemoryRoot = Resolve-SharedOptionalPathArgument -Path $AiMemoryRoot -ParameterName "AiMemoryRoot"
+$WorkspaceRoot = Resolve-SharedOptionalPathArgument -Path $WorkspaceRoot -ParameterName "WorkspaceRoot" -RequireExisting
+$Clients = @(ConvertTo-SharedStringArray -Value $Clients)
+
 function Ensure-Directory {
     param([Parameter(Mandatory = $true)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path)) {
@@ -403,6 +407,17 @@ function Normalize-ClientName {
     }
 }
 
+$supportedClients = @("claude", "codex", "cursor", "vscode", "copilot", "opencode", "trae", "openclaw")
+$unknownClients = @(
+    $Clients |
+        ForEach-Object { Normalize-ClientName -Name $_ } |
+        Where-Object { $supportedClients -notcontains $_ } |
+        Sort-Object -Unique
+)
+if ($unknownClients.Count -gt 0) {
+    throw ("Unsupported client name(s): {0}. Supported values: {1}" -f ([string]::Join(", ", $unknownClients)), ([string]::Join(", ", $supportedClients)))
+}
+
 function Test-ClientSelected {
     param([Parameter(Mandatory = $true)][string]$Name)
 
@@ -687,8 +702,6 @@ if (Test-ClientSelected -Name "openclaw") {
 }
 
 if ((-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) -and (-not $SkipWorkspaceOverlays)) {
-    Ensure-Directory -Path $WorkspaceRoot
-
     if (Test-ClientSelected -Name "cursor") {
         $workspaceCursorRule = Join-SharedPath @($WorkspaceRoot, ".cursor", "rules", "shared-memory.mdc")
         $workspaceCursorRuleText = @"
