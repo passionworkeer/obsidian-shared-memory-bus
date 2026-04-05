@@ -1,11 +1,11 @@
 # sync-claudemem-to-obsidian.ps1
 # Sync claude-mem observations into Obsidian structured memory.
-Set-StrictMode -Version 3.0
-$ErrorActionPreference = "Stop"
-
 param(
     [int]$MaxRecordsPerRun = 500
 )
+
+Set-StrictMode -Version 3.0
+$ErrorActionPreference = "Stop"
 
 $helperPath = @(
     (Join-Path $PSScriptRoot "runtime-platform.ps1"),
@@ -33,6 +33,19 @@ function Normalize-Space {
     }
 
     return (($Text -replace "\s+", " ").Trim())
+}
+
+function Get-ContentHash {
+    param([AllowEmptyString()][string]$Text)
+
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$Text)
+        $hashBytes = $sha256.ComputeHash($bytes)
+        return ([System.BitConverter]::ToString($hashBytes)).Replace("-", "").ToLowerInvariant()
+    } finally {
+        $sha256.Dispose()
+    }
 }
 
 function Convert-ToArrayValue {
@@ -159,6 +172,7 @@ function Convert-ToClaudeStructuredRecord {
         task_state = ""
         freshness = "hot"
         confidence = 0.72
+        content_hash = Get-ContentHash -Text $content
         metadata = [ordered]@{
             subtitle = Normalize-Space ([string](Get-OptionalProperty -Item $Item -Name "subtitle"))
             narrative = $narrative
@@ -298,9 +312,8 @@ $allLines = if ($jsonLines.Count -gt 0) { $jsonLines -join "`n" } else { "" }
 
 $tempFile = $StructuredFile + ".tmp.$([System.Diagnostics.Process]::GetCurrentProcess().Id)"
 try {
-    Set-Content -Path $tempFile -Value $allLines -Encoding UTF8
-    [System.IO.File]::Flush($tempFile)
-    [System.IO.File]::Move($tempFile, $StructuredFile, $true)
+    [System.IO.File]::WriteAllText($tempFile, $allLines, $Utf8NoBom)
+    Move-Item -LiteralPath $tempFile -Destination $StructuredFile -Force
 } catch {
     if (Test-Path -LiteralPath $tempFile) {
         Remove-Item -LiteralPath $tempFile -Force -ErrorAction SilentlyContinue

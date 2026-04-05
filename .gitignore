@@ -34,3 +34,9 @@ reports/
 .tmp-old-start-smoke.json
 .tmp-visible-console-node-old.json
 .tmp-visible-console-old.json
+
+# Local IDE/agent workspace overlays (machine-specific, not portable)
+.claude/
+.cursor/
+.vscode/
+cursor/

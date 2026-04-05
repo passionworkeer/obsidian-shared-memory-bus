@@ -11,6 +11,16 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shar
 ~/.ai-memory/shared-mcp/status-shared-mcp.sh
 ```
 
+For automation, dashboards, or scripts, prefer the JSON form:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\status-shared-mcp.ps1 -Json
+```
+
+```bash
+~/.ai-memory/shared-mcp/status-shared-mcp.sh -Json
+```
+
 ## Start The Default Shared Stack
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\start-default-shared-mcp.ps1
@@ -28,6 +38,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shar
 ```bash
 ~/.ai-memory/shared-mcp/start-default-shared-mcp.sh -ForceRestart
 ```
+
+Use `-ForceRestart` deliberately. Normal validation should first inspect health and only force a full restart when the shared stack is actually degraded.
 
 ## Restart One Shared Service
 Example: restart only Playwright.
@@ -84,6 +96,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\veri
 
 Treat this as a hard gate. The script now exits non-zero when `summary.overallPass=false`.
 
+Interpretation notes:
+- `runtimeChecksPass=true` means the clients that could run a real task probe returned the expected live shared-memory state.
+- `skipped:provider-auth-unavailable` means a client's selected model provider is not authenticated. That is a client-provider issue, not proof that the shared MCP stack is unhealthy.
+
 ## Run Pressure Tests
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks -RunToolCalls -RunClientTaskChecks -IncludeOptionalServers
@@ -94,6 +110,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\run-
 ```
 
 Treat this as a hard gate too. The script now exits non-zero when `summary.overallPass=false`.
+
+The pressure runner now uses the same hidden wrapper execution path as the validation script on Windows, so long prompts and JSON-mode task probes stay stable under `Start-Process`.
 
 ## Logs And Runtime State
 Look here first:
@@ -150,4 +168,3 @@ python $AI_MEMORY_ROOT/ops/redaction.py --input <file> --output <redacted-file>
 Specialized or migration scripts no longer needed in the active pipeline live in `ops/archived/`:
 - `repair-codex-runtime.ps1` — Codex crash recovery (no longer maintained)
 - `migrate-memory-v2.js` — ADR-001 → ADR-002 schema migration (completed)
-

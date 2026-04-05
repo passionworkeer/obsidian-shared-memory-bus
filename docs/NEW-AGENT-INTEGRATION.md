@@ -144,10 +144,12 @@ If the agent supports skills or prompt libraries:
 - does it write back to the correct durable path?
 - does enabling browser automation avoid spawning a new local Playwright server per task?
 - does the generated or tracked overlay avoid writing workstation-specific absolute paths back into the repo?
+- if runtime validation is enabled, does a failed client task mean the shared MCP stack is really down, or is it only a provider-auth skip such as missing API key / missing login?
 
 ## Documentation To Update
 When a new agent becomes supported, update:
 - `README.md`
+- `docs/INSTALL.md`
+- `docs/ARCHITECTURE.md`
 - `docs/VALIDATION.md`
-- `docs/FILES.md`
 - any agent-specific onboarding or config snippets
