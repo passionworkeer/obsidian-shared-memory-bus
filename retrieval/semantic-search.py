@@ -34,6 +34,12 @@ except ModuleNotFoundError:
     from redaction import REDACTION_CONFIG, redact_sensitive
 from runtime_support import first_non_empty_env, normalize_bool, normalize_int, resolve_embedding_runtime, resolve_vault_root
 
+try:
+    from schema_validation import validate_record
+    _SCHEMA_VALIDATION_AVAILABLE = True
+except ImportError:
+    _SCHEMA_VALIDATION_AVAILABLE = False
+
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 if hasattr(sys.stderr, "reconfigure"):
@@ -984,6 +990,11 @@ def _load_entries_uncached() -> List[dict]:
                         payload = json.loads(line)
                     except Exception:
                         continue
+                    # Schema validation: skip records that fail contract validation
+                    if _SCHEMA_VALIDATION_AVAILABLE:
+                        valid, errors = validate_record(payload)
+                        if not valid:
+                            continue
                     for entry in build_entry(payload):
                         if entry["id"] not in seen_ids:
                             seen_ids.add(entry["id"])
@@ -1727,6 +1738,10 @@ def run_server() -> None:
                         "workerMode": "persistent-jsonl",
                         "embeddingRuntime": build_embedding_runtime_summary(),
                         "cacheState": build_cache_state(search_result_cache_hit=False, query_embedding_cache_hit=False),
+                        "schemaValidation": {
+                            "available": _SCHEMA_VALIDATION_AVAILABLE,
+                            "schemaVersion": 2,
+                        },
                     }
                 )
                 continue
@@ -1826,6 +1841,10 @@ def run_server() -> None:
                                     raw_entry = json.loads(line_text)
                                 except Exception:
                                     continue
+                                if _SCHEMA_VALIDATION_AVAILABLE:
+                                    valid, _ = validate_record(raw_entry)
+                                    if not valid:
+                                        continue
                                 eid = normalize_spaces(str(raw_entry.get("id", "")))
                                 if eid and eid not in raw_lookup:
                                     raw_lookup[eid] = raw_entry
