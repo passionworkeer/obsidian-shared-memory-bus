@@ -445,7 +445,6 @@ Use the included probe and benchmark scripts before doing any full reindex.
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md)
 - [`docs/releases/RELEASE-NOTES-2026-04-03.md`](docs/releases/RELEASE-NOTES-2026-04-03.md)
 - [`docs/RELEASING.md`](docs/RELEASING.md)
-- [`docs/ROADMAP.md`](docs/ROADMAP.md)
 - [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)
 - [`SECURITY.md`](SECURITY.md)
 - [`docs/VALIDATION.md`](docs/VALIDATION.md)

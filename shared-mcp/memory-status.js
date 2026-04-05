@@ -1,0 +1,276 @@
+/**
+ * memory-status.js
+ *
+ * Handles all status / overview tools:
+ *   memory_status
+ *   get_memory_overview
+ *
+ * Exposes a factory: createMemoryStatus(params) => { tools, handlers }
+ */
+
+import fs from "node:fs";
+import path from "node:path";
+
+function jsonResult(payload) {
+  return {
+    content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+  };
+}
+
+function readOptionalJson(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch (error) {
+    return { ok: false, error: String(error), path: filePath };
+  }
+}
+
+/**
+ * @param {Object} params
+ * @param {string}  params.VAULT_ROOT
+ * @param {string}  params.CANONICAL_AI_MEMORY_ROOT
+ * @param {string}  params.STRUCTURED_ROOT
+ * @param {string}  params.GENERATED_ROOT
+ * @param {string}  params.EMBEDDINGS_INDEX_PATH
+ * @param {string}  params.HANDOFF_PACK_JSON_PATH
+ * @param {string}  params.MEMORY_LAYERS_JSON_PATH
+ * @param {string}  params.AUTO_DREAM_JSON_PATH
+ * @param {string}  params.CLAUDE_MEM_BASE
+ * @param {string}  params.WATCHDOG_STATE_PATH
+ * @param {string}  params.HASH_MODEL
+ * @param {Object}  params.PYTHON               - Python runtime descriptor
+ * @param {Object}  params.METRICS              - Shared metrics object
+ * @param {Object}  params.EMBEDDING_RUNTIME_DEFAULTS
+ * @param {Function} params.getSearchWorkerSnapshot
+ * @param {Function} params.getSearchWorkerHealth
+ * @param {Function} params.readEmbeddingRuntimeSummary
+ * @param {Function} params.readEmbeddingsSummary
+ * @param {Function} params.buildEmbeddingIndexState
+ * @param {Function} params.readMemoryIntegritySummary
+ * @param {Function} params.readMemoryHygieneReport
+ * @param {Function} params.readWatchdogState
+ * @param {Function} params.getClaudeMemHealth
+ */
+export function createMemoryStatus(params) {
+
+  function detectCurrentProject(workspaceRoot) {
+    const gitConfig = path.join(workspaceRoot, ".git", "config");
+    if (fs.existsSync(gitConfig)) {
+      try {
+        const content = fs.readFileSync(gitConfig, "utf8");
+        const remoteMatch = content.match(/url\s*=\s*.*[\/:]([^\/]+\/[^\/]+?)(?:\.git)?$/m);
+        if (remoteMatch) {
+          return remoteMatch[1];
+        }
+      } catch {
+        // Fall through to directory-name detection.
+      }
+    }
+    return path.basename(workspaceRoot);
+  }
+
+  async function loadTaskRecords(workspaceRoot) {
+    const structuredDir = path.join(workspaceRoot, "00-System", "ai-memory", "structured");
+    const taskFile = path.join(structuredDir, "task-memory.jsonl");
+    if (!fs.existsSync(taskFile)) {
+      return [];
+    }
+    const lines = fs.readFileSync(taskFile, "utf8").split(/\r?\n/).filter((l) => l.trim());
+    const records = [];
+    for (const line of lines) {
+      try {
+        records.push(JSON.parse(line));
+      } catch {
+        // Skip malformed lines.
+      }
+    }
+    return records;
+  }
+
+  async function handleMemoryStatus() {
+    const {
+      PYTHON,
+      METRICS,
+      VAULT_ROOT,
+      GENERATED_ROOT,
+      CANONICAL_AI_MEMORY_ROOT,
+      HANDOFF_PACK_JSON_PATH,
+      MEMORY_LAYERS_JSON_PATH,
+      AUTO_DREAM_JSON_PATH,
+      STRUCTURED_ROOT,
+      getSearchWorkerSnapshot,
+      getSearchWorkerHealth,
+      readEmbeddingRuntimeSummary,
+      readEmbeddingsSummary,
+      buildEmbeddingIndexState,
+      readMemoryIntegritySummary,
+      readMemoryHygieneReport,
+      readWatchdogState,
+      getClaudeMemHealth,
+    } = params;
+
+    const embeddingRuntime = readEmbeddingRuntimeSummary();
+    const embeddings = readEmbeddingsSummary();
+    const embeddingIndexState = buildEmbeddingIndexState(embeddingRuntime, embeddings);
+    const memoryIntegrity = readMemoryIntegritySummary();
+    const workerHealth = await getSearchWorkerHealth();
+    const hygiene = readMemoryHygieneReport();
+
+    return jsonResult({
+      ok: true,
+      generatedAt: new Date().toISOString(),
+      pythonRuntime: {
+        command: PYTHON.command,
+        argsPrefix: PYTHON.argsPrefix,
+        source: PYTHON.source,
+        available: PYTHON.available,
+        version: PYTHON.version,
+        error: PYTHON.error,
+      },
+      searchWorker: {
+        ...getSearchWorkerSnapshot(),
+        health: workerHealth,
+      },
+      searchWorkerCircuitBreaker: getSearchWorkerSnapshot().circuitBreaker,
+      watchdog: readWatchdogState(),
+      memoryIntegrity,
+      embeddingRuntime,
+      embeddingIndexState,
+      embeddings,
+      handoffPack: readOptionalJson(HANDOFF_PACK_JSON_PATH),
+      memoryLayers: readOptionalJson(MEMORY_LAYERS_JSON_PATH),
+      autoDream: readOptionalJson(AUTO_DREAM_JSON_PATH),
+      hygiene,
+      claudeMem: await getClaudeMemHealth(),
+      metrics: {
+        searches_total: METRICS.searches_total,
+        search_latency_buffer: {
+          count: METRICS.search_latency_seconds.length,
+          avg_seconds: METRICS.search_latency_seconds.length > 0
+            ? METRICS.search_latency_seconds.reduce((a, b) => a + b, 0) / METRICS.search_latency_seconds.length
+            : null,
+        },
+        embeddings_index: {
+          age_seconds: METRICS.embeddings_index_age_seconds,
+          size: METRICS.embeddings_index_size,
+        },
+        structured_files_total: METRICS.structured_files_total,
+        promotion_queue_size: METRICS.promotion_queue_size,
+        search_worker: {
+          restarts_total: METRICS.search_worker_restarts_total,
+          backpressure_rejected: METRICS.search_worker_backpressure_rejected,
+        },
+        mcp_requests_total: METRICS.mcp_requests_total,
+      },
+    });
+  }
+
+  async function handleGetMemoryOverview(args) {
+    const { VAULT_ROOT, GENERATED_ROOT } = params;
+    const workspaceRoot = args.workspace_root || VAULT_ROOT;
+    const generatedDir = path.join(workspaceRoot, "00-System", "ai-memory", "generated");
+
+    const meta = readOptionalJson(path.join(generatedDir, "GLOBAL-CONTEXT.meta.json"));
+    const dream = readOptionalJson(path.join(generatedDir, "AUTO-DREAM.json"));
+    const hygiene = readOptionalJson(path.join(generatedDir, "memory_hygiene_report.json"));
+    const handoff = readOptionalJson(path.join(generatedDir, "HANDOFF.json"));
+
+    const taskRecords = await loadTaskRecords(workspaceRoot);
+    const openTasks = taskRecords.filter(
+      (r) => r.task_state && !["completed", "aborted", "failed"].includes(r.task_state)
+    );
+
+    // Build segment summaries from meta if present.
+    const segmentSummaries = {};
+    if (meta && meta.segments) {
+      for (const seg of meta.segments) {
+        if (seg && seg.name) {
+          segmentSummaries[seg.name] = {
+            totalCount: seg.totalCount || 0,
+            displayedCount: Array.isArray(seg.displayedRecords) ? seg.displayedRecords.length : 0,
+            truncated: Boolean(seg.truncated),
+            truncatedCount: seg.truncatedCount || 0,
+          };
+        }
+      }
+    }
+
+    return jsonResult({
+      ok: true,
+      workspace: {
+        root: workspaceRoot,
+        detected_project: detectCurrentProject(workspaceRoot),
+      },
+      memory_summary: {
+        total_records: meta?.totalRecords || 0,
+        estimated_tokens: meta?.estimatedTotalTokens || 0,
+        segments: segmentSummaries,
+      },
+      recent_activity: {
+        last_dream_run: dream?.generatedAt || null,
+        dream_promotions: Array.isArray(dream?.promotionQueue) ? dream.promotionQueue.length : 0,
+        dream_refreshes: Array.isArray(dream?.refreshQueue) ? dream.refreshQueue.length : 0,
+      },
+      active_tasks: {
+        count: openTasks.length,
+        samples: openTasks.slice(0, 5).map((t) => ({
+          id: t.id || null,
+          title: t.title || null,
+          state: t.task_state || null,
+          tool: t.tool || null,
+        })),
+      },
+      handoff: {
+        goal: handoff?.goal || null,
+        done: Array.isArray(handoff?.done) ? handoff.done.slice(0, 3) : [],
+        next: Array.isArray(handoff?.next) ? handoff.next.slice(0, 3) : [],
+        blocked: Array.isArray(handoff?.blocked) ? handoff.blocked.slice(0, 3) : [],
+      },
+      health: hygiene?.health || { score: null, grade: "unknown" },
+      recommendations: Array.isArray(hygiene?.recommendations)
+        ? hygiene.recommendations.slice(0, 3)
+        : [],
+    });
+  }
+
+  return {
+    tools: [
+      {
+        name: "memory_status",
+        description:
+          "Inspect the shared memory stack health: watchdog state, contract/integrity status, embeddings index summary, and claude-mem health.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
+      {
+        name: "get_memory_overview",
+        description:
+          "Get a project-level memory overview for the current workspace. Returns project context, active tasks, recent memory activity, and memory system health. Use this at the start of a session to understand what the shared memory system already knows.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            workspace_root: {
+              type: "string",
+              description:
+                "Optional workspace path. If omitted, uses AI_MEMORY_OBSIDIAN_VAULT or the canonical vault root.",
+            },
+            include_stats: {
+              type: "boolean",
+              default: true,
+              description: "Include memory statistics (record counts, freshness distribution).",
+            },
+          },
+        },
+      },
+    ],
+    handlers: {
+      memory_status: handleMemoryStatus,
+      get_memory_overview: handleGetMemoryOverview,
+    },
+  };
+}
