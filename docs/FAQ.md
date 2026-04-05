@@ -83,8 +83,19 @@ The system protects durable consolidation with a Phase 3 lock (`.lock/consolidat
 For cross-agent blackboard events, last-write-wins still applies: `ops/obsidian-blackboard-daemon.js` fires a Chokidar event per save, and under high concurrency some writes may be overwritten by later saves. This is a known limitation. Conflict-safe event log or lease semantics is tracked in the Roadmap.
 
 ### How do I customize the MCP ports (9331-9338)?
-Currently ports are not configurable via env var. Edit `shared-mcp/manifest.json` directly to change each server's `port` field. Note: changing ports requires updating all client MCP configs.
+Set the `AI_MEMORY_BASE_PORT` environment variable to override the base port (default 9330). Individual server ports are calculated as basePort + offset (context7=1, fetch=2, time=3, sequential-thinking=4, obsidian=5, MiniMax=6, playwright=7, memory=8). Note: changing ports requires updating all client MCP configs.
+
+### How do I configure the metrics server?
+The metrics server (port 9090) supports two environment variables:
+- `AI_MEMORY_METRICS_PORT`: Override the default port (9090)
+- `AI_MEMORY_METRICS_TOKEN`: Set a bearer token for authentication. If set, requests to `/metrics` require `Authorization: Bearer <token>` header.
 
 ### My vault is on a different drive or path. How do I configure it?
 Set the `AI_MEMORY_OBSIDIAN_VAULT` environment variable to your vault root path. The system also auto-detects from Obsidian's app config on Windows, macOS, and Linux.
+
+### How do I disable the background watchdog (auto-sync)?
+Set `AI_MEMORY_WATCHDOG_ENABLED=0` before starting the watchdog. When disabled, the watchdog exits immediately with exit code 0 and no background sync occurs. You can still trigger sync manually via `memory-bus.ps1 -Action SyncAll`. This is useful if you want to control sync timing explicitly or run sync only on-demand.
+
+### How do I see all environment variables used by the system?
+See `docs/ENVIRONMENT.md` for the complete reference.
 

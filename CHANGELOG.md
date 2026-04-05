@@ -29,6 +29,27 @@ All notable changes to this project should be documented here.
 - Shared external MCP launch specs now prefer current registry-resolvable package targets instead of brittle pinned versions that can disappear upstream
 - Fixed `run-obsidian-mcp.ps1` to resolve its bundle-local `mcpvault` path via `$PSScriptRoot`, which avoids strict-mode failures when launched behind the shared proxy
 
+## 2026-04-06
+
+### Security
+- Removed hardcoded proxy defaults
+- Genericized mutex names (removed personal username)
+- Fixed shell injection risk in stdio proxy
+- Added bearer token auth to metrics endpoint
+
+### Feature
+- Made MCP ports configurable via AI_MEMORY_BASE_PORT
+- Added structured error codes documentation
+- Added migration guide
+- Added retry logic for remote embeddings
+- Improved /health endpoint with memory/process info
+- Added linting CI
+
+### Fix
+- Replaced --break-system-packages with --user
+- Improved CLI error handling with --dry-run
+- Added __pycache__ to .gitignore
+
 ## 2026-04-01
 
 ### Added
