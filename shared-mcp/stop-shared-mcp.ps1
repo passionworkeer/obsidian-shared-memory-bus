@@ -20,7 +20,7 @@ if (-not $helperPath) {
 
 $manifestPath = Join-Path $root "manifest.json"
 $statePath = Join-Path $root "state.json"
-$stateMutexName = Get-SharedMutexName -BaseName "WangSharedMcpStateV1"
+$stateMutexName = Get-SharedMutexName -BaseName "AiMcpStateV1"
 
 function Ensure-Directory {
     param([Parameter(Mandatory = $true)][string]$Path)

@@ -1,22 +1,49 @@
 # Obsidian Shared AI Memory Bus
 
-Portable PowerShell-based bundle for building a local-first, Obsidian-backed shared memory layer across multiple AI tools such as Codex, Claude Code, OpenCode, Cursor, Copilot, Trae, and OpenClaw.
+> **What problem does this solve?** If you use multiple AI coding tools (like Claude Code, Codex, OpenCode, Cursor, or Copilot) on the same machine, each one has its own memory and doesn't know what the others remember. This tool gives all your AI tools a shared memory backed by your Obsidian vault — so you don't have to re-explain context to every tool.
 
-This repository packages the architecture, runtime scripts, shared MCP services, onboarding helpers, verification tools, and optional embedding utilities used to run a cross-tool memory bus on one machine. The full control plane is live-validated on Windows, while the portable installer/runtime entrypoints now ship for Windows, macOS, and Linux with source-tree and installed-wrapper smoke coverage.
+> **In plain English**: Your AI tools share one notebook for memory instead of each forgetting everything when you switch.
 
-The source tree is grouped by responsibility (`bus/`, `ops/`, `retrieval/`, `shared-mcp/`), while the installed runtime under `~/.ai-memory` stays intentionally flat for compatibility with existing startup hooks and client configs. That source-to-install contract is defined in `scripts/install-layout.psd1`.
+## Before You Start
 
-## Start Here
-- Quick start:
-  see `## Minimal Quick Start` below for the install, verify, and pressure-test path
-- Integration shape:
-  read [`docs/INTEGRATION-MODES.md`](docs/INTEGRATION-MODES.md) before deciding between shared MCP, skill, or plugin
-- Template kits:
-  copy from [`templates/agents/README.md`](templates/agents/README.md) when onboarding a new host
-- Validation:
-  use [`docs/VALIDATION.md`](docs/VALIDATION.md) as the hard acceptance checklist
-- Release notes:
-  latest operator-facing summary is [`docs/releases/RELEASE-NOTES-2026-04-03.md`](docs/releases/RELEASE-NOTES-2026-04-03.md)
+Checklist — all must be checked before installing:
+- [ ] **Obsidian vault exists** — you already use Obsidian and know where your vault is
+- [ ] **Node.js 18+ installed** — check with `node -v`
+- [ ] **PowerShell 7+** (for macOS/Linux) — check with `pwsh --version`; on Windows, `powershell.exe` works
+- [ ] **Python 3.10+** (optional, for better search) — check with `python --version`
+- [ ] **8 shared ports available** (9331–9338) — no other program using these
+
+Quick vault check — the installer creates this structure if missing:
+- `00-System/ai-memory/` — memory system root
+- `02-KB/OBSIDIAN.md` — canonical Obsidian guide
+- `02-KB/MEMORY.md` — memory system docs
+- `02-KB/WORKING.md` — active task state
+
+If your vault is on a different drive or non-standard location, set `AI_MEMORY_OBSIDIAN_VAULT` before installing:
+```powershell
+$env:AI_MEMORY_OBSIDIAN_VAULT = "D:\Your\Vault\Path"
+```
+
+## Start Here — Pick Your Path
+
+**I want to try it quickly:**
+1. Run `.\scripts\install.ps1 -WorkspaceRoot .` (Windows) or `./scripts/install.sh -WorkspaceRoot .` (macOS/Linux)
+2. After install, either:
+   - **CLI available**: Run `node .\cli\ai-memory.js doctor` (or `ai-memory doctor` if in PATH)
+   - **CLI not in PATH**: Run `powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\status-shared-mcp.ps1 --human`
+3. Done! The shared memory bus is running.
+
+**I want to add another AI tool to the shared memory:**
+→ See [docs/ADDING-CLIENT.md](docs/ADDING-CLIENT.md)
+
+**I want to understand what this is:**
+→ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/FAQ.md](docs/FAQ.md)
+
+**Something is broken:**
+→ See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
+
+**I use macOS or Linux:**
+→ See [docs/INSTALL.md](docs/INSTALL.md) for `pwsh`-based setup
 
 ## Project Status
 - Ready for real local use on Windows

@@ -114,19 +114,19 @@ function resolveVaultRoot(flags) {
 const COMMANDS = {
   // Bus commands
   "bus:sync": {
-    desc: "Run memory-bus SyncAll",
+    desc: "Sync all sources into shared memory",
     category: "Bus",
     ps: "bus/memory-bus.ps1",
     args: ["-Action", "SyncAll"],
   },
   "bus:generate": {
-    desc: "Generate artifacts",
+    desc: "Regenerate memory summaries (layers, handoff, dream)",
     category: "Bus",
     ps: "bus/memory-bus.ps1",
     args: ["-Action", "Generate"],
   },
   "bus:status": {
-    desc: "Show bus status",
+    desc: "Show what's in shared memory right now",
     category: "Bus",
     ps: "bus/memory-bus.ps1",
     args: ["-Action", "Status"],
@@ -134,7 +134,7 @@ const COMMANDS = {
 
   // Dream commands
   "dream:run": {
-    desc: "Run memory dream consolidation",
+    desc: "Consolidate memory into long-term summaries",
     category: "Dream",
     ps: "ops/run-memory-dream.ps1",
     args: [],
@@ -154,19 +154,19 @@ const COMMANDS = {
 
   // Embeddings commands
   "embeddings:build": {
-    desc: "Build embeddings index",
+    desc: "Rebuild the search index",
     category: "Embeddings",
     js: "bus/generate-embeddings.js",
     args: [],
   },
   "embeddings:status": {
-    desc: "Show embeddings index status",
+    desc: "Check if search index is healthy",
     category: "Embeddings",
     js: "ops/check-memory-integrity.js",
     args: ["--json"],
   },
   "embeddings:force": {
-    desc: "Force rebuild embeddings",
+    desc: "Force rebuild the search index",
     category: "Embeddings",
     js: "bus/generate-embeddings.js",
     args: ["--force"],
@@ -198,19 +198,19 @@ const COMMANDS = {
 
   // MCP commands
   "mcp:start": {
-    desc: "Start shared MCP",
+    desc: "Start the shared memory service",
     category: "MCP",
     ps: "shared-mcp/start-default-shared-mcp.ps1",
     args: [],
   },
   "mcp:status": {
-    desc: "Show shared MCP status",
+    desc: "Check if shared memory service is running",
     category: "MCP",
     ps: "shared-mcp/status-shared-mcp.ps1",
-    args: [],
+    args: ["--human"],
   },
   "mcp:stop": {
-    desc: "Stop shared MCP",
+    desc: "Stop the shared memory service",
     category: "MCP",
     ps: "shared-mcp/stop-shared-mcp.ps1",
     args: [],
@@ -218,7 +218,7 @@ const COMMANDS = {
 
   // Search command (direct, no MCP round-trip)
   "search": {
-    desc: "Search shared memory (hybrid mode)",
+    desc: "Search shared memory",
     category: "Search",
     js: "retrieval/semantic-search.js",
     args: ["--mode", "hybrid"],
@@ -226,9 +226,23 @@ const COMMANDS = {
 
   // Integrity
   "check": {
-    desc: "Run memory integrity check",
+    desc: "Validate memory integrity",
     category: "Integrity",
     js: "ops/check-memory-integrity.js",
+    args: [],
+  },
+
+  // Diagnose
+  "doctor": {
+    desc: "Diagnose common setup problems",
+    category: "Diagnose",
+    js: "cli/ai-memory.js",
+    args: ["--doctor"],
+  },
+  "setup": {
+    desc: "Interactive setup wizard (checks prerequisites, creates vault structure)",
+    category: "Diagnose",
+    ps: "ops/setup-wizard.ps1",
     args: [],
   },
 
@@ -279,6 +293,7 @@ const CATEGORY_ORDER = [
   "MCP",
   "Search",
   "Integrity",
+  "Diagnose",
 ];
 
 function groupByCategory(commands) {
@@ -295,7 +310,9 @@ function groupByCategory(commands) {
 function showHelp() {
   const version = getVersion();
   const lines = [];
-  lines.push(`ai-memory v${version} — Unified CLI for the Obsidian Shared Memory Bus\n`);
+  lines.push(`ai-memory v${version} — Shared memory bus for AI tools\n`);
+  lines.push("Your AI tools (Claude Code, Codex, OpenCode...) share one Obsidian-backed memory.");
+  lines.push("Run 'ai-memory doctor' first if something isn't working.\n");
   lines.push("Usage: ai-memory <command> [options]\n");
   lines.push("Commands:");
 
@@ -348,6 +365,11 @@ function scriptHasVaultRootParam(scriptAbs) {
 function spawnPowerShell(scriptPath, extraArgs, vaultRoot, flags) {
   const scriptAbs = resolveScriptPath(scriptPath);
 
+  if (!fs.existsSync(scriptAbs)) {
+    process.stderr.write(`error: script not found: ${scriptAbs}\n`);
+    return Promise.resolve({ exitCode: 1 });
+  }
+
   // Only inject -VaultRoot for scripts that declare it in their param block.
   // Most scripts resolve vault root internally via runtime-platform.ps1.
   const injectVaultRoot = scriptHasVaultRootParam(scriptAbs);
@@ -371,13 +393,26 @@ function spawnPowerShell(scriptPath, extraArgs, vaultRoot, flags) {
     }
   }
 
+  if (flags.includes("--dry-run")) {
+    const exe = "powershell.exe";
+    process.stdout.write(`[dry-run] ${exe} ${psArgs.map(a => /[\s"]/.test(a) ? JSON.stringify(a) : a).join(" ")}\n`);
+    return Promise.resolve({ exitCode: 0 });
+  }
+
   return new Promise((resolve) => {
-    const child = spawn("powershell.exe", psArgs, {
-      stdio: ["ignore", "pipe", "pipe"],
-      shell: false,
-      windowsHide: true,
-      cwd: AI_MEMORY_ROOT,
-    });
+    let child;
+    try {
+      child = spawn("powershell.exe", psArgs, {
+        stdio: ["ignore", "pipe", "pipe"],
+        shell: false,
+        windowsHide: true,
+        cwd: AI_MEMORY_ROOT,
+      });
+    } catch (err) {
+      process.stderr.write(`failed to spawn powershell.exe: ${err.message}\n`);
+      resolve({ exitCode: 1 });
+      return;
+    }
 
     let stdout = "";
     let stderr = "";
@@ -395,7 +430,7 @@ function spawnPowerShell(scriptPath, extraArgs, vaultRoot, flags) {
     });
 
     child.on("error", (err) => {
-      process.stderr.write(`spawn error: ${err.message}\n`);
+      process.stderr.write(`powershell.exe error: ${err.message}\n`);
       resolve({ exitCode: 1 });
     });
   });
@@ -430,6 +465,11 @@ function resolveScriptPath(scriptPath) {
 function spawnNode(scriptPath, extraArgs, flags, vaultRoot) {
   const scriptAbs = resolveScriptPath(scriptPath);
 
+  if (!fs.existsSync(scriptAbs)) {
+    process.stderr.write(`error: script not found: ${scriptAbs}\n`);
+    return Promise.resolve({ exitCode: 1 });
+  }
+
   // Merge forwarded flags
   const forwarded = [];
   if (flags.includes("--json") && !extraArgs.includes("--json")) {
@@ -442,16 +482,37 @@ function spawnNode(scriptPath, extraArgs, flags, vaultRoot) {
     forwarded.push("--strict");
   }
 
+  const allArgs = [...extraArgs, ...forwarded];
+
+  if (flags.includes("--dry-run")) {
+    const exe = process.execPath;
+    const envParts = Object.entries({ ...process.env, AI_MEMORY_OBSIDIAN_VAULT: vaultRoot })
+      .filter(([k]) => k.startsWith("AI_MEMORY_"))
+      .map(([k, v]) => `${k}=${v}`);
+    process.stdout.write(`[dry-run] ${exe} ${[scriptAbs, ...allArgs].map(a => /[\s"]/.test(a) ? JSON.stringify(a) : a).join(" ")}\n`);
+    if (envParts.length) {
+      process.stdout.write(`[dry-run]   env: ${envParts.join(" ")}\n`);
+    }
+    return Promise.resolve({ exitCode: 0 });
+  }
+
   // Set vault root env so the child script can pick it up
   const childEnv = { ...process.env, AI_MEMORY_OBSIDIAN_VAULT: vaultRoot };
 
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [scriptAbs, ...extraArgs, ...forwarded], {
-      stdio: ["ignore", "pipe", "pipe"],
-      shell: false,
-      env: childEnv,
-      cwd: path.dirname(scriptAbs),
-    });
+    let child;
+    try {
+      child = spawn(process.execPath, [scriptAbs, ...allArgs], {
+        stdio: ["ignore", "pipe", "pipe"],
+        shell: false,
+        env: childEnv,
+        cwd: path.dirname(scriptAbs),
+      });
+    } catch (err) {
+      process.stderr.write(`failed to spawn ${process.execPath}: ${err.message}\n`);
+      resolve({ exitCode: 1 });
+      return;
+    }
 
     let stdout = "";
     let stderr = "";
@@ -479,7 +540,7 @@ function spawnNode(scriptPath, extraArgs, flags, vaultRoot) {
     });
 
     child.on("error", (err) => {
-      process.stderr.write(`spawn error: ${err.message}\n`);
+      process.stderr.write(`node process error: ${err.message}\n`);
       resolve({ exitCode: 1 });
     });
   });
@@ -502,6 +563,22 @@ async function runCommand(cmd, subArgs, flags, vaultRoot) {
     return { exitCode: 0 };
   }
 
+  // Reject unknown flags (defensive)
+  const KNOWN_FLAGS = new Set([
+    "--help", "-h", "--version", "--workspace", "--json", "--dry-run", "--strict",
+  ]);
+  for (const flag of flags) {
+    if (!KNOWN_FLAGS.has(flag) && !flag.startsWith("--workspace=")) {
+      process.stderr.write(`error: unknown global flag '${flag}'. See ai-memory --help.\n`);
+      return { exitCode: 1 };
+    }
+  }
+
+  if (!cmd.ps && !cmd.js) {
+    process.stderr.write(`error: internal error — command '${cmd._alias}' has no script defined.\n`);
+    return { exitCode: 1 };
+  }
+
   if (cmd.ps) {
     return spawnPowerShell(cmd.ps, [...subArgs, ...cmd.args], vaultRoot, flags);
   } else if (cmd.js) {
@@ -510,6 +587,179 @@ async function runCommand(cmd, subArgs, flags, vaultRoot) {
     process.stderr.write(`Unknown command type.\n`);
     return { exitCode: 1 };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Doctor checks
+// ---------------------------------------------------------------------------
+
+async function runDoctorChecks() {
+  const checks = [];
+  let passed = 0;
+  let failed = 0;
+  let warnings = 0;
+
+  function check(pass, label, suggestion) {
+    if (pass === true) {
+      checks.push({ type: "pass", label });
+      passed++;
+    } else if (pass === false) {
+      checks.push({ type: "fail", label, suggestion });
+      failed++;
+    } else {
+      checks.push({ type: "warn", label, suggestion });
+      warnings++;
+    }
+  }
+
+  const nodeVersion = process.version.replace(/^v/, "").split(".").map(Number);
+  check(
+    nodeVersion[0] >= 18,
+    `Node.js version >= 18 (found ${process.version})`,
+    "Upgrade Node.js to 18 or later"
+  );
+
+  try {
+    const python = await new Promise((resolve) => {
+      const child = require("child_process").spawn(
+        "python",
+        ["--version"],
+        { shell: true, windowsHide: true }
+      );
+      let output = "";
+      child.stdout.on("data", (d) => { output += d.toString(); });
+      child.stderr.on("data", (d) => { output += d.toString(); });
+      child.on("close", () => { resolve(output.trim()); });
+      child.on("error", () => { resolve(""); });
+    });
+    if (python) {
+      const match = python.match(/Python (\d+)\.(\d+)/);
+      if (match) {
+        const pyMajor = parseInt(match[1], 10);
+        const pyMinor = parseInt(match[2], 10);
+        check(
+          pyMajor > 3 || (pyMajor === 3 && pyMinor >= 10),
+          `Python version >= 3.10 (found ${pyMajor}.${pyMinor})`,
+          "Install Python 3.10+ for full MCP support"
+        );
+      } else {
+        check(null, "Python version detected", "Could not parse Python version");
+      }
+    } else {
+      check(null, "Python availability", "Python not found — some MCP servers may not work");
+    }
+  } catch (_) {
+    check(null, "Python availability", "Python not found — some MCP servers may not work");
+  }
+
+  try {
+    const pwsh = await new Promise((resolve) => {
+      const child = require("child_process").spawn(
+        "pwsh",
+        ["--version"],
+        { shell: true, windowsHide: true }
+      );
+      let output = "";
+      child.stdout.on("data", (d) => { output += d.toString(); });
+      child.stderr.on("data", (d) => { output += d.toString(); });
+      child.on("close", () => { resolve(output.trim()); });
+      child.on("error", () => { resolve(""); });
+    });
+    check(Boolean(pwsh), "PowerShell Core (pwsh) available", "Install PowerShell 7+ for best experience");
+  } catch (_) {
+    check(null, "PowerShell Core (pwsh) available", "PowerShell Core not found — pwsh is recommended");
+  }
+
+  const aiMemoryRoot = process.env.AI_MEMORY_ROOT || path.resolve(__dirname, "..");
+  check(
+    Boolean(process.env.AI_MEMORY_ROOT),
+    `AI_MEMORY_ROOT is set (${aiMemoryRoot})`,
+    "Set AI_MEMORY_ROOT environment variable for reliable operation"
+  );
+
+  let vaultRoot = null;
+  try {
+    vaultRoot = resolveVaultRoot([]);
+    check(
+      fs.existsSync(vaultRoot),
+      `Vault root exists (${vaultRoot})`,
+      "Set AI_MEMORY_OBSIDIAN_VAULT to your Obsidian vault path"
+    );
+  } catch (_) {
+    vaultRoot = null;
+  }
+
+  if (vaultRoot) {
+    const requiredPaths = [
+      "00-System/ai-memory",
+      "02-KB/OBSIDIAN.md",
+      "02-KB/MEMORY.md",
+    ];
+    for (const rel of requiredPaths) {
+      const abs = path.join(vaultRoot, rel.replace(/\//g, path.sep));
+      check(
+        fs.existsSync(abs),
+        `Required vault file exists: ${rel}`,
+        `Create ${rel} in your vault`
+      );
+    }
+  }
+
+  const portsInUse = [];
+  const criticalPorts = [9331, 9332, 9333, 9334, 9335, 9338];
+  for (const port of criticalPorts) {
+    const inUse = await new Promise((resolve) => {
+      const net = require("net");
+      const server = net.createServer();
+      server.once("error", () => { resolve(true); });
+      server.once("listening", () => { server.close(); resolve(false); });
+      server.listen(port, "127.0.0.1");
+    });
+    if (inUse) portsInUse.push(port);
+  }
+  check(
+    portsInUse.length === 0,
+    `Shared MCP ports 9331-9338 available (${portsInUse.length} in use: ${portsInUse.join(", ") || "none"})`,
+    portsInUse.length > 0 ? `Stop other services using ports ${portsInUse.join(", ")}` : undefined
+  );
+
+  const homeAiMemory = path.join(os.homedir(), ".ai-memory");
+  const isInstalled = fs.existsSync(homeAiMemory);
+  const isSourceTree = fs.existsSync(path.join(AI_MEMORY_ROOT, "bus", "memory-bus.ps1"));
+  check(
+    isInstalled || isSourceTree,
+    `ai-memory installed (${isInstalled ? "installed" : "source tree"})`,
+    "Run the installer to set up ai-memory properly"
+  );
+
+  process.stdout.write("\n");
+  for (const c of checks) {
+    if (c.type === "pass") {
+      process.stdout.write(`\u2705 PASS: ${c.label}\n`);
+    } else if (c.type === "fail") {
+      process.stdout.write(`\u274C FAIL: ${c.label}\n`);
+      if (c.suggestion) {
+        process.stdout.write(`   Fix: ${c.suggestion}\n`);
+      }
+    } else {
+      process.stdout.write(`\u26A0  WARN: ${c.label}\n`);
+      if (c.suggestion) {
+        process.stdout.write(`   Suggestion: ${c.suggestion}\n`);
+      }
+    }
+  }
+
+  process.stdout.write("\n");
+  process.stdout.write(`${passed} checks passed, ${failed} failed, ${warnings} warnings\n`);
+  process.stdout.write("\n");
+
+  if (failed === 0) {
+    process.stdout.write("Your setup looks good! Run 'ai-memory mcp:start' to start the shared memory bus.\n");
+  } else {
+    process.stdout.write("Run 'ai-memory mcp:status' or check docs/TROUBLESHOOTING.md for fixes.\n");
+  }
+
+  process.exit(failed === 0 ? 0 : 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -528,6 +778,11 @@ async function main() {
     process.stdout.write(`${getVersion()}\n`);
     process.exit(0);
     return;
+  }
+
+  // Handle --doctor early (before command dispatch)
+  if (flags.includes("--doctor")) {
+    return runDoctorChecks();
   }
 
   const subcmd = positional[0] || "help";
