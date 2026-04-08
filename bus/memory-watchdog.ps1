@@ -6,6 +6,12 @@
     [int]$StaleMinutes = 5
 )
 
+$watchdogEnabled = [Environment]::GetEnvironmentVariable("AI_MEMORY_WATCHDOG_ENABLED")
+if ($null -ne $watchdogEnabled -and $watchdogEnabled -in @("0", "false", "no", "off")) {
+    Write-Output "[watchdog] disabled via AI_MEMORY_WATCHDOG_ENABLED=0"
+    exit 0
+}
+
 Set-StrictMode -Version 3.0
 $ErrorActionPreference = "Stop"
 

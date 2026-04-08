@@ -5,7 +5,8 @@ param(
     $PersistUserEnvironment = $true,
     $InstallPythonDeps = $true,
     $ApplyClientIntegrations = $true,
-    $IncludeOptionalClientServers = $false
+    $IncludeOptionalClientServers = $false,
+    [switch]$DryRun
 )
 
 Set-StrictMode -Version 3.0
@@ -565,7 +566,7 @@ print(json.dumps({name: bool(importlib.util.find_spec(name)) for name in sys.arg
 
     try {
         $pipExtraArgs = @(Get-PythonPackageInstallExtraArgs)
-        & $PythonPath -m pip install "--break-system-packages" "--disable-pip-version-check" "--no-input" @($pipExtraArgs) @($missingPackages)
+        & $PythonPath -m pip install "--user" "--disable-pip-version-check" "--no-input" @($pipExtraArgs) @($missingPackages)
         if ($LASTEXITCODE -ne 0) {
             throw "python -m pip install failed"
         }
@@ -654,7 +655,7 @@ print(json.dumps({name: bool(importlib.util.find_spec(name)) for name in sys.arg
         if ($uvCommand) {
             try {
                 $pipExtraArgs = @(Get-PythonPackageInstallExtraArgs)
-                & $uvCommand.Source "pip" "install" "--python" $PythonPath "--break-system-packages" "--no-progress" @($pipExtraArgs) @($missingPackages)
+                & $uvCommand.Source "pip" "install" "--python" $PythonPath "--no-progress" @($pipExtraArgs) @($missingPackages)
                 if ($LASTEXITCODE -eq 0) {
                     $installSucceeded = $true
                 }
@@ -665,7 +666,7 @@ print(json.dumps({name: bool(importlib.util.find_spec(name)) for name in sys.arg
 
         if (-not $installSucceeded) {
             $pipExtraArgs = @(Get-PythonPackageInstallExtraArgs)
-            & $PythonPath -m pip install "--break-system-packages" "--disable-pip-version-check" "--no-input" @($pipExtraArgs) @($missingPackages)
+            & $PythonPath -m pip install "--user" "--disable-pip-version-check" "--no-input" @($pipExtraArgs) @($missingPackages)
             if ($LASTEXITCODE -ne 0) {
                 throw "python -m pip install failed"
             }
@@ -1195,8 +1196,12 @@ foreach ($sourceDir in @($layout.FlatRuntimeFiles.Keys | Sort-Object)) {
         }
 
         $destinationPath = Join-Path $TargetRoot $name
-        Copy-Item -LiteralPath $srcPath -Destination $destinationPath -Force
-        Set-PosixExecutableIfNeeded -Path $destinationPath
+        if ($DryRun) {
+            Write-Output "[dry-run] would copy: $srcPath -> $destinationPath"
+        } else {
+            Copy-Item -LiteralPath $srcPath -Destination $destinationPath -Force
+            Set-PosixExecutableIfNeeded -Path $destinationPath
+        }
     }
 }
 
@@ -1207,8 +1212,12 @@ foreach ($name in @($layout.SharedMcpFiles)) {
     }
 
     $destinationPath = Join-SharedPath @($TargetRoot, "shared-mcp", $name)
-    Copy-Item -LiteralPath $srcPath -Destination $destinationPath -Force
-    Set-PosixExecutableIfNeeded -Path $destinationPath
+    if ($DryRun) {
+        Write-Output "[dry-run] would copy: $srcPath -> $destinationPath"
+    } else {
+        Copy-Item -LiteralPath $srcPath -Destination $destinationPath -Force
+        Set-PosixExecutableIfNeeded -Path $destinationPath
+    }
 }
 
 foreach ($name in @($layout.TemplateFiles)) {
@@ -1220,7 +1229,11 @@ foreach ($name in @($layout.TemplateFiles)) {
 
     if (-not (Test-Path -LiteralPath $dstPath)) {
         Ensure-Directory -Path (Split-Path -Parent $dstPath)
-        Copy-Item -LiteralPath $srcPath -Destination $dstPath -Force
+        if ($DryRun) {
+            Write-Output "[dry-run] would copy template: $srcPath -> $dstPath"
+        } else {
+            Copy-Item -LiteralPath $srcPath -Destination $dstPath -Force
+        }
     }
 }
 
@@ -1232,8 +1245,12 @@ foreach ($name in @($cliFiles)) {
 
     $destinationPath = Join-Path $TargetRoot $name
     Ensure-Directory -Path (Split-Path -Parent $destinationPath)
-    Copy-Item -LiteralPath $srcPath -Destination $destinationPath -Force
-    Set-PosixExecutableIfNeeded -Path $destinationPath
+    if ($DryRun) {
+        Write-Output "[dry-run] would copy CLI: $srcPath -> $destinationPath"
+    } else {
+        Copy-Item -LiteralPath $srcPath -Destination $destinationPath -Force
+        Set-PosixExecutableIfNeeded -Path $destinationPath
+    }
 }
 
 # ADR-002 Phase 0.2: Initialize .memory/ directory structure
@@ -1278,7 +1295,11 @@ function Initialize-MemoryDirectory {
     Write-Host "[init] .memory/ directory structure ready at $memoryRoot"
 }
 
-Initialize-MemoryDirectory -TargetRoot $TargetRoot
+if (-not $DryRun) {
+    Initialize-MemoryDirectory -TargetRoot $TargetRoot
+} else {
+    Write-Output "[dry-run] would initialize .memory/ directory structure"
+}
 
 # ADR-002 Phase 0.3: Initialize SQLite schema (sqlite-vec 0.1.9)
 $initSchemaScript = Join-Path (Join-Path $TargetRoot "ops") "init-sqlite-schema.js"
@@ -1312,24 +1333,37 @@ try {
         @("install", "--omit=dev")
     }
 
-    & $npmCommand.Source @npmArgs
-    if ($LASTEXITCODE -ne 0) {
-        throw ("npm {0} failed in shared-mcp." -f $npmArgs[0])
+    if ($DryRun) {
+        Write-Output "[dry-run] would run npm $($npmArgs[0]) in shared-mcp/"
+    } else {
+        & $npmCommand.Source @npmArgs
+        if ($LASTEXITCODE -ne 0) {
+            throw ("npm {0} failed in shared-mcp." -f $npmArgs[0])
+        }
     }
 } finally {
     Pop-Location
 }
 
 if ($RegisterStartup) {
-    Register-StartupHooks -TargetRoot $TargetRoot
+    if ($DryRun) {
+        Write-Output "[dry-run] would register startup hooks"
+    } else {
+        Register-StartupHooks -TargetRoot $TargetRoot
+    }
 }
 
 $generateArgs = @("-Action", "Generate")
 if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
     $generateArgs += @("-Project", $WorkspaceRoot)
 }
-Invoke-SharedPowerShellFile -ScriptPath (Join-Path $TargetRoot "memory-bus.ps1") -ArgumentList $generateArgs | Out-Null
-Invoke-SharedPowerShellFile -ScriptPath (Join-SharedPath @($TargetRoot, "shared-mcp", "write-config-snippets.ps1")) | Out-Null
+if ($DryRun) {
+    Write-Output "[dry-run] would invoke memory-bus.ps1 -Action Generate"
+    Write-Output "[dry-run] would invoke write-config-snippets.ps1"
+} else {
+    Invoke-SharedPowerShellFile -ScriptPath (Join-Path $TargetRoot "memory-bus.ps1") -ArgumentList $generateArgs | Out-Null
+    Invoke-SharedPowerShellFile -ScriptPath (Join-SharedPath @($TargetRoot, "shared-mcp", "write-config-snippets.ps1")) | Out-Null
+}
 
 if ($ApplyClientIntegrations) {
     $clientIntegrationScript = Join-Path $TargetRoot "install-client-integrations.ps1"
@@ -1349,7 +1383,11 @@ if ($ApplyClientIntegrations) {
         $clientArgs += "-IncludeOptionalServers"
     }
 
-    Invoke-SharedPowerShellFile -ScriptPath $clientIntegrationScript -ArgumentList $clientArgs | Out-Null
+    if ($DryRun) {
+        Write-Output "[dry-run] would invoke install-client-integrations.ps1 with args: $($clientArgs -join ' ')"
+    } else {
+        Invoke-SharedPowerShellFile -ScriptPath $clientIntegrationScript -ArgumentList $clientArgs | Out-Null
+    }
 }
 
 Write-InstallManifest `
@@ -1360,10 +1398,14 @@ Write-InstallManifest `
 
 if ($PersistUserEnvironment) {
     if (Test-SharedIsWindows) {
-        [Environment]::SetEnvironmentVariable("AI_MEMORY_ROOT", $resolvedTargetRoot, "User")
-        [Environment]::SetEnvironmentVariable("AI_MEMORY_PYTHON", $resolvedPython, "User")
-        if ($resolvedSharedMcpPython) {
-            [Environment]::SetEnvironmentVariable("AI_MEMORY_MCP_PYTHON", $resolvedSharedMcpPython, "User")
+        if ($DryRun) {
+            Write-Output "[dry-run] would persist env vars to User scope: AI_MEMORY_ROOT=$resolvedTargetRoot, AI_MEMORY_PYTHON=$resolvedPython"
+        } else {
+            [Environment]::SetEnvironmentVariable("AI_MEMORY_ROOT", $resolvedTargetRoot, "User")
+            [Environment]::SetEnvironmentVariable("AI_MEMORY_PYTHON", $resolvedPython, "User")
+            if ($resolvedSharedMcpPython) {
+                [Environment]::SetEnvironmentVariable("AI_MEMORY_MCP_PYTHON", $resolvedSharedMcpPython, "User")
+            }
         }
     } else {
         Write-Output ("Generated activation helpers at {0} and {1}" -f (Join-Path $TargetRoot "activate-ai-memory.sh"), (Join-Path $TargetRoot "activate-ai-memory.ps1"))
@@ -1376,19 +1418,27 @@ if ($shouldStartServicesNow) {
         $startupDir = Join-SharedPath @((Get-SharedConfigHome), "Microsoft", "Windows", "Start Menu", "Programs", "Startup")
         $watchdogVbsPath = Join-Path $startupDir "AI Memory Watchdog.vbs"
         $watchdogSupervisorScript = Join-Path $TargetRoot "memory-watchdog-supervisor.ps1"
-        if (-not (Test-WindowsPowerShellScriptRunning -ScriptPath $watchdogSupervisorScript)) {
-            Start-SharedBackgroundProcess `
-                -FilePath (Resolve-SharedPowerShellExecutable) `
-                -ArgumentList (Get-SharedPowerShellFileArguments -ScriptPath $watchdogSupervisorScript) `
-                -WorkingDirectory $TargetRoot | Out-Null
-        }
-        if (Test-Path -LiteralPath $watchdogVbsPath -PathType Leaf) {
-            Stop-WindowsStartupScriptHosts -ScriptPath $watchdogVbsPath
-            Start-Process -FilePath "wscript.exe" -ArgumentList @($watchdogVbsPath) -WindowStyle Hidden | Out-Null
+        if ($DryRun) {
+            Write-Output "[dry-run] would start watchdog supervisor and startup VBS"
+        } else {
+            if (-not (Test-WindowsPowerShellScriptRunning -ScriptPath $watchdogSupervisorScript)) {
+                Start-SharedBackgroundProcess `
+                    -FilePath (Resolve-SharedPowerShellExecutable) `
+                    -ArgumentList (Get-SharedPowerShellFileArguments -ScriptPath $watchdogSupervisorScript) `
+                    -WorkingDirectory $TargetRoot | Out-Null
+            }
+            if (Test-Path -LiteralPath $watchdogVbsPath -PathType Leaf) {
+                Stop-WindowsStartupScriptHosts -ScriptPath $watchdogVbsPath
+                Start-Process -FilePath "wscript.exe" -ArgumentList @($watchdogVbsPath) -WindowStyle Hidden | Out-Null
+            }
         }
     } else {
-        Start-BackgroundRuntime -ScriptPath (Join-Path $TargetRoot "memory-watchdog.ps1") -ArgumentList @("-Daemon", "-PollSeconds", "15")
-        Start-BackgroundRuntime -ScriptPath (Join-SharedPath @($TargetRoot, "shared-mcp", "start-default-shared-mcp.ps1")) -ArgumentList @("-ForceRestart")
+        if ($DryRun) {
+            Write-Output "[dry-run] would start watchdog daemon and shared-mcp"
+        } else {
+            Start-BackgroundRuntime -ScriptPath (Join-Path $TargetRoot "memory-watchdog.ps1") -ArgumentList @("-Daemon", "-PollSeconds", "15")
+            Start-BackgroundRuntime -ScriptPath (Join-SharedPath @($TargetRoot, "shared-mcp", "start-default-shared-mcp.ps1")) -ArgumentList @("-ForceRestart")
+        }
     }
 }
 

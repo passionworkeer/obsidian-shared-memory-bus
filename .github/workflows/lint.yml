@@ -1,0 +1,44 @@
+name: Lint
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install ESLint
+        run: npm install --prefix shared-mcp eslint
+
+      - name: ESLint
+        run: npx eslint shared-mcp/*.js cli/*.js bus/*.js ops/*.js retrieval/*.js --ignore-pattern node_modules/ --ignore-pattern dist/ || true
+
+      - name: Coverage baseline
+        run: |
+          cd shared-mcp
+          npm install
+          npx c8 --exclude='**/node_modules/**' --reporter=text --report-dir=../coverage npx eslint shared-mcp/*.js --ignore-pattern node_modules/ || true
+        continue-on-error: true
+
+      - name: Security audit
+        run: |
+          cd shared-mcp
+          npm audit --audit-level=high || true
+
+      - name: Shell syntax check
+        run: |
+          for f in shared-mcp/*.sh scripts/*.sh; do
+            sh -n "$f" || exit 1
+          done

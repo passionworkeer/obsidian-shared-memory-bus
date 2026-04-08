@@ -24,7 +24,7 @@ $manifestPath = Join-Path $root "manifest.json"
 $statePath = Join-Path $root "state.json"
 $logRoot = Join-Path $root "logs"
 $proxyScriptPath = Join-Path $root "singleton-stdio-mcp-proxy.mjs"
-$stateMutexName = Get-SharedMutexName -BaseName "WangSharedMcpStateV1"
+$stateMutexName = Get-SharedMutexName -BaseName "AiMcpStateV1"
 
 function Ensure-Directory {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -488,6 +488,11 @@ function Start-ProxyProcess {
 
 Ensure-Directory -Path $logRoot
 $manifest = Get-Content -Raw -LiteralPath $manifestPath -Encoding utf8 | ConvertFrom-Json
+
+$envBasePort = [int]([Environment]::GetEnvironmentVariable("AI_MEMORY_BASE_PORT") ?? "")
+$manifestBasePort = $manifest.defaults.basePort
+$basePort = $envBasePort -gt 0 ? $envBasePort : $manifestBasePort
+
 $nodeExecutable = Resolve-SharedNodeExecutable
 $mutex = New-Object System.Threading.Mutex($false, $stateMutexName)
 $mutexAcquired = $false
