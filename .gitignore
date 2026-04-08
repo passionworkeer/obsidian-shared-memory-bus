@@ -15,8 +15,12 @@ shared-mcp/logs/*.err.log
 # Python
 __pycache__/
 *.pyc
+*.py[cod]
 .venv/
 ops/__pycache__/
+retrieval/__pycache__/
+*.egg-info/
+.pytest_cache/
 
 # Bundles and generated state
 node_modules/

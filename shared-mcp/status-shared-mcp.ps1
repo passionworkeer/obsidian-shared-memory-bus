@@ -1,6 +1,7 @@
 param(
     [string[]]$Only,
-    [switch]$Json
+    [switch]$Json,
+    [switch]$Human
 )
 
 Set-StrictMode -Version 3.0
@@ -21,7 +22,7 @@ if (-not $helperPath) {
 
 $manifestPath = Join-Path $root "manifest.json"
 $statePath = Join-Path $root "state.json"
-$stateMutexName = Get-SharedMutexName -BaseName "WangSharedMcpStateV1"
+$stateMutexName = Get-SharedMutexName -BaseName "AiMcpStateV1"
 
 function Read-State {
     if (-not (Test-Path -LiteralPath $statePath)) {
@@ -341,6 +342,60 @@ if ($Json) {
                 notes = $_.Notes
             }
         }) | ConvertTo-Json -Depth 6
+
+    if ($allHealthy) {
+        exit 0
+    } else {
+        exit 1
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Human-readable output
+# ---------------------------------------------------------------------------
+if ($Human) {
+    Write-Output ""
+
+    $serviceLabels = @{
+        "context7" = "Context7"
+        "fetch" = "Fetch"
+        "time" = "Time"
+        "sequential-thinking" = "Sequential Thinking"
+        "obsidian" = "Obsidian MCP"
+        "memory" = "Memory Bus"
+        "MiniMax" = "MiniMax (optional)"
+        "playwright" = "Playwright (optional)"
+    }
+
+    foreach ($row in $rows) {
+        $label = if ($serviceLabels[$row.Server]) { $serviceLabels[$row.Server] } else { $row.Server }
+        $port = if ($row.Port -ne "-") { $row.Port } else { $null }
+        $pid = if ($row.PID -ne "-") { $row.PID } else { $null }
+
+        if ($row.Status -eq "healthy") {
+            $pidText = if ($pid) { " (PID $pid)" } else { "" }
+            Write-Output "${CLR_GREEN}${label}:${CLR_RESET} running$pidText"
+        } elseif ($row.Status -eq "not-running") {
+            if ($row.Mode -eq "optional") {
+                Write-Output "${CLR_YELLOW}${label}:${CLR_RESET} not configured (optional)${CLR_RESET}"
+            } else {
+                Write-Output "${CLR_YELLOW}${label}:${CLR_RESET} not running${CLR_RESET}"
+            }
+        } elseif ($row.Status -eq "dead" -or $row.Status -eq "pid-dead") {
+            Write-Output "${CLR_RED}${label}:${CLR_RESET} dead${CLR_RESET}"
+        } else {
+            Write-Output "${CLR_YELLOW}${label}:${CLR_RESET} unhealthy${CLR_RESET}"
+        }
+    }
+
+    Write-Output ""
+    if ($allHealthy) {
+        Write-Output "${CLR_GREEN}All services healthy${CLR_RESET}"
+    } else {
+        $unhealthyCount = @($rows | Where-Object { $_.Status -ne "healthy" }).Count
+        Write-Output "${CLR_YELLOW}${unhealthyCount} service(s) need attention${CLR_RESET}"
+    }
+    Write-Output ""
 
     if ($allHealthy) {
         exit 0

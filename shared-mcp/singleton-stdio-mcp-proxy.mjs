@@ -75,6 +75,7 @@ process.on('unhandledRejection', (reason) => {
 });
 
 function log(message) {
+  // eslint-disable-next-line no-console
   console.log(`[shared-mcp:${serverId}] ${message}`);
 }
 
@@ -230,11 +231,61 @@ function sendNotification(message) {
   child.stdin.write(`${JSON.stringify(message)}\n`, 'utf8');
 }
 
+function tokenizeCommand(cmd) {
+  const tokens = [];
+  let current = '';
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let escaped = false;
+
+  for (let i = 0; i < cmd.length; i++) {
+    const ch = cmd[i];
+
+    if (escaped) {
+      current += ch;
+      escaped = false;
+      continue;
+    }
+
+    if (ch === '\\' && !inSingleQuote) {
+      escaped = true;
+      continue;
+    }
+
+    if (ch === "'" && !inDoubleQuote) {
+      inSingleQuote = !inSingleQuote;
+      continue;
+    }
+
+    if (ch === '"' && !inSingleQuote) {
+      inDoubleQuote = !inDoubleQuote;
+      continue;
+    }
+
+    if (ch === ' ' && !inSingleQuote && !inDoubleQuote) {
+      if (current.length > 0) {
+        tokens.push(current);
+        current = '';
+      }
+      continue;
+    }
+
+    current += ch;
+  }
+
+  if (current.length > 0) {
+    tokens.push(current);
+  }
+
+  return tokens;
+}
+
 function spawnChildProcess() {
   clearRestartTimer();
   log(`starting singleton child via: ${stdioCommand}`);
-  child = spawn(stdioCommand, {
-    shell: true,
+  const [executable, ...cmdArgs] = tokenizeCommand(stdioCommand);
+  child = spawn(executable, cmdArgs, {
+    shell: false,
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
     env: {

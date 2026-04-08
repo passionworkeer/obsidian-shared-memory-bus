@@ -8,6 +8,13 @@ Set-StrictMode -Version 3.0
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+$envBasePort = [int]([Environment]::GetEnvironmentVariable("AI_MEMORY_BASE_PORT") ?? "")
+$manifestPath = Join-Path $root "manifest.json"
+$manifest = Get-Content -Raw -LiteralPath $manifestPath -Encoding utf8 | ConvertFrom-Json
+$manifestBasePort = $manifest.defaults.basePort
+$env:AI_MEMORY_BASE_PORT = ($envBasePort -gt 0 ? $envBasePort : $manifestBasePort).ToString()
+
 $defaultServers = @(
     "context7",
     "fetch",
