@@ -33,7 +33,7 @@ $WatchdogScript = Join-Path $AiMemoryRoot "memory-watchdog.ps1"
 $WatchdogLockPath = Join-Path $AiMemoryRoot "watchdog.lock"
 $WatchdogStatePath = Join-Path $AiMemoryRoot "watchdog-state.json"
 $WatchdogVersionPath = Join-Path $AiMemoryRoot "watchdog.version"
-$WorkerArguments = @("-Once", "-KeepRunningState")
+$WorkerArguments = @("-KeepRunningState")
 
 # Script version — bump this to trigger a supervised restart
 $CurrentWatchdogVersion = "4"
