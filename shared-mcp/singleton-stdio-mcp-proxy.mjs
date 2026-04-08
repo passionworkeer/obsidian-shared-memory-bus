@@ -4,6 +4,24 @@ import http from 'node:http';
 import process from 'node:process';
 import { spawn } from 'node:child_process';
 
+function killTree(pid) {
+  if (!pid || pid <= 0) {
+    return;
+  }
+  const isWindows = process.platform === 'win32';
+  try {
+    if (isWindows) {
+      // /F = force kill, /T = kill process tree (children + grandchildren)
+      spawn('taskkill', ['/F', '/T', '/PID', String(pid)], { windowsHide: true });
+    } else {
+      try {
+        process.kill(-pid, 'SIGTERM');
+      } catch {
+      }
+    }
+  } catch {
+  }
+}
 function parseArgs(argv) {
   const parsed = new Map();
   for (let index = 2; index < argv.length; index += 1) {
@@ -75,7 +93,6 @@ process.on('unhandledRejection', (reason) => {
 });
 
 function log(message) {
-  // eslint-disable-next-line no-console
   console.log(`[shared-mcp:${serverId}] ${message}`);
 }
 
@@ -133,6 +150,10 @@ function teardownChild(reason) {
     currentChild.removeAllListeners();
   } catch {
   }
+
+  // Kill the entire process tree so no grandchild zombies survive.
+  // (child.kill() alone only kills the shell; grandchild mcpvault survives.)
+  killTree(currentChild.pid);
 }
 
 function scheduleRestart(reason) {
@@ -231,68 +252,102 @@ function sendNotification(message) {
   child.stdin.write(`${JSON.stringify(message)}\n`, 'utf8');
 }
 
-function tokenizeCommand(cmd) {
-  const tokens = [];
-  let current = '';
-  let inSingleQuote = false;
-  let inDoubleQuote = false;
-  let escaped = false;
+// On Windows, find npx by resolving it through npm's bin directory,
+// so we can spawn it directly without `shell: true` (which creates a cmd.exe
+// wrapper whose grandchildren survive taskkill /T).
+function resolveNpxCommand() {
+  const isWindows = process.platform === 'win32';
+  if (!isWindows) {
+    return stdioCommand;
+  }
+  // stdioCommand on Windows is typically "npx -y @pkg@latest".
+  // We need to find the actual npx script path to run without a shell.
+  // Try: <node>\node_modules\npm\bin\npx-cli.js
+  const nodeExe = process.env.NODE_EXE || process.execPath;
+  const nodeDir = require('node:path').dirname(nodeExe);
+  const npxScript = require('node:path').join(nodeDir, 'node_modules', 'npm', 'bin', 'npx-cli.js');
+  try {
+    require('node:fs').accessSync(npxScript);
+    // Replace "npx" at the start of stdioCommand with the resolved script path
+    return stdioCommand.replace(/^npx\b/, `"${npxScript}"`);
+  } catch {
+    return stdioCommand;
+  }
+}
 
-  for (let i = 0; i < cmd.length; i++) {
-    const ch = cmd[i];
-
-    if (escaped) {
-      current += ch;
-      escaped = false;
-      continue;
-    }
-
-    if (ch === '\\' && !inSingleQuote) {
-      escaped = true;
-      continue;
-    }
-
-    if (ch === "'" && !inDoubleQuote) {
-      inSingleQuote = !inSingleQuote;
-      continue;
-    }
-
-    if (ch === '"' && !inSingleQuote) {
-      inDoubleQuote = !inDoubleQuote;
-      continue;
-    }
-
-    if (ch === ' ' && !inSingleQuote && !inDoubleQuote) {
-      if (current.length > 0) {
-        tokens.push(current);
-        current = '';
+// Kill any zombie npx/npm processes from previous child instances that survived
+// a prior taskkill (e.g. grandchild processes reparented to Session Manager).
+// Scans for node processes whose command line mentions "@upstash/context7-mcp",
+// "@modelcontextprotocol/server-sequential-thinking", or "@playwright/mcp" and
+// kills them directly with taskkill /F.
+function killZombieNpxProcesses() {
+  if (process.platform !== 'win32') {
+    return;
+  }
+  const zombiePatterns = [
+    '@upstash/context7-mcp',
+    '@modelcontextprotocol/server-sequential-thinking',
+    '@playwright/mcp',         // matches npx wrapper commands
+    '@playwright/mcp/cli.js',   // matches reparented playwright CLI child processes
+  ];
+  try {
+    const { execSync } = require('node:child_process');
+    // WMIC is available on all Windows and supports wide command-line matching
+    const output = execSync(
+      'wmic process where "name=\'node.exe\'" get ProcessId,CommandLine /format:csv',
+      { windowsHide: true, encoding: 'utf8', timeout: 5000 }
+    );
+    const lines = output.split('\n').filter((l) => l.trim());
+    for (const line of lines) {
+      const fields = line.split(',');
+      if (fields.length < 3) continue;
+      const pidField = fields[1]?.trim();
+      const cmdField = fields.slice(2).join(',').replace(/^"(.*)"$/, '$1');
+      if (!pidField || !cmdField) continue;
+      const pid = parseInt(pidField, 10);
+      if (isNaN(pid) || pid === process.pid) continue;
+      for (const pattern of zombiePatterns) {
+        if (cmdField.includes(pattern)) {
+          try {
+            execSync(`taskkill /F /T /PID ${pid}`, { windowsHide: true, timeout: 3000 });
+            log(`killed zombie npx process ${pid} (${pattern})`);
+          } catch {
+          }
+          break;
+        }
       }
-      continue;
     }
-
-    current += ch;
+  } catch {
   }
-
-  if (current.length > 0) {
-    tokens.push(current);
-  }
-
-  return tokens;
 }
 
 function spawnChildProcess() {
+  // Scavenge zombie npx processes from previous (failed) child instances
+  // before starting a new one, to prevent zombie accumulation.
+  killZombieNpxProcesses();
   clearRestartTimer();
+  const directCommand = resolveNpxCommand();
   log(`starting singleton child via: ${stdioCommand}`);
-  const [executable, ...cmdArgs] = tokenizeCommand(stdioCommand);
-  child = spawn(executable, cmdArgs, {
-    shell: false,
-    stdio: ['pipe', 'pipe', 'pipe'],
-    windowsHide: true,
-    env: {
-      ...process.env,
-      ...childExtraEnv,
-    },
-  });
+
+  if (process.platform === 'win32') {
+    // Use cmd.exe /c to run the command without a wrapping shell process.
+    // This keeps the spawned npx/node as a direct child (not grandchild),
+    // so taskkill /T /PID correctly kills the entire tree.
+    child = spawn('cmd.exe', ['/c', directCommand], {
+      shell: false,
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        ...childExtraEnv,
+      },
+    });
+  } else {
+    child = spawn(directCommand, {
+      shell: false,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  }
 
   child.stdout.on('data', processChildStdout);
   child.stderr.on('data', (chunk) => {
@@ -362,13 +417,6 @@ async function ensureInitialized(protocolVersion = defaultProtocolVersion) {
       return initResponse;
     } catch (error) {
       teardownChild(`bootstrap failed: ${error.message}`);
-      if (child && !child.killed) {
-        try {
-          child.kill();
-        } catch {
-        }
-      }
-      child = null;
       throw error;
     } finally {
       initPromise = null;
@@ -592,7 +640,7 @@ function shutdown(signal) {
 
   if (child) {
     try {
-      child.kill();
+      killTree(child.pid);
     } catch {
     }
   }

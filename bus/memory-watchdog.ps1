@@ -142,6 +142,14 @@ $WatchSpecs = @(
 )
 $script:LastKnownSyncAt = [datetime]::MinValue
 $script:lastBgExtraction = [datetime]::MinValue
+$script:lastHeavySyncSignature = $null
+$script:lastHeavySyncAt = [datetime]::MinValue
+$script:lastClaudeMemHealthCheck = [datetime]::MinValue
+$ClaudeMemHealthIntervalSeconds = 300   # check every 5 min
+$ClaudeMemPluginRoot = Join-Path $UserHome ".claude\plugins\marketplaces\thedotmack"
+$ClaudeMemWorkerScript = Join-Path $ClaudeMemPluginRoot "plugin\scripts\worker-service.cjs"
+$WatchdogVersionPath = Join-Path $AiMemoryRoot "watchdog.version"
+$WatchdogVersion = "4"
 
 function Ensure-Directory {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -559,10 +567,19 @@ function Write-State {
         [Parameter(Mandatory = $true)][bool]$Running,
         [string]$LastReason = "",
         [string[]]$ChangedSpecs = @(),
-        [datetime]$LastSyncAt = [datetime]::MinValue
+        [datetime]$LastSyncAt = [datetime]::MinValue,
+        [string]$StructuredSignature = "",
+        [string]$HeavySyncSignature = "",
+        [datetime]$HeavySyncAt = [datetime]::MinValue
     )
 
     Ensure-Directory -Path (Split-Path -Parent $StatePath)
+    if (-not [string]::IsNullOrWhiteSpace($StructuredSignature)) {
+        $script:lastHeavySyncSignature = $StructuredSignature
+    }
+    if ($HeavySyncAt -gt [datetime]::MinValue) {
+        $script:lastHeavySyncAt = $HeavySyncAt
+    }
     $payload = [ordered]@{
         running = $Running
         pid = $PID
@@ -572,6 +589,9 @@ function Write-State {
         updatedAt = (Get-Date).ToString("o")
         lastReason = $LastReason
         lastSyncAt = if ($LastSyncAt -gt [datetime]::MinValue) { $LastSyncAt.ToString("o") } else { $null }
+        lastStructuredSignature = $script:lastHeavySyncSignature
+        lastHeavySignature = $script:lastHeavySyncSignature
+        lastHeavySyncAt = if ($script:lastHeavySyncAt -gt [datetime]::MinValue) { $script:lastHeavySyncAt.ToString("o") } else { $null }
         changedSpecs = $ChangedSpecs
         busScript = $BusScript
         globalContext = $GlobalContextPath
@@ -639,7 +659,7 @@ function Get-WatchSpecPollSeconds {
 function Write-WatchdogScanHeartbeat {
     param([Parameter(Mandatory = $true)][string]$SpecName)
 
-    Write-State -Running $true -LastReason ("watchdog-scan:" + $SpecName) -ChangedSpecs @() -LastSyncAt (Get-LastKnownSyncAt)
+    Write-State -Running $true -LastReason ("watchdog-scan:" + $SpecName) -ChangedSpecs @() -LastSyncAt (Get-LastKnownSyncAt) -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
 }
 
 function Get-DirectoryWatchStamp {
@@ -821,7 +841,7 @@ function Invoke-BusSync {
         reason = $Reason
         lastSyncAt = if ($lastSyncAt -gt [datetime]::MinValue) { $lastSyncAt.ToString("o") } else { $null }
     }
-    Write-State -Running $true -LastReason $Reason -ChangedSpecs @() -LastSyncAt $lastSyncAt
+    Write-State -Running $true -LastReason $Reason -ChangedSpecs @() -LastSyncAt $lastSyncAt -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
     Write-WatchdogTrace -Step "bussync.state.end" -Data @{
         reason = $Reason
         lastSyncAt = if ($lastSyncAt -gt [datetime]::MinValue) { $lastSyncAt.ToString("o") } else { $null }
@@ -844,7 +864,7 @@ function Invoke-RefreshGeneratedArtifacts {
         Write-WatchdogTrace -Step "generatedartifacts.launched" -Data @{ reason = $Reason }
         return $false
     } catch {
-        Write-State -Running $true -LastReason ("generated-artifacts-failed:" + $Reason) -ChangedSpecs @()
+        Write-State -Running $true -LastReason ("generated-artifacts-failed:" + $Reason) -ChangedSpecs @() -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
         return $false
     }
 }
@@ -935,16 +955,16 @@ function Invoke-OpenClawStructuredSync {
                 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
             } catch {
             }
-            Write-State -Running $true -LastReason ("openclaw-sync-timeout:" + $Reason) -ChangedSpecs @()
+            Write-State -Running $true -LastReason ("openclaw-sync-timeout:" + $Reason) -ChangedSpecs @() -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
             return $false
         }
         if ($waitResult.exitCode -ne 0) {
-            Write-State -Running $true -LastReason ("openclaw-sync-exitcode-" + $waitResult.exitCode + ":" + $Reason) -ChangedSpecs @()
+            Write-State -Running $true -LastReason ("openclaw-sync-exitcode-" + $waitResult.exitCode + ":" + $Reason) -ChangedSpecs @() -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
             return $false
         }
         return $true
     } catch {
-        Write-State -Running $true -LastReason ("openclaw-sync-failed:" + $Reason) -ChangedSpecs @()
+        Write-State -Running $true -LastReason ("openclaw-sync-failed:" + $Reason) -ChangedSpecs @() -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
         return $false
     }
 }
@@ -968,18 +988,18 @@ function Invoke-BuildMemoryLayers {
                 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
             } catch {
             }
-            Write-State -Running $true -LastReason ("memory-layers-timeout:" + $Reason) -ChangedSpecs @()
+            Write-State -Running $true -LastReason ("memory-layers-timeout:" + $Reason) -ChangedSpecs @() -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
             return $false
         }
 
         if ($waitResult.exitCode -ne 0) {
-            Write-State -Running $true -LastReason ("memory-layers-exitcode-" + $waitResult.exitCode + ":" + $Reason) -ChangedSpecs @()
+            Write-State -Running $true -LastReason ("memory-layers-exitcode-" + $waitResult.exitCode + ":" + $Reason) -ChangedSpecs @() -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
             return $false
         }
 
         return $true
     } catch {
-        Write-State -Running $true -LastReason ("memory-layers-failed:" + $Reason) -ChangedSpecs @()
+        Write-State -Running $true -LastReason ("memory-layers-failed:" + $Reason) -ChangedSpecs @() -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
         return $false
     }
 }
@@ -1003,18 +1023,18 @@ function Invoke-BuildHandoffPack {
                 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
             } catch {
             }
-            Write-State -Running $true -LastReason ("handoff-pack-timeout:" + $Reason) -ChangedSpecs @()
+            Write-State -Running $true -LastReason ("handoff-pack-timeout:" + $Reason) -ChangedSpecs @() -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
             return $false
         }
 
         if ($waitResult.exitCode -ne 0) {
-            Write-State -Running $true -LastReason ("handoff-pack-exitcode-" + $waitResult.exitCode + ":" + $Reason) -ChangedSpecs @()
+            Write-State -Running $true -LastReason ("handoff-pack-exitcode-" + $waitResult.exitCode + ":" + $Reason) -ChangedSpecs @() -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
             return $false
         }
 
         return $true
     } catch {
-        Write-State -Running $true -LastReason ("handoff-pack-failed:" + $Reason) -ChangedSpecs @()
+        Write-State -Running $true -LastReason ("handoff-pack-failed:" + $Reason) -ChangedSpecs @() -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
         return $false
     }
 }
@@ -1036,18 +1056,18 @@ function Invoke-GenerateHygieneReport {
                 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
             } catch {
             }
-            Write-State -Running $true -LastReason ("hygiene-report-timeout") -ChangedSpecs @()
+            Write-State -Running $true -LastReason ("hygiene-report-timeout") -ChangedSpecs @() -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
             return $false
         }
 
         if ($waitResult.exitCode -ne 0) {
-            Write-State -Running $true -LastReason ("hygiene-report-exitcode-" + $waitResult.exitCode) -ChangedSpecs @()
+            Write-State -Running $true -LastReason ("hygiene-report-exitcode-" + $waitResult.exitCode) -ChangedSpecs @() -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
             return $false
         }
 
         return $true
     } catch {
-        Write-State -Running $true -LastReason ("hygiene-report-failed:" + $_) -ChangedSpecs @()
+        Write-State -Running $true -LastReason ("hygiene-report-failed:" + $_) -ChangedSpecs @() -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
         return $false
     }
 }
@@ -1079,20 +1099,80 @@ function Invoke-MemoryDream {
                 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
             } catch {
             }
-            Write-State -Running $true -LastReason ("memory-dream-timeout:" + $Reason) -ChangedSpecs @()
+            Write-State -Running $true -LastReason ("memory-dream-timeout:" + $Reason) -ChangedSpecs @() -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
             return $false
         }
 
         if ($waitResult.exitCode -ne 0) {
-            Write-State -Running $true -LastReason ("memory-dream-exitcode-" + $waitResult.exitCode + ":" + $Reason) -ChangedSpecs @()
+            Write-State -Running $true -LastReason ("memory-dream-exitcode-" + $waitResult.exitCode + ":" + $Reason) -ChangedSpecs @() -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
             return $false
         }
 
         return $true
     } catch {
-        Write-State -Running $true -LastReason ("memory-dream-failed:" + $Reason) -ChangedSpecs @()
+        Write-State -Running $true -LastReason ("memory-dream-failed:" + $Reason) -ChangedSpecs @() -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
         return $false
     }
+}
+
+function Test-ClaudeMemWorkerHealthy {
+    try {
+        $healthUri = "http://127.0.0.1:37778/api/health"
+        $response = Invoke-WebRequest -Uri $healthUri -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
+        if ($null -ne $response -and $response.StatusCode -eq 200) {
+            return $true
+        }
+        return $false
+    } catch {
+        return $false
+    }
+}
+
+function Invoke-ClaudeMemWorkerRestart {
+    if (-not (Test-Path -LiteralPath $ClaudeMemWorkerScript -PathType Leaf)) {
+        Write-WatchdogTrace -Step "claudemem.restart.skipped" -Data @{ reason = "worker-script-missing" }
+        return "claudemem-restart-skipped:worker-script-missing"
+    }
+
+    # Check if bun is available
+    $bunPath = Join-Path $UserHome "npm-global\bun"
+    if (-not (Test-Path -LiteralPath $bunPath -PathType Leaf)) {
+        $bunPath = (Get-Command bun -ErrorAction SilentlyContinue).Source
+    }
+    if (-not $bunPath -or -not (Test-Path -LiteralPath $bunPath -PathType Leaf)) {
+        Write-WatchdogTrace -Step "claudemem.restart.skipped" -Data @{ reason = "bun-not-found" }
+        return "claudemem-restart-skipped:bun-not-found"
+    }
+
+    try {
+        $cwd = Split-Path -Parent $ClaudeMemWorkerScript
+        $proc = Start-Process -FilePath $bunPath -ArgumentList $ClaudeMemWorkerScript, "start" `
+            -WorkingDirectory $cwd -WindowStyle Hidden -PassThru -ErrorAction Stop
+        Start-Sleep -Seconds 5
+        if (Test-ClaudeMemWorkerHealthy) {
+            Write-WatchdogTrace -Step "claudemem.restart.success" -Data @{ pid = $proc.Id }
+            return "claudemem-restarted:pid-$($proc.Id)"
+        }
+        Write-WatchdogTrace -Step "claudemem.restart.failed" -Data @{ pid = $proc.Id; reason = "health-check-still-failed" }
+        return "claudemem-restart-failed:health-check-still-failed"
+    } catch {
+        Write-WatchdogTrace -Step "claudemem.restart.error" -Data @{ message = $_.Exception.Message }
+        return "claudemem-restart-error:$($_.Exception.Message)"
+    }
+}
+
+function Invoke-ClaudeMemHealthCheck {
+    if ((Get-Date) -lt $script:lastClaudeMemHealthCheck.AddSeconds($ClaudeMemHealthIntervalSeconds)) {
+        return $null
+    }
+    $script:lastClaudeMemHealthCheck = Get-Date
+
+    if (Test-ClaudeMemWorkerHealthy) {
+        return $null
+    }
+
+    Write-WatchdogTrace -Step "claudemem.health.dead" -Data @{}
+    return Invoke-ClaudeMemWorkerRestart
 }
 
 function Invoke-BackgroundExtraction {
@@ -1208,7 +1288,7 @@ function Invoke-EmbeddingsRefresh {
         $script:LastEmbeddingsRunAt = Get-Date
         return $true
     } catch {
-        Write-State -Running $true -LastReason ("embeddings-refresh-failed:" + $Reason) -ChangedSpecs @()
+        Write-State -Running $true -LastReason ("embeddings-refresh-failed:" + $Reason) -ChangedSpecs @() -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
         return $false
     }
 }
@@ -1294,6 +1374,9 @@ if (-not (Acquire-WatchdogLock)) {
     return
 }
 
+# Write version so supervisor can detect drift and restart
+[System.IO.File]::WriteAllText($WatchdogVersionPath, $WatchdogVersion, [System.Text.UTF8Encoding]::new($false))
+
 try {
     Write-WatchdogTrace -Step "watchdog.enter" -Data @{
         daemon = [bool]$Daemon
@@ -1301,7 +1384,7 @@ try {
         pollSeconds = $PollSeconds
         staleMinutes = $StaleMinutes
     }
-    Write-State -Running $true -LastReason "watchdog-startup-scan" -ChangedSpecs @() -LastSyncAt (Get-LastKnownSyncAt)
+    Write-State -Running $true -LastReason "watchdog-startup-scan" -ChangedSpecs @() -LastSyncAt (Get-LastKnownSyncAt) -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
     $stamps = @{}
     $nextStampRefresh = @{}
     foreach ($spec in $WatchSpecs) {
@@ -1319,27 +1402,35 @@ try {
     Write-WatchdogTrace -Step "startup.sharedmcp.begin"
     $sharedMcpReason = Ensure-SharedMcp
     Write-WatchdogTrace -Step "startup.sharedmcp.end" -Data @{ reason = $sharedMcpReason }
+    Write-WatchdogTrace -Step "startup.claudemem.begin"
+    $claudeMemReason = Invoke-ClaudeMemHealthCheck
+    Write-WatchdogTrace -Step "startup.claudemem.end" -Data @{ reason = $claudeMemReason }
     Write-WatchdogTrace -Step "startup.bussync.begin"
     $lastSyncAt = Invoke-BusSync -Reason "watchdog-startup"
     Write-WatchdogTrace -Step "startup.bussync.end" -Data @{ lastSyncAt = if ($lastSyncAt -gt [datetime]::MinValue) { $lastSyncAt.ToString("o") } else { $null } }
     $startupStructuredSignatureAfter = Get-StructuredDataSignature
     $startupStructuredChanged = ($startupStructuredSignatureBefore -cne $startupStructuredSignatureAfter) -or $startupOpenClawSynced
+    # Always record the baseline signature on startup — needed even when files haven't changed
+    # so downstream gates (structuredSignature diff, dream consolidation) have a valid reference.
+    $script:lastHeavySyncSignature = $startupStructuredSignatureAfter
+    $script:lastHeavySyncAt = Get-Date
     if ($startupStructuredChanged -or (Test-StructuredArtifactsNeedRefresh)) {
         Invoke-StructuredRefreshPipeline -Reason "watchdog-startup" -StructuredChanged:$startupStructuredChanged
     } else {
         [void](Invoke-EmbeddingsRefresh -Reason "watchdog-startup-index-check")
     }
     if (-not [string]::IsNullOrWhiteSpace($blackboardReason)) {
-        Write-State -Running $true -LastReason $blackboardReason -ChangedSpecs @() -LastSyncAt $lastSyncAt
+        Write-State -Running $true -LastReason $blackboardReason -ChangedSpecs @() -LastSyncAt $lastSyncAt -StructuredSignature $startupStructuredSignatureAfter -HeavySyncAt $script:lastHeavySyncAt
     }
     if (-not [string]::IsNullOrWhiteSpace($sharedMcpReason)) {
-        Write-State -Running $true -LastReason $sharedMcpReason -ChangedSpecs @() -LastSyncAt $lastSyncAt
+        Write-State -Running $true -LastReason $sharedMcpReason -ChangedSpecs @() -LastSyncAt $lastSyncAt -StructuredSignature $startupStructuredSignatureAfter -HeavySyncAt $script:lastHeavySyncAt
     }
     if ($Once -and -not $Daemon) {
+        Write-State -Running $true -LastReason "watchdog-once-complete" -ChangedSpecs @() -LastSyncAt $lastSyncAt -StructuredSignature $startupStructuredSignatureAfter -HeavySyncAt $script:lastHeavySyncAt
         return
     }
 
-    Write-State -Running $true -LastReason "watchdog-idle" -ChangedSpecs @() -LastSyncAt $lastSyncAt
+    Write-State -Running $true -LastReason "watchdog-idle" -ChangedSpecs @() -LastSyncAt $lastSyncAt -StructuredSignature $startupStructuredSignatureAfter -HeavySyncAt $script:lastHeavySyncAt
     while ($true) {
         Write-WatchdogTrace -Step "loop.begin"
         Start-Sleep -Seconds $PollSeconds
@@ -1348,13 +1439,19 @@ try {
         $blackboardReason = Ensure-ObsidianBlackboardDaemon
         Write-WatchdogTrace -Step "loop.blackboard.end" -Data @{ reason = $blackboardReason }
         if (-not [string]::IsNullOrWhiteSpace($blackboardReason)) {
-            Write-State -Running $true -LastReason $blackboardReason -ChangedSpecs @() -LastSyncAt $lastSyncAt
+            Write-State -Running $true -LastReason $blackboardReason -ChangedSpecs @() -LastSyncAt $lastSyncAt -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
         }
         Write-WatchdogTrace -Step "loop.sharedmcp.begin"
         $sharedMcpReason = Ensure-SharedMcp
         Write-WatchdogTrace -Step "loop.sharedmcp.end" -Data @{ reason = $sharedMcpReason }
         if (-not [string]::IsNullOrWhiteSpace($sharedMcpReason)) {
-            Write-State -Running $true -LastReason $sharedMcpReason -ChangedSpecs @() -LastSyncAt $lastSyncAt
+            Write-State -Running $true -LastReason $sharedMcpReason -ChangedSpecs @() -LastSyncAt $lastSyncAt -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
+        }
+        Write-WatchdogTrace -Step "loop.claudemem.begin"
+        $claudeMemReason = Invoke-ClaudeMemHealthCheck
+        Write-WatchdogTrace -Step "loop.claudemem.end" -Data @{ reason = $claudeMemReason }
+        if (-not [string]::IsNullOrWhiteSpace($claudeMemReason)) {
+            Write-State -Running $true -LastReason $claudeMemReason -ChangedSpecs @() -LastSyncAt $lastSyncAt -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
         }
         $changed = New-Object System.Collections.Generic.List[string]
         Write-WatchdogTrace -Step "loop.scan.begin"
@@ -1398,6 +1495,10 @@ try {
             Write-WatchdogTrace -Step "loop.changed.bussync.end" -Data @{ reason = $reason; lastSyncAt = if ($lastSyncAt -gt [datetime]::MinValue) { $lastSyncAt.ToString("o") } else { $null } }
             $structuredSignatureAfter = Get-StructuredDataSignature
             $structuredChanged = ($structuredSignatureBefore -cne $structuredSignatureAfter)
+            if ($structuredChanged) {
+                $script:lastHeavySyncSignature = $structuredSignatureAfter
+                $script:lastHeavySyncAt = Get-Date
+            }
             if ($structuredChanged -or (Test-StructuredArtifactsNeedRefresh)) {
                 Write-WatchdogTrace -Step "loop.changed.refresh.begin" -Data @{ reason = $reason; structuredChanged = [bool]$structuredChanged }
                 Invoke-StructuredRefreshPipeline -Reason $reason -StructuredChanged:$structuredChanged
@@ -1405,13 +1506,13 @@ try {
             } else {
                 [void](Invoke-EmbeddingsRefresh -Reason ($reason + "-index-check"))
             }
-            Write-State -Running $true -LastReason $reason -ChangedSpecs $changed.ToArray() -LastSyncAt $lastSyncAt
+            Write-State -Running $true -LastReason $reason -ChangedSpecs $changed.ToArray() -LastSyncAt $lastSyncAt -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
             continue
         }
 
         if (Test-StructuredArtifactsNeedRefresh) {
             $lastSyncAt = Invoke-ArtifactCatchup -Reason "watchdog-artifact-refresh"
-            Write-State -Running $true -LastReason "watchdog-artifact-refresh" -ChangedSpecs @() -LastSyncAt $lastSyncAt
+            Write-State -Running $true -LastReason "watchdog-artifact-refresh" -ChangedSpecs @() -LastSyncAt $lastSyncAt -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
             continue
         }
 
@@ -1420,16 +1521,20 @@ try {
             $lastSyncAt = Invoke-BusSync -Reason "watchdog-stale-refresh"
             $structuredSignatureAfter = Get-StructuredDataSignature
             $structuredChanged = ($structuredSignatureBefore -cne $structuredSignatureAfter)
+            if ($structuredChanged) {
+                $script:lastHeavySyncSignature = $structuredSignatureAfter
+                $script:lastHeavySyncAt = Get-Date
+            }
             if ($structuredChanged -or (Test-StructuredArtifactsNeedRefresh)) {
                 Invoke-StructuredRefreshPipeline -Reason "watchdog-stale-refresh" -StructuredChanged:$structuredChanged
             } else {
                 [void](Invoke-EmbeddingsRefresh -Reason "watchdog-stale-refresh-index-check")
             }
-            Write-State -Running $true -LastReason "watchdog-stale-refresh" -ChangedSpecs @() -LastSyncAt $lastSyncAt
+            Write-State -Running $true -LastReason "watchdog-stale-refresh" -ChangedSpecs @() -LastSyncAt $lastSyncAt -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
             continue
         }
 
-        Write-State -Running $true -LastReason "watchdog-idle" -ChangedSpecs @() -LastSyncAt $lastSyncAt
+        Write-State -Running $true -LastReason "watchdog-idle" -ChangedSpecs @() -LastSyncAt $lastSyncAt -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
 
         if (-not $Daemon) {
             break
