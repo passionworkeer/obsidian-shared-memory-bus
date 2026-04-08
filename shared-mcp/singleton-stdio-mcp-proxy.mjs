@@ -287,7 +287,8 @@ function killZombieNpxProcesses() {
   const zombiePatterns = [
     '@upstash/context7-mcp',
     '@modelcontextprotocol/server-sequential-thinking',
-    '@playwright/mcp',
+    '@playwright/mcp',         // matches npx wrapper commands
+    '@playwright/mcp/cli.js',   // matches reparented playwright CLI child processes
   ];
   try {
     const { execSync } = require('node:child_process');
@@ -308,7 +309,7 @@ function killZombieNpxProcesses() {
       for (const pattern of zombiePatterns) {
         if (cmdField.includes(pattern)) {
           try {
-            execSync(`taskkill /F /PID ${pid}`, { windowsHide: true, timeout: 3000 });
+            execSync(`taskkill /F /T /PID ${pid}`, { windowsHide: true, timeout: 3000 });
             log(`killed zombie npx process ${pid} (${pattern})`);
           } catch {
           }
