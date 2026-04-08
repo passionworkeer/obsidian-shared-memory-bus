@@ -4,6 +4,24 @@ import http from 'node:http';
 import process from 'node:process';
 import { spawn } from 'node:child_process';
 
+function killTree(pid) {
+  if (!pid || pid <= 0) {
+    return;
+  }
+  const isWindows = process.platform === 'win32';
+  try {
+    if (isWindows) {
+      // /T kills the process and all its children (process tree)
+      spawn('taskkill', ['/T', '/PID', String(pid)], { windowsHide: true });
+    } else {
+      try {
+        process.kill(-pid, 'SIGTERM');
+      } catch {
+      }
+    }
+  } catch {
+  }
+}
 function parseArgs(argv) {
   const parsed = new Map();
   for (let index = 2; index < argv.length; index += 1) {
@@ -75,7 +93,6 @@ process.on('unhandledRejection', (reason) => {
 });
 
 function log(message) {
-  // eslint-disable-next-line no-console
   console.log(`[shared-mcp:${serverId}] ${message}`);
 }
 
@@ -133,6 +150,10 @@ function teardownChild(reason) {
     currentChild.removeAllListeners();
   } catch {
   }
+
+  // Kill the entire process tree so no grandchild zombies survive.
+  // (child.kill() alone only kills the shell; grandchild mcpvault survives.)
+  killTree(currentChild.pid);
 }
 
 function scheduleRestart(reason) {
@@ -231,61 +252,11 @@ function sendNotification(message) {
   child.stdin.write(`${JSON.stringify(message)}\n`, 'utf8');
 }
 
-function tokenizeCommand(cmd) {
-  const tokens = [];
-  let current = '';
-  let inSingleQuote = false;
-  let inDoubleQuote = false;
-  let escaped = false;
-
-  for (let i = 0; i < cmd.length; i++) {
-    const ch = cmd[i];
-
-    if (escaped) {
-      current += ch;
-      escaped = false;
-      continue;
-    }
-
-    if (ch === '\\' && !inSingleQuote) {
-      escaped = true;
-      continue;
-    }
-
-    if (ch === "'" && !inDoubleQuote) {
-      inSingleQuote = !inSingleQuote;
-      continue;
-    }
-
-    if (ch === '"' && !inSingleQuote) {
-      inDoubleQuote = !inDoubleQuote;
-      continue;
-    }
-
-    if (ch === ' ' && !inSingleQuote && !inDoubleQuote) {
-      if (current.length > 0) {
-        tokens.push(current);
-        current = '';
-      }
-      continue;
-    }
-
-    current += ch;
-  }
-
-  if (current.length > 0) {
-    tokens.push(current);
-  }
-
-  return tokens;
-}
-
 function spawnChildProcess() {
   clearRestartTimer();
   log(`starting singleton child via: ${stdioCommand}`);
-  const [executable, ...cmdArgs] = tokenizeCommand(stdioCommand);
-  child = spawn(executable, cmdArgs, {
-    shell: false,
+  child = spawn(stdioCommand, {
+    shell: true,
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
     env: {
@@ -362,13 +333,6 @@ async function ensureInitialized(protocolVersion = defaultProtocolVersion) {
       return initResponse;
     } catch (error) {
       teardownChild(`bootstrap failed: ${error.message}`);
-      if (child && !child.killed) {
-        try {
-          child.kill();
-        } catch {
-        }
-      }
-      child = null;
       throw error;
     } finally {
       initPromise = null;
@@ -592,7 +556,7 @@ function shutdown(signal) {
 
   if (child) {
     try {
-      child.kill();
+      killTree(child.pid);
     } catch {
     }
   }
