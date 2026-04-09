@@ -1,6 +1,6 @@
 # ADR-002: Unified Memory Architecture v2
 
-**Status**: Draft
+**Status**: Active
 **Date**: 2026-04-03
 **Deciders**: Architect
 **Supersedes**: ADR-001
