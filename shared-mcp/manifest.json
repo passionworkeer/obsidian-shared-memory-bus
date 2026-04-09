@@ -14,7 +14,10 @@
       "mode": "shared",
       "port": 9331,
       "probeType": "mcp-initialize",
-      "stdioCommandWindows": "npx -y @upstash/context7-mcp@latest",
+      "stdioCommandCandidatesWindows": [
+        "context7-mcp.cmd",
+        "npx -y @upstash/context7-mcp@latest"
+      ],
       "stdioCommandPosix": "npx -y @upstash/context7-mcp@latest",
       "notes": "Stateless documentation/code search MCP. Strong candidate for one shared instance."
     },
@@ -44,7 +47,10 @@
       "mode": "shared",
       "port": 9334,
       "probeType": "mcp-initialize",
-      "stdioCommandWindows": "npx -y @modelcontextprotocol/server-sequential-thinking@latest",
+      "stdioCommandCandidatesWindows": [
+        "mcp-server-sequential-thinking.cmd",
+        "npx -y @modelcontextprotocol/server-sequential-thinking@latest"
+      ],
       "stdioCommandPosix": "npx -y @modelcontextprotocol/server-sequential-thinking@latest",
       "notes": "Mostly stateless reasoning helper. Safe to centralize."
     },
@@ -82,7 +88,11 @@
       "mode": "optional",
       "port": 9337,
       "healthPath": "/mcp",
-      "launchCommand": "npx @playwright/mcp@latest --host 127.0.0.1 --port 9337 --headless --isolated --allowed-hosts=*",
+      "launchCommandCandidatesWindows": [
+        "playwright-mcp.cmd --host 127.0.0.1 --port 9337 --headless --isolated --allowed-hosts=*",
+        "npx @playwright/mcp@latest --host 127.0.0.1 --port 9337 --headless --isolated --allowed-hosts=*"
+      ],
+      "launchCommandPosix": "npx @playwright/mcp@latest --host 127.0.0.1 --port 9337 --headless --isolated --allowed-hosts=*",
       "probeType": "mcp-initialize",
       "notes": "Standalone Playwright MCP HTTP server on 9337. Multiple clients can share one backend while keeping isolated MCP sessions and browser profiles."
     },

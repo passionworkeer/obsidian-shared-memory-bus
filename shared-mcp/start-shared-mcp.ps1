@@ -245,25 +245,100 @@ function Resolve-ManagedRuntimeFile {
     throw "Unable to resolve runtime file from candidates: $([string]::Join(', ', $RelativeCandidates))"
 }
 
-function Get-ServerCommandTemplate {
+function Get-ServerCommandTemplates {
     param(
         [Parameter(Mandatory = $true)]$Server,
         [Parameter(Mandatory = $true)][string]$BaseProperty
     )
 
     $propertyNames = if (Test-SharedIsWindows) {
-        @("${BaseProperty}Windows", $BaseProperty)
+        @("${BaseProperty}CandidatesWindows", "${BaseProperty}Windows", "${BaseProperty}Candidates", $BaseProperty)
     } else {
-        @("${BaseProperty}Posix", $BaseProperty)
+        @("${BaseProperty}CandidatesPosix", "${BaseProperty}Posix", "${BaseProperty}Candidates", $BaseProperty)
     }
 
+    $values = New-Object System.Collections.Generic.List[string]
     foreach ($propertyName in @($propertyNames)) {
         if ($Server.PSObject.Properties.Name -contains $propertyName) {
-            $value = [string]$Server.$propertyName
+            $rawValue = $Server.$propertyName
+            if ($rawValue -is [System.Collections.IEnumerable] -and -not ($rawValue -is [string])) {
+                foreach ($item in @($rawValue)) {
+                    $value = [string]$item
+                    if (-not [string]::IsNullOrWhiteSpace($value)) {
+                        $values.Add($value) | Out-Null
+                    }
+                }
+                continue
+            }
+
+            $value = [string]$rawValue
             if (-not [string]::IsNullOrWhiteSpace($value)) {
-                return $value
+                $values.Add($value) | Out-Null
             }
         }
+    }
+
+    return @($values | Select-Object -Unique)
+}
+
+function Get-CommandTemplateExecutable {
+    param([AllowEmptyString()][string]$Command)
+
+    if ([string]::IsNullOrWhiteSpace($Command)) {
+        return ""
+    }
+
+    $quotedMatch = [regex]::Match($Command, '^\s*"([^"]+)"')
+    if ($quotedMatch.Success) {
+        return $quotedMatch.Groups[1].Value
+    }
+
+    $plainMatch = [regex]::Match($Command, '^\s*([^\s]+)')
+    if ($plainMatch.Success) {
+        return $plainMatch.Groups[1].Value
+    }
+
+    return ""
+}
+
+function Test-CommandTemplateAvailable {
+    param([AllowEmptyString()][string]$Command)
+
+    $executable = Get-CommandTemplateExecutable -Command $Command
+    if ([string]::IsNullOrWhiteSpace($executable)) {
+        return $false
+    }
+
+    if (Test-Path -LiteralPath $executable -PathType Leaf) {
+        return $true
+    }
+
+    $command = Get-Command $executable -ErrorAction SilentlyContinue | Select-Object -First 1
+    return $null -ne $command
+}
+
+function Resolve-PreferredCommandTemplate {
+    param([string[]]$Templates)
+
+    $resolvedTemplates = New-Object System.Collections.Generic.List[string]
+    foreach ($template in @($Templates)) {
+        if ([string]::IsNullOrWhiteSpace([string]$template)) {
+            continue
+        }
+        $resolved = Resolve-CommandTemplate -Template ([string]$template)
+        if (-not [string]::IsNullOrWhiteSpace($resolved)) {
+            $resolvedTemplates.Add($resolved) | Out-Null
+        }
+    }
+
+    foreach ($resolved in @($resolvedTemplates)) {
+        if (Test-CommandTemplateAvailable -Command $resolved) {
+            return $resolved
+        }
+    }
+
+    if ($resolvedTemplates.Count -gt 0) {
+        return $resolvedTemplates[0]
     }
 
     return ""
@@ -365,23 +440,23 @@ function Resolve-StdioCommand {
         }
     }
 
-    $template = Get-ServerCommandTemplate -Server $Server -BaseProperty "stdioCommand"
-    if ([string]::IsNullOrWhiteSpace($template)) {
+    $templates = Get-ServerCommandTemplates -Server $Server -BaseProperty "stdioCommand"
+    if (@($templates).Count -eq 0) {
         return ""
     }
 
-    return Resolve-CommandTemplate -Template $template
+    return Resolve-PreferredCommandTemplate -Templates $templates
 }
 
 function Resolve-LaunchCommand {
     param([Parameter(Mandatory = $true)]$Server)
 
-    $template = Get-ServerCommandTemplate -Server $Server -BaseProperty "launchCommand"
-    if ([string]::IsNullOrWhiteSpace($template)) {
+    $templates = Get-ServerCommandTemplates -Server $Server -BaseProperty "launchCommand"
+    if (@($templates).Count -eq 0) {
         return ""
     }
 
-    return Resolve-CommandTemplate -Template $template
+    return Resolve-PreferredCommandTemplate -Templates $templates
 }
 
 function Get-EnvironmentValue {
