@@ -56,6 +56,7 @@ $env:AI_MEMORY_OBSIDIAN_VAULT = "D:\Your\Vault\Path"
 - Windows background launch hardening now keeps shared MCP and watchdog flows out of foreground console windows.
 - Shared proxy startup no longer passes resolved runtime environment payloads on the command line.
 - Shared MCP `start/status/stop` now recover cleanly from abandoned mutexes after interrupted runs.
+- Shared memory now exposes `memory_wake_up` for compact session bootstrap and optional verbatim snippet windows in `search_shared_memory`.
 - Portable `skill` and `thin plugin` starter templates are now included under [`templates/agents/`](templates/agents/).
 
 ## What This Is
@@ -94,6 +95,7 @@ $env:AI_MEMORY_OBSIDIAN_VAULT = "D:\Your\Vault\Path"
 - Shared retrieval worker cache introspection and cache-reset control through `memory_status` and `clear_shared_memory_search_cache`
 - Runtime embedding catalog and selection controls through `list_embedding_runtimes` and `set_embedding_runtime`, with drift detection exposed as `memory_status.embeddingIndexState`
 - Query-intent routing controls through `search_shared_memory.route`, with live route metadata surfaced as `queryIntent`, `queryRoute`, `layerCounts`, and per-result `rankMeta`
+- Optional compact wake-up context through `memory_wake_up`, plus exact-match snippet windows through `search_shared_memory.includeVerbatim`
 - Versioned memory-contract validation through `ops/check-memory-integrity.js` and live integrity reporting through `memory_status.memoryIntegrity`
 - Pressure-test and verification tooling for multi-agent setups
 - An explicit source-to-install contract with stale runtime cleanup plus Windows and portable-core CI validation

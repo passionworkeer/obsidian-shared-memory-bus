@@ -673,9 +673,23 @@
       "properties": {
         "ok": { "type": "boolean" },
         "query": { "type": "string" },
+        "error": { "type": "string" },
+        "route": { "type": "string" },
+        "status": { "type": "number" },
+        "statusText": { "type": "string" },
+        "contentType": { "type": "string" },
         "response": {
-          "type": "object",
+          "oneOf": [
+            { "type": "object" },
+            { "type": "array" },
+            { "type": "string" },
+            { "type": "null" }
+          ],
           "description": "Raw response body from claude-mem /api/search."
+        },
+        "responseText": {
+          "type": "string",
+          "description": "Truncated plain-text response body when the upstream response was not JSON."
         }
       }
     },
@@ -706,9 +720,62 @@
       "type": "object",
       "properties": {
         "ok": { "type": "boolean" },
-        "response": {
+        "error": { "type": "string" },
+        "route": {
+          "type": "string",
+          "description": "The claude-mem route that accepted or attempted the write."
+        },
+        "verifiedPersistence": {
+          "type": "boolean",
+          "description": "True when the bridge verified persistence through /api/observations after a non-success upstream response."
+        },
+        "warning": { "type": "string" },
+        "verification": {
           "type": "object",
-          "description": "Raw response body from claude-mem /api/memories."
+          "properties": {
+            "verified": { "type": "boolean" },
+            "source": { "type": "string" },
+            "reason": { "type": "string" },
+            "observation": {
+              "type": "object",
+              "properties": {
+                "id": { "type": ["number", "string"] },
+                "title": { "type": "string" },
+                "project": { "type": "string" },
+                "created_at_epoch": { "type": ["number", "null"] }
+              }
+            }
+          }
+        },
+        "response": {
+          "oneOf": [
+            { "type": "object" },
+            { "type": "array" },
+            { "type": "string" },
+            { "type": "null" }
+          ],
+          "description": "Raw response body from the attempted claude-mem write route."
+        },
+        "failures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "route": { "type": "string" },
+              "status": { "type": "number" },
+              "statusText": { "type": "string" },
+              "contentType": { "type": "string" },
+              "response": {
+                "oneOf": [
+                  { "type": "object" },
+                  { "type": "array" },
+                  { "type": "string" },
+                  { "type": "null" }
+                ]
+              },
+              "responseText": { "type": "string" }
+            }
+          }
         }
       }
     },

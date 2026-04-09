@@ -48,6 +48,7 @@ function readOptionalJson(filePath) {
  * @param {Function} params.getSearchWorkerHealth
  * @param {Function} params.readEmbeddingRuntimeSummary
  * @param {Function} params.readEmbeddingsSummary
+ * @param {Function} params.refreshEmbeddingMetricsFromSummary
  * @param {Function} params.buildEmbeddingIndexState
  * @param {Function} params.readMemoryIntegritySummary
  * @param {Function} params.readMemoryHygieneReport
@@ -55,6 +56,110 @@ function readOptionalJson(filePath) {
  * @param {Function} params.getClaudeMemHealth
  */
 export function createMemoryStatus(params) {
+  function clampText(value, maxLength = 160) {
+    const text = String(value || "").replace(/\s+/g, " ").trim();
+    if (!text) {
+      return "";
+    }
+    if (text.length <= maxLength) {
+      return text;
+    }
+    return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+  }
+
+  function compactUnique(items, maxItems = 3, maxLength = 160) {
+    const results = [];
+    const seen = new Set();
+    for (const item of Array.isArray(items) ? items : []) {
+      const normalized = clampText(item, maxLength);
+      if (!normalized) {
+        continue;
+      }
+      const key = normalized.toLowerCase();
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      results.push(normalized);
+      if (results.length >= maxItems) {
+        break;
+      }
+    }
+    return results;
+  }
+
+  function resolveGeneratedDir(workspaceRoot) {
+    if (workspaceRoot && fs.existsSync(path.join(workspaceRoot, "00-System", "ai-memory", "generated"))) {
+      return path.join(workspaceRoot, "00-System", "ai-memory", "generated");
+    }
+    return params.GENERATED_ROOT;
+  }
+
+  async function buildWakeUpPack(args = {}) {
+    const workspaceRoot = args.workspace_root || params.VAULT_ROOT;
+    const generatedDir = resolveGeneratedDir(workspaceRoot);
+    const maxItems = Math.max(1, Math.min(6, Number(args.max_items) || 3));
+    const includeRecentActivity = args.include_recent_activity !== false;
+
+    const handoff = readOptionalJson(path.join(generatedDir, "HANDOFF.json")) || {};
+    const layers = readOptionalJson(path.join(generatedDir, "MEMORY-LAYERS.json")) || {};
+    const meta = readOptionalJson(path.join(generatedDir, "GLOBAL-CONTEXT.meta.json")) || {};
+    const taskRecords = await loadTaskRecords(workspaceRoot);
+    const openTasks = taskRecords
+      .filter((record) => record.task_state && !["completed", "aborted", "failed"].includes(record.task_state))
+      .slice(0, maxItems);
+
+    const durableAnchors = compactUnique([
+      ...(layers.latest?.durableByScope?.user || []).map((item) => item.title),
+      ...(layers.latest?.durableByScope?.feedback || []).map((item) => item.title),
+      ...(layers.latest?.durableByScope?.project || []).map((item) => item.title),
+      ...(meta.segments || [])
+        .flatMap((segment) => Array.isArray(segment.displayedRecords) ? segment.displayedRecords.map((record) => record.title) : []),
+    ], maxItems, 180);
+
+    const recentActivity = includeRecentActivity
+      ? compactUnique([
+        ...(layers.latest?.sessionMemory || []).map((item) => item.title),
+        ...(layers.latest?.taskMemory || []).map((item) => item.title),
+        ...(layers.latest?.sharedEvents || []).map((item) => item.title),
+      ], maxItems, 180)
+      : [];
+
+    const wakeUp = {
+      detected_project: detectCurrentProject(workspaceRoot),
+      goal: clampText(handoff.goal, 220) || null,
+      next: compactUnique(handoff.next, maxItems, 180),
+      blocked: compactUnique(handoff.blocked, maxItems, 180),
+      recent_wins: compactUnique(handoff.done, maxItems, 180),
+      open_threads: compactUnique(handoff.open_threads, maxItems, 180),
+      active_tasks: openTasks.map((task) => ({
+        id: task.id || null,
+        title: clampText(task.title || "", 180) || null,
+        state: task.task_state || null,
+        tool: task.tool || null,
+      })),
+      durable_anchors: durableAnchors,
+      recent_activity: recentActivity,
+    };
+
+    wakeUp.prompt = compactUnique([
+      wakeUp.goal ? `Current goal: ${wakeUp.goal}` : "",
+      ...wakeUp.next.map((item) => `Next: ${item}`),
+      ...wakeUp.blocked.map((item) => `Blocked: ${item}`),
+      ...wakeUp.durable_anchors.map((item) => `Anchor: ${item}`),
+      ...wakeUp.recent_activity.map((item) => `Recent: ${item}`),
+    ], 8, 220);
+
+    return {
+      ok: true,
+      workspace: {
+        root: workspaceRoot,
+        generated_root: generatedDir,
+        detected_project: wakeUp.detected_project,
+      },
+      wake_up: wakeUp,
+    };
+  }
 
   function detectCurrentProject(workspaceRoot) {
     const gitConfig = path.join(workspaceRoot, ".git", "config");
@@ -105,6 +210,7 @@ export function createMemoryStatus(params) {
       getSearchWorkerHealth,
       readEmbeddingRuntimeSummary,
       readEmbeddingsSummary,
+      refreshEmbeddingMetricsFromSummary,
       buildEmbeddingIndexState,
       readMemoryIntegritySummary,
       readMemoryHygieneReport,
@@ -114,6 +220,7 @@ export function createMemoryStatus(params) {
 
     const embeddingRuntime = readEmbeddingRuntimeSummary();
     const embeddings = readEmbeddingsSummary();
+    refreshEmbeddingMetricsFromSummary(embeddings);
     const embeddingIndexState = buildEmbeddingIndexState(embeddingRuntime, embeddings);
     const memoryIntegrity = readMemoryIntegritySummary();
     const workerHealth = await getSearchWorkerHealth();
@@ -236,6 +343,10 @@ export function createMemoryStatus(params) {
     });
   }
 
+  async function handleMemoryWakeUp(args) {
+    return jsonResult(await buildWakeUpPack(args));
+  }
+
   return {
     tools: [
       {
@@ -267,10 +378,38 @@ export function createMemoryStatus(params) {
           },
         },
       },
+      {
+        name: "memory_wake_up",
+        description:
+          "Build a very small session bootstrap pack from the canonical shared memory bus. Use this when you want a compact wake-up context before doing deeper searches.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            workspace_root: {
+              type: "string",
+              description:
+                "Optional workspace or vault path. If omitted, uses the canonical shared Obsidian vault.",
+            },
+            max_items: {
+              type: "number",
+              default: 3,
+              description:
+                "Maximum items to keep per compact section such as next steps, blockers, and recent threads.",
+            },
+            include_recent_activity: {
+              type: "boolean",
+              default: true,
+              description:
+                "Include a few recent session/task items in addition to durable anchors and handoff data.",
+            },
+          },
+        },
+      },
     ],
     handlers: {
       memory_status: handleMemoryStatus,
       get_memory_overview: handleGetMemoryOverview,
+      memory_wake_up: handleMemoryWakeUp,
     },
   };
 }
