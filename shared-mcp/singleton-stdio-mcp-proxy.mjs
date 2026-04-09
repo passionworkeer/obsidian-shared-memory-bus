@@ -2,9 +2,9 @@
 
 import http from 'node:http';
 import process from 'node:process';
-import { spawn, execSync } from 'node:child_process';
-import { accessSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { spawn, execSync, spawnSync } from 'node:child_process';
+import { accessSync, existsSync, readFileSync } from 'node:fs';
+import { dirname, join, normalize } from 'node:path';
 
 function killTree(pid) {
   if (!pid || pid <= 0) {
@@ -268,6 +268,67 @@ function splitCommandLine(commandText) {
   return tokens;
 }
 
+function resolveWindowsCommandPath(commandToken) {
+  if (process.platform !== 'win32' || !commandToken) {
+    return '';
+  }
+
+  if (/[\\/]/.test(commandToken) || /^[A-Za-z]:/.test(commandToken)) {
+    return existsSync(commandToken) ? commandToken : '';
+  }
+
+  try {
+    const result = spawnSync('where.exe', [commandToken], {
+      windowsHide: true,
+      encoding: 'utf8',
+      timeout: 5000,
+    });
+    if (result.status !== 0 || !result.stdout) {
+      return '';
+    }
+
+    return result.stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line && existsSync(line)) || '';
+  } catch {
+    return '';
+  }
+}
+
+function resolveWindowsCmdShimLaunchSpec(commandToken, passthroughArgs, fallbackNodeExe) {
+  const commandPath = resolveWindowsCommandPath(commandToken);
+  if (!commandPath) {
+    return null;
+  }
+
+  let content = '';
+  try {
+    content = readFileSync(commandPath, 'utf8');
+  } catch {
+    return null;
+  }
+
+  const shimMatch = content.match(
+    /"%_prog%"\s+"%(?:dp0|~dp0)%\\([^"\r\n]+\.(?:js|mjs|cjs))"/i,
+  );
+  if (!shimMatch) {
+    return null;
+  }
+
+  const scriptPath = normalize(join(dirname(commandPath), shimMatch[1].replace(/\\/g, '/')));
+  if (!existsSync(scriptPath)) {
+    return null;
+  }
+
+  const bundledNodeExe = join(dirname(commandPath), 'node.exe');
+  const effectiveNodeExe = existsSync(bundledNodeExe) ? bundledNodeExe : fallbackNodeExe;
+  return {
+    filePath: effectiveNodeExe,
+    args: [scriptPath, ...passthroughArgs],
+  };
+}
+
 function resolveStdioLaunchSpec() {
   const tokens = splitCommandLine(stdioCommand);
   if (tokens.length === 0) {
@@ -277,6 +338,9 @@ function resolveStdioLaunchSpec() {
   const nodeExe = process.env.NODE_EXE || process.execPath;
   const isWindows = process.platform === 'win32';
   const firstToken = tokens[0];
+  const resolvedFirstToken = isWindows
+    ? resolveWindowsCommandPath(firstToken) || firstToken
+    : firstToken;
 
   if (isWindows && /^npx(?:\.cmd|\.exe)?$/i.test(firstToken)) {
     const nodeDir = dirname(nodeExe);
@@ -295,14 +359,19 @@ function resolveStdioLaunchSpec() {
     }
   }
 
-  if (isWindows && /\.(js|mjs|cjs)$/i.test(firstToken)) {
+  if (isWindows && /\.(js|mjs|cjs)$/i.test(resolvedFirstToken)) {
     return {
       filePath: nodeExe,
-      args: tokens,
+      args: [resolvedFirstToken, ...tokens.slice(1)],
     };
   }
 
-  if (isWindows && /\.(cmd|bat)$/i.test(firstToken)) {
+  if (isWindows && /\.(cmd|bat)$/i.test(resolvedFirstToken)) {
+    const shimLaunchSpec = resolveWindowsCmdShimLaunchSpec(firstToken, tokens.slice(1), nodeExe);
+    if (shimLaunchSpec) {
+      return shimLaunchSpec;
+    }
+
     return {
       filePath: 'cmd.exe',
       args: ['/d', '/s', '/c', stdioCommand],
@@ -310,7 +379,7 @@ function resolveStdioLaunchSpec() {
   }
 
   return {
-    filePath: firstToken,
+    filePath: resolvedFirstToken,
     args: tokens.slice(1),
   };
 }
