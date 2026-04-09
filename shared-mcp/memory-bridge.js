@@ -19,6 +19,13 @@ function jsonResult(payload) {
   };
 }
 
+function jsonErrorResult(payload) {
+  return {
+    content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+    isError: true,
+  };
+}
+
 function errorResult(message) {
   return {
     content: [{ type: "text", text: JSON.stringify({ ok: false, error: String(message) }, null, 2) }],
@@ -55,6 +62,65 @@ function spawnProcess(executable, args, options = {}) {
   });
 }
 
+function truncateText(value, maxLength = 400) {
+  const text = String(value || "");
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return `${text.slice(0, maxLength)}...`;
+}
+
+function firstNonEmpty(values) {
+  for (const value of values) {
+    const normalized = String(value || "").trim();
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return "";
+}
+
+async function readResponseEnvelope(response) {
+  const contentType = String(response.headers.get("content-type") || "").trim();
+  const text = await response.text();
+  const trimmedText = text.trim();
+  let json = null;
+
+  if (trimmedText) {
+    try {
+      json = JSON.parse(trimmedText);
+    } catch {
+      json = null;
+    }
+  }
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    statusText: response.statusText,
+    contentType,
+    text: trimmedText,
+    json,
+  };
+}
+
+function describeClaudeMemFailure({ route, envelope }) {
+  const summary = {
+    route,
+    status: envelope.status,
+    statusText: envelope.statusText,
+    contentType: envelope.contentType,
+  };
+
+  if (envelope.json !== null) {
+    summary.response = envelope.json;
+  } else if (envelope.text) {
+    summary.responseText = truncateText(envelope.text);
+  }
+
+  return summary;
+}
+
 /**
  * @param {Object} params
  * @param {string} params.CLAUDE_MEM_BASE  - Base URL for claude-mem API (e.g. "http://127.0.0.1:37778")
@@ -64,6 +130,67 @@ function spawnProcess(executable, args, options = {}) {
  * @param {string} params.BLACKBOARD_DB_PATH
  */
 export function createMemoryBridge(params) {
+
+  async function fetchClaudeMem(route, options = {}) {
+    const response = await fetch(`${params.CLAUDE_MEM_BASE}${route}`, options);
+    return readResponseEnvelope(response);
+  }
+
+  async function verifyClaudeMemObservationInserted({ content, title, project }) {
+    try {
+      const query = new URLSearchParams({
+        limit: "25",
+      });
+
+      if (project) {
+        query.set("project", project);
+      }
+
+      const envelope = await fetchClaudeMem(`/api/observations?${query.toString()}`);
+      if (!envelope.ok || envelope.json === null || !Array.isArray(envelope.json.items)) {
+        return {
+          verified: false,
+          reason: "observations-unavailable",
+        };
+      }
+
+      const exactMatch = envelope.json.items.find((item) => {
+        const narrative = String(item?.narrative || "").trim();
+        const text = String(item?.text || "").trim();
+        const itemTitle = String(item?.title || "").trim();
+        const itemProject = String(item?.project || "").trim();
+
+        return (
+          (narrative === content || text === content)
+          && (!title || itemTitle === title)
+          && (!project || itemProject === project)
+        );
+      });
+
+      if (!exactMatch) {
+        return {
+          verified: false,
+          reason: "observation-not-found",
+        };
+      }
+
+      return {
+        verified: true,
+        source: "observations",
+        observation: {
+          id: exactMatch.id,
+          title: exactMatch.title,
+          project: exactMatch.project,
+          created_at_epoch: exactMatch.created_at_epoch,
+        },
+      };
+    } catch (error) {
+      return {
+        verified: false,
+        reason: `verification-failed: ${error.message}`,
+      };
+    }
+  }
 
   async function runBlackboardPython(payload) {
     const { PYTHON, BLACKBOARD_DB_PATH, PYTHON_SPAWN_ENV, withPythonArgs } = params;
@@ -141,12 +268,22 @@ finally:
       return errorResult("query is required");
     }
     const limit = Math.max(1, Number(args.limit) || 5);
-    const url = `${params.CLAUDE_MEM_BASE}/api/search?query=${encodeURIComponent(query)}&limit=${limit}`;
-    const response = await fetch(url);
+    const route = `/api/search?query=${encodeURIComponent(query)}&limit=${limit}`;
+    const response = await fetchClaudeMem(route);
+
+    if (!response.ok) {
+      return jsonErrorResult({
+        ok: false,
+        query,
+        error: "claude-mem query failed",
+        ...describeClaudeMemFailure({ route, envelope: response }),
+      });
+    }
+
     return jsonResult({
       ok: true,
       query,
-      response: await response.json(),
+      response: response.json ?? response.text,
     });
   }
 
@@ -155,14 +292,84 @@ finally:
     if (!content) {
       return errorResult("content is required");
     }
-    const response = await fetch(`${params.CLAUDE_MEM_BASE}/api/memories`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content, metadata: args.metadata || {} }),
-    });
-    return jsonResult({
-      ok: true,
-      response: await response.json(),
+
+    const metadata = args.metadata && typeof args.metadata === "object" ? args.metadata : {};
+    const title = firstNonEmpty([
+      metadata.title,
+      metadata.summary,
+      metadata.subject,
+      metadata.label,
+    ]);
+    const project = firstNonEmpty([
+      metadata.project,
+      metadata.workspace,
+      metadata.repo,
+      metadata.repository,
+      metadata.sourceProject,
+    ]);
+
+    const attempts = [
+      {
+        route: "/api/memory/save",
+        buildBody: () => ({
+          text: content,
+          ...(title ? { title } : {}),
+          ...(project ? { project } : {}),
+        }),
+      },
+      {
+        route: "/api/memories",
+        buildBody: () => ({
+          content,
+          metadata,
+        }),
+      },
+    ];
+
+    const failures = [];
+
+    for (const attempt of attempts) {
+      const envelope = await fetchClaudeMem(attempt.route, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(attempt.buildBody()),
+      });
+
+      if (envelope.ok) {
+        return jsonResult({
+          ok: true,
+          route: attempt.route,
+          verifiedPersistence: false,
+          response: envelope.json ?? envelope.text ?? null,
+        });
+      }
+
+      failures.push(describeClaudeMemFailure({ route: attempt.route, envelope }));
+
+      if (attempt.route === "/api/memory/save") {
+        const verification = await verifyClaudeMemObservationInserted({ content, title, project });
+        if (verification.verified) {
+          return jsonResult({
+            ok: true,
+            route: attempt.route,
+            verifiedPersistence: true,
+            warning:
+              "claude-mem returned a non-success status after persisting the observation; treating as success after verification",
+            verification,
+            response: envelope.json ?? envelope.text ?? null,
+          });
+        }
+      }
+
+      if (envelope.status !== 404) {
+        break;
+      }
+    }
+
+    return jsonErrorResult({
+      ok: false,
+      error: "claude-mem insert failed",
+      failures,
     });
   }
 

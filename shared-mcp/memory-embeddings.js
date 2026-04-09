@@ -58,6 +58,7 @@ function spawnProcess(executable, args, options = {}) {
  * @param {Object}  params.METRICS                 - Shared metrics object (modified in-place)
  * @param {Function} params.firstNonEmptyEnv
  * @param {Function} params.readEmbeddingsSummary
+ * @param {Function} params.refreshEmbeddingMetricsFromSummary
  * @param {Function} params.readEmbeddingRuntimeSummary
  * @param {Function} params.readEmbeddingRuntimeCatalog
  * @param {Function} params.buildEmbeddingIndexState
@@ -73,7 +74,12 @@ function spawnProcess(executable, args, options = {}) {
 export function createMemoryEmbeddings(params) {
 
   async function handleRebuildMemoryEmbeddings(args) {
-    const { EMBEDDINGS_SCRIPT, VAULT_ROOT, RUNTIME_ENV, METRICS } = params;
+    const {
+      EMBEDDINGS_SCRIPT,
+      VAULT_ROOT,
+      RUNTIME_ENV,
+      refreshEmbeddingMetricsFromSummary,
+    } = params;
 
     if (!fs.existsSync(EMBEDDINGS_SCRIPT)) {
       throw new Error(`embeddings-script-missing: ${EMBEDDINGS_SCRIPT}`);
@@ -98,7 +104,7 @@ export function createMemoryEmbeddings(params) {
     // Refresh metrics after rebuild
     try {
       const summary = params.readEmbeddingsSummary();
-      METRICS.embeddings_index_size = summary.count || 0;
+      refreshEmbeddingMetricsFromSummary(summary);
     } catch {
       // Non-fatal — metrics refresh failure should not break the response
     }
@@ -113,8 +119,15 @@ export function createMemoryEmbeddings(params) {
   }
 
   async function handleListEmbeddingRuntimes() {
-    const { readEmbeddingsSummary, readEmbeddingRuntimeCatalog, annotateEmbeddingRuntimeCatalog, buildEmbeddingIndexState } = params;
+    const {
+      readEmbeddingsSummary,
+      refreshEmbeddingMetricsFromSummary,
+      readEmbeddingRuntimeCatalog,
+      annotateEmbeddingRuntimeCatalog,
+      buildEmbeddingIndexState,
+    } = params;
     const embeddings = readEmbeddingsSummary();
+    refreshEmbeddingMetricsFromSummary(embeddings);
     const catalog = annotateEmbeddingRuntimeCatalog(readEmbeddingRuntimeCatalog(), embeddings);
     return jsonResult({
       ok: true,
@@ -130,6 +143,7 @@ export function createMemoryEmbeddings(params) {
       EMBEDDING_RUNTIME_DEFAULTS,
       readEmbeddingRuntimeSummary,
       readEmbeddingsSummary,
+      refreshEmbeddingMetricsFromSummary,
       buildEmbeddingIndexState,
       annotateEmbeddingRuntimeCatalog,
       buildEmbeddingRuntimeRestartSignature,
@@ -155,6 +169,7 @@ export function createMemoryEmbeddings(params) {
     });
 
     const embeddings = readEmbeddingsSummary();
+    refreshEmbeddingMetricsFromSummary(embeddings);
     const catalog = annotateEmbeddingRuntimeCatalog(payload.catalog, embeddings);
     const runtimeSignatureBefore = buildEmbeddingRuntimeRestartSignature(previousRuntime);
     const runtimeSignatureAfter = buildEmbeddingRuntimeRestartSignature(catalog.runtime || payload.runtime || {});
