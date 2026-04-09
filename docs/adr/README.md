@@ -9,4 +9,3 @@ Records of significant architectural decisions made for this project.
 See also:
 - [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md) — Current system architecture overview
 - [`docs/MEMORY-ARCHITECTURE-CRITIQUE.md`](../MEMORY-ARCHITECTURE-CRITIQUE.md) — Known limitations and design debt
-- [`docs/ROADMAP.md`](../ROADMAP.md) — Forward-looking development roadmap
