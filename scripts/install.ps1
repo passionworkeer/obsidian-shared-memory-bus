@@ -977,11 +977,86 @@ function Test-WindowsPowerShellScriptRunning {
     ).Count -gt 0
 }
 
+function Write-LegacyOpenClawGatewayShim {
+    param(
+        [Parameter(Mandatory = $true)][string]$LegacyActionPath,
+        [Parameter(Mandatory = $true)][string]$CurrentOpenClawHome
+    )
+
+    $result = [ordered]@{
+        created = $false
+        path = $LegacyActionPath
+        target = ""
+        error = ""
+    }
+
+    try {
+        $extension = [System.IO.Path]::GetExtension($LegacyActionPath).ToLowerInvariant()
+        $currentStartGatewayPath = Join-SharedPath @($CurrentOpenClawHome, "start-gateway.ps1")
+        if (-not (Test-Path -LiteralPath $currentStartGatewayPath -PathType Leaf)) {
+            $result.error = "current-start-gateway-missing"
+            return [pscustomobject]$result
+        }
+
+        $parentPath = Split-Path -Parent $LegacyActionPath
+        if ([string]::IsNullOrWhiteSpace($parentPath)) {
+            $result.error = "legacy-action-parent-missing"
+            return [pscustomobject]$result
+        }
+
+        Ensure-Directory -Path $parentPath
+        $result.target = $currentStartGatewayPath
+
+        switch ($extension) {
+            ".cmd" {
+                $shimContent = @"
+@echo off
+setlocal
+set "TARGET_PS1=$currentStartGatewayPath"
+if exist "%TARGET_PS1%" (
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%TARGET_PS1%" >nul 2>nul
+)
+exit /b 0
+"@.Trim() + "`r`n"
+                [System.IO.File]::WriteAllText($LegacyActionPath, $shimContent, $utf8NoBom)
+                $result.created = $true
+            }
+            ".ps1" {
+                $shimContent = @"
+\$ErrorActionPreference = "SilentlyContinue"
+\$target = "$currentStartGatewayPath"
+if (Test-Path -LiteralPath \$target -PathType Leaf) {
+    Start-Process powershell.exe -ArgumentList @(
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-WindowStyle", "Hidden",
+        "-File", \$target
+    ) -WindowStyle Hidden | Out-Null
+}
+"@.Trim() + "`r`n"
+                [System.IO.File]::WriteAllText($LegacyActionPath, $shimContent, $utf8NoBom)
+                $result.created = $true
+            }
+            default {
+                $result.error = "unsupported-legacy-openclaw-action-extension:$extension"
+            }
+        }
+    } catch {
+        $result.error = $_.Exception.Message
+    }
+
+    return [pscustomobject]$result
+}
+
 function Disable-StaleOpenClawGatewayTask {
     $result = [ordered]@{
         taskFound = $false
         stale = $false
         disabled = $false
+        shimCreated = $false
+        shimPath = ""
+        shimTarget = ""
+        shimError = ""
         actionPath = ""
         reason = ""
         disableError = ""
@@ -1074,6 +1149,14 @@ function Disable-StaleOpenClawGatewayTask {
             } catch {
                 $result.disableError = $_.Exception.Message
             }
+        }
+
+        if ($actionMissing -and -not [string]::IsNullOrWhiteSpace($resolvedActionPath)) {
+            $shimResult = Write-LegacyOpenClawGatewayShim -LegacyActionPath $resolvedActionPath -CurrentOpenClawHome $openClawHome
+            $result.shimCreated = [bool]$shimResult.created
+            $result.shimPath = [string]$shimResult.path
+            $result.shimTarget = [string]$shimResult.target
+            $result.shimError = [string]$shimResult.error
         }
     } catch {
         $result.error = $_.Exception.Message
@@ -1480,6 +1563,8 @@ if ((Test-SharedIsWindows) -and (-not $DryRun)) {
     $openClawGatewayTaskRepair = Disable-StaleOpenClawGatewayTask
     if ([bool]$openClawGatewayTaskRepair.disabled) {
         Write-Output ("Disabled stale OpenClaw Gateway scheduled task ({0}): {1}" -f $openClawGatewayTaskRepair.reason, $openClawGatewayTaskRepair.actionPath)
+    } elseif ([bool]$openClawGatewayTaskRepair.shimCreated) {
+        Write-Output ("Installed legacy OpenClaw Gateway shim for stale task ({0}): {1} -> {2}" -f $openClawGatewayTaskRepair.reason, $openClawGatewayTaskRepair.shimPath, $openClawGatewayTaskRepair.shimTarget)
     } elseif ([bool]$openClawGatewayTaskRepair.stale -and -not [string]::IsNullOrWhiteSpace([string]$openClawGatewayTaskRepair.disableError)) {
         Write-Warning ("Detected stale OpenClaw Gateway scheduled task but could not disable it automatically: {0}" -f $openClawGatewayTaskRepair.disableError)
     }
