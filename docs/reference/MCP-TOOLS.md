@@ -361,6 +361,7 @@ Queries the local `claude-mem` semantic memory API directly at `http://127.0.0.1
 - Calls HTTP API on `http://127.0.0.1:37778/api/search`.
 - Node.js `fetch` (no external HTTP library needed).
 - The `claude-mem` service must be running locally (port 37778).
+- On upstream non-success responses, the tool returns a structured failure payload with `route`, `status`, `statusText`, `contentType`, plus either `response` or `responseText`.
 - No timeout set on the fetch call.
 
 ---
@@ -381,6 +382,18 @@ Inserts a new item into the local `claude-mem` store.
 ```json
 {
   "ok": true,
+  "route": "/api/memory/save",
+  "verifiedPersistence": true,
+  "warning": "...",
+  "verification": {
+    "verified": true,
+    "source": "observations",
+    "observation": {
+      "id": 2482,
+      "title": "codex-bridge-probe",
+      "project": "obsidian-shared-memory-bus"
+    }
+  },
   "response": {
     "id": "...",
     "created": true
@@ -389,7 +402,11 @@ Inserts a new item into the local `claude-mem` store.
 ```
 
 **Notes**
-- Calls HTTP POST to `http://127.0.0.1:37778/api/memories`.
+- Primary write path is HTTP POST `http://127.0.0.1:37778/api/memory/save`.
+- If the current worker returns `404` on the modern route, falls back to legacy `http://127.0.0.1:37778/api/memories`.
+- Derives `title` and `project` from common metadata keys when present (`title`, `summary`, `subject`, `project`, `workspace`, `repo`, etc.).
+- If `/api/memory/save` returns a non-success status after the observation is already persisted, the bridge verifies the write through `/api/observations` and returns `verifiedPersistence: true`.
+- On non-success results that cannot be verified, the tool returns a structured failure payload with `failures[]`.
 - Node.js `fetch` with `Content-Type: application/json`.
 - `claude-mem` service must be running.
 

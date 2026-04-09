@@ -1146,8 +1146,8 @@ function Invoke-ClaudeMemWorkerRestart {
 
     try {
         $cwd = Split-Path -Parent $ClaudeMemWorkerScript
-        $proc = Start-Process -FilePath $bunPath -ArgumentList $ClaudeMemWorkerScript, "start" `
-            -WorkingDirectory $cwd -WindowStyle Hidden -PassThru -ErrorAction Stop
+        $proc = Start-SharedBackgroundProcess -FilePath $bunPath -ArgumentList @($ClaudeMemWorkerScript, "start") `
+            -WorkingDirectory $cwd
         Start-Sleep -Seconds 5
         if (Test-ClaudeMemWorkerHealthy) {
             Write-WatchdogTrace -Step "claudemem.restart.success" -Data @{ pid = $proc.Id }
@@ -1332,6 +1332,48 @@ function Get-ExpectedSharedMcpPorts {
     return @($records.ToArray())
 }
 
+function Test-SharedMcpBootstrapRunning {
+    if (-not (Test-SharedIsWindows)) {
+        return $false
+    }
+
+    $scriptPaths = @()
+    foreach ($candidate in @($SharedMcpStartScript, (Join-Path $SharedMcpRoot "start-shared-mcp.ps1"))) {
+        if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            $scriptPaths += (Get-Item -LiteralPath $candidate).FullName.ToLowerInvariant()
+        }
+    }
+
+    if ($scriptPaths.Count -eq 0) {
+        return $false
+    }
+
+    $matches = @(
+        Get-CimInstance Win32_Process -Filter "Name='powershell.exe' or Name='pwsh.exe'" -ErrorAction SilentlyContinue |
+            Where-Object {
+                $commandLine = [string]$_.CommandLine
+                if ([string]::IsNullOrWhiteSpace($commandLine)) {
+                    return $false
+                }
+
+                $lowered = $commandLine.ToLowerInvariant()
+                if (-not $lowered.Contains("-file")) {
+                    return $false
+                }
+
+                foreach ($path in @($scriptPaths)) {
+                    if ($lowered.Contains($path)) {
+                        return $true
+                    }
+                }
+
+                return $false
+            }
+    )
+
+    return $matches.Count -gt 0
+}
+
 function Ensure-SharedMcp {
     if (-not (Test-Path -LiteralPath $SharedMcpStartScript -PathType Leaf)) {
         return ""
@@ -1349,6 +1391,10 @@ function Ensure-SharedMcp {
 
     if ($missing.Count -eq 0) {
         return ""
+    }
+
+    if (Test-SharedMcpBootstrapRunning) {
+        return "shared-mcp-bootstrap-already-running:" + ([string]::Join(",", $missing))
     }
 
     try {
