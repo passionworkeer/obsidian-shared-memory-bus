@@ -16,9 +16,43 @@ if (-not $helperPath) {
 
 . $helperPath
 
+function Test-UnsafeDirectScriptCommand {
+    param([Parameter(Mandatory = $true)][string]$CommandText)
+
+    $trimmed = $CommandText.Trim()
+    if ([string]::IsNullOrWhiteSpace($trimmed)) {
+        return $false
+    }
+
+    $firstToken = ""
+    if ($trimmed.StartsWith('"')) {
+        $closingQuote = $trimmed.IndexOf('"', 1)
+        if ($closingQuote -gt 0) {
+            $firstToken = $trimmed.Substring(1, $closingQuote - 1)
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($firstToken)) {
+        $parts = $trimmed.Split(@(" "), 2, [System.StringSplitOptions]::RemoveEmptyEntries)
+        if ($parts.Length -gt 0) {
+            $firstToken = $parts[0]
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($firstToken)) {
+        return $false
+    }
+
+    $extension = [System.IO.Path]::GetExtension($firstToken)
+    return @(".js", ".mjs", ".cjs") -contains $extension.ToLowerInvariant()
+}
+
 function Resolve-MiniMaxRunner {
     $customCommand = Get-SharedEnvValue -Name "MINIMAX_MCP_COMMAND"
     if (-not [string]::IsNullOrWhiteSpace($customCommand)) {
+        if (Test-UnsafeDirectScriptCommand -CommandText $customCommand) {
+            throw "MINIMAX_MCP_COMMAND must invoke a host executable explicitly. Wrap .js/.mjs/.cjs entrypoints with node.exe or node."
+        }
         return @{
             kind = "shell"
             path = $customCommand

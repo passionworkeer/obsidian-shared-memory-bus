@@ -75,6 +75,9 @@ async function runSemanticSearchOnce({
   workspace = "",
   taskState = "",
   preferSummaries = false,
+  includeVerbatim = false,
+  snippetWindow = 220,
+  maxVerbatimPerResult = 1,
 }) {
   const { SEARCH_SCRIPT, VAULT_ROOT, PYTHON_SPAWN_ENV, PYTHON, withPythonArgs } = params;
   const normalizedRoute = SEARCH_ROUTE_VALUES.has(String(route || "").trim().toLowerCase())
@@ -104,6 +107,11 @@ async function runSemanticSearchOnce({
   }
   if (preferSummaries) {
     args.push("--prefer-summaries");
+  }
+  if (includeVerbatim) {
+    args.push("--include-verbatim");
+    args.push("--snippet-window", String(snippetWindow));
+    args.push("--max-verbatim-per-result", String(maxVerbatimPerResult));
   }
 
   const result = await spawnProcess(PYTHON.command, withPythonArgs(PYTHON, args), {
@@ -151,6 +159,9 @@ export function createMemoryRetrieval(params) {
       ? route.trim().toLowerCase()
       : "auto";
     const limit = Math.max(1, Number(args.limit) || 8);
+    const includeVerbatim = Boolean(args.includeVerbatim);
+    const snippetWindow = Math.max(80, Math.min(600, Number(args.snippetWindow) || 220));
+    const maxVerbatimPerResult = Math.max(1, Math.min(5, Number(args.maxVerbatimPerResult) || 1));
 
     const searchStartMs = Date.now();
     const normalizedMode = mode.trim().toLowerCase() || "hybrid";
@@ -170,6 +181,9 @@ export function createMemoryRetrieval(params) {
           workspace: String(args.workspace || ""),
           taskState: String(args.taskState || ""),
           preferSummaries: Boolean(args.preferSummaries),
+          includeVerbatim,
+          snippetWindow,
+          maxVerbatimPerResult,
         },
         120000
       );
@@ -191,6 +205,9 @@ export function createMemoryRetrieval(params) {
             workspace: String(args.workspace || ""),
             taskState: String(args.taskState || ""),
             preferSummaries: Boolean(args.preferSummaries),
+            includeVerbatim,
+            snippetWindow,
+            maxVerbatimPerResult,
           })
         );
       } catch (_fallbackError) {
@@ -468,6 +485,21 @@ Only include records that are genuinely relevant. Return fewer than max_results 
             workspace: { type: "string", description: "Optional workspace filter." },
             taskState: { type: "string", description: "Optional task state filter." },
             preferSummaries: { type: "boolean", default: false, description: "Boost session/summary records slightly in ranking." },
+            includeVerbatim: {
+              type: "boolean",
+              default: false,
+              description: "When true, attach query-aware exact snippet windows from the matched record text.",
+            },
+            snippetWindow: {
+              type: "number",
+              default: 220,
+              description: "Approximate character window to keep around each exact snippet match.",
+            },
+            maxVerbatimPerResult: {
+              type: "number",
+              default: 1,
+              description: "Maximum exact snippet windows to return per result when includeVerbatim is enabled.",
+            },
           },
           required: ["query"],
         },
