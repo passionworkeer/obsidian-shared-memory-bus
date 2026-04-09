@@ -191,7 +191,10 @@ function Get-MemoryStatusSnapshot {
 function Invoke-MemoryToolSnapshot {
     param(
         [Parameter(Mandatory = $true)][string]$ToolName,
-        [AllowNull()]$Arguments = $null
+        [AllowNull()]$Arguments = $null,
+        [int]$TimeoutSeconds = 20,
+        [int]$MaxAttempts = 1,
+        [int]$RetryDelayMilliseconds = 0
     )
 
     $payload = @{
@@ -204,40 +207,43 @@ function Invoke-MemoryToolSnapshot {
         }
     } | ConvertTo-Json -Depth 10 -Compress
 
-    try {
-        $response = Invoke-RestMethod -Uri "http://127.0.0.1:9338/mcp" -Method Post -TimeoutSec 20 -ContentType "application/json" -Body $payload
-        $errorProperty = $response.PSObject.Properties["error"]
-        if ($null -ne $errorProperty -and $null -ne $response.error) {
+    $attemptCount = [Math]::Max(1, $MaxAttempts)
+    $lastError = ""
+    for ($attempt = 1; $attempt -le $attemptCount; $attempt++) {
+        try {
+            $response = Invoke-RestMethod -Uri "http://127.0.0.1:9338/mcp" -Method Post -TimeoutSec $TimeoutSeconds -ContentType "application/json" -Body $payload
+            $errorProperty = $response.PSObject.Properties["error"]
+            if ($null -ne $errorProperty -and $null -ne $response.error) {
+                throw [System.InvalidOperationException]::new([string]$response.error.message)
+            }
+
+            $content = @()
+            if ($null -ne $response.result -and $null -ne $response.result.content) {
+                $content = @($response.result.content)
+            }
+            if ($content.Count -eq 0 -or [string]::IsNullOrWhiteSpace([string]$content[0].text)) {
+                throw [System.InvalidOperationException]::new("$ToolName returned no content")
+            }
+
             return [pscustomobject]@{
-                ok = $false
+                ok = $true
                 tool = $ToolName
-                error = [string]$response.error.message
+                attempts = $attempt
+                payload = ($content[0].text | ConvertFrom-Json)
+            }
+        } catch {
+            $lastError = $_.Exception.Message
+            if ($attempt -lt $attemptCount -and $RetryDelayMilliseconds -gt 0) {
+                Start-Sleep -Milliseconds $RetryDelayMilliseconds
             }
         }
+    }
 
-        $content = @()
-        if ($null -ne $response.result -and $null -ne $response.result.content) {
-            $content = @($response.result.content)
-        }
-        if ($content.Count -eq 0 -or [string]::IsNullOrWhiteSpace([string]$content[0].text)) {
-            return [pscustomobject]@{
-                ok = $false
-                tool = $ToolName
-                error = "$ToolName returned no content"
-            }
-        }
-
-        return [pscustomobject]@{
-            ok = $true
-            tool = $ToolName
-            payload = ($content[0].text | ConvertFrom-Json)
-        }
-    } catch {
-        return [pscustomobject]@{
-            ok = $false
-            tool = $ToolName
-            error = $_.Exception.Message
-        }
+    return [pscustomobject]@{
+        ok = $false
+        tool = $ToolName
+        attempts = $attemptCount
+        error = $lastError
     }
 }
 
@@ -1176,13 +1182,13 @@ if (Test-Path -LiteralPath $sharedStatusPath -PathType Leaf) {
 }
 
 $report.memoryHealth = Get-MemoryStatusSnapshot
-$report.embeddingRuntimes = Invoke-MemoryToolSnapshot -ToolName "list_embedding_runtimes" -Arguments @{}
+$report.embeddingRuntimes = Invoke-MemoryToolSnapshot -ToolName "list_embedding_runtimes" -Arguments @{} -TimeoutSeconds 30 -MaxAttempts 2 -RetryDelayMilliseconds 1000
 $report.denseSearch = Invoke-MemoryToolSnapshot -ToolName "search_shared_memory" -Arguments @{
     query = "shared memory read order"
     mode = "dense"
     route = "mixed"
     limit = 3
-}
+} -TimeoutSeconds 45 -MaxAttempts 2 -RetryDelayMilliseconds 2000
 
 $cursorGlobalPath = Join-SharedPath @($userHome, ".cursor", "mcp.json")
 $vsCodeMcpPath = Join-Path $vsCodeUserRoot "mcp.json"
