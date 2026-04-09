@@ -1,12 +1,20 @@
 # Environment Variables
 
-All configuration is done through environment variables. This page is the single source of truth for every variable the system uses.
+This page documents the environment variables the runtime understands. For an installed shared runtime, it is not true anymore that all configuration is driven only by environment variables: `~/.ai-memory/config/runtime.json` is the canonical selector for the active embedding profile/provider/runtime by default.
+
+## Configuration Precedence
+
+- Installed shared runtime: `~/.ai-memory/config/runtime.json` is the canonical source for embedding profile, provider, adapter, model, and base URL selection.
+- Environment variables still matter for secrets, bootstrap paths, per-process tuning, and one-off debugging.
+- Selection overrides such as `AI_MEMORY_EMBED_PROFILE`, `AI_MEMORY_EMBED_PROVIDER`, `AI_MEMORY_EMBED_ADAPTER`, `AI_MEMORY_EMBED_MODEL`, and `AI_MEMORY_EMBED_BASE_URL` are ignored by the long-running shared `memory` MCP unless `AI_MEMORY_ALLOW_EMBED_RUNTIME_ENV_OVERRIDES=1`.
+- Source-tree direct runs can still resolve runtime config from `AI_MEMORY_RUNTIME_CONFIG_PATH`, `config/runtime.json`, or `templates/config/runtime.json` before install.
 
 ## Core Variables
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `AI_MEMORY_ROOT` | No | `~/.ai-memory` (installed) or repo root | Where the runtime files live |
+| `AI_MEMORY_RUNTIME_CONFIG_PATH` | No | Auto-resolved | Explicit runtime config path for source-tree or advanced runs |
 | `AI_MEMORY_OBSIDIAN_VAULT` | No | Auto-detected | Path to your Obsidian vault root |
 | `AI_MEMORY_WATCHDOG_ENABLED` | No | `1` (enabled) | Set to `0` to disable the background watchdog |
 | `AI_MEMORY_BASE_PORT` | No | `9330` | Base port; servers use basePort+N (memory=9338) |
@@ -16,16 +24,16 @@ All configuration is done through environment variables. This page is the single
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `AI_MEMORY_EMBED_PROFILE` | No | `hash-local` | Provider profile name |
-| `AI_MEMORY_EMBED_PROVIDER` | No | (from profile) | Override embedding provider |
-| `AI_MEMORY_EMBED_ADAPTER` | No | `hash` | Adapter: `hash`, `transformer`, `openai-compatible` |
-| `AI_MEMORY_EMBED_MODEL` | No | (from adapter) | Model name for remote embeddings |
-| `AI_MEMORY_EMBED_BASE_URL` | No | (from adapter) | API base URL for OpenAI-compatible embeddings |
-| `AI_MEMORY_EMBED_API_KEY` | No | (from adapter) | API key for OpenAI-compatible embeddings |
-| `AI_MEMORY_EMBED_API_KEY_ENV` | No | (from adapter) | Env var name containing API key |
+| `AI_MEMORY_EMBED_PROFILE` | No | `runtime.json` active profile | Optional per-process profile override; ignored by the shared runtime unless env overrides are enabled |
+| `AI_MEMORY_EMBED_PROVIDER` | No | `runtime.json` active provider | Optional per-process provider override; ignored by the shared runtime unless env overrides are enabled |
+| `AI_MEMORY_EMBED_ADAPTER` | No | `runtime.json` resolved adapter | Optional per-process adapter override; ignored by the shared runtime unless env overrides are enabled |
+| `AI_MEMORY_EMBED_MODEL` | No | `runtime.json` resolved model | Optional per-process model override; ignored by the shared runtime unless env overrides are enabled |
+| `AI_MEMORY_EMBED_BASE_URL` | No | `runtime.json` resolved base URL | Optional per-process base URL override; ignored by the shared runtime unless env overrides are enabled |
+| `AI_MEMORY_EMBED_API_KEY` | No | (none) | API key secret for remote embeddings |
+| `AI_MEMORY_EMBED_API_KEY_ENV` | No | (from runtime/provider) | Env var name containing the remote embedding API key |
 | `AI_MEMORY_EMBED_TIMEOUT_MS` | No | `120000` | Embedding request timeout in ms |
 | `AI_MEMORY_EMBED_REQUEST_DELAY_MS` | No | `0` | Delay between embedding requests |
-| `AI_MEMORY_ALLOW_EMBED_RUNTIME_ENV_OVERRIDES` | No | `0` | Set to `1` to allow env vars to override runtime.json |
+| `AI_MEMORY_ALLOW_EMBED_RUNTIME_ENV_OVERRIDES` | No | `0` | Set to `1` only when you intentionally want selection env vars to override `runtime.json` |
 
 ## Metrics Variables
 

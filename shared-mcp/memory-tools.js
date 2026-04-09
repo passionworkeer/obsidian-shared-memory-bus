@@ -37,6 +37,33 @@ export const TOOLS = [
     },
   },
   {
+    name: "memory_wake_up",
+    description:
+      "Build a very small session bootstrap pack from the canonical shared memory bus. Use this when you want a compact wake-up context before doing deeper searches.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workspace_root: {
+          type: "string",
+          description:
+            "Optional workspace or vault path. If omitted, uses the canonical shared Obsidian vault.",
+        },
+        max_items: {
+          type: "number",
+          default: 3,
+          description:
+            "Maximum items to keep per compact section such as next steps, blockers, and recent threads.",
+        },
+        include_recent_activity: {
+          type: "boolean",
+          default: true,
+          description:
+            "Include a few recent session/task items in addition to durable anchors and handoff data.",
+        },
+      },
+    },
+  },
+  {
     name: "search_shared_memory",
     description:
       "Search the canonical shared Obsidian memory bus across Codex, Claude Code, OpenCode, Copilot, Cursor, Trae, and OpenClaw. Defaults to hybrid retrieval and falls back to BM25 when dense embeddings are unavailable.",
@@ -69,6 +96,21 @@ export const TOOLS = [
         workspace: { type: "string", description: "Optional workspace filter." },
         taskState: { type: "string", description: "Optional task state filter." },
         preferSummaries: { type: "boolean", default: false, description: "Boost session/summary records slightly in ranking." },
+        includeVerbatim: {
+          type: "boolean",
+          default: false,
+          description: "When true, attach query-aware exact snippet windows from the matched record text.",
+        },
+        snippetWindow: {
+          type: "number",
+          default: 220,
+          description: "Approximate character window to keep around each exact snippet match.",
+        },
+        maxVerbatimPerResult: {
+          type: "number",
+          default: 1,
+          description: "Maximum exact snippet windows to return per result when includeVerbatim is enabled.",
+        },
       },
       required: ["query"],
     },

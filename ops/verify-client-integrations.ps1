@@ -188,6 +188,59 @@ function Get-MemoryStatusSnapshot {
     }
 }
 
+function Invoke-MemoryToolSnapshot {
+    param(
+        [Parameter(Mandatory = $true)][string]$ToolName,
+        [AllowNull()]$Arguments = $null
+    )
+
+    $payload = @{
+        jsonrpc = "2.0"
+        id = "verify-$ToolName"
+        method = "tools/call"
+        params = @{
+            name = $ToolName
+            arguments = $(if ($null -eq $Arguments) { @{} } else { $Arguments })
+        }
+    } | ConvertTo-Json -Depth 10 -Compress
+
+    try {
+        $response = Invoke-RestMethod -Uri "http://127.0.0.1:9338/mcp" -Method Post -TimeoutSec 20 -ContentType "application/json" -Body $payload
+        $errorProperty = $response.PSObject.Properties["error"]
+        if ($null -ne $errorProperty -and $null -ne $response.error) {
+            return [pscustomobject]@{
+                ok = $false
+                tool = $ToolName
+                error = [string]$response.error.message
+            }
+        }
+
+        $content = @()
+        if ($null -ne $response.result -and $null -ne $response.result.content) {
+            $content = @($response.result.content)
+        }
+        if ($content.Count -eq 0 -or [string]::IsNullOrWhiteSpace([string]$content[0].text)) {
+            return [pscustomobject]@{
+                ok = $false
+                tool = $ToolName
+                error = "$ToolName returned no content"
+            }
+        }
+
+        return [pscustomobject]@{
+            ok = $true
+            tool = $ToolName
+            payload = ($content[0].text | ConvertFrom-Json)
+        }
+    } catch {
+        return [pscustomobject]@{
+            ok = $false
+            tool = $ToolName
+            error = $_.Exception.Message
+        }
+    }
+}
+
 function Resolve-PreferredExecutable {
     param([Parameter(Mandatory = $true)][string]$Name)
 
@@ -461,6 +514,23 @@ function Invoke-CliCheck {
     )
 
     $commandResult = Invoke-ExternalCommandWithTimeout -Executable $Executable -Arguments $Arguments -WorkingDirectory $WorkingDirectory -TimeoutSeconds 45
+    $shouldRetryInline = (
+        [bool]$commandResult.timedOut -or
+        [int]$commandResult.exitCode -ne 0 -or
+        [string]::IsNullOrWhiteSpace([string]$commandResult.output)
+    )
+    if ($shouldRetryInline) {
+        $inlineResult = Invoke-ExternalCommandInlineWithTimeout -Executable $Executable -Arguments $Arguments -WorkingDirectory $WorkingDirectory -TimeoutSeconds 45
+        $inlineSucceeded = (
+            -not [bool]$inlineResult.timedOut -and
+            [int]$inlineResult.exitCode -eq 0 -and
+            -not [string]::IsNullOrWhiteSpace([string]$inlineResult.output)
+        )
+        $primaryMissingOutput = [string]::IsNullOrWhiteSpace([string]$commandResult.output)
+        if ($inlineSucceeded -or $primaryMissingOutput) {
+            $commandResult = $inlineResult
+        }
+    }
     $text = [string]$commandResult.output
     $mcpIndex = $text.IndexOf("MCP Servers")
     if ($mcpIndex -gt 0) {
@@ -489,8 +559,35 @@ function Invoke-CliCheck {
     }
 }
 
+function New-ClientProbeId {
+    param([Parameter(Mandatory = $true)][string]$ClientId)
+
+    return ("runtime-probe-{0}-{1}" -f $ClientId.Trim().ToLowerInvariant(), ([guid]::NewGuid().ToString("N").Substring(0, 12)))
+}
+
 function Get-ClientProbePrompt {
-    return 'Use the shared MCP memory tool. First call memory_status and read watchdog.status, watchdog.pid, watchdog.updatedAt, and memoryIntegrity.status from the nested response. Then call search_shared_memory with query ''shared memory read order'', mode ''hybrid'', route ''mixed'', limit 1. Set searchObservedResult to true if the search returns at least one result, otherwise false. Return only one strict minified JSON object with exactly these flat keys: client, watchdogStatus, watchdogPid, watchdogUpdatedAt, memoryIntegrityStatus, searchObservedResult. All values must be plain string, number, or boolean scalars. No markdown, no code fences, no commentary.'
+    param(
+        [Parameter(Mandatory = $true)][string]$ProbeToken,
+        [Parameter(Mandatory = $true)][string]$MemoryTitle
+    )
+
+    return @"
+Use the shared MCP memory tool. First answer this user question with one short natural sentence: What are we validating today? Remember that exact sentence as replyText. Then call memory_status and read watchdog.status, watchdog.pid, watchdog.updatedAt, memoryIntegrity.status, and embeddingIndexState.status from the nested response. Set embeddingIndexStatus to the exact embedding index status string. Then call search_shared_memory with query 'shared memory read order', mode 'hybrid', route 'mixed', limit 1. Set searchObservedResult to true if the search returns at least one result, otherwise false. Then call search_shared_memory with query 'shared memory read order', mode 'dense', route 'mixed', limit 1. Set denseObservedResult to true only if the dense search returns at least one result. Then call insert_claude_mem with title '$MemoryTitle' and content that includes both the exact replyText and '$ProbeToken'. Set saveOk to true only if the insert clearly succeeds. Then call query_claude_mem with exact query '$MemoryTitle'. Set queryFound to true only if the query result clearly shows the exact title or the exact probe token. Return only one strict minified JSON object with exactly these flat keys: client, watchdogStatus, watchdogPid, watchdogUpdatedAt, memoryIntegrityStatus, embeddingIndexStatus, searchObservedResult, denseObservedResult, replyText, saveOk, queryFound. All values must be plain string, number, or boolean scalars. No markdown, no code fences, no commentary.
+"@
+}
+
+function ConvertTo-ProbeBoolean {
+    param([AllowNull()]$Value)
+
+    if ($Value -is [bool]) {
+        return [bool]$Value
+    }
+
+    if ($Value -is [string]) {
+        return ([string]$Value).Trim().ToLowerInvariant() -eq "true"
+    }
+
+    return ($null -ne $Value)
 }
 
 function Test-JsonProbeShape {
@@ -742,10 +839,17 @@ function Invoke-ClientRuntimeProbe {
         watchdogPid = 0
         watchdogUpdatedAt = ""
         memoryIntegrityStatus = ""
+        embeddingIndexStatus = ""
         searchObservedResult = $false
+        denseObservedResult = $false
+        replyText = ""
+        saveOk = $false
+        queryFound = $false
         watchdogStatusMatches = $false
         watchdogPidMatches = $false
         memoryIntegrityMatches = $false
+        embeddingIndexStatusMatches = $false
+        embeddingIndexAligned = $false
         pass = $false
         outputPreview = ""
         errors = @()
@@ -763,7 +867,12 @@ function Invoke-ClientRuntimeProbe {
         $record.watchdogPid = 0
         $record.watchdogUpdatedAt = ""
         $record.memoryIntegrityStatus = ""
+        $record.embeddingIndexStatus = ""
         $record.searchObservedResult = $false
+        $record.denseObservedResult = $false
+        $record.replyText = ""
+        $record.saveOk = $false
+        $record.queryFound = $false
         $record.outputPreview = ""
         $record.errors = @()
         $probeOutputPath = ""
@@ -828,14 +937,23 @@ function Invoke-ClientRuntimeProbe {
                     $record.watchdogPid = [int]$parsed.watchdogPid
                     $record.watchdogUpdatedAt = [string]$parsed.watchdogUpdatedAt
                     $record.memoryIntegrityStatus = [string]$parsed.memoryIntegrityStatus
+                    if ($null -ne $parsed.PSObject.Properties["embeddingIndexStatus"]) {
+                        $record.embeddingIndexStatus = [string]$parsed.embeddingIndexStatus
+                    }
                     if ($null -ne $parsed.PSObject.Properties["searchObservedResult"]) {
-                        if ($parsed.searchObservedResult -is [bool]) {
-                            $record.searchObservedResult = [bool]$parsed.searchObservedResult
-                        } elseif ($parsed.searchObservedResult -is [string]) {
-                            $record.searchObservedResult = ([string]$parsed.searchObservedResult).Trim().ToLowerInvariant() -eq "true"
-                        } else {
-                            $record.searchObservedResult = ($null -ne $parsed.searchObservedResult)
-                        }
+                        $record.searchObservedResult = ConvertTo-ProbeBoolean -Value $parsed.searchObservedResult
+                    }
+                    if ($null -ne $parsed.PSObject.Properties["denseObservedResult"]) {
+                        $record.denseObservedResult = ConvertTo-ProbeBoolean -Value $parsed.denseObservedResult
+                    }
+                    if ($null -ne $parsed.PSObject.Properties["replyText"]) {
+                        $record.replyText = [string]$parsed.replyText
+                    }
+                    if ($null -ne $parsed.PSObject.Properties["saveOk"]) {
+                        $record.saveOk = ConvertTo-ProbeBoolean -Value $parsed.saveOk
+                    }
+                    if ($null -ne $parsed.PSObject.Properties["queryFound"]) {
+                        $record.queryFound = ConvertTo-ProbeBoolean -Value $parsed.queryFound
                     }
                 }
             } catch {
@@ -881,9 +999,12 @@ function Invoke-ClientRuntimeProbe {
         $expectedWatchdogStatus = [string]$ExpectedMemoryHealth.watchdog.status
         $expectedWatchdogPid = [int]$ExpectedMemoryHealth.watchdog.pid
         $expectedMemoryIntegrityStatus = [string]$ExpectedMemoryHealth.memoryIntegrity.status
+        $expectedEmbeddingIndexStatus = [string]$ExpectedMemoryHealth.embeddingIndexState.status
         $record.watchdogStatusMatches = Test-WatchdogStatusCompatible -ObservedStatus ([string]$record.watchdogStatus) -ExpectedStatus $expectedWatchdogStatus
         $record.watchdogPidMatches = Test-WatchdogPidCompatible -ObservedPid $record.watchdogPid -ExpectedPid $expectedWatchdogPid
         $record.memoryIntegrityMatches = ($record.memoryIntegrityStatus -eq $expectedMemoryIntegrityStatus)
+        $record.embeddingIndexStatusMatches = ($record.embeddingIndexStatus -eq $expectedEmbeddingIndexStatus)
+        $record.embeddingIndexAligned = ($record.embeddingIndexStatus -eq "aligned")
         if (-not $record.watchdogStatusMatches) {
             $record.errors += "watchdog-status-mismatch"
         }
@@ -893,8 +1014,26 @@ function Invoke-ClientRuntimeProbe {
         if (-not $record.memoryIntegrityMatches) {
             $record.errors += "memory-integrity-mismatch"
         }
+        if (-not $record.embeddingIndexStatusMatches) {
+            $record.errors += "embedding-index-status-mismatch"
+        }
+        if (-not $record.embeddingIndexAligned) {
+            $record.errors += "embedding-index-not-aligned"
+        }
         if (-not $record.searchObservedResult) {
             $record.errors += "search-observed-result-false"
+        }
+        if (-not $record.denseObservedResult) {
+            $record.errors += "dense-observed-result-false"
+        }
+        if ([string]::IsNullOrWhiteSpace([string]$record.replyText)) {
+            $record.errors += "reply-text-empty"
+        }
+        if (-not $record.saveOk) {
+            $record.errors += "save-ok-false"
+        }
+        if (-not $record.queryFound) {
+            $record.errors += "query-found-false"
         }
         $record.pass = (
             $record.ok -and
@@ -902,7 +1041,13 @@ function Invoke-ClientRuntimeProbe {
             $record.watchdogStatusMatches -and
             $record.watchdogPidMatches -and
             $record.memoryIntegrityMatches -and
-            $record.searchObservedResult
+            $record.embeddingIndexStatusMatches -and
+            $record.embeddingIndexAligned -and
+            $record.searchObservedResult -and
+            $record.denseObservedResult -and
+            (-not [string]::IsNullOrWhiteSpace([string]$record.replyText)) -and
+            $record.saveOk -and
+            $record.queryFound
         )
     } else {
         $record.pass = ($record.ok -and $record.hasProbeJson)
@@ -1009,6 +1154,8 @@ $report = [ordered]@{
     workspaceRoot = $WorkspaceRoot
     sharedMcpStatus = $null
     memoryHealth = $null
+    embeddingRuntimes = $null
+    denseSearch = $null
     sharedSkills = [ordered]@{}
     clients = [ordered]@{}
     cliChecks = @()
@@ -1029,6 +1176,13 @@ if (Test-Path -LiteralPath $sharedStatusPath -PathType Leaf) {
 }
 
 $report.memoryHealth = Get-MemoryStatusSnapshot
+$report.embeddingRuntimes = Invoke-MemoryToolSnapshot -ToolName "list_embedding_runtimes" -Arguments @{}
+$report.denseSearch = Invoke-MemoryToolSnapshot -ToolName "search_shared_memory" -Arguments @{
+    query = "shared memory read order"
+    mode = "dense"
+    route = "mixed"
+    limit = 3
+}
 
 $cursorGlobalPath = Join-SharedPath @($userHome, ".cursor", "mcp.json")
 $vsCodeMcpPath = Join-Path $vsCodeUserRoot "mcp.json"
@@ -1138,10 +1292,12 @@ if ($RunCliChecks) {
 
 if ($RunRuntimeChecks) {
     $clientWorkspace = if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) { $PWD.Path } else { $WorkspaceRoot }
-    $clientPrompt = Get-ClientProbePrompt
-    $report.runtimeChecks += Invoke-ClientRuntimeProbe -ClientId "codex" -Executable (Resolve-PreferredExecutable -Name "codex") -Arguments @("exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "-C", $clientWorkspace, $clientPrompt) -WorkingDirectory $clientWorkspace -ExpectedMemoryHealth $report.memoryHealth
-    $report.runtimeChecks += Invoke-ClientRuntimeProbe -ClientId "claude" -Executable (Resolve-PreferredExecutable -Name "claude") -Arguments @("-p", "--permission-mode", "bypassPermissions", "--output-format", "json", $clientPrompt) -WorkingDirectory $clientWorkspace -ExpectedMemoryHealth $report.memoryHealth
-    $report.runtimeChecks += Invoke-ClientRuntimeProbe -ClientId "opencode" -Executable (Resolve-PreferredExecutable -Name "opencode") -Arguments @("run", "--dir", $clientWorkspace, "--format", "json", "--print-logs", "false", "--log-level", "ERROR", "--title", "probe", $clientPrompt) -WorkingDirectory $clientWorkspace -ExpectedMemoryHealth $report.memoryHealth
+    $codexProbeId = New-ClientProbeId -ClientId "codex"
+    $claudeProbeId = New-ClientProbeId -ClientId "claude"
+    $opencodeProbeId = New-ClientProbeId -ClientId "opencode"
+    $report.runtimeChecks += Invoke-ClientRuntimeProbe -ClientId "codex" -Executable (Resolve-PreferredExecutable -Name "codex") -Arguments @("exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "-C", $clientWorkspace, (Get-ClientProbePrompt -ProbeToken $codexProbeId -MemoryTitle $codexProbeId)) -WorkingDirectory $clientWorkspace -ExpectedMemoryHealth $report.memoryHealth
+    $report.runtimeChecks += Invoke-ClientRuntimeProbe -ClientId "claude" -Executable (Resolve-PreferredExecutable -Name "claude") -Arguments @("-p", "--permission-mode", "bypassPermissions", "--output-format", "json", (Get-ClientProbePrompt -ProbeToken $claudeProbeId -MemoryTitle $claudeProbeId)) -WorkingDirectory $clientWorkspace -ExpectedMemoryHealth $report.memoryHealth
+    $report.runtimeChecks += Invoke-ClientRuntimeProbe -ClientId "opencode" -Executable (Resolve-PreferredExecutable -Name "opencode") -Arguments @("run", "--dir", $clientWorkspace, "--format", "json", "--print-logs", "false", "--log-level", "ERROR", "--title", "probe", (Get-ClientProbePrompt -ProbeToken $opencodeProbeId -MemoryTitle $opencodeProbeId)) -WorkingDirectory $clientWorkspace -ExpectedMemoryHealth $report.memoryHealth
 }
 
 $summaryErrors = New-Object System.Collections.Generic.List[string]
@@ -1167,6 +1323,8 @@ if ($null -eq $report.sharedMcpStatus -or $null -ne $report.sharedMcpStatus.PSOb
 
 $memoryHealthPass = $true
 $claudeMemPass = $true
+$embeddingRuntimeCatalogPass = $false
+$denseSearchPass = $false
 if ($null -eq $report.memoryHealth -or $null -ne $report.memoryHealth.PSObject.Properties["error"]) {
     $memoryHealthPass = $false
     $claudeMemPass = $false
@@ -1181,10 +1339,41 @@ if ($null -eq $report.memoryHealth -or $null -ne $report.memoryHealth.PSObject.P
         $memoryHealthPass = $false
         $summaryErrors.Add("memory-integrity-not-ok") | Out-Null
     }
+    if ([string]$report.memoryHealth.embeddingIndexState.status -ne "aligned") {
+        $memoryHealthPass = $false
+        $summaryErrors.Add("embedding-index-not-aligned") | Out-Null
+    }
     if (-not [bool]$report.memoryHealth.claudeMem.ok) {
         $claudeMemPass = $false
         $summaryErrors.Add("claude-mem-health-not-ok") | Out-Null
     }
+}
+
+$embeddingRuntimeCatalogPass = (
+    $null -ne $report.embeddingRuntimes -and
+    [bool]$report.embeddingRuntimes.ok -and
+    $null -ne $report.embeddingRuntimes.payload -and
+    $null -ne $report.embeddingRuntimes.payload.catalog -and
+    $null -ne $report.embeddingRuntimes.payload.catalog.runtime
+)
+if (-not $embeddingRuntimeCatalogPass) {
+    $memoryHealthPass = $false
+    $summaryErrors.Add("embedding-runtime-catalog-unavailable") | Out-Null
+}
+
+$denseResults = @()
+if ($null -ne $report.denseSearch -and [bool]$report.denseSearch.ok -and $null -ne $report.denseSearch.payload) {
+    if ($null -ne $report.denseSearch.payload.PSObject.Properties["results"]) {
+        $denseResults = @($report.denseSearch.payload.results)
+    }
+    $denseSearchPass = (
+        [string]$report.denseSearch.payload.effectiveMode -eq "dense" -and
+        $denseResults.Count -gt 0
+    )
+}
+if (-not $denseSearchPass) {
+    $memoryHealthPass = $false
+    $summaryErrors.Add("dense-search-smoke-failed") | Out-Null
 }
 
 $sharedSkillsPass = (
@@ -1302,6 +1491,8 @@ $report.summary = [ordered]@{
     sharedMcpStatusPass = $sharedMcpStatusPass
     memoryHealthPass = $memoryHealthPass
     claudeMemPass = $claudeMemPass
+    embeddingRuntimeCatalogPass = $embeddingRuntimeCatalogPass
+    denseSearchPass = $denseSearchPass
     sharedSkillsPass = $sharedSkillsPass
     cursorPass = $cursorPass
     vscodePass = $vscodePass

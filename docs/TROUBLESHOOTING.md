@@ -141,6 +141,46 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shar
 ~/.ai-memory/shared-mcp/start-default-shared-mcp.sh -ForceRestart
 ```
 
+## Windows Shows Node Console Windows Or An `Open With` Dialog
+
+Cause:
+- an older local install or legacy startup entry may still launch `.js`, `.mjs`, or `.cjs` files directly instead of invoking `node.exe`
+- a stale Scheduled Task from older OpenClaw installs may still point to an old path such as `C:\Users\<old-user>\.openclaw\gateway.cmd`
+
+Fix:
+- reinstall the runtime so the current hidden-launch shims and proxy bootstrap guards are written to `~/.ai-memory`
+- verify the shared stack is healthy:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\status-shared-mcp.ps1 -Json
+```
+
+- ensure `.mjs` / `.cjs` resolve to `node.exe` for the current user if you have other legacy launchers on the machine:
+
+```powershell
+$progId = "AI.Memory.NodeModuleFile"
+$nodeExe = "C:\path\to\node.exe"
+reg add "HKCU\Software\Classes\$progId\shell\open\command" /ve /d "\"$nodeExe\" \"%1\" %*" /f
+reg add "HKCU\Software\Classes\.mjs" /ve /d "$progId" /f
+reg add "HKCU\Software\Classes\.cjs" /ve /d "$progId" /f
+```
+
+- if a legacy `OpenClaw Gateway` Scheduled Task still exists, remove or disable it from an elevated PowerShell session:
+
+```powershell
+schtasks /Delete /TN "OpenClaw Gateway" /F
+```
+
+```powershell
+Disable-ScheduledTask -TaskName "OpenClaw Gateway"
+```
+
+Notes:
+- the current `AI Memory Watchdog.vbs` startup entry should launch only hidden PowerShell hosts
+- current installs also try to disable a clearly stale per-user `OpenClaw Gateway` task automatically when it points at a missing `\.openclaw\gateway.cmd` or another profile's path; older installs may need one reinstall before that cleanup runs
+- if deletion or disable returns `Access is denied`, that specific task still requires an administrator shell even if the rest of the memory bus runs correctly
+- on the affected Windows profile, that `Access is denied` case can happen even when the task says `Run As User = wang`; the task file can still be ACL-owned by `Administrators`, so the practical fix is one elevated disable/delete in Task Scheduler or an admin PowerShell session
+
 ## Startup Registration Did Not Appear Where I Expected
 
 The installer uses different per-user startup mechanisms per OS:

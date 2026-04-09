@@ -77,7 +77,6 @@
         "write-config-snippets.ps1"
     )
     TemplateFiles = @(
-        "agents.json"
         "config/runtime.json"
     )
     LegacyCleanupFiles = @(
@@ -85,6 +84,12 @@
         "export-bundle.ps1"
         "probe-embedding-models.py"
         "run-shared-stack-pressure-test.ps1"
+    )
+    LegacyCleanupDirectories = @(
+        "bundle-template"
+        "dist"
+        "mcp-shared"
+        "startup"
     )
     CliFiles = @(
         "cli/ai-memory.js"

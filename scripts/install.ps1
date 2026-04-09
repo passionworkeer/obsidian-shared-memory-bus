@@ -122,12 +122,25 @@ function Remove-ManagedFileIfPresent {
     }
 }
 
+function Remove-ManagedDirectoryIfPresent {
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetRoot,
+        [Parameter(Mandatory = $true)][string]$RelativePath
+    )
+
+    $targetPath = Join-Path $TargetRoot (Normalize-RelativeInstallPath -Path $RelativePath)
+    if (Test-Path -LiteralPath $targetPath -PathType Container) {
+        Remove-Item -LiteralPath $targetPath -Force -Recurse
+    }
+}
+
 function Remove-StaleManagedFiles {
     param(
         [Parameter(Mandatory = $true)][string]$TargetRoot,
         [Parameter(Mandatory = $true)][string]$ManifestPath,
         [Parameter(Mandatory = $true)][string[]]$CurrentManagedFiles,
-        [string[]]$LegacyCleanupFiles = @()
+        [string[]]$LegacyCleanupFiles = @(),
+        [string[]]$LegacyCleanupDirectories = @()
     )
 
     $desiredLookup = @{}
@@ -137,6 +150,10 @@ function Remove-StaleManagedFiles {
 
     foreach ($path in @($LegacyCleanupFiles)) {
         Remove-ManagedFileIfPresent -TargetRoot $TargetRoot -RelativePath $path
+    }
+
+    foreach ($path in @($LegacyCleanupDirectories)) {
+        Remove-ManagedDirectoryIfPresent -TargetRoot $TargetRoot -RelativePath $path
     }
 
     if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
@@ -960,6 +977,111 @@ function Test-WindowsPowerShellScriptRunning {
     ).Count -gt 0
 }
 
+function Disable-StaleOpenClawGatewayTask {
+    $result = [ordered]@{
+        taskFound = $false
+        stale = $false
+        disabled = $false
+        actionPath = ""
+        reason = ""
+        disableError = ""
+        error = ""
+    }
+
+    if (-not (Test-SharedIsWindows)) {
+        return [pscustomobject]$result
+    }
+
+    try {
+        $task = Get-ScheduledTask -TaskName "OpenClaw Gateway" -ErrorAction SilentlyContinue
+        if ($null -eq $task) {
+            return [pscustomobject]$result
+        }
+
+        $result.taskFound = $true
+        $openClawHome = Join-SharedPath @((Get-SharedUserHome), ".openclaw")
+        $expectedActionPaths = @(
+            (Join-SharedPath @($openClawHome, "gateway.cmd")),
+            (Join-SharedPath @($openClawHome, "start-gateway.ps1"))
+        ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object {
+            try {
+                [System.IO.Path]::GetFullPath($_).ToLowerInvariant()
+            } catch {
+                ([string]$_).Trim().ToLowerInvariant()
+            }
+        }
+
+        $resolvedActionPath = ""
+        foreach ($action in @($task.Actions)) {
+            foreach ($candidate in @([string]$action.Execute, [string]$action.Arguments)) {
+                if ([string]::IsNullOrWhiteSpace($candidate)) {
+                    continue
+                }
+
+                if ($candidate -match '(?i)([A-Z]:\\[^"]+?\.openclaw\\(?:gateway\.cmd|start-gateway\.ps1))') {
+                    $resolvedActionPath = $matches[1]
+                    break
+                }
+
+                $trimmedCandidate = $candidate.Trim().Trim('"')
+                if ($trimmedCandidate -match '(?i)\\\.openclaw\\(?:gateway\.cmd|start-gateway\.ps1)$') {
+                    $resolvedActionPath = $trimmedCandidate
+                    break
+                }
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($resolvedActionPath)) {
+                break
+            }
+        }
+
+        if ([string]::IsNullOrWhiteSpace($resolvedActionPath)) {
+            $result.reason = "no-openclaw-action-detected"
+            return [pscustomobject]$result
+        }
+
+        $result.actionPath = $resolvedActionPath
+        $normalizedActionPath = try {
+            [System.IO.Path]::GetFullPath($resolvedActionPath).ToLowerInvariant()
+        } catch {
+            $resolvedActionPath.Trim().ToLowerInvariant()
+        }
+        $result.actionPath = $normalizedActionPath
+
+        $actionMissing = -not (Test-Path -LiteralPath $resolvedActionPath -PathType Leaf)
+        $unexpectedProfilePath = $expectedActionPaths.Count -gt 0 -and ($expectedActionPaths -notcontains $normalizedActionPath)
+
+        if (-not $actionMissing -and -not $unexpectedProfilePath) {
+            $result.reason = "task-action-current"
+            return [pscustomobject]$result
+        }
+
+        $result.stale = $true
+        $result.reason = if ($actionMissing) { "task-action-missing" } else { "task-action-points-to-different-profile" }
+
+        try {
+            Disable-ScheduledTask -TaskName "OpenClaw Gateway" -ErrorAction Stop | Out-Null
+            $result.disabled = $true
+            return [pscustomobject]$result
+        } catch {
+            try {
+                & schtasks /Change /TN "OpenClaw Gateway" /DISABLE *> $null
+                if ($LASTEXITCODE -eq 0) {
+                    $result.disabled = $true
+                    return [pscustomobject]$result
+                }
+                $result.disableError = "schtasks-disable-exit-$LASTEXITCODE"
+            } catch {
+                $result.disableError = $_.Exception.Message
+            }
+        }
+    } catch {
+        $result.error = $_.Exception.Message
+    }
+
+    return [pscustomobject]$result
+}
+
 function Register-StartupHooks {
     param([Parameter(Mandatory = $true)][string]$TargetRoot)
 
@@ -988,26 +1110,21 @@ function Register-StartupHooks {
         $watchdogVbsLines.Add('Set wmi = GetObject("winmgmts:\\.\root\cimv2")') | Out-Null
         $watchdogVbsLines.Add(('command = "{0}"' -f (ConvertTo-VbsStringLiteral -Value $watchdogCommand))) | Out-Null
         $watchdogVbsLines.Add(('watchdogMatch = "{0}"' -f (ConvertTo-VbsStringLiteral -Value $watchdogMatch))) | Out-Null
-        $watchdogVbsLines.Add('') | Out-Null
-        $watchdogVbsLines.Add('Do') | Out-Null
-        $watchdogVbsLines.Add('  running = False') | Out-Null
-        $watchdogVbsLines.Add('  Set procs = wmi.ExecQuery("Select CommandLine from Win32_Process where Name=''powershell.exe'' or Name=''pwsh.exe''")') | Out-Null
-        $watchdogVbsLines.Add('  For Each proc in procs') | Out-Null
-        $watchdogVbsLines.Add('    If Not IsNull(proc.CommandLine) Then') | Out-Null
-        $watchdogVbsLines.Add('      lc = LCase(proc.CommandLine)') | Out-Null
-        $watchdogVbsLines.Add('      If InStr(lc, "-file") > 0 And InStr(lc, watchdogMatch) > 0 Then') | Out-Null
-        $watchdogVbsLines.Add('        running = True') | Out-Null
-        $watchdogVbsLines.Add('        Exit For') | Out-Null
-        $watchdogVbsLines.Add('      End If') | Out-Null
+        $watchdogVbsLines.Add('running = False') | Out-Null
+        $watchdogVbsLines.Add('Set procs = wmi.ExecQuery("Select CommandLine from Win32_Process where Name=''powershell.exe'' or Name=''pwsh.exe''")') | Out-Null
+        $watchdogVbsLines.Add('For Each proc in procs') | Out-Null
+        $watchdogVbsLines.Add('  If Not IsNull(proc.CommandLine) Then') | Out-Null
+        $watchdogVbsLines.Add('    lc = LCase(proc.CommandLine)') | Out-Null
+        $watchdogVbsLines.Add('    If InStr(lc, "-file") > 0 And InStr(lc, watchdogMatch) > 0 Then') | Out-Null
+        $watchdogVbsLines.Add('      running = True') | Out-Null
+        $watchdogVbsLines.Add('      Exit For') | Out-Null
         $watchdogVbsLines.Add('    End If') | Out-Null
-        $watchdogVbsLines.Add('  Next') | Out-Null
-        $watchdogVbsLines.Add('') | Out-Null
-        $watchdogVbsLines.Add('  If Not running Then') | Out-Null
-        $watchdogVbsLines.Add('    shell.Run command, 0, False') | Out-Null
         $watchdogVbsLines.Add('  End If') | Out-Null
+        $watchdogVbsLines.Add('Next') | Out-Null
         $watchdogVbsLines.Add('') | Out-Null
-        $watchdogVbsLines.Add('  WScript.Sleep 2000') | Out-Null
-        $watchdogVbsLines.Add('Loop') | Out-Null
+        $watchdogVbsLines.Add('If Not running Then') | Out-Null
+        $watchdogVbsLines.Add('  shell.Run command, 0, False') | Out-Null
+        $watchdogVbsLines.Add('End If') | Out-Null
         $watchdogVbsContent = [string]::Join([Environment]::NewLine, @($watchdogVbsLines)) + [Environment]::NewLine
         [System.IO.File]::WriteAllText($watchdogVbsPath, $watchdogVbsContent, $utf8NoBom)
         Stop-WindowsStartupScriptHosts -ScriptPath $watchdogVbsPath
@@ -1179,6 +1296,11 @@ $legacyCleanupFiles = if ($layout.ContainsKey("LegacyCleanupFiles")) {
 } else {
     @()
 }
+$legacyCleanupDirectories = if ($layout.ContainsKey("LegacyCleanupDirectories")) {
+    @($layout.LegacyCleanupDirectories)
+} else {
+    @()
+}
 $managedInstallFiles = Get-ManagedInstallFiles -Layout $layout
 $cliFiles = if ($layout.ContainsKey("CliFiles")) { @($layout.CliFiles) } else { @() }
 $installManifestPath = Join-Path $TargetRoot "install-manifest.json"
@@ -1186,7 +1308,8 @@ Remove-StaleManagedFiles `
     -TargetRoot $TargetRoot `
     -ManifestPath $installManifestPath `
     -CurrentManagedFiles $managedInstallFiles `
-    -LegacyCleanupFiles $legacyCleanupFiles
+    -LegacyCleanupFiles $legacyCleanupFiles `
+    -LegacyCleanupDirectories $legacyCleanupDirectories
 
 foreach ($sourceDir in @($layout.FlatRuntimeFiles.Keys | Sort-Object)) {
     foreach ($name in @($layout.FlatRuntimeFiles[$sourceDir])) {
@@ -1353,6 +1476,15 @@ if ($RegisterStartup) {
     }
 }
 
+if ((Test-SharedIsWindows) -and (-not $DryRun)) {
+    $openClawGatewayTaskRepair = Disable-StaleOpenClawGatewayTask
+    if ([bool]$openClawGatewayTaskRepair.disabled) {
+        Write-Output ("Disabled stale OpenClaw Gateway scheduled task ({0}): {1}" -f $openClawGatewayTaskRepair.reason, $openClawGatewayTaskRepair.actionPath)
+    } elseif ([bool]$openClawGatewayTaskRepair.stale -and -not [string]::IsNullOrWhiteSpace([string]$openClawGatewayTaskRepair.disableError)) {
+        Write-Warning ("Detected stale OpenClaw Gateway scheduled task but could not disable it automatically: {0}" -f $openClawGatewayTaskRepair.disableError)
+    }
+}
+
 $generateArgs = @("-Action", "Generate")
 if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
     $generateArgs += @("-Project", $WorkspaceRoot)
@@ -1426,10 +1558,6 @@ if ($shouldStartServicesNow) {
                     -FilePath (Resolve-SharedPowerShellExecutable) `
                     -ArgumentList (Get-SharedPowerShellFileArguments -ScriptPath $watchdogSupervisorScript) `
                     -WorkingDirectory $TargetRoot | Out-Null
-            }
-            if (Test-Path -LiteralPath $watchdogVbsPath -PathType Leaf) {
-                Stop-WindowsStartupScriptHosts -ScriptPath $watchdogVbsPath
-                Start-Process -FilePath "wscript.exe" -ArgumentList @($watchdogVbsPath) -WindowStyle Hidden | Out-Null
             }
         }
     } else {

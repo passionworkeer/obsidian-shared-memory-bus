@@ -354,6 +354,23 @@ function Invoke-CliCheck {
     )
 
     $commandResult = Invoke-ExternalCommandWithTimeout -Executable $Executable -Arguments $Arguments -WorkingDirectory $WorkingDirectory -TimeoutSeconds 45
+    $shouldRetryInline = (
+        [bool]$commandResult.timedOut -or
+        [int]$commandResult.exitCode -ne 0 -or
+        [string]::IsNullOrWhiteSpace([string]$commandResult.output)
+    )
+    if ($shouldRetryInline) {
+        $inlineResult = Invoke-ExternalCommandInlineWithTimeout -Executable $Executable -Arguments $Arguments -WorkingDirectory $WorkingDirectory -TimeoutSeconds 45
+        $inlineSucceeded = (
+            -not [bool]$inlineResult.timedOut -and
+            [int]$inlineResult.exitCode -eq 0 -and
+            -not [string]::IsNullOrWhiteSpace([string]$inlineResult.output)
+        )
+        $primaryMissingOutput = [string]::IsNullOrWhiteSpace([string]$commandResult.output)
+        if ($inlineSucceeded -or $primaryMissingOutput) {
+            $commandResult = $inlineResult
+        }
+    }
     $text = [string]$commandResult.output
     $mcpIndex = $text.IndexOf("MCP Servers")
     if ($mcpIndex -gt 0) {
@@ -502,6 +519,33 @@ function Test-JsonProbeShape {
         $null -ne $Object.PSObject.Properties["watchdogPid"] -and
         $null -ne $Object.PSObject.Properties["memoryIntegrityStatus"]
     )
+}
+
+function Get-OptionalProbeBooleanProperty {
+    param(
+        [AllowNull()]$Object,
+        [Parameter(Mandatory = $true)][string]$PropertyName,
+        [bool]$Default = $false
+    )
+
+    if ($null -eq $Object) {
+        return $Default
+    }
+
+    $property = $Object.PSObject.Properties[$PropertyName]
+    if ($null -eq $property) {
+        return $Default
+    }
+
+    $value = $property.Value
+    if ($value -is [bool]) {
+        return [bool]$value
+    }
+    if ($value -is [string]) {
+        return ([string]$value).Trim().ToLowerInvariant() -eq "true"
+    }
+
+    return ($null -ne $value)
 }
 
 function ConvertFrom-JsonProbePayload {
@@ -1117,6 +1161,8 @@ $toolCallJobScript = {
         serverId = $ServerId
         wave = $Wave
         toolName = $ToolName
+        requestedMode = ""
+        requestedRoute = ""
         callOk = $false
         hasTextContent = $false
         jsonOk = $false
@@ -1132,6 +1178,12 @@ $toolCallJobScript = {
 
     try {
         $arguments = if ([string]::IsNullOrWhiteSpace($ArgumentsJson)) { @{} } else { $ArgumentsJson | ConvertFrom-Json }
+        if ($null -ne $arguments -and $null -ne $arguments.PSObject.Properties["mode"]) {
+            $result.requestedMode = [string]$arguments.mode
+        }
+        if ($null -ne $arguments -and $null -ne $arguments.PSObject.Properties["route"]) {
+            $result.requestedRoute = [string]$arguments.route
+        }
         $payload = @{
             jsonrpc = "2.0"
             id = "call-$Wave-$ServerId-$ToolName"
@@ -1168,16 +1220,32 @@ $toolCallJobScript = {
                                 ($null -ne $parsed.watchdog) -and
                                 (-not [string]::IsNullOrWhiteSpace([string]$parsed.watchdog.status)) -and
                                 ($null -ne $parsed.memoryIntegrity) -and
-                                (-not [string]::IsNullOrWhiteSpace([string]$parsed.memoryIntegrity.status))
+                                (-not [string]::IsNullOrWhiteSpace([string]$parsed.memoryIntegrity.status)) -and
+                                ($null -ne $parsed.embeddingIndexState) -and
+                                ([string]$parsed.embeddingIndexState.status -eq "aligned")
                         }
                         "search_shared_memory" {
                             $results = @()
                             if ($null -ne $parsed.PSObject.Properties["results"]) {
                                 $results = @($parsed.results)
                             }
+                            $effectiveMode = [string]$parsed.effectiveMode
+                            if ([string]$result.requestedMode -eq "dense") {
+                                $result.assertionsOk =
+                                    ($effectiveMode -eq "dense") -and
+                                    ($results.Count -gt 0)
+                            } else {
+                                $result.assertionsOk =
+                                    (-not [string]::IsNullOrWhiteSpace($effectiveMode)) -and
+                                    ($results.Count -gt 0)
+                            }
+                        }
+                        "list_embedding_runtimes" {
                             $result.assertionsOk =
-                                (-not [string]::IsNullOrWhiteSpace([string]$parsed.effectiveMode)) -and
-                                ($results.Count -gt 0)
+                                ($null -ne $parsed.catalog) -and
+                                ($null -ne $parsed.catalog.runtime) -and
+                                ($null -ne $parsed.embeddingIndexState) -and
+                                ([string]$parsed.embeddingIndexState.status -eq "aligned")
                         }
                         "get_blackboard_tasks" {
                             $tasks = @()
@@ -1380,7 +1448,9 @@ $clientTaskJobScript = {
         watchdogPid = 0
         watchdogUpdatedAt = ""
         memoryIntegrityStatus = ""
+        embeddingIndexAligned = $false
         searchObservedResult = $false
+        denseObservedResult = $false
         pass = $false
         outputPreview = ""
         command = ""
@@ -1457,6 +1527,15 @@ $clientTaskJobScript = {
             $result.watchdogPid = [int]$parsed.watchdogPid
             $result.watchdogUpdatedAt = [string]$parsed.watchdogUpdatedAt
             $result.memoryIntegrityStatus = [string]$parsed.memoryIntegrityStatus
+            if ($null -ne $parsed.PSObject.Properties["embeddingIndexAligned"]) {
+                if ($parsed.embeddingIndexAligned -is [bool]) {
+                    $result.embeddingIndexAligned = [bool]$parsed.embeddingIndexAligned
+                } elseif ($parsed.embeddingIndexAligned -is [string]) {
+                    $result.embeddingIndexAligned = ([string]$parsed.embeddingIndexAligned).Trim().ToLowerInvariant() -eq "true"
+                } else {
+                    $result.embeddingIndexAligned = ($null -ne $parsed.embeddingIndexAligned)
+                }
+            }
             if ($null -ne $parsed.PSObject.Properties["searchObservedResult"]) {
                 if ($parsed.searchObservedResult -is [bool]) {
                     $result.searchObservedResult = [bool]$parsed.searchObservedResult
@@ -1464,6 +1543,15 @@ $clientTaskJobScript = {
                     $result.searchObservedResult = ([string]$parsed.searchObservedResult).Trim().ToLowerInvariant() -eq "true"
                 } else {
                     $result.searchObservedResult = ($null -ne $parsed.searchObservedResult)
+                }
+            }
+            if ($null -ne $parsed.PSObject.Properties["denseObservedResult"]) {
+                if ($parsed.denseObservedResult -is [bool]) {
+                    $result.denseObservedResult = [bool]$parsed.denseObservedResult
+                } elseif ($parsed.denseObservedResult -is [string]) {
+                    $result.denseObservedResult = ([string]$parsed.denseObservedResult).Trim().ToLowerInvariant() -eq "true"
+                } else {
+                    $result.denseObservedResult = ($null -ne $parsed.denseObservedResult)
                 }
             }
         }
@@ -1509,7 +1597,7 @@ $sharedPath = [string]$manifest.defaults.path
 $baselineMemorySnapshot = Invoke-MemoryStatusSnapshot -Url $memoryUrl -TimeoutSeconds $TimeoutSeconds
 $clientSpecs = @()
 if ($RunClientTaskChecks) {
-    $clientPrompt = 'Use the shared MCP memory tool. First call memory_status and read watchdog.status, watchdog.pid, watchdog.updatedAt, and memoryIntegrity.status from the nested response. Then call search_shared_memory with query ''shared memory read order'', mode ''hybrid'', route ''mixed'', limit 1. Set searchObservedResult to true if the search returns at least one result, otherwise false. Return only one strict minified JSON object with exactly these flat keys: client, watchdogStatus, watchdogPid, watchdogUpdatedAt, memoryIntegrityStatus, searchObservedResult. All values must be plain string, number, or boolean scalars. No markdown, no code fences, no commentary.'
+    $clientPrompt = 'Use the shared MCP memory tool. First call memory_status and read watchdog.status, watchdog.pid, watchdog.updatedAt, memoryIntegrity.status, and embeddingIndexState.status from the nested response. Set embeddingIndexAligned to true only if embeddingIndexState.status is exactly aligned. Then call search_shared_memory with query ''shared memory read order'', mode ''hybrid'', route ''mixed'', limit 1. Set searchObservedResult to true if the search returns at least one result, otherwise false. Then call search_shared_memory with query ''shared memory read order'', mode ''dense'', route ''mixed'', limit 1. Set denseObservedResult to true only if the dense search returns at least one result. Return only one strict minified JSON object with exactly these flat keys: client, watchdogStatus, watchdogPid, watchdogUpdatedAt, memoryIntegrityStatus, embeddingIndexAligned, searchObservedResult, denseObservedResult. All values must be plain string, number, or boolean scalars. No markdown, no code fences, no commentary.'
     $clientWorkspace = if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) { $PWD.Path } else { $WorkspaceRoot }
     $clientSpecs = @(
         [pscustomobject]@{
@@ -1554,6 +1642,8 @@ foreach ($wave in 1..$Waves) {
         $toolSpecs = @(
             [pscustomobject]@{ serverId = "memory"; url = $memoryUrl; toolName = "memory_status"; argumentsJson = (@{} | ConvertTo-Json -Compress) },
             [pscustomobject]@{ serverId = "memory"; url = $memoryUrl; toolName = "search_shared_memory"; argumentsJson = (@{ query = "shared memory read order"; mode = "hybrid"; route = "mixed"; limit = 3 } | ConvertTo-Json -Compress) },
+            [pscustomobject]@{ serverId = "memory"; url = $memoryUrl; toolName = "search_shared_memory"; argumentsJson = (@{ query = "shared memory read order"; mode = "dense"; route = "mixed"; limit = 3 } | ConvertTo-Json -Compress) },
+            [pscustomobject]@{ serverId = "memory"; url = $memoryUrl; toolName = "list_embedding_runtimes"; argumentsJson = (@{} | ConvertTo-Json -Compress) },
             [pscustomobject]@{ serverId = "memory"; url = $memoryUrl; toolName = "get_blackboard_tasks"; argumentsJson = (@{ limit = 5 } | ConvertTo-Json -Compress) }
         )
 
@@ -1687,6 +1777,9 @@ foreach ($clientResult in $clientTaskResults) {
     $watchdogStatusMatches = $false
     $watchdogPidMatches = $false
     $memoryIntegrityMatches = $false
+    $embeddingIndexAligned = Get-OptionalProbeBooleanProperty -Object $clientResult -PropertyName "embeddingIndexAligned"
+    $searchObservedResult = Get-OptionalProbeBooleanProperty -Object $clientResult -PropertyName "searchObservedResult"
+    $denseObservedResult = Get-OptionalProbeBooleanProperty -Object $clientResult -PropertyName "denseObservedResult"
     if ($baselineMemorySnapshot.ok) {
         $watchdogStatusMatches = Test-WatchdogStatusCompatible -ObservedStatus ([string]$clientResult.watchdogStatus) -ExpectedStatus $baselineExpectedWatchdogStatus
         $watchdogPidMatches = Test-WatchdogPidCompatible -ObservedPid $clientResult.watchdogPid -ExpectedPid $baselineExpectedWatchdogPid
@@ -1710,7 +1803,9 @@ foreach ($clientResult in $clientTaskResults) {
             $watchdogStatusMatches -and
             $watchdogPidMatches -and
             $memoryIntegrityMatches -and
-            $clientResult.searchObservedResult
+            $embeddingIndexAligned -and
+            $searchObservedResult -and
+            $denseObservedResult
         )
         if (-not $watchdogStatusMatches) {
             $clientResult.errors += "watchdog-status-mismatch"
@@ -1721,8 +1816,14 @@ foreach ($clientResult in $clientTaskResults) {
         if (-not $memoryIntegrityMatches) {
             $clientResult.errors += "memory-integrity-mismatch"
         }
-        if (-not $clientResult.searchObservedResult) {
+        if (-not $embeddingIndexAligned) {
+            $clientResult.errors += "embedding-index-not-aligned"
+        }
+        if (-not $searchObservedResult) {
             $clientResult.errors += "search-observed-result-false"
+        }
+        if (-not $denseObservedResult) {
+            $clientResult.errors += "dense-observed-result-false"
         }
     } else {
         $clientResult.pass = ($clientResult.ok -and $clientResult.hasProbeJson)
@@ -1760,9 +1861,11 @@ $clientTasksAllPass = ($failedClientTasks.Count -eq 0)
 $memoryStatusSnapshot = Invoke-MemoryStatusSnapshot -Url $memoryUrl -TimeoutSeconds $TimeoutSeconds
 $watchdogHealthy = $false
 $memoryIntegrityHealthy = $false
+$embeddingIndexHealthy = $false
 if ($memoryStatusSnapshot.ok) {
     $watchdogHealthy = -not [bool]$memoryStatusSnapshot.payload.watchdog.stale
     $memoryIntegrityHealthy = ([string]$memoryStatusSnapshot.payload.memoryIntegrity.status -eq "ok")
+    $embeddingIndexHealthy = ([string]$memoryStatusSnapshot.payload.embeddingIndexState.status -eq "aligned")
 }
 
 $report = [ordered]@{
@@ -1805,6 +1908,7 @@ $report = [ordered]@{
         clientTasksAllPass = $clientTasksAllPass
         watchdogHealthy = $watchdogHealthy
         memoryIntegrityHealthy = $memoryIntegrityHealthy
+        embeddingIndexHealthy = $embeddingIndexHealthy
         overallPass = (
             $failedResults.Count -eq 0 -and
             $allTrackedRunning -and
@@ -1814,7 +1918,8 @@ $report = [ordered]@{
             (-not $RunToolCalls -or $toolCallsAllPass) -and
             (-not $RunClientTaskChecks -or $clientTasksAllPass) -and
             $watchdogHealthy -and
-            $memoryIntegrityHealthy
+            $memoryIntegrityHealthy -and
+            $embeddingIndexHealthy
         )
     }
 }
@@ -1835,7 +1940,8 @@ $failedSummary = if ($failedResults.Count -gt 0) {
 
 $failedToolCallSummary = if ($failedToolCalls.Count -gt 0) {
     [string]::Join("`n", @($failedToolCalls | Select-Object -First 12 | ForEach-Object {
-        "- wave $($_.wave) / $($_.toolName): $([string]::Join('; ', @($_.errors)))"
+        $modeLabel = if (-not [string]::IsNullOrWhiteSpace([string]$_.requestedMode)) { " mode=$([string]$_.requestedMode)" } else { "" }
+        "- wave $($_.wave) / $($_.toolName)${modeLabel}: $([string]::Join('; ', @($_.errors)))"
     }))
 } else {
     "(none)"
@@ -1867,7 +1973,8 @@ $cliSummary = if ($cliChecks.Count -gt 0) {
 
 $toolCallSummary = if ($toolCallResults.Count -gt 0) {
     [string]::Join("`n", @($toolCallResults | ForEach-Object {
-        "- wave $($_.wave) / $($_.toolName): ok=$($_.callOk) :: hasText=$($_.hasTextContent) :: preview=$($_.outputPreview)"
+        $modeLabel = if (-not [string]::IsNullOrWhiteSpace([string]$_.requestedMode)) { " :: mode=$([string]$_.requestedMode)" } else { "" }
+        "- wave $($_.wave) / $($_.toolName): ok=$($_.callOk)$modeLabel :: hasText=$($_.hasTextContent) :: preview=$($_.outputPreview)"
     }))
 } else {
     "(skipped)"
@@ -1875,14 +1982,16 @@ $toolCallSummary = if ($toolCallResults.Count -gt 0) {
 
 $clientTaskSummary = if ($clientTaskResults.Count -gt 0) {
     [string]::Join("`n", @($clientTaskResults | ForEach-Object {
-        "- wave $($_.wave) / $($_.clientId): ok=$($_.ok) :: hasProbeJson=$($_.hasProbeJson) :: pass=$($_.pass) :: preview=$($_.outputPreview)"
+        $embeddingAligned = Get-OptionalProbeBooleanProperty -Object $_ -PropertyName "embeddingIndexAligned"
+        $denseObserved = Get-OptionalProbeBooleanProperty -Object $_ -PropertyName "denseObservedResult"
+        "- wave $($_.wave) / $($_.clientId): ok=$($_.ok) :: hasProbeJson=$($_.hasProbeJson) :: embeddingAligned=$embeddingAligned :: dense=$denseObserved :: pass=$($_.pass) :: preview=$($_.outputPreview)"
     }))
 } else {
     "(skipped)"
 }
 
 $memoryStatusSummary = if ($memoryStatusSnapshot.ok) {
-    "- watchdogHealthy=$watchdogHealthy`n- memoryIntegrityHealthy=$memoryIntegrityHealthy`n- watchdogStatus=$($memoryStatusSnapshot.payload.watchdog.status)`n- memoryIntegrityStatus=$($memoryStatusSnapshot.payload.memoryIntegrity.status)"
+    "- watchdogHealthy=$watchdogHealthy`n- memoryIntegrityHealthy=$memoryIntegrityHealthy`n- embeddingIndexHealthy=$embeddingIndexHealthy`n- watchdogStatus=$($memoryStatusSnapshot.payload.watchdog.status)`n- memoryIntegrityStatus=$($memoryStatusSnapshot.payload.memoryIntegrity.status)`n- embeddingIndexStatus=$($memoryStatusSnapshot.payload.embeddingIndexState.status)"
 } else {
     "- failed to read memory_status: $($memoryStatusSnapshot.error)"
 }
