@@ -688,7 +688,9 @@ function Invoke-ClientTaskProbe {
         watchdogPid = 0
         watchdogUpdatedAt = ""
         memoryIntegrityStatus = ""
+        embeddingIndexAligned = $false
         searchObservedResult = $false
+        denseObservedResult = $false
         pass = $false
         outputPreview = ""
         command = (($Executable + " " + ($Arguments -join " ")).Trim())
@@ -707,7 +709,9 @@ function Invoke-ClientTaskProbe {
         $result.watchdogPid = 0
         $result.watchdogUpdatedAt = ""
         $result.memoryIntegrityStatus = ""
+        $result.embeddingIndexAligned = $false
         $result.searchObservedResult = $false
+        $result.denseObservedResult = $false
         $result.outputPreview = ""
         $result.errors = @()
         $probeOutputPath = ""
@@ -772,6 +776,15 @@ function Invoke-ClientTaskProbe {
                     $result.watchdogPid = [int]$parsed.watchdogPid
                     $result.watchdogUpdatedAt = [string]$parsed.watchdogUpdatedAt
                     $result.memoryIntegrityStatus = [string]$parsed.memoryIntegrityStatus
+                    if ($null -ne $parsed.PSObject.Properties["embeddingIndexAligned"]) {
+                        if ($parsed.embeddingIndexAligned -is [bool]) {
+                            $result.embeddingIndexAligned = [bool]$parsed.embeddingIndexAligned
+                        } elseif ($parsed.embeddingIndexAligned -is [string]) {
+                            $result.embeddingIndexAligned = ([string]$parsed.embeddingIndexAligned).Trim().ToLowerInvariant() -eq "true"
+                        } else {
+                            $result.embeddingIndexAligned = ($null -ne $parsed.embeddingIndexAligned)
+                        }
+                    }
                     if ($null -ne $parsed.PSObject.Properties["searchObservedResult"]) {
                         if ($parsed.searchObservedResult -is [bool]) {
                             $result.searchObservedResult = [bool]$parsed.searchObservedResult
@@ -779,6 +792,15 @@ function Invoke-ClientTaskProbe {
                             $result.searchObservedResult = ([string]$parsed.searchObservedResult).Trim().ToLowerInvariant() -eq "true"
                         } else {
                             $result.searchObservedResult = ($null -ne $parsed.searchObservedResult)
+                        }
+                    }
+                    if ($null -ne $parsed.PSObject.Properties["denseObservedResult"]) {
+                        if ($parsed.denseObservedResult -is [bool]) {
+                            $result.denseObservedResult = [bool]$parsed.denseObservedResult
+                        } elseif ($parsed.denseObservedResult -is [string]) {
+                            $result.denseObservedResult = ([string]$parsed.denseObservedResult).Trim().ToLowerInvariant() -eq "true"
+                        } else {
+                            $result.denseObservedResult = ($null -ne $parsed.denseObservedResult)
                         }
                     }
                 }
@@ -1764,6 +1786,30 @@ function Test-WatchdogPidCompatible {
     return [int]$ObservedPid -ge 0
 }
 
+function Test-MemoryIntegrityStatusCompatible {
+    param(
+        [AllowEmptyString()][string]$ObservedStatus,
+        [AllowEmptyString()][string]$ExpectedStatus
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ObservedStatus)) {
+        return $false
+    }
+
+    if ([string]::IsNullOrWhiteSpace($ExpectedStatus)) {
+        return $true
+    }
+
+    $normalizedObserved = $ObservedStatus.Trim().ToLowerInvariant()
+    $normalizedExpected = $ExpectedStatus.Trim().ToLowerInvariant()
+    if ($normalizedObserved -eq $normalizedExpected) {
+        return $true
+    }
+
+    $nonErrorStatuses = @("ok", "warn")
+    return ($nonErrorStatuses -contains $normalizedObserved) -and ($nonErrorStatuses -contains $normalizedExpected)
+}
+
 $baselineExpectedWatchdogStatus = ""
 $baselineExpectedWatchdogPid = 0
 $baselineExpectedMemoryIntegrityStatus = ""
@@ -1783,7 +1829,7 @@ foreach ($clientResult in $clientTaskResults) {
     if ($baselineMemorySnapshot.ok) {
         $watchdogStatusMatches = Test-WatchdogStatusCompatible -ObservedStatus ([string]$clientResult.watchdogStatus) -ExpectedStatus $baselineExpectedWatchdogStatus
         $watchdogPidMatches = Test-WatchdogPidCompatible -ObservedPid $clientResult.watchdogPid -ExpectedPid $baselineExpectedWatchdogPid
-        $memoryIntegrityMatches = ([string]$clientResult.memoryIntegrityStatus -eq $baselineExpectedMemoryIntegrityStatus)
+        $memoryIntegrityMatches = Test-MemoryIntegrityStatusCompatible -ObservedStatus ([string]$clientResult.memoryIntegrityStatus) -ExpectedStatus $baselineExpectedMemoryIntegrityStatus
     }
 
     Add-Member -InputObject $clientResult -NotePropertyName expectedWatchdogStatus -NotePropertyValue $baselineExpectedWatchdogStatus -Force

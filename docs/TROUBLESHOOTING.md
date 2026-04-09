@@ -177,7 +177,11 @@ Disable-ScheduledTask -TaskName "OpenClaw Gateway"
 
 Notes:
 - the current `AI Memory Watchdog.vbs` startup entry should launch only hidden PowerShell hosts
-- current installs also try to disable a clearly stale per-user `OpenClaw Gateway` task automatically when it points at a missing `\.openclaw\gateway.cmd` or another profile's path; older installs may need one reinstall before that cleanup runs
+- current installs also replace legacy `OpenClaw.lnk` Startup entries with a hidden `OpenClaw.vbs` launcher when `~/.openclaw/start-gateway.ps1` exists
+- current installs now treat `OpenClaw Gateway` task actions that still call `\.openclaw\gateway.cmd` as repair-worthy, because the `.cmd` entrypoint itself can still flash a console window even when it points at the current profile
+- current installs also try to disable a clearly stale per-user `OpenClaw Gateway` task automatically when it points at a missing `\.openclaw\gateway.cmd`, another profile's path, or a legacy `.cmd` entrypoint; older installs may need one reinstall before that cleanup runs
+- when automatic disable hits `Access is denied`, current installs also write `~/.ai-memory/reports/repair-openclaw-gateway.admin.ps1` so one elevated PowerShell run can remove the stale task cleanly
+- if Windows still refuses the disable/delete with `Access is denied`, current installs also drop a compatibility shim at the stale `\.openclaw\gateway.cmd` path when possible so the leftover task stops triggering `Open With` prompts for Node/NPM scripts
 - if deletion or disable returns `Access is denied`, that specific task still requires an administrator shell even if the rest of the memory bus runs correctly
 - on the affected Windows profile, that `Access is denied` case can happen even when the task says `Run As User = wang`; the task file can still be ACL-owned by `Administrators`, so the practical fix is one elevated disable/delete in Task Scheduler or an admin PowerShell session
 
