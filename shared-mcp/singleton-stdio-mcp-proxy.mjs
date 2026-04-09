@@ -2,7 +2,9 @@
 
 import http from 'node:http';
 import process from 'node:process';
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
+import { accessSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 function killTree(pid) {
   if (!pid || pid <= 0) {
@@ -252,27 +254,65 @@ function sendNotification(message) {
   child.stdin.write(`${JSON.stringify(message)}\n`, 'utf8');
 }
 
-// On Windows, find npx by resolving it through npm's bin directory,
-// so we can spawn it directly without `shell: true` (which creates a cmd.exe
-// wrapper whose grandchildren survive taskkill /T).
-function resolveNpxCommand() {
-  const isWindows = process.platform === 'win32';
-  if (!isWindows) {
-    return stdioCommand;
+function splitCommandLine(commandText) {
+  const tokens = [];
+  const matcher = /"([^"]*)"|[^\s"]+/g;
+  let match = null;
+  while ((match = matcher.exec(commandText)) !== null) {
+    if (typeof match[1] === 'string') {
+      tokens.push(match[1]);
+    } else {
+      tokens.push(match[0]);
+    }
   }
-  // stdioCommand on Windows is typically "npx -y @pkg@latest".
-  // We need to find the actual npx script path to run without a shell.
-  // Try: <node>\node_modules\npm\bin\npx-cli.js
+  return tokens;
+}
+
+function resolveStdioLaunchSpec() {
+  const tokens = splitCommandLine(stdioCommand);
+  if (tokens.length === 0) {
+    throw new Error('stdio command produced no launch tokens');
+  }
+
   const nodeExe = process.env.NODE_EXE || process.execPath;
-  const nodeDir = require('node:path').dirname(nodeExe);
-  const npxScript = require('node:path').join(nodeDir, 'node_modules', 'npm', 'bin', 'npx-cli.js');
-  try {
-    require('node:fs').accessSync(npxScript);
-    // Replace "npx" at the start of stdioCommand with the resolved script path
-    return stdioCommand.replace(/^npx\b/, `"${npxScript}"`);
-  } catch {
-    return stdioCommand;
+  const isWindows = process.platform === 'win32';
+  const firstToken = tokens[0];
+
+  if (isWindows && /^npx(?:\.cmd|\.exe)?$/i.test(firstToken)) {
+    const nodeDir = dirname(nodeExe);
+    const npxScript = join(nodeDir, 'node_modules', 'npm', 'bin', 'npx-cli.js');
+    try {
+      accessSync(npxScript);
+      return {
+        filePath: nodeExe,
+        args: [npxScript, ...tokens.slice(1)],
+      };
+    } catch {
+      return {
+        filePath: 'cmd.exe',
+        args: ['/d', '/s', '/c', stdioCommand],
+      };
+    }
   }
+
+  if (isWindows && /\.(js|mjs|cjs)$/i.test(firstToken)) {
+    return {
+      filePath: nodeExe,
+      args: tokens,
+    };
+  }
+
+  if (isWindows && /\.(cmd|bat)$/i.test(firstToken)) {
+    return {
+      filePath: 'cmd.exe',
+      args: ['/d', '/s', '/c', stdioCommand],
+    };
+  }
+
+  return {
+    filePath: firstToken,
+    args: tokens.slice(1),
+  };
 }
 
 // Kill any zombie npx/npm processes from previous child instances that survived
@@ -291,7 +331,6 @@ function killZombieNpxProcesses() {
     '@playwright/mcp/cli.js',   // matches reparented playwright CLI child processes
   ];
   try {
-    const { execSync } = require('node:child_process');
     // WMIC is available on all Windows and supports wide command-line matching
     const output = execSync(
       'wmic process where "name=\'node.exe\'" get ProcessId,CommandLine /format:csv',
@@ -326,28 +365,18 @@ function spawnChildProcess() {
   // before starting a new one, to prevent zombie accumulation.
   killZombieNpxProcesses();
   clearRestartTimer();
-  const directCommand = resolveNpxCommand();
-  log(`starting singleton child via: ${stdioCommand}`);
+  const launchSpec = resolveStdioLaunchSpec();
+  log(`starting singleton child via: ${launchSpec.filePath} ${launchSpec.args.join(' ')}`.trim());
 
-  if (process.platform === 'win32') {
-    // Use cmd.exe /c to run the command without a wrapping shell process.
-    // This keeps the spawned npx/node as a direct child (not grandchild),
-    // so taskkill /T /PID correctly kills the entire tree.
-    child = spawn('cmd.exe', ['/c', directCommand], {
-      shell: false,
-      windowsHide: true,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        ...childExtraEnv,
-      },
-    });
-  } else {
-    child = spawn(directCommand, {
-      shell: false,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-  }
+  child = spawn(launchSpec.filePath, launchSpec.args, {
+    shell: false,
+    windowsHide: process.platform === 'win32',
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      ...childExtraEnv,
+    },
+  });
 
   child.stdout.on('data', processChildStdout);
   child.stderr.on('data', (chunk) => {

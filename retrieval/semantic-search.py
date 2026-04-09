@@ -460,6 +460,138 @@ def tokenize(text: str) -> List[str]:
     return tokens
 
 
+def build_snippet_terms(query: str) -> List[str]:
+    candidates: List[str] = []
+    normalized_query = normalize_spaces(query).lower()
+    if normalized_query:
+        candidates.append(normalized_query)
+    candidates.extend(token.lower() for token in tokenize(query))
+    candidates.extend(re.findall(r"[a-z0-9][a-z0-9_\-./:]{1,}|[\u4e00-\u9fff]{2,}", normalized_query))
+
+    ordered: List[str] = []
+    seen = set()
+    for candidate in sorted(candidates, key=lambda item: (-len(item), item)):
+        normalized = normalize_spaces(candidate).lower()
+        if len(normalized) < 2 or normalized in seen:
+            continue
+        seen.add(normalized)
+        ordered.append(normalized)
+    return ordered[:16]
+
+
+def extract_snippet_window(text: str, start: int, end: int, window_chars: int) -> Tuple[str, int, int]:
+    desired_length = max(int(window_chars), end - start)
+    context = max(24, (desired_length - (end - start)) // 2)
+    snippet_start = max(0, start - context)
+    snippet_end = min(len(text), end + context)
+
+    current_length = snippet_end - snippet_start
+    if current_length < desired_length:
+        shortfall = desired_length - current_length
+        grow_left = min(snippet_start, math.ceil(shortfall / 2))
+        grow_right = min(len(text) - snippet_end, shortfall - grow_left)
+        snippet_start -= grow_left
+        snippet_end += grow_right
+        remaining = desired_length - (snippet_end - snippet_start)
+        if remaining > 0 and snippet_start > 0:
+            extra_left = min(snippet_start, remaining)
+            snippet_start -= extra_left
+            remaining -= extra_left
+        if remaining > 0 and snippet_end < len(text):
+            snippet_end = min(len(text), snippet_end + remaining)
+
+    snippet_text = text[snippet_start:snippet_end].strip()
+    if snippet_start > 0 and snippet_text:
+        snippet_text = f"…{snippet_text}"
+    if snippet_end < len(text) and snippet_text:
+        snippet_text = f"{snippet_text}…"
+    return snippet_text, snippet_start, snippet_end
+
+
+def extract_verbatim_snippets(
+    query: str,
+    entry: dict,
+    window_chars: int = 220,
+    max_snippets: int = 1,
+) -> List[Dict[str, object]]:
+    terms = build_snippet_terms(query)
+    if not terms:
+        return []
+
+    window_chars = max(80, min(600, int(window_chars)))
+    max_snippets = max(1, min(5, int(max_snippets)))
+    entry_field = normalize_spaces(str(entry.get("field", "content"))).lower() or "content"
+
+    field_candidates: List[Tuple[str, str]] = []
+    if entry_field in {"fact", "concept"}:
+        field_candidates.append((entry_field, str(entry.get("search_text", ""))))
+    else:
+        field_candidates.extend(
+            [
+                ("title", str(entry.get("title", ""))),
+                ("description", str(entry.get("description", ""))),
+                ("content", str(entry.get("content", ""))),
+            ]
+        )
+        fallback_search_text = str(entry.get("search_text", ""))
+        if fallback_search_text:
+            field_candidates.append(("content", fallback_search_text))
+
+    snippets: List[Dict[str, object]] = []
+    covered_regions: List[Tuple[str, int, int]] = []
+    seen_texts = set()
+
+    for candidate_field, candidate_text in field_candidates:
+        normalized_text = normalize_spaces(candidate_text)
+        if not normalized_text:
+            continue
+
+        dedupe_key = (candidate_field, normalized_text)
+        if dedupe_key in seen_texts:
+            continue
+        seen_texts.add(dedupe_key)
+
+        lowered = normalized_text.lower()
+        matches: List[Tuple[int, int, str]] = []
+        for term in terms:
+            cursor = lowered.find(term)
+            while cursor >= 0:
+                match_end = cursor + len(term)
+                matches.append((cursor, match_end, normalized_text[cursor:match_end]))
+                if len(matches) >= max_snippets * 6:
+                    break
+                cursor = lowered.find(term, cursor + max(1, len(term)))
+            if len(matches) >= max_snippets * 6:
+                break
+
+        matches.sort(key=lambda item: (item[0], -(item[1] - item[0])))
+        for match_start, match_end, match_text in matches:
+            is_covered = any(
+                field_name == candidate_field and not (match_end <= region_start or match_start >= region_end)
+                for field_name, region_start, region_end in covered_regions
+            )
+            if is_covered:
+                continue
+
+            snippet_text, snippet_start, snippet_end = extract_snippet_window(
+                normalized_text, match_start, match_end, window_chars
+            )
+            snippets.append(
+                {
+                    "field": candidate_field,
+                    "match": match_text,
+                    "start": match_start,
+                    "end": match_end,
+                    "text": snippet_text,
+                }
+            )
+            covered_regions.append((candidate_field, snippet_start, snippet_end))
+            if len(snippets) >= max_snippets:
+                return snippets
+
+    return snippets
+
+
 def derive_entry_layer(payload: dict) -> str:
     memory_level = normalize_spaces(str(payload.get("memory_level", payload.get("memoryLevel", "")))).lower()
     source_kind = normalize_spaces(str(payload.get("source_kind", payload.get("sourceKind", "")))).lower()
@@ -1267,6 +1399,10 @@ def format_results(
     bm25_map: Dict[str, float],
     dense_map: Dict[str, float],
     rank_meta: Dict[str, Dict[str, object]],
+    query: str,
+    include_verbatim: bool = False,
+    snippet_window: int = 220,
+    max_verbatim_per_result: int = 1,
     workspace_hints: Optional[Dict] = None,
 ) -> List[dict]:
     results: List[dict] = []
@@ -1286,37 +1422,43 @@ def format_results(
         # Memory drift detection — pure read, never writes.
         drift_info = check_memory_drift(entry, workspace_hints)
 
-        results.append(
-            {
-                "rank": index,
-                "id": entry_id,
-                "record_id": entry.get("record_id", entry_id),
-                "field": entry.get("field", "content"),
-                "score": round(float(score), 6),
-                "tool": entry["tool"],
-                "project": entry["project"],
-                "type": entry["type"],
-                "t": entry["t"][:19] if entry["t"] else "",
-                "title": entry["title"][:140],
-                "excerpt": entry["excerpt"][:240],
-                "scope": entry.get("scope", ""),
-                "visibility": entry.get("visibility", ""),
-                "sourceKind": entry.get("sourceKind", ""),
-                "memoryLevel": entry.get("memoryLevel", ""),
-                "workspace": entry.get("workspace", ""),
-                "taskState": entry.get("taskState", ""),
-                "freshness": entry.get("freshness", ""),
-                "layer": entry.get("layer", ""),
-                "sources": sources.get(entry_id, []),
-                "bm25Score": round(float(bm25_map.get(entry_id, 0.0)), 6) if entry_id in bm25_map else None,
-                "denseScore": round(float(dense_map.get(entry_id, 0.0)), 6) if entry_id in dense_map else None,
-                "rankMeta": meta or None,
-                "estimated_tokens": estimated_tokens,
-                "driftRisk": drift_info["driftRisk"],
-                "driftSignals": drift_info["driftSignals"] or None,
-                "missingFileCount": drift_info.get("missingFileCount") or None,
-            }
-        )
+        result_payload = {
+            "rank": index,
+            "id": entry_id,
+            "record_id": entry.get("record_id", entry_id),
+            "field": entry.get("field", "content"),
+            "score": round(float(score), 6),
+            "tool": entry["tool"],
+            "project": entry["project"],
+            "type": entry["type"],
+            "t": entry["t"][:19] if entry["t"] else "",
+            "title": entry["title"][:140],
+            "excerpt": entry["excerpt"][:240],
+            "scope": entry.get("scope", ""),
+            "visibility": entry.get("visibility", ""),
+            "sourceKind": entry.get("sourceKind", ""),
+            "memoryLevel": entry.get("memoryLevel", ""),
+            "workspace": entry.get("workspace", ""),
+            "taskState": entry.get("taskState", ""),
+            "freshness": entry.get("freshness", ""),
+            "layer": entry.get("layer", ""),
+            "sources": sources.get(entry_id, []),
+            "bm25Score": round(float(bm25_map.get(entry_id, 0.0)), 6) if entry_id in bm25_map else None,
+            "denseScore": round(float(dense_map.get(entry_id, 0.0)), 6) if entry_id in dense_map else None,
+            "rankMeta": meta or None,
+            "estimated_tokens": estimated_tokens,
+            "driftRisk": drift_info["driftRisk"],
+            "driftSignals": drift_info["driftSignals"] or None,
+            "missingFileCount": drift_info.get("missingFileCount") or None,
+        }
+        if include_verbatim:
+            result_payload["verbatimSnippets"] = extract_verbatim_snippets(
+                query,
+                entry,
+                window_chars=snippet_window,
+                max_snippets=max_verbatim_per_result,
+            )
+        results.append(result_payload)
     return results
 
 
@@ -1480,6 +1622,19 @@ def normalize_request_payload(payload: Dict[str, object]) -> Dict[str, object]:
         "workspace": normalize_spaces(str(payload.get("workspace", ""))).lower(),
         "task_state": normalize_spaces(str(payload.get("task_state", payload.get("taskState", "")))).lower(),
         "prefer_summaries": normalize_bool(payload.get("prefer_summaries", payload.get("preferSummaries", False)), fallback=False),
+        "include_verbatim": normalize_bool(payload.get("include_verbatim", payload.get("includeVerbatim", False)), fallback=False),
+        "snippet_window": min(
+            600,
+            normalize_int(payload.get("snippet_window", payload.get("snippetWindow", 220)), fallback=220, minimum=80),
+        ),
+        "max_verbatim_per_result": min(
+            5,
+            normalize_int(
+                payload.get("max_verbatim_per_result", payload.get("maxVerbatimPerResult", 1)),
+                fallback=1,
+                minimum=1,
+            ),
+        ),
         "mmr_enabled": mmr_enabled,
         "mmr_lambda": mmr_lambda,
         "temporal_decay": {
@@ -1502,6 +1657,9 @@ def parse_args() -> Dict[str, object]:
     parser.add_argument("--workspace", default="")
     parser.add_argument("--task-state", default="")
     parser.add_argument("--prefer-summaries", action="store_true")
+    parser.add_argument("--include-verbatim", action="store_true")
+    parser.add_argument("--snippet-window", type=int, default=220)
+    parser.add_argument("--max-verbatim-per-result", type=int, default=1)
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--server", action="store_true", help="Run persistent JSONL server mode.")
     args = parser.parse_args()
@@ -1539,6 +1697,9 @@ def parse_args() -> Dict[str, object]:
             "workspace": args.workspace,
             "task_state": args.task_state,
             "prefer_summaries": bool(args.prefer_summaries),
+            "include_verbatim": bool(args.include_verbatim),
+            "snippet_window": args.snippet_window,
+            "max_verbatim_per_result": args.max_verbatim_per_result,
         }
     )
 
@@ -1688,6 +1849,9 @@ def execute_search(parsed: Dict[str, object], workspace_root: Optional[str] = No
             "workspace": parsed.get("workspace"),
             "taskState": parsed.get("task_state"),
             "preferSummaries": parsed.get("prefer_summaries"),
+            "includeVerbatim": parsed.get("include_verbatim"),
+            "snippetWindow": parsed.get("snippet_window"),
+            "maxVerbatimPerResult": parsed.get("max_verbatim_per_result"),
             "temporalDecay": parsed.get("temporal_decay"),
         },
         "entryCount": len(entries),
@@ -1706,7 +1870,19 @@ def execute_search(parsed: Dict[str, object], workspace_root: Optional[str] = No
             search_result_cache_hit=False,
             query_embedding_cache_hit=bool(dense_meta.get("queryEmbeddingCacheHit")),
         ),
-        "results": format_results(ranked, entries_by_id, sources, bm25_map, dense_map, rank_meta, workspace_hints),
+        "results": format_results(
+            ranked,
+            entries_by_id,
+            sources,
+            bm25_map,
+            dense_map,
+            rank_meta,
+            query,
+            include_verbatim=bool(parsed.get("include_verbatim")),
+            snippet_window=int(parsed.get("snippet_window", 220)),
+            max_verbatim_per_result=int(parsed.get("max_verbatim_per_result", 1)),
+            workspace_hints=workspace_hints,
+        ),
     }
     store_search_result(search_result_cache_key, payload)
     return payload

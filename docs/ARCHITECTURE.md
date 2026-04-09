@@ -30,6 +30,7 @@ Core canonical notes:
    - `shared-mcp/omni-memory-server.js`
    - shared HTTP endpoints for `context7`, `fetch`, `time`, `sequential-thinking`, `obsidian`, `memory`, and the managed `playwright` backend
 - exposes `memory_status`, `search_shared_memory`, embeddings rebuild tools, claude-mem compatibility tools, and OpenClaw blackboard tools
+- exposes `memory_wake_up` for compact bootstrap context and optional verbatim snippet windows on `search_shared_memory`
 - keeps a warm shared Python retrieval worker for `search_shared_memory`, with one-shot fallback if the worker is unavailable
 - reports worker cache metrics through `memory_status` and supports explicit cache resets through `clear_shared_memory_search_cache`
 - reports contract/integrity state through `memory_status.memoryIntegrity`
@@ -185,6 +186,8 @@ This is intentionally auditable rather than magical. The system prefers explicit
 - single-mode `bm25` and `dense` queries keep their retrieval semantics; hybrid-only coverage bonus is applied only when both retrievers contribute to the same candidate
 
 The current weights are still hand-tuned. They improve operator control and inspectability, but they are not a learned or benchmark-calibrated ranker yet.
+
+`search_shared_memory` can also attach query-aware verbatim snippet windows when `includeVerbatim=true`, which keeps the canonical store unchanged while exposing the exact matched text needed for decision recall and auditability.
 
 ## Portability Boundary
 - Windows:

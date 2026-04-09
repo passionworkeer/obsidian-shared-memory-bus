@@ -489,15 +489,30 @@ function Start-ProxyProcess {
 Ensure-Directory -Path $logRoot
 $manifest = Get-Content -Raw -LiteralPath $manifestPath -Encoding utf8 | ConvertFrom-Json
 
-$envBasePort = [int]([Environment]::GetEnvironmentVariable("AI_MEMORY_BASE_PORT") ?? "")
+$envBasePortRaw = [Environment]::GetEnvironmentVariable("AI_MEMORY_BASE_PORT")
+$envBasePort = 0
+if (-not [string]::IsNullOrWhiteSpace($envBasePortRaw)) {
+    $envBasePort = [int]$envBasePortRaw
+}
 $manifestBasePort = $manifest.defaults.basePort
-$basePort = $envBasePort -gt 0 ? $envBasePort : $manifestBasePort
+if ($envBasePort -gt 0) {
+    $basePort = $envBasePort
+} else {
+    $basePort = $manifestBasePort
+}
 
 $nodeExecutable = Resolve-SharedNodeExecutable
 $mutex = New-Object System.Threading.Mutex($false, $stateMutexName)
 $mutexAcquired = $false
 try {
-    [void]$mutex.WaitOne()
+    $mutexAcquired = $mutex.WaitOne(0)
+    if (-not $mutexAcquired) {
+        [pscustomobject]@{
+            id = "shared-mcp"
+            status = "state-lock-busy"
+        } | ConvertTo-Json -Depth 4
+        exit 0
+    }
     $mutexAcquired = $true
 } catch [System.Threading.AbandonedMutexException] {
     $mutexAcquired = $true
