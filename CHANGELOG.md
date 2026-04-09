@@ -50,6 +50,17 @@ All notable changes to this project should be documented here.
 - Improved CLI error handling with --dry-run
 - Added __pycache__ to .gitignore
 
+## 2026-04-03
+
+### Windows Runtime Hardening
+- Windows shared MCP and watchdog launches now use a no-console background path instead of relying only on `WindowStyle Hidden`.
+- Node child processes used by the shared runtime now opt into `windowsHide: true` so nested `node`, `cmd`, and `powershell` launches stay out of the foreground.
+- Shared proxy launch no longer passes resolved environment payloads on the command line, removing a local process-list leakage path for sensitive runtime values.
+- Shared MCP mutex handling now tolerates abandoned mutex recovery in `start`, `status`, and `stop` flows after interrupted runs.
+
+### Packaging
+- Added `templates/agents/portable-skill` and `templates/agents/thin-plugin` starter kits.
+
 ## 2026-04-01
 
 ### Added
