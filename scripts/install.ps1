@@ -951,6 +951,86 @@ function Stop-WindowsStartupScriptHosts {
     }
 }
 
+function Write-WindowsHiddenLauncherVbs {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$Arguments = @(),
+        [System.Collections.IDictionary]$Environment = $null
+    )
+
+    $command = ConvertTo-WindowsCommandLine -FilePath $FilePath -Arguments $Arguments
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add('Set shell = CreateObject("Wscript.Shell")') | Out-Null
+    foreach ($line in @(New-VbsEnvironmentAssignments -Variables $Environment)) {
+        $lines.Add($line) | Out-Null
+    }
+    $lines.Add(('command = "{0}"' -f (ConvertTo-VbsStringLiteral -Value $command))) | Out-Null
+    $lines.Add('shell.Run command, 0, False') | Out-Null
+    $content = [string]::Join([Environment]::NewLine, @($lines)) + [Environment]::NewLine
+    [System.IO.File]::WriteAllText($Path, $content, $utf8NoBom)
+}
+
+function Repair-OpenClawStartupEntry {
+    param([Parameter(Mandatory = $true)][string]$CurrentOpenClawHome)
+
+    $result = [ordered]@{
+        configured = $false
+        launcherPath = ""
+        reason = ""
+        error = ""
+        removedEntries = New-Object System.Collections.Generic.List[string]
+    }
+
+    if (-not (Test-SharedIsWindows)) {
+        return [pscustomobject]$result
+    }
+
+    try {
+        $startupDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Startup"
+        Ensure-Directory -Path $startupDir
+
+        $openClawVbsPath = Join-Path $startupDir "OpenClaw.vbs"
+        $startGatewayPath = Join-SharedPath @($CurrentOpenClawHome, "start-gateway.ps1")
+        $legacyEntryPaths = @(
+            (Join-Path $startupDir "OpenClaw.lnk"),
+            (Join-Path $startupDir "OpenClaw Gateway.lnk"),
+            (Join-Path $startupDir "OpenClaw Gateway.cmd"),
+            (Join-Path $startupDir "OpenClaw.cmd"),
+            (Join-Path $startupDir "OpenClaw.ps1")
+        ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+        foreach ($legacyEntryPath in @($legacyEntryPaths)) {
+            if (Test-Path -LiteralPath $legacyEntryPath -PathType Leaf) {
+                Remove-Item -LiteralPath $legacyEntryPath -Force -ErrorAction SilentlyContinue
+                $result.removedEntries.Add($legacyEntryPath) | Out-Null
+            }
+            Stop-WindowsStartupScriptHosts -ScriptPath $legacyEntryPath
+        }
+
+        if (-not (Test-Path -LiteralPath $startGatewayPath -PathType Leaf)) {
+            if (Test-Path -LiteralPath $openClawVbsPath -PathType Leaf) {
+                Remove-Item -LiteralPath $openClawVbsPath -Force -ErrorAction SilentlyContinue
+                $result.removedEntries.Add($openClawVbsPath) | Out-Null
+            }
+            Stop-WindowsStartupScriptHosts -ScriptPath $openClawVbsPath
+            $result.reason = "openclaw-start-gateway-missing"
+            return [pscustomobject]$result
+        }
+
+        $powerShellExe = Resolve-SharedPowerShellExecutable
+        $gatewayArgs = Get-SharedPowerShellFileArguments -ScriptPath $startGatewayPath -ArgumentList @()
+        Write-WindowsHiddenLauncherVbs -Path $openClawVbsPath -FilePath $powerShellExe -Arguments $gatewayArgs
+        $result.configured = $true
+        $result.launcherPath = $openClawVbsPath
+        $result.reason = "openclaw-hidden-vbs"
+    } catch {
+        $result.error = $_.Exception.Message
+    }
+
+    return [pscustomobject]$result
+}
+
 function Test-WindowsPowerShellScriptRunning {
     param([Parameter(Mandatory = $true)][string]$ScriptPath)
 
@@ -977,14 +1057,153 @@ function Test-WindowsPowerShellScriptRunning {
     ).Count -gt 0
 }
 
+function Write-LegacyOpenClawGatewayShim {
+    param(
+        [Parameter(Mandatory = $true)][string]$LegacyActionPath,
+        [Parameter(Mandatory = $true)][string]$CurrentOpenClawHome
+    )
+
+    $result = [ordered]@{
+        created = $false
+        path = $LegacyActionPath
+        target = ""
+        error = ""
+    }
+
+    try {
+        $extension = [System.IO.Path]::GetExtension($LegacyActionPath).ToLowerInvariant()
+        $currentStartGatewayPath = Join-SharedPath @($CurrentOpenClawHome, "start-gateway.ps1")
+        if (-not (Test-Path -LiteralPath $currentStartGatewayPath -PathType Leaf)) {
+            $result.error = "current-start-gateway-missing"
+            return [pscustomobject]$result
+        }
+
+        $parentPath = Split-Path -Parent $LegacyActionPath
+        if ([string]::IsNullOrWhiteSpace($parentPath)) {
+            $result.error = "legacy-action-parent-missing"
+            return [pscustomobject]$result
+        }
+
+        Ensure-Directory -Path $parentPath
+        $result.target = $currentStartGatewayPath
+
+        switch ($extension) {
+            ".cmd" {
+                $shimContent = @"
+@echo off
+setlocal
+set "TARGET_PS1=$currentStartGatewayPath"
+if exist "%TARGET_PS1%" (
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%TARGET_PS1%" >nul 2>nul
+)
+exit /b 0
+"@.Trim() + "`r`n"
+                [System.IO.File]::WriteAllText($LegacyActionPath, $shimContent, $utf8NoBom)
+                $result.created = $true
+            }
+            ".ps1" {
+                $shimContent = @"
+\$ErrorActionPreference = "SilentlyContinue"
+\$target = "$currentStartGatewayPath"
+if (Test-Path -LiteralPath \$target -PathType Leaf) {
+    Start-Process powershell.exe -ArgumentList @(
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-WindowStyle", "Hidden",
+        "-File", \$target
+    ) -WindowStyle Hidden | Out-Null
+}
+"@.Trim() + "`r`n"
+                [System.IO.File]::WriteAllText($LegacyActionPath, $shimContent, $utf8NoBom)
+                $result.created = $true
+            }
+            default {
+                $result.error = "unsupported-legacy-openclaw-action-extension:$extension"
+            }
+        }
+    } catch {
+        $result.error = $_.Exception.Message
+    }
+
+    return [pscustomobject]$result
+}
+
+function Write-OpenClawGatewayAdminRepairScript {
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetRoot,
+        [string]$ActionPath = ""
+    )
+
+    $result = [ordered]@{
+        created = $false
+        path = ""
+        error = ""
+    }
+
+    if (-not (Test-SharedIsWindows)) {
+        return [pscustomobject]$result
+    }
+
+    try {
+        $reportsDir = Join-Path $TargetRoot "reports"
+        Ensure-Directory -Path $reportsDir
+        $scriptPath = Join-Path $reportsDir "repair-openclaw-gateway.admin.ps1"
+        $actionComment = if ([string]::IsNullOrWhiteSpace($ActionPath)) { "" } else { "# Observed stale action path: $ActionPath`r`n" }
+        $scriptContent = @"
+`$ErrorActionPreference = "Stop"
+$actionComment`$taskName = "OpenClaw Gateway"
+`$task = Get-ScheduledTask -TaskName `$taskName -ErrorAction SilentlyContinue
+if (`$null -eq `$task) {
+    Write-Output "OpenClaw Gateway task not found."
+    return
+}
+
+try {
+    Disable-ScheduledTask -TaskName `$taskName -ErrorAction SilentlyContinue | Out-Null
+} catch {
+}
+
+try {
+    Unregister-ScheduledTask -TaskName `$taskName -Confirm:`$false -ErrorAction Stop | Out-Null
+    Write-Output "Removed OpenClaw Gateway."
+    return
+} catch {
+}
+
+& schtasks /Delete /TN `$taskName /F
+if (`$LASTEXITCODE -ne 0) {
+    throw "schtasks /Delete failed with exit code `$LASTEXITCODE"
+}
+
+Write-Output "Removed OpenClaw Gateway."
+"@.Trim() + "`r`n"
+        [System.IO.File]::WriteAllText($scriptPath, $scriptContent, $utf8NoBom)
+        $result.created = $true
+        $result.path = $scriptPath
+    } catch {
+        $result.error = $_.Exception.Message
+    }
+
+    return [pscustomobject]$result
+}
+
 function Disable-StaleOpenClawGatewayTask {
+    param([string]$TargetRoot = "")
+
     $result = [ordered]@{
         taskFound = $false
         stale = $false
         disabled = $false
+        shimCreated = $false
+        shimPath = ""
+        shimTarget = ""
+        shimError = ""
         actionPath = ""
         reason = ""
         disableError = ""
+        repairScriptCreated = $false
+        repairScriptPath = ""
+        repairScriptError = ""
         error = ""
     }
 
@@ -1051,13 +1270,21 @@ function Disable-StaleOpenClawGatewayTask {
         $actionMissing = -not (Test-Path -LiteralPath $resolvedActionPath -PathType Leaf)
         $unexpectedProfilePath = $expectedActionPaths.Count -gt 0 -and ($expectedActionPaths -notcontains $normalizedActionPath)
 
-        if (-not $actionMissing -and -not $unexpectedProfilePath) {
+        $cmdActionPath = $normalizedActionPath -match '(?i)\\\.openclaw\\gateway\.cmd$'
+
+        if (-not $actionMissing -and -not $unexpectedProfilePath -and -not $cmdActionPath) {
             $result.reason = "task-action-current"
             return [pscustomobject]$result
         }
 
         $result.stale = $true
-        $result.reason = if ($actionMissing) { "task-action-missing" } else { "task-action-points-to-different-profile" }
+        if ($actionMissing) {
+            $result.reason = "task-action-missing"
+        } elseif ($unexpectedProfilePath) {
+            $result.reason = "task-action-points-to-different-profile"
+        } else {
+            $result.reason = "task-action-cmd-entrypoint"
+        }
 
         try {
             Disable-ScheduledTask -TaskName "OpenClaw Gateway" -ErrorAction Stop | Out-Null
@@ -1074,6 +1301,21 @@ function Disable-StaleOpenClawGatewayTask {
             } catch {
                 $result.disableError = $_.Exception.Message
             }
+        }
+
+        if (($actionMissing -or $cmdActionPath) -and -not [string]::IsNullOrWhiteSpace($resolvedActionPath)) {
+            $shimResult = Write-LegacyOpenClawGatewayShim -LegacyActionPath $resolvedActionPath -CurrentOpenClawHome $openClawHome
+            $result.shimCreated = [bool]$shimResult.created
+            $result.shimPath = [string]$shimResult.path
+            $result.shimTarget = [string]$shimResult.target
+            $result.shimError = [string]$shimResult.error
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($TargetRoot)) {
+            $repairScript = Write-OpenClawGatewayAdminRepairScript -TargetRoot $TargetRoot -ActionPath $resolvedActionPath
+            $result.repairScriptCreated = [bool]$repairScript.created
+            $result.repairScriptPath = [string]$repairScript.path
+            $result.repairScriptError = [string]$repairScript.error
         }
     } catch {
         $result.error = $_.Exception.Message
@@ -1144,6 +1386,12 @@ function Register-StartupHooks {
                 Unregister-ScheduledTask -TaskName "AI-Memory-Bus-Sync" -Confirm:$false -ErrorAction SilentlyContinue
             }
         } catch {
+        }
+        $openClawStartupRepair = Repair-OpenClawStartupEntry -CurrentOpenClawHome (Join-SharedPath @((Get-SharedUserHome), ".openclaw"))
+        if ([bool]$openClawStartupRepair.configured) {
+            Write-Output ("Configured hidden OpenClaw startup launcher: {0}" -f $openClawStartupRepair.launcherPath)
+        } elseif (@($openClawStartupRepair.removedEntries).Count -gt 0) {
+            Write-Output ("Removed stale OpenClaw startup entries: {0}" -f ([string]::Join(", ", @($openClawStartupRepair.removedEntries))))
         }
         return
     }
@@ -1477,11 +1725,18 @@ if ($RegisterStartup) {
 }
 
 if ((Test-SharedIsWindows) -and (-not $DryRun)) {
-    $openClawGatewayTaskRepair = Disable-StaleOpenClawGatewayTask
+    $openClawGatewayTaskRepair = Disable-StaleOpenClawGatewayTask -TargetRoot $TargetRoot
     if ([bool]$openClawGatewayTaskRepair.disabled) {
         Write-Output ("Disabled stale OpenClaw Gateway scheduled task ({0}): {1}" -f $openClawGatewayTaskRepair.reason, $openClawGatewayTaskRepair.actionPath)
+    } elseif ([bool]$openClawGatewayTaskRepair.shimCreated) {
+        Write-Output ("Installed legacy OpenClaw Gateway shim for stale task ({0}): {1} -> {2}" -f $openClawGatewayTaskRepair.reason, $openClawGatewayTaskRepair.shimPath, $openClawGatewayTaskRepair.shimTarget)
     } elseif ([bool]$openClawGatewayTaskRepair.stale -and -not [string]::IsNullOrWhiteSpace([string]$openClawGatewayTaskRepair.disableError)) {
         Write-Warning ("Detected stale OpenClaw Gateway scheduled task but could not disable it automatically: {0}" -f $openClawGatewayTaskRepair.disableError)
+        if ([bool]$openClawGatewayTaskRepair.repairScriptCreated) {
+            Write-Warning ("Wrote elevated repair script for the stale OpenClaw task: {0}" -f $openClawGatewayTaskRepair.repairScriptPath)
+        } elseif (-not [string]::IsNullOrWhiteSpace([string]$openClawGatewayTaskRepair.repairScriptError)) {
+            Write-Warning ("Unable to write elevated repair script for the stale OpenClaw task: {0}" -f $openClawGatewayTaskRepair.repairScriptError)
+        }
     }
 }
 

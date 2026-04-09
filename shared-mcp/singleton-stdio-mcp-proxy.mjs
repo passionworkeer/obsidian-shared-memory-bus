@@ -2,9 +2,9 @@
 
 import http from 'node:http';
 import process from 'node:process';
-import { spawn, execSync } from 'node:child_process';
-import { accessSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { spawn, execSync, spawnSync } from 'node:child_process';
+import { accessSync, existsSync, readFileSync } from 'node:fs';
+import { dirname, join, normalize } from 'node:path';
 
 function killTree(pid) {
   if (!pid || pid <= 0) {
@@ -268,6 +268,112 @@ function splitCommandLine(commandText) {
   return tokens;
 }
 
+function resolveWindowsCommandPath(commandToken) {
+  if (process.platform !== 'win32' || !commandToken) {
+    return '';
+  }
+
+  if (/[\\/]/.test(commandToken) || /^[A-Za-z]:/.test(commandToken)) {
+    return existsSync(commandToken) ? commandToken : '';
+  }
+
+  try {
+    const result = spawnSync('where.exe', [commandToken], {
+      windowsHide: true,
+      encoding: 'utf8',
+      timeout: 5000,
+    });
+    if (result.status !== 0 || !result.stdout) {
+      return '';
+    }
+
+    return result.stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line && existsSync(line)) || '';
+  } catch {
+    return '';
+  }
+}
+
+function resolveWindowsCmdShimLaunchSpec(commandToken, passthroughArgs, fallbackNodeExe) {
+  const commandPath = resolveWindowsCommandPath(commandToken);
+  if (!commandPath) {
+    return null;
+  }
+
+  let content = '';
+  try {
+    content = readFileSync(commandPath, 'utf8');
+  } catch {
+    return null;
+  }
+
+  const shimMatch = content.match(
+    /"%_prog%"\s+"%(?:dp0|~dp0)%\\([^"\r\n]+\.(?:js|mjs|cjs))"/i,
+  );
+  if (!shimMatch) {
+    return null;
+  }
+
+  const scriptPath = normalize(join(dirname(commandPath), shimMatch[1].replace(/\\/g, '/')));
+  if (!existsSync(scriptPath)) {
+    return null;
+  }
+
+  // Pattern 3: bare script path (no leading exe) — uvx / npx style
+  const bareScriptMatch = content.match(
+    /"(%~dp0[^"\r\n]+\.(?:js|mjs|cjs|py))"/i,
+  );
+  if (bareScriptMatch) {
+    const script = bareScriptMatch[1].replace(/%~dp0%/gi, shimDir + '\\');
+    if (existsSync(script)) {
+      // Detect interpreter from the shebang or batch context.
+      // Check for node first, then python.
+      const bundledNode = join(shimDir, 'node.exe');
+      if (existsSync(bundledNode)) {
+        return { filePath: bundledNode, args: [script, ...passthroughArgs] };
+      }
+      // Fall back to python from PATH (don't guess a specific path).
+      const pythonShim = join(shimDir, 'python.exe');
+      if (existsSync(pythonShim)) {
+        return { filePath: pythonShim, args: [script, ...passthroughArgs] };
+      }
+      // Last resort: use fallback node (may not work for .py files but
+      // avoids the visible cmd.exe window at least).
+      return { filePath: fallbackNodeExe, args: [script, ...passthroughArgs] };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Returns a launch spec for cmd.exe that runs the given executable+args
+ * via a temporary batch file. This is the most reliable way to suppress
+ * the visible console window on Windows — cmd.exe /c "..." still sometimes
+ * creates a flicker even with windowsHide, but cmd.exe /c batch-file avoids it.
+ */
+function cmdFallbackViaBat(executable, args) {
+  const batName = `mcp-hidden-${process.pid}-${Date.now()}.bat`;
+  const batPath = join(process.env.TEMP || process.env.TMP || '/tmp', batName);
+  // On Windows, powershell.exe child processes of cmd.exe get a visible console
+  // window by default. Inject -WindowStyle Hidden so they stay invisible.
+  const exeNorm = executable.replace(/\\/g, '/').toLowerCase();
+  const isPowerShell = exeNorm.endsWith('/powershell.exe') || exeNorm.endsWith('/pwsh.exe');
+  const psArgs = isPowerShell
+    ? ['-WindowStyle', 'Hidden', ...args]
+    : args;
+  const argLine = psArgs.map(a => `"${String(a).replace(/"/g, '\\"')}"`).join(' ');
+  writeFileSync(batPath,
+    `@echo off\r\n"${executable}" ${argLine}\r\nexit /B !ERRORLEVEL!\r\n`,
+    { encoding: 'utf8' });
+  return {
+    filePath: effectiveNodeExe,
+    args: [scriptPath, ...passthroughArgs],
+  };
+}
+
 function resolveStdioLaunchSpec() {
   const tokens = splitCommandLine(stdioCommand);
   if (tokens.length === 0) {
@@ -277,6 +383,9 @@ function resolveStdioLaunchSpec() {
   const nodeExe = process.env.NODE_EXE || process.execPath;
   const isWindows = process.platform === 'win32';
   const firstToken = tokens[0];
+  const resolvedFirstToken = isWindows
+    ? resolveWindowsCommandPath(firstToken) || firstToken
+    : firstToken;
 
   if (isWindows && /^npx(?:\.cmd|\.exe)?$/i.test(firstToken)) {
     const nodeDir = dirname(nodeExe);
@@ -295,14 +404,19 @@ function resolveStdioLaunchSpec() {
     }
   }
 
-  if (isWindows && /\.(js|mjs|cjs)$/i.test(firstToken)) {
+  if (isWindows && /\.(js|mjs|cjs)$/i.test(resolvedFirstToken)) {
     return {
       filePath: nodeExe,
-      args: tokens,
+      args: [resolvedFirstToken, ...tokens.slice(1)],
     };
   }
 
-  if (isWindows && /\.(cmd|bat)$/i.test(firstToken)) {
+  if (isWindows && /\.(cmd|bat)$/i.test(resolvedFirstToken)) {
+    const shimLaunchSpec = resolveWindowsCmdShimLaunchSpec(firstToken, tokens.slice(1), nodeExe);
+    if (shimLaunchSpec) {
+      return shimLaunchSpec;
+    }
+
     return {
       filePath: 'cmd.exe',
       args: ['/d', '/s', '/c', stdioCommand],
@@ -310,7 +424,7 @@ function resolveStdioLaunchSpec() {
   }
 
   return {
-    filePath: firstToken,
+    filePath: resolvedFirstToken,
     args: tokens.slice(1),
   };
 }
@@ -367,6 +481,22 @@ function spawnChildProcess() {
   clearRestartTimer();
   const launchSpec = resolveStdioLaunchSpec();
   log(`starting singleton child via: ${launchSpec.filePath} ${launchSpec.args.join(' ')}`.trim());
+
+  // Track the temp batch path (from cmdFallbackViaBat) so we can clean it up.
+  const batPath = launchSpec._batPath || null;
+
+  // On Windows, inject -WindowStyle Hidden when launching PowerShell with a .ps1
+  // script so the console stays invisible even when node's windowsHide flag is
+  // insufficient (PowerShell ignores CreateNoWindow when launched without it).
+  if (process.platform === 'win32') {
+    const exeNorm = launchSpec.filePath.replace(/\\/g, '/').toLowerCase();
+    const isPowerShell = exeNorm.endsWith('/powershell.exe') || exeNorm.endsWith('/pwsh.exe');
+    const hasPs1 = launchSpec.args.some(a => a.replace(/\\/g, '/').toLowerCase().endsWith('.ps1'));
+    if (isPowerShell && hasPs1 && !launchSpec.args.includes('-WindowStyle')) {
+      log('injecting -WindowStyle Hidden into PowerShell .ps1 launch');
+      launchSpec.args = ['-WindowStyle', 'Hidden', ...launchSpec.args];
+    }
+  }
 
   child = spawn(launchSpec.filePath, launchSpec.args, {
     shell: false,

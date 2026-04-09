@@ -226,6 +226,136 @@ function ConvertTo-ShellLiteral {
     return "'$escapedValue'"
 }
 
+function Split-CommandLineTokens {
+    param([AllowEmptyString()][string]$CommandText)
+
+    $tokens = New-Object System.Collections.Generic.List[string]
+    if ([string]::IsNullOrWhiteSpace($CommandText)) {
+        return @()
+    }
+
+    $matches = [regex]::Matches($CommandText, '"([^"]*)"|[^\s"]+')
+    foreach ($match in @($matches)) {
+        if ($match.Groups.Count -gt 1 -and $match.Groups[1].Success) {
+            $tokens.Add([string]$match.Groups[1].Value) | Out-Null
+        } else {
+            $tokens.Add([string]$match.Value) | Out-Null
+        }
+    }
+
+    return @($tokens)
+}
+
+function Resolve-WindowsCommandTokenPath {
+    param([AllowEmptyString()][string]$Token)
+
+    if ([string]::IsNullOrWhiteSpace($Token)) {
+        return ""
+    }
+
+    if (Test-Path -LiteralPath $Token -PathType Leaf) {
+        return (Get-Item -LiteralPath $Token).FullName
+    }
+
+    $command = Get-Command $Token -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($command -and -not [string]::IsNullOrWhiteSpace([string]$command.Source)) {
+        return [string]$command.Source
+    }
+
+    return ""
+}
+
+function Resolve-WindowsCmdShimLaunchSpec {
+    param(
+        [Parameter(Mandatory = $true)][string]$CommandPath,
+        [string[]]$PassThroughArgs = @(),
+        [Parameter(Mandatory = $true)][string]$FallbackNodeExecutable
+    )
+
+    if (-not (Test-Path -LiteralPath $CommandPath -PathType Leaf)) {
+        return $null
+    }
+
+    $content = ""
+    try {
+        $content = Get-Content -Raw -LiteralPath $CommandPath -Encoding utf8
+    } catch {
+        return $null
+    }
+
+    $match = [regex]::Match(
+        $content,
+        '"%_prog%"\s+"%(?:dp0|~dp0)%\\([^"\r\n]+\.(?:js|mjs|cjs))"',
+        [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+    )
+    if (-not $match.Success) {
+        return $null
+    }
+
+    $scriptRelativePath = [string]$match.Groups[1].Value
+    $scriptPath = Join-Path (Split-Path -Parent $CommandPath) ($scriptRelativePath -replace '\\', [System.IO.Path]::DirectorySeparatorChar)
+    if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
+        return $null
+    }
+
+    $bundledNodePath = Join-Path (Split-Path -Parent $CommandPath) "node.exe"
+    $effectiveNodeExecutable = if (Test-Path -LiteralPath $bundledNodePath -PathType Leaf) {
+        $bundledNodePath
+    } else {
+        $FallbackNodeExecutable
+    }
+
+    return [pscustomobject]@{
+        filePath = $effectiveNodeExecutable
+        argumentList = @($scriptPath) + @($PassThroughArgs)
+    }
+}
+
+function Resolve-WindowsCommandLaunchSpec {
+    param(
+        [Parameter(Mandatory = $true)][string]$Command,
+        [Parameter(Mandatory = $true)][string]$FallbackNodeExecutable
+    )
+
+    $tokens = @(Split-CommandLineTokens -CommandText $Command)
+    if ($tokens.Count -eq 0) {
+        throw "Command produced no launch tokens: $Command"
+    }
+
+    $firstToken = [string]$tokens[0]
+    $passThroughArgs = @($tokens | Select-Object -Skip 1)
+    $resolvedTokenPath = Resolve-WindowsCommandTokenPath -Token $firstToken
+    $effectiveFirstToken = if (-not [string]::IsNullOrWhiteSpace($resolvedTokenPath)) {
+        $resolvedTokenPath
+    } else {
+        $firstToken
+    }
+
+    if ($effectiveFirstToken -match '\.(js|mjs|cjs)$') {
+        return [pscustomobject]@{
+            filePath = $FallbackNodeExecutable
+            argumentList = @($effectiveFirstToken) + @($passThroughArgs)
+        }
+    }
+
+    if ($effectiveFirstToken -match '\.(cmd|bat)$') {
+        $shimLaunchSpec = Resolve-WindowsCmdShimLaunchSpec -CommandPath $effectiveFirstToken -PassThroughArgs $passThroughArgs -FallbackNodeExecutable $FallbackNodeExecutable
+        if ($null -ne $shimLaunchSpec) {
+            return $shimLaunchSpec
+        }
+
+        return [pscustomobject]@{
+            filePath = "cmd.exe"
+            argumentList = @("/d", "/s", "/c", $Command)
+        }
+    }
+
+    return [pscustomobject]@{
+        filePath = $effectiveFirstToken
+        argumentList = $passThroughArgs
+    }
+}
+
 function Resolve-ManagedRuntimeFile {
     param([Parameter(Mandatory = $true)][string[]]$RelativeCandidates)
 
@@ -245,25 +375,100 @@ function Resolve-ManagedRuntimeFile {
     throw "Unable to resolve runtime file from candidates: $([string]::Join(', ', $RelativeCandidates))"
 }
 
-function Get-ServerCommandTemplate {
+function Get-ServerCommandTemplates {
     param(
         [Parameter(Mandatory = $true)]$Server,
         [Parameter(Mandatory = $true)][string]$BaseProperty
     )
 
     $propertyNames = if (Test-SharedIsWindows) {
-        @("${BaseProperty}Windows", $BaseProperty)
+        @("${BaseProperty}CandidatesWindows", "${BaseProperty}Windows", "${BaseProperty}Candidates", $BaseProperty)
     } else {
-        @("${BaseProperty}Posix", $BaseProperty)
+        @("${BaseProperty}CandidatesPosix", "${BaseProperty}Posix", "${BaseProperty}Candidates", $BaseProperty)
     }
 
+    $values = New-Object System.Collections.Generic.List[string]
     foreach ($propertyName in @($propertyNames)) {
         if ($Server.PSObject.Properties.Name -contains $propertyName) {
-            $value = [string]$Server.$propertyName
+            $rawValue = $Server.$propertyName
+            if ($rawValue -is [System.Collections.IEnumerable] -and -not ($rawValue -is [string])) {
+                foreach ($item in @($rawValue)) {
+                    $value = [string]$item
+                    if (-not [string]::IsNullOrWhiteSpace($value)) {
+                        $values.Add($value) | Out-Null
+                    }
+                }
+                continue
+            }
+
+            $value = [string]$rawValue
             if (-not [string]::IsNullOrWhiteSpace($value)) {
-                return $value
+                $values.Add($value) | Out-Null
             }
         }
+    }
+
+    return @($values | Select-Object -Unique)
+}
+
+function Get-CommandTemplateExecutable {
+    param([AllowEmptyString()][string]$Command)
+
+    if ([string]::IsNullOrWhiteSpace($Command)) {
+        return ""
+    }
+
+    $quotedMatch = [regex]::Match($Command, '^\s*"([^"]+)"')
+    if ($quotedMatch.Success) {
+        return $quotedMatch.Groups[1].Value
+    }
+
+    $plainMatch = [regex]::Match($Command, '^\s*([^\s]+)')
+    if ($plainMatch.Success) {
+        return $plainMatch.Groups[1].Value
+    }
+
+    return ""
+}
+
+function Test-CommandTemplateAvailable {
+    param([AllowEmptyString()][string]$Command)
+
+    $executable = Get-CommandTemplateExecutable -Command $Command
+    if ([string]::IsNullOrWhiteSpace($executable)) {
+        return $false
+    }
+
+    if (Test-Path -LiteralPath $executable -PathType Leaf) {
+        return $true
+    }
+
+    $command = Get-Command $executable -ErrorAction SilentlyContinue | Select-Object -First 1
+    return $null -ne $command
+}
+
+function Resolve-PreferredCommandTemplate {
+    param([string[]]$Templates)
+
+    $resolvedTemplates = New-Object System.Collections.Generic.List[string]
+    foreach ($template in @($Templates)) {
+        if ([string]::IsNullOrWhiteSpace([string]$template)) {
+            continue
+        }
+        $resolved = Resolve-CommandTemplate -Template ([string]$template)
+        if (-not [string]::IsNullOrWhiteSpace($resolved)) {
+            $resolvedTemplates.Add($resolved) | Out-Null
+        }
+    }
+
+    foreach ($resolved in @($resolvedTemplates)) {
+        if (Test-CommandTemplateAvailable -Command $resolved) {
+            return $resolved
+        }
+    }
+
+    if ($resolvedTemplates.Count -gt 0) {
+        return $resolvedTemplates[0]
     }
 
     return ""
@@ -365,23 +570,23 @@ function Resolve-StdioCommand {
         }
     }
 
-    $template = Get-ServerCommandTemplate -Server $Server -BaseProperty "stdioCommand"
-    if ([string]::IsNullOrWhiteSpace($template)) {
+    $templates = Get-ServerCommandTemplates -Server $Server -BaseProperty "stdioCommand"
+    if (@($templates).Count -eq 0) {
         return ""
     }
 
-    return Resolve-CommandTemplate -Template $template
+    return Resolve-PreferredCommandTemplate -Templates $templates
 }
 
 function Resolve-LaunchCommand {
     param([Parameter(Mandatory = $true)]$Server)
 
-    $template = Get-ServerCommandTemplate -Server $Server -BaseProperty "launchCommand"
-    if ([string]::IsNullOrWhiteSpace($template)) {
+    $templates = Get-ServerCommandTemplates -Server $Server -BaseProperty "launchCommand"
+    if (@($templates).Count -eq 0) {
         return ""
     }
 
-    return Resolve-CommandTemplate -Template $template
+    return Resolve-PreferredCommandTemplate -Templates $templates
 }
 
 function Get-EnvironmentValue {
@@ -455,7 +660,8 @@ function Start-ManagedHttpProcess {
     )
 
     if (Test-SharedIsWindows) {
-        return Start-SharedWindowsHeadlessProcess -FilePath "cmd.exe" -ArgumentList @("/d", "/s", "/c", $Command) -Environment $Environment -WorkingDirectory $root
+        $launchSpec = Resolve-WindowsCommandLaunchSpec -Command $Command -FallbackNodeExecutable $nodeExecutable
+        return Start-SharedWindowsHeadlessProcess -FilePath ([string]$launchSpec.filePath) -ArgumentList @($launchSpec.argumentList) -Environment $Environment -WorkingDirectory $root
     }
 
     return Start-SharedShellProcess -Command $Command -Environment $Environment -WorkingDirectory $root -StdoutPath $StdoutPath -StderrPath $StderrPath
