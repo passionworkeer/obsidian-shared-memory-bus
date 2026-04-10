@@ -1651,6 +1651,7 @@ function main() {
     ...layers.sessionMemory,
     ...layers.sharedEvents,
     ...layers.taskMemory,
+    ...dreamRecords,   // also extract entities from dream writeback records
   ];
 
   // Open a KG batch so that hundreds of ingestRecord calls share one transaction

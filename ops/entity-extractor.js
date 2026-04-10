@@ -74,6 +74,10 @@ const PERSON_VERB_PATTERNS = [
   "{name} thinks", "{name} believes", "{name} wants", "{name} knows",
   "{name} decided", "{name} prefers", "{name} told me",
   "hey {name}", "hi {name}", "dear {name}", "thanks {name}",
+  "{name} works on", "{name} working on", "{name} is working",
+  "{name} helped", "{name} uses", "{name} built", "{name} created",
+  "{name} with {name}",   // "Alice with Bob" — both are persons
+  "\\bwith\\s+{name}",   // "with Bob" after any word — Bob is same type as antecedent
 ];
 
 // Project signals — things projects have/do
@@ -85,6 +89,23 @@ const PROJECT_VERB_PATTERNS = [
   "{name}.py", "{name}.js", "{name}.ts", "{name}.go",
   "{name}-core", "{name}-local", "{name}-server",
   "pip install {name}", "npm install {name}",
+];
+
+// Chinese person signals — patterns indicating a named person (2-char CJK name placeholder)
+const CHINESE_PERSON_PATTERNS = [
+  "{name}说", "{name}告诉", "{name}问", "{name}回答", "{name}写道",
+  "{name}觉得", "{name}相信", "{name}想", "{name}知道",
+  "{name}决定", "{name}喜欢", "喂{name}", "嗨{name}", "你好{name}",
+  "{name}正在", "{name}在用", "{name}用的是",
+  "{name}在", "{name}在", "{name}做了", "{name}做的",
+  "{name}也是", "{name}也很", "{name}也帮",
+];
+
+// Chinese project signals — patterns indicating a named project/tool
+const CHINESE_PROJECT_PATTERNS = [
+  "用{name}", "使用{name}", "{name}项目", "{name}系统", "{name}架构",
+  "{name}版本", "{name} v", "{name}.py", "{name}.js",
+  "装了{name}", "安装了{name}", "部署{name}",
 ];
 
 // Relationship predicate extraction patterns
@@ -100,7 +121,66 @@ const RELATIONSHIP_PATTERNS = [
   [/([^\s,，；;]+)\s+(?:works? on|working on)\s+([^\s,，；;]+)/i, "{1}_works_on_{2}"],
   [/([^\s,，；;]+)\s+(?:depends? on|depends on)\s+([^\s,，；;]+)/i, "{1}_depends_on_{2}"],
   [/([^\s,，；;]+)\s+(?:calls? |calls)\s+([^\s,，；;]+)/i, "{1}_calls_{2}"],
+  [/([^\s,，；;]+)\s+(?:store(?:s(?: data in)?)?)\s+([^\s,，；;]+)/i, "{1}_stores_in_{2}"],
+  [/([^\s,，；;]+)\s+(?:integrate(?:s(?: with)?)?)\s+([^\s,，；;]+)/i, "{1}_integrates_with_{2}"],
+  [/([^\s,，；;]+)\s+(?:run(?:s|ning on)?)\s+([^\s,，；;]+)/i, "{1}_runs_on_{2}"],
+  [/([^\s,，；;]+)\s+(?:provide(?:s(?: with)?)?)\s+([^\s,，；;]+)/i, "{1}_provides_{2}"],
+  [/([^\s,，；;]+)\s+(?:told)\s+([^\s,，；;]+)/i, "{1}_told_{2}"],
 ];
+
+// Coreference map: alias → canonical name (expand this as you discover more aliases)
+const COREFERENCE_MAP = new Map([
+  ["she", null], ["her", null], ["hers", null],   // → resolve from context
+  ["he", null], ["him", null], ["his", null],
+  ["they", null], ["them", null],
+  ["it", null], ["this", null],
+]);
+
+/**
+ * Resolve pronouns to their likely antecedents using co-occurrence scoring.
+ * @param {string} text - normalized text
+ * @param {string[]} sentences - text split by sentence boundaries
+ * @param {Map<string, number>} candidates - map of canonical entity names → frequency
+ * @returns {Map<string, string>} resolved pronouns → canonical entity name
+ */
+function resolveCoreference(text, sentences, candidates) {
+  const resolved = new Map();
+  if (candidates.size === 0) return resolved;
+
+  // Split into sentences (Chinese 。 or English .)
+  const sentBounds = [];
+  let last = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (/[.。!！?]/.test(text[i])) {
+      sentBounds.push(i);
+    }
+  }
+
+  for (const [pronoun] of COREFERENCE_MAP) {
+    // Find all occurrences of the pronoun
+    let pos = 0;
+    while ((pos = text.indexOf(pronoun, pos)) !== -1) {
+      // Find sentence index
+      const sentIdx = sentBounds.filter(b => b < pos).length;
+      // Score candidates within ±2 sentences
+      const windowStart = Math.max(0, sentIdx - 2);
+      const windowEnd   = Math.min(sentences.length - 1, sentIdx + 2);
+      const windowText  = sentences.slice(windowStart, windowEnd + 1).join(" ");
+
+      let best = null, bestScore = 0;
+      for (const [name] of candidates) {
+        const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const count = (windowText.match(new RegExp(escapedName, "gi")) || []).length;
+        if (count > bestScore) { bestScore = count; best = name; }
+      }
+      if (best && bestScore > 0) {
+        resolved.set(pronoun, best);
+      }
+      pos += pronoun.length;
+    }
+  }
+  return resolved;
+}
 
 // ---------------------------------------------------------------------------
 // Candidate extraction
@@ -162,12 +242,77 @@ for (const segment of chineseRaw) {
     }
   }
 }
-// Keep tokens appearing at least 2 times
-for (const [token, count] of cjkCounts) {
-  if (count >= 2 && token.length >= 2) {
-    counts.set(token, count);
+
+// Characters that never appear in Chinese personal names (grammar particles / demonstratives).
+const CHINESE_NON_NAME_CHARS = new Set(["这", "那", "的", "了", "在", "和", "与", "或", "有", "为", "之", "乎", "者", "也", "就", "都", "而", "且", "但", "把", "被", "让", "从", "到", "对", "于", "上", "下", "中", "内", "外", "前", "后", "里", "呢", "啊", "吧", "呀", "吗", "么"]);
+
+function isLikelyChineseName(token) {
+  if (token.length < 2 || token.length > 3) return false;
+  // Must not be all the same char, and no grammar particles
+  if (new Set(token).size < 2) return false;
+  for (const ch of token) {
+    if (CHINESE_NON_NAME_CHARS.has(ch)) return false;
   }
+  return true;
 }
+
+// Pre-build Chinese person name extractor (anchor-based).
+// Scans the text for known person patterns and extracts the {name} slot directly.
+// Only extracts 2-3 char names that look like real personal names.
+function extractChinesePersonNames(text) {
+  const names = new Set();
+  for (const pattern of CHINESE_PERSON_PATTERNS) {
+    const anchorIdx = pattern.indexOf("{name}");
+    if (anchorIdx === -1) continue;
+    const before = pattern.slice(0, anchorIdx);
+    const escapedBefore = before.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const after = pattern.slice(anchorIdx + "{name}".length);
+    if (!after) continue;
+    const escapedAfter = after.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // Extract 2-3 char Chinese names only (person names are never 4+ chars)
+    const rx = new RegExp(escapedBefore + "([\\u4e00-\\u9fff]{2,3})" + escapedAfter, "gu");
+    let m;
+    while ((m = rx.exec(text)) !== null) {
+      const n = m[1];
+      if (isLikelyChineseName(n)) names.add(n);
+    }
+  }
+  return names;
+}
+
+// Pre-build Chinese project name extractor (anchor-based).
+// Only extracts names that look like software/project artifacts (version refs, file names, etc.)
+// Avoids the {name}项目 style patterns which greedily capture too much.
+function extractChineseProjectNames(text) {
+  const names = new Set();
+  for (const pattern of CHINESE_PROJECT_PATTERNS) {
+    const anchorIdx = pattern.indexOf("{name}");
+    if (anchorIdx === -1) continue;
+    const before = pattern.slice(0, anchorIdx);
+    const escapedBefore = before.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const after = pattern.slice(anchorIdx + "{name}".length);
+    if (!after) continue;
+    const escapedAfter = after.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // Only safe patterns: file ext (.py, .js) or version refs (v) — never "项目/系统/架构"
+    const SAFE_PROJECT_PATTERNS = [".py", ".js", ".ts", ".go", ".rs", " v", "版"];
+    const isSafe = SAFE_PROJECT_PATTERNS.some(s => pattern.includes(s));
+    if (!isSafe) continue;
+    const rx = new RegExp(escapedBefore + "([\\u4e00-\\u9fff]{1,4}|[A-Za-z0-9_.-]{1,20})" + escapedAfter, "gu");
+    let m;
+    while ((m = rx.exec(text)) !== null) {
+      const n = m[1];
+      if (n.length >= 2) names.add(n);
+    }
+  }
+  return names;
+}
+
+// Keep tokens appearing ≥2 times (sliding-window tokens are high-quality).
+// Additionally include anchor-extracted Chinese names (may appear only once).
+const anchorPersonNames = extractChinesePersonNames(text);
+const anchorProjectNames = extractChineseProjectNames(text);
+for (const n of anchorPersonNames) counts.set(n, (counts.get(n) || 0) + 1);
+for (const n of anchorProjectNames) counts.set(n, (counts.get(n) || 0) + 1);
 
   // Filter: must appear at least 1 time (Issue 3: lowered from 2 to 1)
   const candidates = new Map();
@@ -258,8 +403,12 @@ function scoreEntity(name, text, lines) {
   }
 
   // --- Concept signals ---
-  // A term is a concept if it appears in definitional patterns
-  const definitionRx = new RegExp(`\\b(${escaped})\\s+(?:is|means|refers to|describes?|represents?|defines?)\\b`, "gi");
+  // A term is a concept only if it appears in a TRUE definitional pattern (copular + article or specific verb).
+  // Does NOT fire for action sentences like "Alice is working on" (that would misclassify persons).
+  const definitionRx = new RegExp(
+    `\\b(${escaped})\\s+(?:is\\s+(?:a|an|the)\\s+\\w+|means|refers\\s+to|describes|represents|defines?)\\b`,
+    "gi"
+  );
   const defMatches = (text.match(definitionRx) || []).length;
   if (defMatches > 0) {
     conceptScore += defMatches * 4;
@@ -272,6 +421,26 @@ function scoreEntity(name, text, lines) {
   if (listMatches >= 2) {
     conceptScore += listMatches;
     conceptSignals.push(`listed as topic (${listMatches}x)`);
+  }
+
+  // --- Chinese person signals ---
+  for (const pattern of CHINESE_PERSON_PATTERNS) {
+    const rx = new RegExp(pattern.replace("{name}", escaped), "gi");
+    const matches = (text.match(rx) || []).length;
+    if (matches > 0) {
+      personScore += matches * 2;
+      personSignals.push(`"${name}"中文人称信号 (${matches}x)`);
+    }
+  }
+
+  // --- Chinese project signals ---
+  for (const pattern of CHINESE_PROJECT_PATTERNS) {
+    const rx = new RegExp(pattern.replace("{name}", escaped), "gi");
+    const matches = (text.match(rx) || []).length;
+    if (matches > 0) {
+      projectScore += matches * 2;
+      projectSignals.push(`"${name}"中文项目信号 (${matches}x)`);
+    }
   }
 
   return {
@@ -320,8 +489,8 @@ function classifyEntity(name, frequency, scores) {
 
   // Issue 3: high-confidence signal-only entities (confidence >= 0.75 regardless of frequency)
   const maxSignalScore = Math.max(ps, pjs, cs);
-  const signalConfidence = maxSignalScore >= 4 ? Math.min(0.95, 0.5 + 0.5) : 0;
-  if (maxSignalScore >= 4 && signalConfidence >= 0.75) {
+  const signalConfidence = maxSignalScore >= 2 ? Math.min(0.95, 0.5 + 0.5) : 0;
+  if (maxSignalScore >= 2 && signalConfidence >= 0.75) {
     if (ps >= pjs && ps >= cs) {
       return { name, type: "person", confidence: 0.85, frequency, signals: scores.person_signals };
     }
@@ -337,7 +506,7 @@ function classifyEntity(name, frequency, scores) {
   const projectRatio = pjs / total;
   const conceptRatio = cs / total;
 
-  if (personRatio >= 0.6 && hasMultiplePersonSignals && ps >= 4) {
+  if (personRatio >= 0.6 && hasMultiplePersonSignals && ps >= 2) {
     return {
       name,
       type: "person",
@@ -484,6 +653,22 @@ function extractEntities(text) {
       object: triple.object,
       confidence: triple.confidence,
     });
+  }
+
+  // Resolve coreferences: map pronouns to canonical names
+  const sentences = normalized.split(/[.。!！?]/).filter(s => s.trim().length > 5);
+  const corefMap = resolveCoreference(normalized, sentences, candidates);
+  if (corefMap.size > 0) {
+    // For each pronoun found in facts, replace with canonical name
+    for (const triple of triples) {
+      if (corefMap.has(triple.subject)) triple.subject = corefMap.get(triple.subject);
+      if (corefMap.has(triple.object))  triple.object  = corefMap.get(triple.object);
+    }
+    for (const entity of entities) {
+      if (corefMap.has(entity.name)) entity.resolved_from = entity.name;
+      const resolved = corefMap.get(entity.name);
+      if (resolved) entity.name = resolved;
+    }
   }
 
   // Deduplicate facts by value
