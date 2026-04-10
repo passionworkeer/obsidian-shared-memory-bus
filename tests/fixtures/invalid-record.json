@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 2,
+  "id": "test-invalid-record-001",
+  "tool": "test",
+  "type": "note",
+  "source": "test",
+  "scope": "user",
+  "memory_level": "durable",
+  "source_kind": "writeback",
+  "content": "Missing required fields: title is absent",
+  "content_hash": "a591d64d8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8",
+  "t": "2026-04-01T00:00:00.000Z"
+}
