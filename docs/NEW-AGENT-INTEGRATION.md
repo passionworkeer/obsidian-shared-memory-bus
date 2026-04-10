@@ -78,13 +78,22 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\inst
 `verify-integrations.ps1` remains only as a compatibility alias for the apply step. The real validation gate is `verify-client-integrations.ps1`.
 
 ## Canonical Shared Memory Read Order
+
 For structured bootstrap, the preferred first option is `memory_wake_up` on port 9338 — it returns a compact pack covering durable anchors, next steps, blockers, and recent activity in a single call.
 
 If the agent cannot call MCP tools, fall back to reading files in this order:
-1. `02-KB/OBSIDIAN.md`
-2. `02-KB/MEMORY.md`
-3. `02-KB/WORKING.md`
-4. `00-System/ai-memory/generated/GLOBAL-CONTEXT.md`
+
+1. **`SKILL.md`** (repository root) — the universal entry point for all agents. Start here before anything else.
+2. `<obsidian-vault>/02-KB/OBSIDIAN.md`
+3. `<obsidian-vault>/02-KB/MEMORY.md`
+4. `<obsidian-vault>/02-KB/WORKING.md`
+5. `<obsidian-vault>/00-System/ai-memory/generated/GLOBAL-CONTEXT.md`
+
+The root `SKILL.md` also lists the per-agent skill files in `.agents/skills/` — use the one that matches the agent being onboarded for agent-specific vault resolution, MCP wiring, and token budget guidance.
+
+## Git Hook Integration
+
+For agents that run in a git repository, consider installing the git hooks documented in `docs/GIT-HOOKS-INTEGRATION.md`. They run inbox hygiene and refresh memory layers automatically on checkout, merge, and commit. Windows Git is supported via POSIX shim wrappers.
 
 ## Portable Placeholder Rules
 When documenting or committing agent overlays, use portable placeholders instead of local absolute paths.

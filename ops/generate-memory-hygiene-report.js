@@ -415,6 +415,32 @@ function buildRecommendations(stats) {
 // Main
 // ---------------------------------------------------------------------------
 
+// ── Tier budget status ───────────────────────────────────────────────────────────
+// ADR-002 v2: 5-tier budget enforcement
+const TIER_BUDGETS = { 1: 200, 2: 200, 3: 100, 4: 200, 5: 500 };
+
+function computeTierBudgetStatus(allRecords) {
+  const counts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+  for (const rec of allRecords) {
+    const t = rec.lifecycle?.tier ?? 1;
+    if (counts[t] !== undefined) counts[t]++;
+    else counts[1]++;
+  }
+  const status = {};
+  let anyOverBudget = false;
+  for (const [tier, max] of Object.entries(TIER_BUDGETS)) {
+    const n = counts[tier] || 0;
+    status[tier] = { count: n, max, over: n > max };
+    if (n > max) anyOverBudget = true;
+  }
+  // Cold records (no access_count) in Tier 4 also flag archival_needed
+  const coldTier4 = allRecords.filter(r =>
+    (r.lifecycle?.tier === 4 || r.lifecycle?.tier === undefined) &&
+    (r.lifecycle?.access_count || 0) === 0
+  ).length;
+  return { counts: counts, tiers: status, coldTier4Records: coldTier4, archival_needed: anyOverBudget || coldTier4 > 50 };
+}
+
 function main() {
   const vaultRoot = resolveVaultRoot();
   const aiMemoryRoot = path.join(vaultRoot, "00-System", "ai-memory");
@@ -544,6 +570,7 @@ function main() {
     stats,
     recommendations,
     health,
+    tier_budget_status: computeTierBudgetStatus(allRecords),
   };
 
   // Write report

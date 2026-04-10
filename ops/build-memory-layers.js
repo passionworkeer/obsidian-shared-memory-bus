@@ -79,6 +79,15 @@ const NON_PROMOTABLE_PROMOTION_TYPES = new Set([
   "task-journal",
 ]);
 
+// ADR-002 v2: 5-tier budget limits (enforced by memory-archival.js)
+const TIER_BUDGET_LIMITS = {
+  1: 200,  // Event/Working
+  2: 200,  // Session Durable
+  3: 100,  // Project Durable (per project)
+  4: 200,  // Shared Durable (per type)
+  5: 500,  // Archive (soft limit)
+};
+
 function readJsonl(filePath) {
   if (!fs.existsSync(filePath)) {
     return [];
@@ -487,6 +496,23 @@ function buildMemoryDescription(record) {
   return text.replace(/[#*`_~\[\]]/g, "").replace(/\s+/g, " ").trim();
 }
 
+function computeTier(record) {
+  // ADR-002 v2 5-tier system: tier derived from memory_level + scope + source_kind
+  const ml = (record.memory_level || record.memoryLevel || "").toLowerCase();
+  const sk = (record.source_kind || record.sourceKind || "").toLowerCase();
+  const scope = (record.scope || "").toLowerCase();
+  if (ml === "event" || scope === "event") return 1;
+  if (sk === "writeback") {
+    return scope === "project" ? 3 : 4;
+  }
+  if (ml === "durable") {
+    return scope === "project" ? 3 : 4;
+  }
+  if (ml === "session" || scope === "session" || scope === "summary" || scope === "task" || scope === "run" || scope === "job") return 2;
+  // Default: session-level pending confirmation
+  return 2;
+}
+
 function buildRecord({
   id,
   t,
@@ -530,6 +556,21 @@ function buildRecord({
       sourceRecordId: id,
     }),
   };
+  const tier = computeTier({
+    memory_level: memory_level || "",
+    scope: scope || "",
+    source_kind: source_kind || "",
+  });
+
+  const ttlByScope = { user: null, feedback: 90, reference: 180, project: 30, summary: 7 };
+  const expiresAt = (() => {
+    const offsetDays = ttlByScope[scope] ?? 7;
+    if (offsetDays === null) return null;
+    const base = new Date(t || new Date().toISOString());
+    base.setDate(base.getDate() + offsetDays);
+    return base.toISOString();
+  })();
+
   return {
     schemaVersion: MEMORY_RECORD_SCHEMA_VERSION,
     id,
@@ -556,6 +597,15 @@ function buildRecord({
     confidence,
     metadata: normalizedMetadata,
     content_hash,
+    // ADR-002 v2 tier + lifecycle fields
+    tier,
+    lifecycle: {
+      tier,
+      expires_at: expiresAt,
+      access_count: 0,
+      promotion_count: 0,
+      archived: false,
+    },
   };
 }
 
@@ -843,6 +893,15 @@ function coerceStructuredRecord(payload, defaults = {}) {
     confidence: normalizedConfidence,
     metadata: normalizedMetadata,
     content_hash: normalizeSpaces(payload.content_hash) || sha256(content),
+    // ADR-002 v2: preserve or derive tier + lifecycle
+    tier: payload.lifecycle?.tier ?? computeTier({ memory_level: normalizedMemoryLevel, scope: normalizedScope, source_kind: normalizedSourceKind }),
+    lifecycle: payload.lifecycle && typeof payload.lifecycle === "object" ? payload.lifecycle : {
+      tier: payload.lifecycle?.tier ?? computeTier({ memory_level: normalizedMemoryLevel, scope: normalizedScope, source_kind: normalizedSourceKind }),
+      expires_at: null,
+      access_count: 0,
+      promotion_count: 0,
+      archived: false,
+    },
   };
 }
 
