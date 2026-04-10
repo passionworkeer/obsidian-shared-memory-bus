@@ -184,6 +184,51 @@ export const TOOLS = [
     },
   },
   {
+    name: "get_entity_info",
+    description:
+      "Query the knowledge graph for an entity's relationships and metadata. Use this to find what is known about a specific person, project, tool, or concept across all memory records.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "Entity name to look up (e.g. 'Alice', 'MemPalace', 'ChromaDB').",
+        },
+        direction: {
+          type: "string",
+          default: "both",
+          description: "Relationship direction: 'outgoing' (entity → ?), 'incoming' (? → entity), or 'both'.",
+          enum: ["outgoing", "incoming", "both"],
+        },
+        as_of: {
+          type: "string",
+          description: "Optional date (YYYY-MM-DD) — return only facts that were true at that time.",
+        },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "search_by_entity",
+    description:
+      "Search the knowledge graph for entities matching a name query, then return their relationships and optionally a timeline. Use this to explore connections between people, projects, and concepts across your memory.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        entity_query: {
+          type: "string",
+          description: "Partial or full name to search for in the entity index.",
+        },
+        include_timeline: {
+          type: "boolean",
+          default: false,
+          description: "When true, also return a chronological timeline for the top matched entity.",
+        },
+      },
+      required: ["entity_query"],
+    },
+  },
+  {
     name: "list_embedding_runtimes",
     description:
       "List the configured embedding defaults, providers, and profiles, along with the currently resolved active runtime and whether the dense index is aligned or needs a rebuild.",

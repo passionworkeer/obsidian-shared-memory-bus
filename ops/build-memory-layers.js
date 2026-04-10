@@ -125,6 +125,97 @@ function ensureDirectory(targetPath) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Entity extraction helpers (lazy-loaded, no external dependencies)
+// ---------------------------------------------------------------------------
+
+/** @returns {{ extractFromRecord: (r: object) => object } | null} */
+function loadEntityExtractor() {
+  try {
+    return require("./entity-extractor.js");
+  } catch {
+    return { extractFromRecord: (r) => r };  // passthrough when module unavailable
+  }
+}
+
+/** @returns {{ ingestRecord: (r: object) => void, close: () => void } | null} */
+function loadKnowledgeGraph() {
+  try {
+    const { KnowledgeGraph } = require("./knowledge-graph.js");
+    return new KnowledgeGraph({ vaultRoot: VAULT_ROOT });
+  } catch {
+    return {
+      ingestRecord: () => {},
+      close: () => {},
+    };
+  }
+}
+
+/**
+ * Get the target JSONL file path for a record based on its memory_level/scope.
+ * @param {object} record
+ * @returns {string|null}
+ */
+function getTargetJsonl(record) {
+  const scope = record.scope || "";
+  const level = record.memory_level || record.memoryLevel || "";
+  if (scope === "session" || level === "session") return SESSION_MEMORY_JSONL;
+  if (scope === "task" || level === "task" || record.type === "task-note" || record.type === "task-job")
+    return TASK_MEMORY_JSONL;
+  if (record.type === "event" || scope === "event") return SHARED_EVENTS_JSONL;
+  return SHARED_INBOX_JSONL;
+}
+
+/**
+ * Patch a single record in a JSONL file by id (immutable rewrite).
+ * Only rewrites the line matching the given id — other lines untouched.
+ * @param {string} jsonlPath
+ * @param {string} recordId
+ * @param {object} enriched  — record with entities/facts/concepts added
+ */
+function patchJsonlRecord(jsonlPath, recordId, enriched) {
+  try {
+    const lines = fs.readFileSync(jsonlPath, "utf-8").split("\n");
+    let changed = false;
+    const patched = lines.map((line) => {
+      if (!line.trim()) return line;
+      try {
+        const rec = JSON.parse(line);
+        if (rec.id === recordId) {
+          // Preserve existing facts/concepts if already present; merge new ones
+          const existingFacts = Array.isArray(rec.facts) ? rec.facts : [];
+          const existingConcepts = Array.isArray(rec.concepts) ? rec.concepts : [];
+          const newFacts = Array.isArray(enriched.facts) ? enriched.facts : [];
+          const newConcepts = Array.isArray(enriched.concepts) ? enriched.concepts : [];
+
+          const seenFacts = new Set(existingFacts.map((f) => typeof f === "string" ? f : f.value));
+          const seenConcepts = new Set(existingConcepts.map((c) => typeof c === "string" ? c : c.value));
+
+          return JSON.stringify({
+            ...rec,
+            entities: enriched.entities || rec.entities || [],
+            facts: [
+              ...existingFacts,
+              ...newFacts.filter((f) => !seenFacts.has(typeof f === "string" ? f : f.value)),
+            ],
+            concepts: [
+              ...existingConcepts,
+              ...newConcepts.filter((c) => !seenConcepts.has(typeof c === "string" ? c : c.value)),
+            ],
+          });
+          changed = true;
+        }
+      } catch {}
+      return line;
+    });
+    if (changed) {
+      fs.writeFileSync(jsonlPath, patched.join("\n"), "utf-8");
+    }
+  } catch {
+    // Non-fatal: patch failures should not break the pipeline
+  }
+}
+
 function readText(filePath) {
   if (!fs.existsSync(filePath)) {
     return "";
@@ -1551,6 +1642,9 @@ function main() {
   writeJsonl(SHARED_EVENTS_JSONL, layers.sharedEvents);
   writeJsonl(TASK_MEMORY_JSONL, layers.taskMemory);
 
+  const entityExtractor = loadEntityExtractor();
+  const knowledgeGraph = loadKnowledgeGraph();
+
   // Daily append-only logs (only touches today/yesterday files — never rewrites history)
   const allRecords = [
     ...layers.sharedInbox,
@@ -1558,7 +1652,35 @@ function main() {
     ...layers.sharedEvents,
     ...layers.taskMemory,
   ];
+
+  for (const record of allRecords) {
+    if (record._entityExtracted) continue;  // skip already-processed records
+    const enriched = entityExtractor.extractFromRecord(record);
+    if (enriched.facts?.length || enriched.concepts?.length || enriched.entities?.length) {
+      // Write enriched record back to the appropriate JSONL
+      // (facts/concepts are included in the record for semantic-search.py to index)
+      const targetFile = record._sourceFile || getTargetJsonl(record);
+      if (targetFile && fs.existsSync(targetFile)) {
+        patchJsonlRecord(targetFile, record.id, enriched);
+      }
+    }
+    // Ingest into the knowledge graph
+    try {
+      knowledgeGraph.ingestRecord({
+        ...enriched,
+        source_file: record.source || record.tool || "build-memory-layers",
+      });
+    } catch (err) {
+      // Non-fatal: KG ingestion should never block memory writes
+      console.error(`[build-memory-layers] KG ingest error for ${record.id}: ${err.message}`);
+    }
+    record._entityExtracted = true;
+  }
+
   appendDailyLogs(allRecords);
+
+  // Close KG connection
+  try { knowledgeGraph.close(); } catch {}
 
   const summary = buildLayerSummary(layers);
   writeText(MEMORY_LAYERS_MD, summary.markdown);
