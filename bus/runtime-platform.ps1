@@ -452,7 +452,7 @@ function Get-SharedPowerShellFileArguments {
     )
 
     $prefix = if (Test-SharedIsWindows) {
-        @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $ScriptPath)
+        @("-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", $ScriptPath)
     } else {
         @("-NoProfile", "-File", $ScriptPath)
     }

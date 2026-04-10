@@ -264,9 +264,6 @@ const METRICS = {
   dream_lock_held_seconds: [],   // circular buffer, last 20 values
   mcp_requests_total: {},       // {tool: count}
 };
-const MAX_LATENCY_BUFFER = 100;
-const MAX_LOCK_BUFFER = 20;
-// ---------------------------------------------------------------------------
 // Metrics collection helpers
 // ---------------------------------------------------------------------------
 
@@ -464,20 +461,6 @@ function readWatchdogState() {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Embedding helpers
-// ---------------------------------------------------------------------------
-
-function readOptionalJson(filePath) {
-  if (!fs.existsSync(filePath)) {
-    return null;
-  }
-  try {
-    return JSON.parse(fs.readFileSync(filePath, "utf8"));
-  } catch (error) {
-    return { ok: false, error: String(error), path: filePath };
-  }
-}
 
 function readEmbeddingsSummary() {
   if (!fs.existsSync(EMBEDDINGS_INDEX_PATH)) {
@@ -1218,10 +1201,6 @@ process.on("exit", () => {
     // Best-effort cleanup only.
   }
 });
-
-function jsonResult(payload) {
-  return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
-}
 
 function errorResult(message) {
   return {

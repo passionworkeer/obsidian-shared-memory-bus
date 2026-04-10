@@ -27,7 +27,6 @@ const safeWrite = (data) => {
     flushStdout();
 };
 
-let requestId = 1;
 let mcpSessionId = null;
 
 // Persistent agent for keep-alive
@@ -138,7 +137,7 @@ async function initialize() {
 // Check if Playwright MCP HTTP server is reachable
 function checkServer() {
   return new Promise((resolve) => {
-    const req = http.get({ hostname: PLAYWRIGHT_HOST, port: PLAYWRIGHT_PORT, path: '/mcp', agent }, (res) => {
+    const req = http.get({ hostname: PLAYWRIGHT_HOST, port: PLAYWRIGHT_PORT, path: '/mcp', agent }, () => {
       resolve(true);
     });
     req.on('error', () => resolve(false));

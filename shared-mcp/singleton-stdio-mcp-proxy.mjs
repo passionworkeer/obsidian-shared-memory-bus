@@ -384,7 +384,13 @@ function resolveWindowsCmdShimLaunchSpec(commandToken, passthroughArgs, fallback
 function cmdFallbackViaBat(executable, args) {
   const batName = `mcp-hidden-${process.pid}-${Date.now()}.bat`;
   const batPath = join(process.env.TEMP || process.env.TMP || '/tmp', batName);
-  const argLine = args.map(a => `"${String(a).replace(/"/g, '\\"')}"`).join(' ');
+  // On Windows, powershell.exe child processes of cmd.exe get a visible console
+  // window by default. Inject -WindowStyle Hidden so they stay invisible.
+  const isPowerShell = executable.replace(/\\/g, '/').toLowerCase().includes('powershell');
+  const psArgs = isPowerShell
+    ? ['-WindowStyle', 'Hidden', ...args]
+    : args;
+  const argLine = psArgs.map(a => `"${String(a).replace(/"/g, '\\"')}"`).join(' ');
   writeFileSync(batPath,
     `@echo off\r\n"${executable}" ${argLine}\r\nexit /B !ERRORLEVEL!\r\n`,
     { encoding: 'utf8' });
