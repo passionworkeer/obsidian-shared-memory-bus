@@ -499,6 +499,51 @@ function killZombieNpxProcesses() {
   }
 }
 
+/**
+ * On Windows, spawn all non-PowerShell children via a hidden PowerShell
+ * intermediary so that the ENTIRE process tree (powershell → cmd/npx/node →
+ * grandchild node) runs inside one invisible console.
+ *
+ * - windowsHide: true on Node's spawn() only sets CREATE_NO_WINDOW for the
+ *   direct child.  Grandchild processes (e.g. npx's internal node.exe) are
+ *   not affected and may independently allocate a visible console window.
+ * - PowerShell launched with -WindowStyle Hidden has no console window.
+ *   Any child processes it spawns (cmd.exe, npx, node.exe …) inherit that
+ *   hidden console, so no window appears at any level of the tree.
+ *
+ * The approach: write the full child-launch command to a temp .bat file,
+ * then run it via `powershell -WindowStyle Hidden -Command "cmd /c bat;exit
+ * $LASTEXITCODE"`.  PowerShell's stdin/stdout/stderr are piped to the proxy,
+ * and the proxy's JSON-RPC traffic is forwarded verbatim to the grandchild.
+ */
+function resolvePowerShellExe() {
+  if (process.platform !== 'win32') return '';
+  // Try thepwsh (PowerShell 7) first, then fall back to powershell.exe.
+  for (const name of ['pwsh.exe', 'powershell.exe']) {
+    try {
+      const result = spawnSync(name, ['-Version'], {
+        windowsHide: true,
+        encoding: 'utf8',
+        timeout: 3000,
+      });
+      if (result.status === 0 || result.error?.code !== 'ENOENT') {
+        // Found – return the full path from where.exe.
+        const r2 = spawnSync('where.exe', [name], {
+          windowsHide: true,
+          encoding: 'utf8',
+          timeout: 3000,
+        });
+        if (r2.status === 0 && r2.stdout) {
+          const found = r2.stdout.split(/\r?\n/)[0].trim();
+          if (found) return found;
+        }
+        return name; // fall back to bare name if where fails
+      }
+    } catch { /* try next */ }
+  }
+  return 'powershell.exe';
+}
+
 function spawnChildProcess() {
   // Scavenge zombie npx processes from previous (failed) child instances
   // before starting a new one, to prevent zombie accumulation.
@@ -510,14 +555,67 @@ function spawnChildProcess() {
   // Track the temp batch path (from cmdFallbackViaBat) so we can clean it up.
   const batPath = launchSpec._batPath || null;
 
-  // On Windows, inject -WindowStyle Hidden when launching PowerShell with a .ps1
-  // script so the console stays invisible even when node's windowsHide flag is
-  // insufficient (PowerShell ignores CreateNoWindow when launched without it).
   if (process.platform === 'win32') {
     const exeNorm = launchSpec.filePath.replace(/\\/g, '/').toLowerCase();
     const isPowerShell = exeNorm.endsWith('/powershell.exe') || exeNorm.endsWith('/pwsh.exe');
+
+    if (!isPowerShell) {
+      // Write the child's launch command to a temp .bat so PowerShell can
+      // invoke it via cmd /c without needing its own visible window.
+      const psExe = resolvePowerShellExe();
+      const childBatPath = join(process.env.TEMP || process.env.TMP || '/tmp',
+        `mcp-child-${process.pid}-${Date.now()}.bat`);
+
+      // Build the literal command that the batch file will run.
+      // Arguments that contain spaces are double-quoted; double-quotes inside
+      // an argument are escaped by doubling them — the standard CMD convention.
+      const childArgsLine = launchSpec.args
+        .map(a => `"${String(a).replace(/"/g, '""')}"`)
+        .join(' ');
+      const childCmdLine = `"${launchSpec.filePath}" ${childArgsLine}`;
+      writeFileSync(childBatPath,
+        `@echo off\r\n${childCmdLine}\r\nexit /B !ERRORLEVEL!\r\n`,
+        { encoding: 'utf8' });
+
+      // PowerShell launched with -WindowStyle Hidden has no console window.
+      // cmd.exe started by PowerShell inherits that hidden console, so no
+      // window appears at any depth of the tree (npx → npm → node → script).
+      const psArgs = [
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-WindowStyle', 'Hidden',
+        '-Command',
+        `cmd /d /c "${childBatPath}"; exit $LASTEXITCODE`,
+      ];
+
+      log(`spawning hidden PowerShell intermediary: ${psExe} ${psArgs.join(' ')}`.trim());
+      child = spawn(psExe, psArgs, {
+        shell: false,
+        windowsHide: true,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env, ...childExtraEnv },
+      });
+
+      // Clean up the temp batch file when the child (PowerShell) exits.
+      child.on('exit', () => {
+        try { require('node:fs').unlinkSync(childBatPath); } catch { /* best-effort */ }
+      });
+
+      child.stdout.on('data', processChildStdout);
+      child.stderr.on('data', (chunk) => {
+        const text = chunk.toString('utf8').trimEnd();
+        if (text) logError(`child stderr: ${text}`);
+      });
+      child.on('exit', handleChildExit);
+      child.on('error', (error) => logError(`child process error: ${error.message}`));
+      return;
+    }
+
+    // PowerShell direct path (obsidian / MiniMax runners): inject
+    // -WindowStyle Hidden so the window stays invisible even when node's
+    // windowsHide flag alone is insufficient.
     const hasPs1 = launchSpec.args.some(a => a.replace(/\\/g, '/').toLowerCase().endsWith('.ps1'));
-    if (isPowerShell && hasPs1 && !launchSpec.args.includes('-WindowStyle')) {
+    if (hasPs1 && !launchSpec.args.includes('-WindowStyle')) {
       log('injecting -WindowStyle Hidden into PowerShell .ps1 launch');
       launchSpec.args = ['-WindowStyle', 'Hidden', ...launchSpec.args];
     }
@@ -527,10 +625,7 @@ function spawnChildProcess() {
     shell: false,
     windowsHide: process.platform === 'win32',
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: {
-      ...process.env,
-      ...childExtraEnv,
-    },
+    env: { ...process.env, ...childExtraEnv },
   });
 
   // Clean up the temp batch file when the child exits.
