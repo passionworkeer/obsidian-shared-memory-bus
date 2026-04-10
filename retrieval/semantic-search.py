@@ -1,26 +1,12 @@
 """
-Hybrid semantic search over the shared Obsidian memory bus.
-
-Compatibility:
-- python semantic-search.py "query" [topK] [strategy]
-- python semantic-search.py --mode hybrid --top-k 8 --json "query"
-
-Schema Versions:
-- MEMORY_RECORD_SCHEMA_VERSION: 2 (defined in ops/memory-contract.js)
-- VECTOR_SCHEMA_VERSION: 1 (defined in retrieval/lsh_utils.py, imported via embedding_providers)
-  Note: These are independent version tracks — memory record schema and embedding vector
-  schema evolve on separate cycles.
+Compatibility wrapper for the hyphenated semantic-search entrypoint.
+The refactored implementation lives in semantic_search.py, but the flat runtime
+layout and validation scripts still expect semantic-search.py to exist.
 """
 
 from __future__ import annotations
-
-import argparse
-import datetime
-import hashlib
-import json
-import math
-import os
-import re
+import pathlib
+import runpy
 import sys
 import time as time_module
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -81,8 +67,9 @@ def check_memory_drift(entry: Dict, workspace_hints: Optional[Dict] = None) -> D
     """
     Detect whether a memory record may be pointing to stale or non-existent references.
 
-    This is a pure read-only function: it only inspects the entry and filesystem,
-    never writes anything.
+# Ensure CURRENT_DIR is on sys.path so all the search_* modules can be imported
+if str(CURRENT_DIR) not in sys.path:
+    sys.path.insert(0, str(CURRENT_DIR))
 
     Returns: { driftRisk: 'low'|'medium'|'high', driftSignals: List[str],
                missingFileCount: int }

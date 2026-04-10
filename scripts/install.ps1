@@ -1817,10 +1817,13 @@ if ($shouldStartServicesNow) {
         }
     } else {
         if ($DryRun) {
-            Write-Output "[dry-run] would start watchdog daemon and shared-mcp"
+            Write-Output "[dry-run] would register event-driven hooks (no background daemons)"
         } else {
-            Start-BackgroundRuntime -ScriptPath (Join-Path $TargetRoot "memory-watchdog.ps1") -ArgumentList @("-Daemon", "-PollSeconds", "15")
-            Start-BackgroundRuntime -ScriptPath (Join-SharedPath @($TargetRoot, "shared-mcp", "start-default-shared-mcp.ps1")) -ArgumentList @("-ForceRestart")
+            # 轻量化：不再启动后台 watchdog 和 MCP 服务
+            # 用户通过 Stop Hook 触发同步，按需启动 MCP
+            Write-Output "[shared-memory] Event-driven mode: no background daemons started"
+            Write-Output "[shared-memory] Use memory-bus.ps1 -Action SyncAll for manual sync"
+            Write-Output "[shared-memory] Configure Stop Hooks in ~/.claude/settings.json for auto-sync"
         }
     }
 }
