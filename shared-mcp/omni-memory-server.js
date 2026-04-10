@@ -181,7 +181,12 @@ function resolvePowerShellCommand() {
   return firstNonEmptyEnv("AI_MEMORY_PWSH") || "pwsh";
 }
 
-const SEARCH_SCRIPT = resolveRuntimePath("semantic-search.py", path.join("retrieval", "semantic-search.py"));
+const SEARCH_SCRIPT = resolveRuntimePath(
+  "semantic_search.py",
+  path.join("retrieval", "semantic_search.py"),
+  "semantic-search.py",
+  path.join("retrieval", "semantic-search.py"),
+);
 const EMBEDDINGS_SCRIPT = resolveRuntimePath("generate-embeddings.js", path.join("bus", "generate-embeddings.js"));
 const MEMORY_BUS_SCRIPT = resolveRuntimePath("memory-bus.ps1", path.join("bus", "memory-bus.ps1"));
 const WATCHDOG_STATE_PATH = path.join(AI_MEMORY_ROOT, "watchdog-state.json");

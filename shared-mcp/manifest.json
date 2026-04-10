@@ -78,6 +78,8 @@
       "mode": "shared",
       "port": 9338,
       "probeType": "mcp-initialize",
+      "startupProbeTimeoutSeconds": 10,
+      "startupProbeAttempts": 45,
       "stdioCommandWindows": "{{node}} --experimental-default-type=module {{omniMemoryServer}}",
       "stdioCommandPosix": "{{node}} --experimental-default-type=module {{omniMemoryServer}}",
       "notes": "Unified shared memory interface over canonical Obsidian structured memory with bm25/dense/hybrid retrieval, embeddings rebuild, claude-mem compatibility, and OpenClaw blackboard tools."
