@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 999,
+  "id": "test-invalid-schema-001",
+  "tool": "test",
+  "type": "note",
+  "title": "Record with wrong schema version",
+  "source": "test",
+  "scope": "user",
+  "memory_level": "durable",
+  "source_kind": "writeback",
+  "content": "Record with unexpected schema version",
+  "t": "2026-04-01T00:00:00.000Z"
+}
