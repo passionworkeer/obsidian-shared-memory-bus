@@ -4,6 +4,12 @@ Hybrid semantic search over the shared Obsidian memory bus.
 Compatibility:
 - python semantic-search.py "query" [topK] [strategy]
 - python semantic-search.py --mode hybrid --top-k 8 --json "query"
+
+Schema Versions:
+- MEMORY_RECORD_SCHEMA_VERSION: 2 (defined in ops/memory-contract.js)
+- VECTOR_SCHEMA_VERSION: 1 (defined in retrieval/lsh_utils.py, imported via embedding_providers)
+  Note: These are independent version tracks — memory record schema and embedding vector
+  schema evolve on separate cycles.
 """
 
 from __future__ import annotations

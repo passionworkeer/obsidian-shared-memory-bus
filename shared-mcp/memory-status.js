@@ -104,7 +104,8 @@ export function createMemoryStatus(params) {
     const handoff = readOptionalJson(path.join(generatedDir, "HANDOFF.json")) || {};
     const layers = readOptionalJson(path.join(generatedDir, "MEMORY-LAYERS.json")) || {};
     const meta = readOptionalJson(path.join(generatedDir, "GLOBAL-CONTEXT.meta.json")) || {};
-    const taskRecords = await loadTaskRecords(workspaceRoot);
+    const taskRecordsResult = await loadTaskRecords(workspaceRoot);
+    const taskRecords = Array.isArray(taskRecordsResult) ? taskRecordsResult : (taskRecordsResult.records || []);
     const openTasks = taskRecords
       .filter((record) => record.task_state && !["completed", "aborted", "failed"].includes(record.task_state))
       .slice(0, maxItems);
@@ -243,12 +244,18 @@ export function createMemoryStatus(params) {
     }
     const lines = fs.readFileSync(taskFile, "utf8").split(/\r?\n/).filter((l) => l.trim());
     const records = [];
+    const skippedLines = [];
     for (const line of lines) {
       try {
         records.push(JSON.parse(line));
-      } catch {
-        // Skip malformed lines.
+      } catch (err) {
+        const preview = line.slice(0, 50).replace(/\s+/g, " ").trim();
+        console.warn(`[memory-status] Skipped malformed JSON line: "${preview}..." — ${err.message}`);
+        skippedLines.push({ line, error: err.message });
       }
+    }
+    if (skippedLines.length > 0) {
+      return { records, skippedCount: skippedLines.length, skippedLines };
     }
     return records;
   }
@@ -256,16 +263,9 @@ export function createMemoryStatus(params) {
   async function handleMemoryStatus() {
     const {
       PYTHON,
-      METRICS,
-      VAULT_ROOT,
-      GENERATED_ROOT,
-      CANONICAL_AI_MEMORY_ROOT,
       HANDOFF_PACK_JSON_PATH,
       MEMORY_LAYERS_JSON_PATH,
       AUTO_DREAM_JSON_PATH,
-      STRUCTURED_ROOT,
-      getSearchWorkerSnapshot,
-      getSearchWorkerHealth,
       readEmbeddingRuntimeSummary,
       readEmbeddingsSummary,
       refreshEmbeddingMetricsFromSummary,
@@ -334,7 +334,7 @@ export function createMemoryStatus(params) {
   }
 
   async function handleGetMemoryOverview(args) {
-    const { VAULT_ROOT, GENERATED_ROOT } = params;
+    const { VAULT_ROOT } = params;
     const workspaceRoot = args.workspace_root || VAULT_ROOT;
     const generatedDir = path.join(workspaceRoot, "00-System", "ai-memory", "generated");
 
@@ -343,7 +343,8 @@ export function createMemoryStatus(params) {
     const hygiene = readOptionalJson(path.join(generatedDir, "memory_hygiene_report.json"));
     const handoff = readOptionalJson(path.join(generatedDir, "HANDOFF.json"));
 
-    const taskRecords = await loadTaskRecords(workspaceRoot);
+    const taskRecordsResult = await loadTaskRecords(workspaceRoot);
+    const taskRecords = Array.isArray(taskRecordsResult) ? taskRecordsResult : (taskRecordsResult.records || []);
     const openTasks = taskRecords.filter(
       (r) => r.task_state && !["completed", "aborted", "failed"].includes(r.task_state)
     );
@@ -406,64 +407,6 @@ export function createMemoryStatus(params) {
   }
 
   return {
-    tools: [
-      {
-        name: "memory_status",
-        description:
-          "Inspect the shared memory stack health: watchdog state, contract/integrity status, embeddings index summary, and claude-mem health.",
-        inputSchema: {
-          type: "object",
-          properties: {},
-        },
-      },
-      {
-        name: "get_memory_overview",
-        description:
-          "Get a project-level memory overview for the current workspace. Returns project context, active tasks, recent memory activity, and memory system health. Use this at the start of a session to understand what the shared memory system already knows.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            workspace_root: {
-              type: "string",
-              description:
-                "Optional workspace path. If omitted, uses AI_MEMORY_OBSIDIAN_VAULT or the canonical vault root.",
-            },
-            include_stats: {
-              type: "boolean",
-              default: true,
-              description: "Include memory statistics (record counts, freshness distribution).",
-            },
-          },
-        },
-      },
-      {
-        name: "memory_wake_up",
-        description:
-          "Build a very small session bootstrap pack from the canonical shared memory bus. Use this when you want a compact wake-up context before doing deeper searches.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            workspace_root: {
-              type: "string",
-              description:
-                "Optional workspace or vault path. If omitted, uses the canonical shared Obsidian vault.",
-            },
-            max_items: {
-              type: "number",
-              default: 3,
-              description:
-                "Maximum items to keep per compact section such as next steps, blockers, and recent threads.",
-            },
-            include_recent_activity: {
-              type: "boolean",
-              default: true,
-              description:
-                "Include a few recent session/task items in addition to durable anchors and handoff data.",
-            },
-          },
-        },
-      },
-    ],
     handlers: {
       memory_status: handleMemoryStatus,
       get_memory_overview: handleGetMemoryOverview,

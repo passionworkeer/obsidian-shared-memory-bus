@@ -12,6 +12,10 @@ const assert = require("node:assert");
 const path = require("path");
 const { spawnSync } = require("child_process");
 
+// Resolve retrieval module path relative to test file (portable)
+const PROJECT_ROOT = path.resolve(__dirname, "../..");
+const PYTHON_MODULE_PATH = path.join(PROJECT_ROOT, "retrieval").replace(/\\/g, "/");
+
 // Load the JS implementation directly
 const {
   normalizeSpaces,
@@ -19,9 +23,6 @@ const {
   buildHashFeatures,
   buildHashEmbedding,
 } = require("../../bus/lsh-hash.js");
-
-// Python retrieval module path (forward slashes for cross-platform compatibility)
-const PYTHON_MODULE_PATH = "E:/desktop/obsidian-shared-memory-bus/retrieval";
 
 /**
  * Run a Python function via subprocess and return the parsed JSON result.
@@ -34,10 +35,25 @@ import sys, json
 sys.path.insert(0, '${PYTHON_MODULE_PATH}')
 ${pythonCode}
 `;
-  // Python executable: use py.exe launcher if available, else absolute path
-  const PYTHON_EXE = process.platform === "win32"
-    ? "D:\\Users\\王健俊\\AppData\\Local\\Programs\\Python\\Python313\\python.exe"
-    : "python";
+  // Python executable: try known paths first, then PATH-resolved
+  const PYTHON_EXE = (() => {
+    if (process.platform === "win32") {
+      // Try common installations first
+      const candidates = [
+        "D:/python/python.exe",
+        "C:/python/python.exe",
+        "py",
+        "python",
+      ];
+      for (const cand of candidates) {
+        const r = spawnSync(cand, ["--version"], { encoding: "utf8" });
+        if (r && r.status === 0) return cand;
+      }
+      return "python3";
+    }
+    const r3 = spawnSync("python3", ["--version"], { encoding: "utf8" });
+    return r3.status === 0 ? "python3" : "python";
+  })();
   const result = spawnSync(PYTHON_EXE, ["-c", fullCode], {
     encoding: "utf8",
     timeout: 10000,
@@ -161,7 +177,7 @@ print(json.dumps(build_hash_features("${input}")))
     const pyResult = runPython(`
 # -*- coding: utf-8 -*-
 import sys, json
-sys.path.insert(0, 'E:/desktop/obsidian-shared-memory-bus/retrieval')
+sys.path.insert(0, '${PYTHON_MODULE_PATH}')
 from lsh_utils import build_hash_features
 print(json.dumps(build_hash_features("中文测试")))
     `);
