@@ -85,6 +85,7 @@ $BuildHandoffPackScript = Resolve-BusPath -Candidates @("build-handoff-pack.js",
 $BuildMemoryLayersScript = Resolve-BusPath -Candidates @("build-memory-layers.js", "ops/build-memory-layers.js")
 $GenerateHygieneScript = Resolve-BusPath -Candidates @("generate-memory-hygiene-report.js", "ops/generate-memory-hygiene-report.js")
 $MemoryDreamScript = Resolve-BusPath -Candidates @("run-memory-dream.ps1", "ops/run-memory-dream.ps1")
+$MemoryArchivalScript = Resolve-BusPath -Candidates @("memory-archival.js", "ops/memory-archival.js")
 $BackgroundExtractionScript = Resolve-BusPath -Candidates @("run-background-extraction.ps1", "ops/run-background-extraction.ps1")
 $EmbeddingsScript = Resolve-BusPath -Candidates @("generate-embeddings.js", "bus/generate-embeddings.js")
 $EmbeddingsIndexPath = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "embeddings", "index.jsonl")
@@ -1045,7 +1046,7 @@ function Invoke-BuildHandoffPack {
 
 function Invoke-GenerateHygieneReport {
     if (-not (Test-Path -LiteralPath $GenerateHygieneScript -PathType Leaf)) {
-        return $false
+        return $null
     }
 
     try {
@@ -1061,12 +1062,12 @@ function Invoke-GenerateHygieneReport {
             } catch {
             }
             Write-State -Running $true -LastReason ("hygiene-report-timeout") -ChangedSpecs @() -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
-            return $false
+            return $null
         }
 
         if ($waitResult.exitCode -ne 0) {
             Write-State -Running $true -LastReason ("hygiene-report-exitcode-" + $waitResult.exitCode) -ChangedSpecs @() -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
-            return $false
+            return $null
         }
 
         return $true
@@ -1078,7 +1079,7 @@ function Invoke-GenerateHygieneReport {
 
 function Invoke-MemoryArchival {
     # Read hygiene report to check archival_needed flag (Q1 fix: do NOT self-trigger, only act on report)
-    $hygieneReportPath = Join-SharedPath @($GeneratedRoot, "memory_hygiene_report.json")
+    $hygieneReportPath = Join-Path $GeneratedRoot "memory_hygiene_report.json"
     $archivalNeeded = $false
     if (Test-Path -LiteralPath $hygieneReportPath -PathType Leaf) {
         try {
@@ -1285,6 +1286,9 @@ function Invoke-ArtifactCatchup {
 
     # Generate memory hygiene report
     [void](Invoke-GenerateHygieneReport)
+
+    # Trigger idempotent archival if hygiene report says archival_needed=true (Q1 fix: hygiene only reports)
+    [void](Invoke-MemoryArchival)
 
     return $lastSyncAt
 }

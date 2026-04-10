@@ -4,6 +4,22 @@
 
 > **In plain English**: Your AI tools share one notebook for memory instead of each forgetting everything when you switch.
 
+## Universal Skill File
+
+This repository ships a **root `SKILL.md`** as the single universal entry point for all AI agents. Any agent that can read a skill or rule file can clone this repo and follow `SKILL.md` to auto-configure optimal access to the shared Obsidian memory bus.
+
+Supported agents:
+- **Claude Code** → `.agents/skills/claude-code.md`
+- **Codex** → `.agents/skills/codex.md`
+- **OpenClaw** → `.agents/skills/openclaw.md`
+- **Trae** → `.agents/skills/trae.md`
+- **Cursor** → `.agents/skills/cursor.md`
+- **Copilot** → `.agents/skills/copilot.md`
+
+Each per-agent file covers vault path resolution, token budget guidance, MCP wiring, and durable writeback targets specific to that agent. Git hooks for automatic hygiene and context refresh on pull/checkout are documented in `docs/GIT-HOOKS-INTEGRATION.md`.
+
+The 5-tier memory architecture is documented in `docs/MEMORY-TIERING.md`. Only Tier 3 and Tier 4 records are embedded; Tier 5 Archive uses `archive-manifest.jsonl` instead of a tombstone to avoid polluting the vector space.
+
 ## Before You Start
 
 Checklist — all must be checked before installing:
