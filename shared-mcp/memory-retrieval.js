@@ -7,6 +7,8 @@
  *   refine_memory_selection
  *   get_memory_timeline
  *   clear_shared_memory_search_cache
+ *   get_entity_info
+ *   search_by_entity
  *
  * Exposes a factory: createMemoryRetrieval(params) => { tools, handlers }
  * All state is passed in via params to avoid circular import issues.
@@ -450,6 +452,75 @@ Only include records that are genuinely relevant. Return fewer than max_results 
     );
   }
 
+  // ── Entity / knowledge-graph handlers ─────────────────────────────────
+
+  function loadKnowledgeGraph() {
+    try {
+      const { KnowledgeGraph } = require("../../ops/knowledge-graph.js");
+      return new KnowledgeGraph({ vaultRoot: params.VAULT_ROOT });
+    } catch {
+      return null;
+    }
+  }
+
+  async function handleGetEntityInfo(args) {
+    const name = String(args.name || "").trim();
+    if (!name) return errorResult("name is required");
+
+    const kg = loadKnowledgeGraph();
+    if (!kg) return errorResult("knowledge-graph-unavailable: run build-memory-layers.js first");
+
+    try {
+      const entity = kg.getEntity(name);
+      if (!entity) {
+        return jsonResult({ ok: true, name, found: false, relationships: [] });
+      }
+      const relationships = kg.queryEntity(name, {
+        direction: args.direction || "both",
+        asOf: args.as_of || null,
+      });
+      return jsonResult({ ok: true, found: true, entity, relationships });
+    } finally {
+      try { kg.close(); } catch {}
+    }
+  }
+
+  async function handleSearchByEntity(args) {
+    const entityQuery = String(args.entity_query || "").trim();
+    if (!entityQuery) return errorResult("entity_query is required");
+
+    const kg = loadKnowledgeGraph();
+    if (!kg) return errorResult("knowledge-graph-unavailable: run build-memory-layers.js first");
+
+    try {
+      // 1. Find matching entities
+      const matchedEntities = kg.searchEntities(entityQuery);
+
+      // 2. For each matched entity, get their relationships
+      const results = [];
+      for (const entity of matchedEntities.slice(0, 10)) {
+        const rels = kg.queryEntity(entity.name, { direction: "both" });
+        results.push({ entity, relationships: rels });
+      }
+
+      // 3. Optionally get the full timeline for top entity
+      let timeline = [];
+      if (results.length > 0 && args.include_timeline) {
+        timeline = kg.timeline(results[0].entity.name).slice(0, 20);
+      }
+
+      return jsonResult({
+        ok: true,
+        query: entityQuery,
+        matchedEntities: matchedEntities.length,
+        results,
+        timeline,
+      });
+    } finally {
+      try { kg.close(); } catch {}
+    }
+  }
+
   return {
     handlers: {
       search_shared_memory: handleSearchSharedMemory,
@@ -457,6 +528,8 @@ Only include records that are genuinely relevant. Return fewer than max_results 
       refine_memory_selection: handleRefineMemorySelection,
       get_memory_timeline: handleGetMemoryTimeline,
       clear_shared_memory_search_cache: handleClearSharedMemorySearchCache,
+      get_entity_info: handleGetEntityInfo,
+      search_by_entity: handleSearchByEntity,
     },
   };
 }
