@@ -61,6 +61,11 @@ const STOPWORDS = new Set([
   "output","outputs","input","inputs","records","record","entry","entries",
   // Greetings / filler
   "hey","hi","hello","thanks","thank","right","let",
+  // Common Chinese stopwords
+  "的","是","在","有","我","你","他","她","它","了","和","与","及","或","不","这","那",
+  "也","还","又","就","但","而","则","因","所","以","为","于","上","下","中","后","前",
+  "里","外","之","其","并","觉","得","能","会","可","要","想","说","看","来","去","用",
+  "把","被","让","给","向","往","prefer","prefers",
 ]);
 
 // Person signals — things people say/do (formatted strings, {name} replaced at runtime)
@@ -84,16 +89,17 @@ const PROJECT_VERB_PATTERNS = [
 
 // Relationship predicate extraction patterns
 // Matches patterns like: "Alice is the author of X" → { subject: "Alice", predicate: "is_author_of", object: "X" }
+// Uses [^\s,，；;]+ to capture both Latin words and CJK characters
 const RELATIONSHIP_PATTERNS = [
   // [regex, predicate_template]
-  [/(\w+)\s+(?:is|are)\s+(?:the\s+)?(\w+)\s+of\s+(.+)/i, "{1}_is_{2}_of"],
-  [/(\w+)\s+(?:is|are)\s+(?:a|an)\s+(\w+)/i, "{1}_is_{2}"],
-  [/(\w+)\s+(?:uses|using|used)\s+(\w+)/i, "{1}_uses_{2}"],
-  [/(\w+)\s+(?:built|building|creates?)\s+(\w+)/i, "{1}_builds_{2}"],
-  [/(\w+)\s+(?:owns?|owning)\s+(\w+)/i, "{1}_owns_{2}"],
-  [/(\w+)\s+(?:works? on|working on)\s+(\w+)/i, "{1}_works_on_{2}"],
-  [/(\w+)\s+(?:depends? on|depends on)\s+(\w+)/i, "{1}_depends_on_{2}"],
-  [/(\w+)\s+(?:calls? |calls)\s+(\w+)/i, "{1}_calls_{2}"],
+  [/([^\s,，；;]+)\s+(?:is|are)\s+(?:the\s+)?(\w+)\s+of\s+(.+)/i, "{1}_is_{2}_of"],
+  [/([^\s,，；;]+)\s+(?:is|are)\s+(?:a|an)\s+([^\s,，；;]+)/i, "{1}_is_{2}"],
+  [/([^\s,，；;]+)\s+(?:uses|using|used)\s+([^\s,，；;]+)/i, "{1}_uses_{2}"],
+  [/([^\s,，；;]+)\s+(?:built|building|creates?)\s+([^\s,，；;]+)/i, "{1}_builds_{2}"],
+  [/([^\s,，；;]+)\s+(?:owns?|owning)\s+([^\s,，；;]+)/i, "{1}_owns_{2}"],
+  [/([^\s,，；;]+)\s+(?:works? on|working on)\s+([^\s,，；;]+)/i, "{1}_works_on_{2}"],
+  [/([^\s,，；;]+)\s+(?:depends? on|depends on)\s+([^\s,，；;]+)/i, "{1}_depends_on_{2}"],
+  [/([^\s,，；;]+)\s+(?:calls? |calls)\s+([^\s,，；;]+)/i, "{1}_calls_{2}"],
 ];
 
 // ---------------------------------------------------------------------------
@@ -128,10 +134,45 @@ function extractCandidates(text) {
     }
   }
 
-  // Filter: must appear at least 2 times
+  // Chinese words: greedy segmentation into 2-4 char tokens, deduplicated by position.
+// Skips over Latin/CJK mixed segments (e.g. "MemPalace中文" → separate tokens).
+const chineseRaw = [];
+let cur = "";
+let inCJK = false;
+for (const ch of text) {
+  const isCJK = /[\u4e00-\u9fff]/.test(ch);
+  if (isCJK) {
+    if (!inCJK) { if (cur) chineseRaw.push(cur); cur = ""; inCJK = true; }
+    cur += ch;
+  } else {
+    if (inCJK) { if (cur) chineseRaw.push(cur); cur = ""; inCJK = false; }
+  }
+}
+if (cur) chineseRaw.push(cur);
+
+// Count each segment; also record all sub-word 2-char, 3-char, 4-char prefixes for overlap
+const cjkCounts = new Map();
+for (const segment of chineseRaw) {
+  for (let len = 2; len <= Math.min(4, segment.length); len++) {
+    for (let i = 0; i <= segment.length - len; i++) {
+      const token = segment.slice(i, i + len);
+      if (!STOPWORDS.has(token)) {
+        cjkCounts.set(token, (cjkCounts.get(token) || 0) + 1);
+      }
+    }
+  }
+}
+// Keep tokens appearing at least 2 times
+for (const [token, count] of cjkCounts) {
+  if (count >= 2 && token.length >= 2) {
+    counts.set(token, count);
+  }
+}
+
+  // Filter: must appear at least 1 time (Issue 3: lowered from 2 to 1)
   const candidates = new Map();
   for (const [name, count] of counts) {
-    if (count >= 2) candidates.set(name, count);
+    if (count >= 1) candidates.set(name, count);
   }
   return candidates;
 }
@@ -277,6 +318,21 @@ function classifyEntity(name, frequency, scores) {
     };
   }
 
+  // Issue 3: high-confidence signal-only entities (confidence >= 0.75 regardless of frequency)
+  const maxSignalScore = Math.max(ps, pjs, cs);
+  const signalConfidence = maxSignalScore >= 4 ? Math.min(0.95, 0.5 + 0.5) : 0;
+  if (maxSignalScore >= 4 && signalConfidence >= 0.75) {
+    if (ps >= pjs && ps >= cs) {
+      return { name, type: "person", confidence: 0.85, frequency, signals: scores.person_signals };
+    }
+    if (pjs >= ps && pjs >= cs) {
+      return { name, type: "project", confidence: 0.85, frequency, signals: scores.project_signals };
+    }
+    if (cs >= ps && cs >= pjs) {
+      return { name, type: "concept", confidence: 0.85, frequency, signals: scores.concept_signals };
+    }
+  }
+
   const personRatio = ps / total;
   const projectRatio = pjs / total;
   const conceptRatio = cs / total;
@@ -335,16 +391,20 @@ function extractRelationships(text) {
     let match;
     const re = new RegExp(rx.source, "gi");
     while ((match = re.exec(text)) !== null) {
-      const subject = match[1].trim();
-      const object = (match[match.length - 1] || "").trim();
-      if (!subject || !object || subject.length < 2 || object.length < 2) continue;
+      // Strip trailing punctuation — prevents "developer." from slipping through
+      const rawSubject = match[1].trim();
+      const rawObject = (match[match.length - 1] || "").trim();
+      const subject = rawSubject.replace(/[.,;!?。，；]+$/, "");
+      const object  = rawObject.replace(/[.,;!?。，；]+$/,  "");
+      if (!subject || !object || subject.length < 3 || object.length < 3) continue;
 
       // Build predicate from template
+      const rawPred2 = (match[2] || "").toLowerCase().replace(/[.,;!?。，；]+$/, "").replace(/\s+/g, "_");
       const predicate = predTemplate
         .replace("{1}", subject.toLowerCase().replace(/\s+/g, "_"))
-        .replace("{2}", (match[2] || "").toLowerCase().replace(/\s+/g, "_"));
+        .replace("{2}", rawPred2);
 
-      // Avoid obvious stopwords as subject/object
+      // Avoid stopwords as subject/object (after punctuation stripped)
       if (STOPWORDS.has(subject.toLowerCase()) || STOPWORDS.has(object.toLowerCase())) continue;
 
       triples.push({
