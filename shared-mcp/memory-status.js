@@ -116,6 +116,16 @@ export function createMemoryStatus(params) {
       ...(meta.segments || [])
         .flatMap((segment) => Array.isArray(segment.displayedRecords) ? segment.displayedRecords.map((record) => record.title) : []),
     ], maxItems, 180);
+    const userAnchors = compactUnique(
+      (layers.latest?.durableByScope?.user || []).map((item) => item.title),
+      maxItems,
+      180
+    );
+    const projectAnchors = compactUnique(
+      (layers.latest?.durableByScope?.project || []).map((item) => item.title),
+      maxItems,
+      180
+    );
 
     const recentActivity = includeRecentActivity
       ? compactUnique([
@@ -141,14 +151,62 @@ export function createMemoryStatus(params) {
       durable_anchors: durableAnchors,
       recent_activity: recentActivity,
     };
-
-    wakeUp.prompt = compactUnique([
-      wakeUp.goal ? `Current goal: ${wakeUp.goal}` : "",
+    const identityLayer = compactUnique([
+      wakeUp.detected_project ? `Project: ${wakeUp.detected_project}` : "",
+      ...userAnchors.map((item) => `User: ${item}`),
+      ...projectAnchors.map((item) => `Project memory: ${item}`),
+    ], maxItems, 220);
+    const essentialLayer = compactUnique([
+      wakeUp.goal ? `Goal: ${wakeUp.goal}` : "",
       ...wakeUp.next.map((item) => `Next: ${item}`),
       ...wakeUp.blocked.map((item) => `Blocked: ${item}`),
       ...wakeUp.durable_anchors.map((item) => `Anchor: ${item}`),
+    ], Math.max(4, maxItems + 1), 220);
+    const recentLayer = compactUnique([
       ...wakeUp.recent_activity.map((item) => `Recent: ${item}`),
-    ], 8, 220);
+      ...wakeUp.open_threads.map((item) => `Thread: ${item}`),
+      ...wakeUp.active_tasks
+        .map((task) => clampText(task.title || "", 180))
+        .filter(Boolean)
+        .map((title) => `Task: ${title}`),
+    ], Math.max(4, maxItems + 1), 220);
+    const retrieveLayer = {
+      default_route: wakeUp.active_tasks.length > 0 || wakeUp.recent_activity.length > 0 ? "mixed" : "durable",
+      suggestions: [
+        {
+          route: "durable",
+          use_when: "Need stable user preferences, project facts, or durable decisions.",
+        },
+        {
+          route: "task",
+          use_when: "Need active task state, OpenClaw blackboard items, or in-flight execution context.",
+        },
+        {
+          route: "recent",
+          use_when: "Need the freshest session/events without pulling the full durable layer.",
+        },
+        {
+          route: "reference",
+          use_when: "Need notes, docs, or exact reference-style recall.",
+        },
+        {
+          route: "mixed",
+          use_when: "Default follow-up when the answer may span durable, task, and recent layers.",
+        },
+      ],
+    };
+    wakeUp.layers = {
+      identity: identityLayer,
+      essential: essentialLayer,
+      recent: recentLayer,
+      retrieve: retrieveLayer,
+    };
+
+    wakeUp.prompt = compactUnique([
+      ...identityLayer,
+      ...essentialLayer,
+      ...recentLayer,
+    ], 10, 220);
 
     return {
       ok: true,
