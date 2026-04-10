@@ -97,6 +97,56 @@ That default starter brings up:
 - `playwright`
 - `MiniMax` only when its environment variables are configured or the starter is told to include it explicitly
 
+### Search Capabilities
+
+The `memory` MCP server exposes `memory_wake_up` as a compact session bootstrap tool available at port 9338. It returns a structured pack combining durable anchors, handoff data, and recent activity without requiring individual file reads.
+
+The server also supports verbatim snippet extraction on `search_shared_memory`:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `includeVerbatim` | `boolean` | `false` | Return query-aware exact snippet windows around matched text |
+| `snippetWindow` | `integer` | `220` | Character window kept around each exact match |
+| `maxVerbatimPerResult` | `integer` | `1` | Maximum verbatim snippet windows per result |
+
+### Standalone Operations
+
+The watchdog supervisor can be started independently of the shared MCP stack:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\bus\memory-watchdog-supervisor.ps1 -Daemon
+```
+
+```bash
+pwsh "$HOME/.ai-memory/bus/memory-watchdog-supervisor.ps1" -Daemon
+```
+
+Inbox hygiene removes entries older than 7 days:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\ops\cleanup-inbox.ps1
+```
+
+```bash
+pwsh "$HOME/.ai-memory/ops/cleanup-inbox.ps1"
+```
+
+### Memory Generation Pipeline
+
+After install, run the full memory generation pipeline for complete bootstrap data:
+
+```powershell
+node $env:AI_MEMORY_ROOT\ops\build-memory-layers.js
+node $env:AI_MEMORY_ROOT\ops\build-handoff-pack.js
+```
+
+```bash
+node ~/.ai-memory/ops/build-memory-layers.js
+node ~/.ai-memory/ops/build-handoff-pack.js
+```
+
+These are also run automatically by `install.ps1`, but you can re-run them to refresh generated artifacts at any time.
+
 If you want a narrower shared set and prefer to leave Playwright out, start an explicit subset instead:
 
 ```powershell
