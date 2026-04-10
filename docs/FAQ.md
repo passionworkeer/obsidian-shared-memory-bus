@@ -93,6 +93,26 @@ The metrics server (port 9090) supports two environment variables:
 ### My vault is on a different drive or path. How do I configure it?
 Set the `AI_MEMORY_OBSIDIAN_VAULT` environment variable to your vault root path. The system also auto-detects from Obsidian's app config on Windows, macOS, and Linux.
 
+### How do I stop all shared MCP services?
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\start-default-shared-mcp.ps1 -Stop
+```
+This gracefully shuts down all running shared MCP servers. On Windows it also kills any orphaned background launcher processes. After stopping, `status-shared-mcp.ps1` should report all services as stopped.
+
+### Why do I see multiple Node.js processes?
+The shared MCP stack runs each server as a separate Node.js process (one per MCP server on ports 9331-9338). Process deduplication ensures that if two clients request the same MCP server, they share the existing process rather than each launching their own -- this keeps servers alive across client sessions. Each entry in `status-shared-mcp.ps1` maps to one Node process. Seeing multiple Node processes is normal and expected.
+
+### How does Windows console window hiding work?
+The Windows launchers use a three-layer approach to keep windows hidden:
+1. `Start-Process -WindowStyle Hidden` to suppress the visible window on launch.
+2. A helper launcher script (`run-obsidian-mcp.ps1`, `run-minimax-mcp.ps1`, etc.) that relaunches the actual process via a second `Start-Process -WindowStyle Hidden` call, which covers cases where the first layer fails.
+3. A background launcher wrapper that is itself launched via `Start-Process -WindowStyle Hidden` before it spawns the helper layer.
+
+This cascading approach handles the case where PowerShell or Node.js themselves show a console window. The shared MCP background processes should be invisible to the user in normal operation.
+
+### What is the memory contract?
+The memory contract (`ops/memory-contract.js`) defines a versioned schema for all structured JSONL files in the canonical memory layers. It is checked automatically by `ops/check-memory-integrity.js` whenever you run validation or pressure tests. Each record must carry a recognized `schemaVersion` field; records with unknown versions are flagged rather than silently accepted. This prevents cross-version corruption when the schema evolves between releases.
+
 ### How do I disable the background watchdog (auto-sync)?
 Set `AI_MEMORY_WATCHDOG_ENABLED=0` before starting the watchdog. When disabled, the watchdog exits immediately with exit code 0 and no background sync occurs. You can still trigger sync manually via `memory-bus.ps1 -Action SyncAll`. This is useful if you want to control sync timing explicitly or run sync only on-demand.
 

@@ -14,6 +14,18 @@ node -v
 npm -v
 ```
 
+## Node.js Console Windows Appear On Startup
+
+Cause:
+- The shared MCP proxy runs on Windows with console subsystem executables (cmd.exe, npx.cmd, uvx.cmd) that may create visible console windows when spawned through `cmd.exe /c`.
+- `windowsHide: true` in Node.js `spawn()` only suppresses the immediate child process window -- grandchild processes can still create their own visible consoles.
+- This was especially visible for `playwright-mcp.cmd`, `npx` fallback paths, and any batch-file shim that could not be parsed.
+
+Fix (applied in the latest version):
+- The singleton proxy now uses a temp-batch approach for all fallback cmd.exe launches: it writes a temporary `.bat` file and runs `cmd.exe /c batPath` which avoids console window allocation.
+- Shim resolution has been expanded to detect three patterns (npm-style shims, exe+script pairs, bare script paths) so more commands bypass cmd.exe entirely.
+- If you still see console windows, the relevant log file under `shared-mcp/logs/` will show the actual command being run.
+
 ## `.sh` Wrappers Cannot Find `pwsh`
 
 Cause:

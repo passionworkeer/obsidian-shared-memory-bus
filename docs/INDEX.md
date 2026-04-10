@@ -28,3 +28,16 @@
 ## Development
 - [RELEASING.md](./RELEASING.md) — Release process
 - [DEVELOPMENT.md](./DEVELOPMENT.md) — Pre-commit checks and CI
+
+## Reference
+- [reference/README.md](./reference/README.md) — Reference overview
+- [reference/MCP-TOOLS.md](./reference/MCP-TOOLS.md) — MCP tool reference
+- [reference/DATA-FLOW.md](./reference/DATA-FLOW.md) — Data flow diagrams
+- [reference/CROSS-LANGUAGE-MAP.md](./reference/CROSS-LANGUAGE-MAP.md) — Cross-language type mapping
+- [reference/OBSERVABILITY.md](./reference/OBSERVABILITY.md) — Observability and metrics
+- [reference/PERFORMANCE.md](./reference/PERFORMANCE.md) — Performance characteristics
+- [reference/QUICKSTART.md](./reference/QUICKSTART.md) — Quick reference guide
+
+## Architecture Decision Records
+- [adr/README.md](./adr/README.md) — ADR index
+- [adr/ADR-002-unified-memory-architecture-v2.md](./adr/ADR-002-unified-memory-architecture-v2.md) — Unified memory architecture v2
