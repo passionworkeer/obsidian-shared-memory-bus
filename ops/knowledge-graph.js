@@ -165,10 +165,33 @@ class KnowledgeGraph {
     }
   }
 
+  // ── Transaction / batch support ───────────────────────────────────────
+
+  /**
+   * Begin a write transaction. All subsequent write operations
+   * (addEntity, addTriple, ingestRecord) are held in memory until
+   * endBatch() is called. This dramatically improves throughput when
+   * ingesting hundreds of records.
+   */
+  beginBatch() {
+    this._db.run("BEGIN TRANSACTION");
+  }
+
+  /**
+   * Commit or roll back the current batch.
+   * @param {boolean} [commit=true] — pass false to roll back
+   */
+  endBatch(commit = true) {
+    this._db.run(commit ? "COMMIT" : "ROLLBACK");
+  }
+
   // ── Write operations ──────────────────────────────────────────────────
 
   /**
    * Add or update an entity node.
+   * If the entity already exists, its properties are merged (shallow merge)
+   * rather than replaced, so that fields from multiple sources are preserved.
+   *
    * @param {string} name
    * @param {'person'|'project'|'concept'|'tool'|'unknown'} [type]
    * @param {object} [properties]
@@ -176,10 +199,19 @@ class KnowledgeGraph {
    */
   addEntity(name, type = "unknown", properties = {}) {
     const eid = entityId(name);
-    const props = JSON.stringify(properties || {});
+    const existing = this._db.get("SELECT properties, type FROM entities WHERE id = ?", eid);
+    const mergedProps = existing
+      ? { ...JSON.parse(existing.properties || "{}"), ...properties }
+      : properties;
+    // Keep the most-specific type seen so far (person > project > concept > tool > unknown)
+    const TYPE_RANK = { person: 5, project: 4, concept: 3, tool: 2, unknown: 1 };
+    const rank = (t) => TYPE_RANK[t] ?? 0;
+    const resolvedType =
+      rank(type) > rank(existing ? existing.type : "unknown") ? type : (existing ? existing.type : type);
+    const props = JSON.stringify(mergedProps);
     this._db.run(
       "INSERT OR REPLACE INTO entities (id, name, type, properties) VALUES (?, ?, ?, ?)",
-      eid, name, type, props
+      eid, name, resolvedType, props
     );
     return eid;
   }
@@ -259,7 +291,7 @@ class KnowledgeGraph {
    * @param {object} record - memory record with `id`, `entities[]`, `facts[]`, optional `source_file`
    */
   ingestRecord(record) {
-    const facts   = record.facts   || [];
+    const facts    = record.facts    || [];
     const entities = record.entities || [];
     const recordId  = record.id      || null;
     const sourceFile = record.source_file || null;
@@ -274,13 +306,38 @@ class KnowledgeGraph {
     }
 
     for (const fact of facts) {
-      if (fact.subject && fact.predicate && fact.object) {
-        this.addTriple(fact.subject, fact.predicate, fact.object, {
+      // Normalise: a fact may be a plain string, an {entity_type} object,
+      // or a full { subject, predicate, object } triple.
+      if (typeof fact === "string") {
+        // Plain string — no structured triple to extract; skip silently.
+        continue;
+      }
+
+      const subject   = fact.subject      || null;
+      const predicate = fact.predicate    || null;
+      const object    = fact.object       || null;
+
+      if (subject && object) {
+        // Full triple: use the provided predicate (may be absent — handled below).
+        const resolvedPredicate = predicate || "is_a";
+        this.addTriple(subject, resolvedPredicate, object, {
           confidence: fact.confidence || 1.0,
           sourceId: recordId,
           sourceFile: sourceFile,
         });
+      } else if (fact.entity_type) {
+        // Entity-classification signal: subject is the entity name,
+        // predicate defaults to "is_a", object is the entity_type.
+        const entityName = fact.name || subject;
+        if (entityName) {
+          this.addTriple(entityName, "is_a", fact.entity_type, {
+            confidence: fact.confidence || 0.7,
+            sourceId: recordId,
+            sourceFile: sourceFile,
+          });
+        }
       }
+      // Facts that are neither a triple nor entity-classification are skipped.
     }
   }
 
@@ -468,18 +525,81 @@ class KnowledgeGraph {
   }
 
   /**
-   * Search entities by name (partial match).
+   * Search entities by name with multi-token support and relevance scoring.
+   *
+   * - Splits query on whitespace; each token must appear somewhere in the name.
+   * - Relevance score (higher = better):
+   *     3 = exact prefix match on the full name
+   *     2 = full name starts with all tokens (in order, contiguous prefix)
+   *     1 = all tokens appear somewhere in the name
+   *   Entities missing any token score 0 and are excluded.
+   *
    * @param {string} query
+   * @param {{ limit?: number }} [opts]
    * @returns {object[]}
    */
-  searchEntities(query) {
+  searchEntities(query, opts = {}) {
+    const limit = opts.limit ?? 20;
+    const tokens = (query || "")
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((t) => t.length > 0);
+
+    if (tokens.length === 0) {
+      return [];
+    }
+
+    // Fetch a generous working set (SQL LIKE on each token would be expensive
+    // to construct safely, so we filter in JS after a single broad fetch).
+    const rows = this._db.all(
+      "SELECT * FROM entities ORDER BY name LIMIT 200"
+    );
+
+    /** @param {string} name @returns {number} relevance score */
+    const score = (name) => {
+      const lower = name.toLowerCase();
+      const allMatch = tokens.every((t) => lower.includes(t));
+      if (!allMatch) return 0;
+
+      // Exact prefix (whole name starts with full query)
+      if (lower.startsWith(query.toLowerCase())) return 3;
+
+      // All tokens present and name starts with the first token
+      if (lower.startsWith(tokens[0])) return 2;
+
+      return 1;
+    };
+
+    return rows
+      .map((row) => ({
+        id:         row.id,
+        name:       row.name,
+        type:       row.type,
+        relevance:  score(row.name),
+        properties: JSON.parse(row.properties || "{}"),
+      }))
+      .filter((e) => e.relevance > 0)
+      .sort((a, b) => {
+        if (b.relevance !== a.relevance) return b.relevance - a.relevance;
+        return a.name.localeCompare(b.name);
+      })
+      .slice(0, limit);
+  }
+
+  /**
+   * Return all entities of a given type.
+   * @param {'person'|'project'|'concept'|'tool'|'unknown'} type
+   * @returns {object[]}
+   */
+  getEntitiesByType(type) {
     return this._db
-      .all("SELECT * FROM entities WHERE name LIKE ? ORDER BY name LIMIT 20", `%${query}%`)
-      .map(row => ({
+      .all("SELECT * FROM entities WHERE type = ? ORDER BY name", type)
+      .map((row) => ({
         id:         row.id,
         name:       row.name,
         type:       row.type,
         properties: JSON.parse(row.properties || "{}"),
+        created_at: row.created_at,
       }));
   }
 }

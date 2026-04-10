@@ -1651,7 +1651,12 @@ function main() {
     ...layers.sessionMemory,
     ...layers.sharedEvents,
     ...layers.taskMemory,
+    ...dreamRecords,   // also extract entities from dream writeback records
   ];
+
+  // Open a KG batch so that hundreds of ingestRecord calls share one transaction
+  // instead of opening/closing the DB on every call.
+  try { knowledgeGraph.beginBatch(); } catch {}
 
   for (const record of allRecords) {
     if (record._entityExtracted) continue;  // skip already-processed records
@@ -1676,6 +1681,8 @@ function main() {
     }
     record._entityExtracted = true;
   }
+
+  try { knowledgeGraph.endBatch(true); } catch {}
 
   appendDailyLogs(allRecords);
 
