@@ -872,6 +872,13 @@ function Start-SharedWindowsHeadlessProcess {
         [string]$WorkingDirectory = ""
     )
 
+    # On Windows, PowerShell -File ignores CreateNoWindow=true and always allocates
+    # a console. Inject -WindowStyle Hidden so child processes stay invisible.
+    $isWindowsPowerShell = $FilePath -replace '\\', '/' -like '*/powershell.exe'
+    if ($isWindowsPowerShell -and $ArgumentList -notcontains '-WindowStyle') {
+        $ArgumentList = @('-WindowStyle', 'Hidden') + @($ArgumentList)
+    }
+
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
     $startInfo.FileName = $FilePath
     $startInfo.Arguments = Join-SharedWindowsProcessArguments -Arguments $ArgumentList
