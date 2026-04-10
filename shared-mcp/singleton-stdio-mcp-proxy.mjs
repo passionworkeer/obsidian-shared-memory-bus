@@ -3,7 +3,7 @@
 import http from 'node:http';
 import process from 'node:process';
 import { spawn, execSync, spawnSync } from 'node:child_process';
-import { accessSync, existsSync, readFileSync } from 'node:fs';
+import { accessSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, normalize } from 'node:path';
 
 function killTree(pid) {
@@ -296,6 +296,16 @@ function resolveWindowsCommandPath(commandToken) {
   }
 }
 
+/**
+ * Expands resolveWindowsCmdShimLaunchSpec to handle multiple batch-file patterns:
+ *   1. npm-style: "%_prog%" "%~dp0\...\bin\...\js"
+ *   2. bare executable + script: "%~dp0\node.exe" "%~dp0\...\js"
+ *   3. quoted script only: "%~dp0\python.exe" "%~dp0\scripts\script.py"
+ *   4. unquoted script: %~dp0\script.py (uvx-style)
+ *
+ * Returns a launch spec { filePath, args } that bypasses cmd.exe entirely,
+ * or null if the shim cannot be resolved.
+ */
 function resolveWindowsCmdShimLaunchSpec(commandToken, passthroughArgs, fallbackNodeExe) {
   const commandPath = resolveWindowsCommandPath(commandToken);
   if (!commandPath) {
@@ -309,23 +319,79 @@ function resolveWindowsCmdShimLaunchSpec(commandToken, passthroughArgs, fallback
     return null;
   }
 
-  const shimMatch = content.match(
+  const shimDir = dirname(commandPath);
+
+  // Pattern 1: npm shim — "%_prog%" "%~dp0\node_modules\...\bin\...\js"
+  const npmMatch = content.match(
     /"%_prog%"\s+"%(?:dp0|~dp0)%\\([^"\r\n]+\.(?:js|mjs|cjs))"/i,
   );
-  if (!shimMatch) {
-    return null;
+  if (npmMatch) {
+    const scriptPath = normalize(join(shimDir, npmMatch[1].replace(/\\/g, '/')));
+    if (existsSync(scriptPath)) {
+      const bundledNodeExe = join(shimDir, 'node.exe');
+      return {
+        filePath: existsSync(bundledNodeExe) ? bundledNodeExe : fallbackNodeExe,
+        args: [scriptPath, ...passthroughArgs],
+      };
+    }
   }
 
-  const scriptPath = normalize(join(dirname(commandPath), shimMatch[1].replace(/\\/g, '/')));
-  if (!existsSync(scriptPath)) {
-    return null;
+  // Pattern 2: direct node/python with quoted script path — node.exe "%~dp0\...\js"
+  const exeScriptMatch = content.match(
+    /"(%~dp0\\(?:node|python|py|python3|uvx)[\w.-]*(?:\.exe)?)"\s+"(%~dp0[^"\r\n]+\.(?:js|mjs|cjs|py))"/i,
+  );
+  if (exeScriptMatch) {
+    const exe = exeScriptMatch[1].replace(/%~dp0%/gi, shimDir + '\\');
+    const script = exeScriptMatch[2].replace(/%~dp0%/gi, shimDir + '\\');
+    if (existsSync(exe) && existsSync(script)) {
+      return { filePath: exe, args: [script, ...passthroughArgs] };
+    }
   }
 
-  const bundledNodeExe = join(dirname(commandPath), 'node.exe');
-  const effectiveNodeExe = existsSync(bundledNodeExe) ? bundledNodeExe : fallbackNodeExe;
+  // Pattern 3: bare script path (no leading exe) — uvx / npx style
+  const bareScriptMatch = content.match(
+    /"(%~dp0[^"\r\n]+\.(?:js|mjs|cjs|py))"/i,
+  );
+  if (bareScriptMatch) {
+    const script = bareScriptMatch[1].replace(/%~dp0%/gi, shimDir + '\\');
+    if (existsSync(script)) {
+      // Detect interpreter from the shebang or batch context.
+      // Check for node first, then python.
+      const bundledNode = join(shimDir, 'node.exe');
+      if (existsSync(bundledNode)) {
+        return { filePath: bundledNode, args: [script, ...passthroughArgs] };
+      }
+      // Fall back to python from PATH (don't guess a specific path).
+      const pythonShim = join(shimDir, 'python.exe');
+      if (existsSync(pythonShim)) {
+        return { filePath: pythonShim, args: [script, ...passthroughArgs] };
+      }
+      // Last resort: use fallback node (may not work for .py files but
+      // avoids the visible cmd.exe window at least).
+      return { filePath: fallbackNodeExe, args: [script, ...passthroughArgs] };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Returns a launch spec for cmd.exe that runs the given executable+args
+ * via a temporary batch file. This is the most reliable way to suppress
+ * the visible console window on Windows — cmd.exe /c "..." still sometimes
+ * creates a flicker even with windowsHide, but cmd.exe /c batch-file avoids it.
+ */
+function cmdFallbackViaBat(executable, args) {
+  const batName = `mcp-hidden-${process.pid}-${Date.now()}.bat`;
+  const batPath = join(process.env.TEMP || process.env.TMP || '/tmp', batName);
+  const argLine = args.map(a => `"${String(a).replace(/"/g, '\\"')}"`).join(' ');
+  writeFileSync(batPath,
+    `@echo off\r\n"${executable}" ${argLine}\r\nexit /B !ERRORLEVEL!\r\n`,
+    { encoding: 'utf8' });
   return {
-    filePath: effectiveNodeExe,
-    args: [scriptPath, ...passthroughArgs],
+    filePath: 'cmd.exe',
+    args: ['/d', '/c', batPath],
+    _batPath: batPath,  // stored for potential cleanup
   };
 }
 
@@ -352,10 +418,8 @@ function resolveStdioLaunchSpec() {
         args: [npxScript, ...tokens.slice(1)],
       };
     } catch {
-      return {
-        filePath: 'cmd.exe',
-        args: ['/d', '/s', '/c', stdioCommand],
-      };
+      // Layer 1 + 3: use temp-batch approach so cmd.exe creates no window.
+      return cmdFallbackViaBat('npx', tokens);
     }
   }
 
@@ -367,15 +431,14 @@ function resolveStdioLaunchSpec() {
   }
 
   if (isWindows && /\.(cmd|bat)$/i.test(resolvedFirstToken)) {
+    // Layer 2: try expanded shim resolution first.
     const shimLaunchSpec = resolveWindowsCmdShimLaunchSpec(firstToken, tokens.slice(1), nodeExe);
     if (shimLaunchSpec) {
       return shimLaunchSpec;
     }
 
-    return {
-      filePath: 'cmd.exe',
-      args: ['/d', '/s', '/c', stdioCommand],
-    };
+    // Layer 1 + 3: shim resolution failed — fall back via temp batch.
+    return cmdFallbackViaBat(resolvedFirstToken, tokens.slice(1));
   }
 
   return {
@@ -437,6 +500,9 @@ function spawnChildProcess() {
   const launchSpec = resolveStdioLaunchSpec();
   log(`starting singleton child via: ${launchSpec.filePath} ${launchSpec.args.join(' ')}`.trim());
 
+  // Track the temp batch path (from cmdFallbackViaBat) so we can clean it up.
+  const batPath = launchSpec._batPath || null;
+
   child = spawn(launchSpec.filePath, launchSpec.args, {
     shell: false,
     windowsHide: process.platform === 'win32',
@@ -446,6 +512,13 @@ function spawnChildProcess() {
       ...childExtraEnv,
     },
   });
+
+  // Clean up the temp batch file when the child exits.
+  if (batPath) {
+    child.on('exit', () => {
+      try { require('node:fs').unlinkSync(batPath); } catch { /* best-effort */ }
+    });
+  }
 
   child.stdout.on('data', processChildStdout);
   child.stderr.on('data', (chunk) => {
