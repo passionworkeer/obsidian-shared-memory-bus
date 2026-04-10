@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 2,
+  "id": "test-valid-record-001",
+  "tool": "test",
+  "type": "note",
+  "title": "Valid test memory record",
+  "source": "test",
+  "scope": "user",
+  "visibility": "shared",
+  "memory_level": "durable",
+  "source_kind": "writeback",
+  "content": "This is a valid test record with all required fields present.",
+  "content_hash": "a591d64d8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8",
+  "t": "2026-04-01T00:00:00.000Z",
+  "metadata": {}
+}

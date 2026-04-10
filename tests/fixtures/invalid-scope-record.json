@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 2,
+  "id": "test-invalid-scope-001",
+  "tool": "test",
+  "type": "note",
+  "title": "Record with invalid scope",
+  "source": "test",
+  "scope": "not_a_valid_scope",
+  "memory_level": "durable",
+  "source_kind": "writeback",
+  "content": "Record with invalid scope value",
+  "t": "2026-04-01T00:00:00.000Z"
+}
