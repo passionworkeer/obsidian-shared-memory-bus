@@ -9,13 +9,15 @@
 
 const { test, describe } = require("node:test");
 const assert = require("node:assert");
+const path = require("path");
 const { spawnSync } = require("child_process");
 
 // Load the JS implementation directly
 const { validateStructuredRecord, validatePromotionMetadata } = require("../../ops/memory-contract.js");
 
-// Python retrieval module path (forward slashes for cross-platform compatibility)
-const PYTHON_MODULE_PATH = "E:/desktop/obsidian-shared-memory-bus/retrieval";
+// Resolve retrieval module path relative to test file (portable)
+const PROJECT_ROOT = path.resolve(__dirname, "../..");
+const PYTHON_MODULE_PATH = path.join(PROJECT_ROOT, "retrieval").replace(/\\/g, "/");
 
 /**
  * Run a Python validation function via subprocess and return the parsed result.
@@ -29,10 +31,24 @@ import sys, json
 sys.path.insert(0, '${PYTHON_MODULE_PATH}')
 ${pythonCode}
 `;
-  // Python executable: use absolute path (not all environments have 'python' in PATH)
-  const PYTHON_EXE = process.platform === "win32"
-    ? "D:\\Users\\王健俊\\AppData\\Local\\Programs\\Python\\Python313\\python.exe"
-    : "python";
+  // Python executable: try known paths first, then PATH-resolved
+  const PYTHON_EXE = (() => {
+    if (process.platform === "win32") {
+      const candidates = [
+        "D:/python/python.exe",
+        "C:/python/python.exe",
+        "py",
+        "python",
+      ];
+      for (const cand of candidates) {
+        const r = spawnSync(cand, ["--version"], { encoding: "utf8" });
+        if (r && r.status === 0) return cand;
+      }
+      return "python3";
+    }
+    const r3 = spawnSync("python3", ["--version"], { encoding: "utf8" });
+    return r3.status === 0 ? "python3" : "python";
+  })();
   const result = spawnSync(PYTHON_EXE, ["-c", fullCode], {
     encoding: "utf8",
     timeout: 10000,
@@ -60,40 +76,12 @@ ${pythonCode}
  * @param {string[]} errors
  * @returns {string[]} Normalized error codes
  */
-function normalizeErrorCodes(errors) {
-  if (!Array.isArray(errors)) {
-    return [];
-  }
-  return errors.map((e) => {
-    // Extract the error code (everything before the first ':' or the whole string)
-    const colonIndex = e.indexOf(":");
-    return colonIndex >= 0 ? e.substring(0, colonIndex) : e;
-  });
-}
-
 /**
  * Check if two error lists are equivalent (same error codes, possibly different values).
  * @param {string[]} errors1
  * @param {string[]} errors2
  * @returns {boolean}
  */
-function errorsAreEquivalent(errors1, errors2) {
-  const codes1 = normalizeErrorCodes(errors1).sort();
-  const codes2 = normalizeErrorCodes(errors2).sort();
-  if (codes1.length !== codes2.length) {
-    return false;
-  }
-  for (let i = 0; i < codes1.length; i++) {
-    if (codes1[i] !== codes2[i]) {
-      return false;
-    }
-  }
-  return true;
-}
-
-// ---------------------------------------------------------------------------
-// Record validation tests
-// ---------------------------------------------------------------------------
 
 describe("validateStructuredRecord consistency", () => {
   test("Valid record: all required fields present, both ok=true", () => {

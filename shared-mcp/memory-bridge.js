@@ -202,13 +202,15 @@ export function createMemoryBridge(params) {
       return { ok: false, error: `python-runtime-unavailable: ${PYTHON.error || "unknown-error"}` };
     }
 
+    # NOTE: Inline -c string is intentional — avoids a temp file on disk.
+    # Debug tip: to inspect, add `print("DEBUG:", payload)` before json.load().
     const script = `
 import json
 import sqlite3
 import sys
 
 payload = json.load(sys.stdin)
-db = sqlite3.connect(payload["db"])
+db = sqlite3.connect(payload["db"], timeout=5)
 db.row_factory = sqlite3.Row
 
 try:
@@ -229,8 +231,8 @@ try:
         assigned_agent = str(payload.get("assigned_agent") or "intel").strip() or "intel"
         issue_title = str(payload.get("issue_title") or "{}#{}".format(repo, issue_number)).strip()
         cursor = db.execute(
-            "INSERT INTO tasks (repo, issue_number, assigned_agent, issue_title, state) VALUES (?, ?, ?, ?, 'PENDING')",
-            (repo, issue_number, assigned_agent, issue_title),
+            "INSERT INTO tasks (repo, issue_number, assigned_agent, issue_title, state) VALUES (?, ?, ?, ?, ?)",
+            (repo, issue_number, assigned_agent, issue_title, 'PENDING'),
         )
         db.commit()
         print(json.dumps({"ok": True, "insertedId": cursor.lastrowid}, ensure_ascii=False))
@@ -406,67 +408,6 @@ finally:
   }
 
   return {
-    tools: [
-      {
-        name: "query_claude_mem",
-        description:
-          "Query the local claude-mem semantic memory API directly. Use search_shared_memory for the canonical cross-tool shared layer.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            query: { type: "string", description: "Semantic query." },
-            limit: { type: "number", default: 5, description: "Maximum number of results." },
-          },
-          required: ["query"],
-        },
-      },
-      {
-        name: "insert_claude_mem",
-        description: "Insert a new item into the local claude-mem store.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            content: { type: "string", description: "Memory content to insert." },
-            metadata: { type: "object", description: "Optional metadata." },
-          },
-          required: ["content"],
-        },
-      },
-      {
-        name: "get_blackboard_tasks",
-        description: "Read recent OpenClaw blackboard tasks from the shared AI Shrimp SQLite blackboard.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            limit: { type: "number", default: 10, description: "Maximum rows to return." },
-            state: { type: "string", description: "Optional single state filter." },
-            states: {
-              type: "array",
-              items: { type: "string" },
-              description: "Optional task states to filter, e.g. ['PENDING', 'ACTIVE']",
-            },
-          },
-        },
-      },
-      {
-        name: "write_blackboard_task",
-        description: "Insert a new task into the OpenClaw blackboard.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            repo: { type: "string", description: "Repository name, e.g. browser-use/browser-use." },
-            issue_number: { type: "number", description: "Issue number." },
-            assigned_agent: {
-              type: "string",
-              default: "intel",
-              description: "OpenClaw agent lane, usually intel or developer.",
-            },
-            issue_title: { type: "string", description: "Optional issue title." },
-          },
-          required: ["repo", "issue_number"],
-        },
-      },
-    ],
     handlers: {
       query_claude_mem: handleQueryClaudeMem,
       insert_claude_mem: handleInsertClaudeMem,
