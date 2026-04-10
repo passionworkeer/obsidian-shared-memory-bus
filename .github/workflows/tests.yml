@@ -1,0 +1,118 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # JavaScript unit tests (Node.js)
+  # ---------------------------------------------------------------------------
+  js-unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run JS unit tests
+        run: node --test tests/unit/js/*.test.js
+
+  # ---------------------------------------------------------------------------
+  # Python unit tests
+  # ---------------------------------------------------------------------------
+  python-unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pytest
+        run: pip install pytest>=8.0.0
+
+      - name: Run Python unit tests
+        run: pytest tests/unit/py/ -v --tb=short
+
+  # ---------------------------------------------------------------------------
+  # Cross-language equivalence tests (Linux)
+  # ---------------------------------------------------------------------------
+  cross-language-tests-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pytest
+        run: pip install pytest>=8.0.0
+
+      - name: Run cross-language tests
+        run: node --test tests/cross-language/*.test.js
+
+  # ---------------------------------------------------------------------------
+  # Integration tests (Node.js ESM)
+  # ---------------------------------------------------------------------------
+  integration-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run integration tests
+        run: node --test "tests/integration/js/*.test.mjs"
+
+  # ---------------------------------------------------------------------------
+  # Windows: JS unit tests + Python unit tests
+  # ---------------------------------------------------------------------------
+  windows-tests:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pytest
+        run: pip install pytest>=8.0.0
+
+      - name: Run JS unit tests
+        run: node --test tests/unit/js/*.test.js
+
+      - name: Run Python unit tests
+        run: pytest tests/unit/py/ -v --tb=short
+
+      - name: Run integration tests
+        run: node --test "tests/integration/js/*.test.mjs"
