@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "durable_type": "user",
+  "key": "user:passionworkeer:test-key-001",
+  "reason": "user preference recorded",
+  "source_type": "writeback",
+  "source_confidence": 0.85,
+  "source_record_id": "test-record-001",
+  "is_refresh": false,
+  "conflict_with": []
+}

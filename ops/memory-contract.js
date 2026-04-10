@@ -12,6 +12,17 @@ const ALLOWED_VISIBILITY = new Set(["shared", "private"]);
 const ALLOWED_SOURCE_KINDS = new Set(["writeback", "hook", "session", "event", "blackboard", "run", "cron", "task"]);
 const ALLOWED_MEMORY_LEVELS = new Set(["durable", "session", "event", "task"]);
 const ALLOWED_DURABLE_TYPES = new Set(["user", "feedback", "project", "reference"]);
+// Mirrors REQUIRED_FIELDS in retrieval/schema_validation.py
+const REQUIRED_RECORD_FIELDS = [
+  "schemaVersion",
+  "id",
+  "tool",
+  "type",
+  "title",
+  "source",
+  "scope",
+  "memory_level",
+];
 
 const STRUCTURED_LAYER_DEFINITIONS = [
   {
@@ -171,7 +182,7 @@ function validatePromotionMetadata(promotion) {
   return errors;
 }
 
-function validateStructuredRecord(record, requiredFields = []) {
+function validateStructuredRecord(record, requiredFields = REQUIRED_RECORD_FIELDS) {
   if (!isPlainObject(record)) {
     return {
       ok: false,
@@ -587,11 +598,15 @@ module.exports = {
   GENERATED_MEMORY_DEFINITIONS,
   MEMORY_INTEGRITY_CONTRACT_VERSION,
   MEMORY_RECORD_SCHEMA_VERSION,
+  REQUIRED_RECORD_FIELDS,
   STRUCTURED_LAYER_DEFINITIONS,
   buildGeneratedArtifactMetadata,
   buildMemoryIntegrityReport,
   buildStructuredSignature,
   isExpectedDerivedDuplicate,
+  normalizeLower,
+  normalizeString,
+  sha1,
   validatePromotionMetadata,
   validateStructuredRecord,
 };
