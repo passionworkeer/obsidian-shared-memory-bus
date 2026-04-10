@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "name": "tier-budget",
+  "description": "Per-tier record count limits enforced by memory-archival.js. Supersedes unbounded tier growth.",
+  "version": 1,
+  "tiers": {
+    "1": {
+      "label": "Event/Working",
+      "max_records": 200,
+      "auto_archive": true,
+      "archive_policy": "oldest-first-by-freshness_score",
+      "note": "TTL=1d enforced separately in retention-policy.json"
+    },
+    "2": {
+      "label": "Session Durable",
+      "max_records": 200,
+      "auto_archive": true,
+      "archive_policy": "oldest-first-by-freshness_score"
+    },
+    "3": {
+      "label": "Project Durable",
+      "max_records_per_project": 100,
+      "auto_archive": true,
+      "archive_policy": "per-project oldest-first",
+      "note": "Enforced at project scope level, not globally"
+    },
+    "4": {
+      "label": "Shared Durable",
+      "max_records_per_type": 200,
+      "auto_archive": true,
+      "archive_policy": "per-type oldest-first",
+      "note": "Type = record.type field (user/feedback/project/reference)"
+    },
+    "5": {
+      "label": "Archive",
+      "max_records_soft": 500,
+      "auto_archive": false,
+      "review_threshold": 500,
+      "action": "human_review",
+      "note": "Tier-5 is terminal — records are never auto-deleted. Exceeding review_threshold triggers a warning."
+    }
+  },
+  "simplification": {
+    "enabled": true,
+    "trigger": "access_count > 20 AND content_length > 2000 chars",
+    "target_length": 500,
+    "tiers_affected": [4],
+    "preserves": ["id", "schemaVersion", "tool", "type", "scope", "title", "lifecycle", "frontmatter"],
+    "note": "Original content stored in archive; simplified version replaces live record"
+  },
+  "eviction_order": "freshness_score ASC, t ASC",
+  "idempotency": {
+    "lock_file": "00-System/ai-memory/.lock/archival.lock",
+    "lock_ttl_minutes": 30,
+    "caller_tags": ["watchdog", "dream", "manual"]
+  }
+}

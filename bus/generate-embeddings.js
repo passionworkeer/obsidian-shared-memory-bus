@@ -339,6 +339,18 @@ function collectDocuments() {
     return documents;
   }
 
+  // ADR-002 v2: --tier-filter defaults to Tier 3+4 (Project Durable + Shared Durable)
+  // Only these tiers participate in the embedding index.
+  const tierFilterArg = (() => {
+    const idx = process.argv.indexOf("--tier-filter");
+    return idx >= 0 ? (process.argv[idx + 1] || "project+durable") : "project+durable";
+  })();
+  const allowedTiers = new Set(
+    tierFilterArg === "all"
+      ? [1, 2, 3, 4, 5]
+      : tierFilterArg.split("+").map((t) => ({ project: 3, durable: 4, "3": 3, "4": 4 })[t.trim()] ?? 3)
+  );
+
   for (const fileName of fs.readdirSync(STRUCTURED_DIR).sort()) {
     if (!fileName.endsWith(".jsonl")) {
       continue;
@@ -351,6 +363,26 @@ function collectDocuments() {
       }
       try {
         const entry = JSON.parse(line);
+
+        // ADR-002 v2: Skip archived records (Q3 fix — no tombstone, use archived flag)
+        const isArchived = entry.lifecycle?.archived === true;
+        if (isArchived) {
+          // Write archived=true marker so retrieval layer can skip these vectors
+          documents.set(String(entry.id || "").trim() || fallbackId(entry, "", ""), {
+            recordId: String(entry.id || "").trim() || fallbackId(entry, "", ""),
+            tool: normalizeSpaces(entry.tool || "unknown") || "unknown",
+            type: normalizeSpaces(entry.type || ""),
+            archived: true,
+            t: normalizeSpaces(entry.t || ""),
+          });
+          continue;
+        }
+
+        // ADR-002 v2: Tier filter — only embed Tier 3+4 by default
+        const recordTier = Number(entry.lifecycle?.tier ?? 2);
+        if (!allowedTiers.has(recordTier)) {
+          continue;
+        }
         const { title, content, facts, concepts } = extractFieldTexts(entry);
         const rawText = [title, content].filter(Boolean).join(" ");
 
@@ -407,6 +439,9 @@ function collectDocuments() {
           excerpt: (content || rawText || "").slice(0, 240),
           fieldTexts,
           fieldHashes,
+          // ADR-002 v2: tier + lifecycle metadata
+          tier: recordTier,
+          archived: false,
         });
       } catch (err) {
         // Ignore malformed records during rebuild.

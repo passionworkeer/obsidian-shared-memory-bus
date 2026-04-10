@@ -81,6 +81,7 @@ $BuildHandoffPackScript = Resolve-BusPath -Candidates @("build-handoff-pack.js",
 $BuildMemoryLayersScript = Resolve-BusPath -Candidates @("build-memory-layers.js", "ops/build-memory-layers.js")
 $GenerateHygieneScript = Resolve-BusPath -Candidates @("generate-memory-hygiene-report.js", "ops/generate-memory-hygiene-report.js")
 $MemoryDreamScript = Resolve-BusPath -Candidates @("run-memory-dream.ps1", "ops/run-memory-dream.ps1")
+$MemoryArchivalScript = Resolve-BusPath -Candidates @("memory-archival.js", "ops/memory-archival.js")
 $BackgroundExtractionScript = Resolve-BusPath -Candidates @("run-background-extraction.ps1", "ops/run-background-extraction.ps1")
 $EmbeddingsScript = Resolve-BusPath -Candidates @("generate-embeddings.js", "bus/generate-embeddings.js")
 $EmbeddingsIndexPath = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "embeddings", "index.jsonl")
@@ -1041,7 +1042,7 @@ function Invoke-BuildHandoffPack {
 
 function Invoke-GenerateHygieneReport {
     if (-not (Test-Path -LiteralPath $GenerateHygieneScript -PathType Leaf)) {
-        return $false
+        return $null
     }
 
     try {
@@ -1057,17 +1058,56 @@ function Invoke-GenerateHygieneReport {
             } catch {
             }
             Write-State -Running $true -LastReason ("hygiene-report-timeout") -ChangedSpecs @() -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
-            return $false
+            return $null
         }
 
         if ($waitResult.exitCode -ne 0) {
             Write-State -Running $true -LastReason ("hygiene-report-exitcode-" + $waitResult.exitCode) -ChangedSpecs @() -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
-            return $false
+            return $null
         }
 
         return $true
     } catch {
         Write-State -Running $true -LastReason ("hygiene-report-failed:" + $_) -ChangedSpecs @() -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
+        return $null
+    }
+}
+
+function Invoke-MemoryArchival {
+    # Read hygiene report to check archival_needed flag (Q1 fix: do NOT self-trigger, only act on report)
+    $hygieneReportPath = Join-Path $GeneratedRoot "memory_hygiene_report.json"
+    $archivalNeeded = $false
+    if (Test-Path -LiteralPath $hygieneReportPath -PathType Leaf) {
+        try {
+            $report = Get-Content -Raw -LiteralPath $hygieneReportPath -Encoding UTF8 | ConvertFrom-Json
+            if ($null -ne $report.tier_budget_status) {
+                $archivalNeeded = [bool]$report.tier_budget_status.archival_needed
+            }
+        } catch {
+        }
+    }
+
+    if (-not $archivalNeeded) {
+        Write-WatchdogTrace -Step "archival.skip" -Data @{ reason = "archival_not_needed" }
+        return $false
+    }
+
+    if (-not (Test-Path -LiteralPath $MemoryArchivalScript -PathType Leaf)) {
+        Write-WatchdogTrace -Step "archival.skip" -Data @{ reason = "script_missing" }
+        return $false
+    }
+
+    try {
+        # Use Start-Process (non-blocking, idempotent lock protects concurrent runs)
+        if (Test-SharedIsWindows) {
+            Start-SharedWindowsHeadlessProcess -FilePath (Get-NodeExecutable) -ArgumentList @($MemoryArchivalScript, "--vault-root", $VaultRoot, "--trigger", "watchdog") -WorkingDirectory (Split-Path -Parent $MemoryArchivalScript) | Out-Null
+        } else {
+            Start-SharedBackgroundProcess -FilePath (Get-NodeExecutable) -ArgumentList @($MemoryArchivalScript, "--vault-root", $VaultRoot, "--trigger", "watchdog") -WorkingDirectory (Split-Path -Parent $MemoryArchivalScript) | Out-Null
+        }
+        Write-WatchdogTrace -Step "archival.launched" -Data @{ reason = "archival_needed=true" }
+        return $true
+    } catch {
+        Write-State -Running $true -LastReason ("archival-failed:" + $_) -ChangedSpecs @() -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
         return $false
     }
 }
@@ -1242,6 +1282,9 @@ function Invoke-ArtifactCatchup {
 
     # Generate memory hygiene report
     [void](Invoke-GenerateHygieneReport)
+
+    # Trigger idempotent archival if hygiene report says archival_needed=true (Q1 fix: hygiene only reports)
+    [void](Invoke-MemoryArchival)
 
     return $lastSyncAt
 }
