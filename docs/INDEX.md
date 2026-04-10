@@ -15,6 +15,9 @@
 - [DEPLOYMENT-MATRIX.md](./DEPLOYMENT-MATRIX.md) — Deployment configurations
 - [UNINSTALL.md](./UNINSTALL.md) — How to remove the memory bus
 - [ENVIRONMENT.md](./ENVIRONMENT.md) — All environment variables reference
+- [GIT-HOOKS-INTEGRATION.md](./GIT-HOOKS-INTEGRATION.md) — Windows/POSIX git hooks for automatic hygiene and context refresh
+- [MEMORY-TIERING.md](./MEMORY-TIERING.md) — 5-tier memory architecture specification
+- [RECOMMENDATION-TIER.md](./RECOMMENDATION-TIER.md) — Adaptive retrieval modes, cold-start rules, recall signal accumulation
 
 ## Troubleshooting
 - [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) — Common issues and solutions
