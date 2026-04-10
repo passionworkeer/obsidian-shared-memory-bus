@@ -386,7 +386,8 @@ function cmdFallbackViaBat(executable, args) {
   const batPath = join(process.env.TEMP || process.env.TMP || '/tmp', batName);
   // On Windows, powershell.exe child processes of cmd.exe get a visible console
   // window by default. Inject -WindowStyle Hidden so they stay invisible.
-  const isPowerShell = executable.replace(/\\/g, '/').toLowerCase().includes('powershell');
+  const exeNorm = executable.replace(/\\/g, '/').toLowerCase();
+  const isPowerShell = exeNorm.endsWith('/powershell.exe') || exeNorm.endsWith('/pwsh.exe');
   const psArgs = isPowerShell
     ? ['-WindowStyle', 'Hidden', ...args]
     : args;
@@ -508,6 +509,19 @@ function spawnChildProcess() {
 
   // Track the temp batch path (from cmdFallbackViaBat) so we can clean it up.
   const batPath = launchSpec._batPath || null;
+
+  // On Windows, inject -WindowStyle Hidden when launching PowerShell with a .ps1
+  // script so the console stays invisible even when node's windowsHide flag is
+  // insufficient (PowerShell ignores CreateNoWindow when launched without it).
+  if (process.platform === 'win32') {
+    const exeNorm = launchSpec.filePath.replace(/\\/g, '/').toLowerCase();
+    const isPowerShell = exeNorm.endsWith('/powershell.exe') || exeNorm.endsWith('/pwsh.exe');
+    const hasPs1 = launchSpec.args.some(a => a.replace(/\\/g, '/').toLowerCase().endsWith('.ps1'));
+    if (isPowerShell && hasPs1 && !launchSpec.args.includes('-WindowStyle')) {
+      log('injecting -WindowStyle Hidden into PowerShell .ps1 launch');
+      launchSpec.args = ['-WindowStyle', 'Hidden', ...launchSpec.args];
+    }
+  }
 
   child = spawn(launchSpec.filePath, launchSpec.args, {
     shell: false,
