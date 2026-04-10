@@ -27,13 +27,14 @@ Use isolated MCP when the service is:
 - unsafe to centralize without a stronger isolation story
 
 ## Baseline Onboarding Steps
-1. Give the agent the canonical read order for shared memory
-2. Point it to the durable writeback path
-3. Wire shared MCP endpoints for `memory`, `obsidian`, and any safe utility services
-4. Decide whether it should use shared `playwright` or stay local
-5. Expose portable skills if the agent supports them
-6. Add host-native plugins only if the agent truly needs lifecycle hooks or UI
-7. Run a smoke test and write the result into validation notes
+1. Give the agent the canonical read order for shared memory (see below)
+2. Optionally wire `memory_wake_up` on port 9338 as a compact structured bootstrap alternative to reading individual files
+3. Point it to the durable writeback path
+4. Wire shared MCP endpoints for `memory`, `obsidian`, and any safe utility services
+5. Decide whether it should use shared `playwright` or stay local
+6. Expose portable skills if the agent supports them
+7. Add host-native plugins only if the agent truly needs lifecycle hooks or UI
+8. Run a smoke test and write the result into validation notes
 
 See `docs/INTEGRATION-MODES.md` for the recommended MCP versus skill versus plugin split.
 
@@ -77,6 +78,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\inst
 `verify-integrations.ps1` remains only as a compatibility alias for the apply step. The real validation gate is `verify-client-integrations.ps1`.
 
 ## Canonical Shared Memory Read Order
+For structured bootstrap, the preferred first option is `memory_wake_up` on port 9338 — it returns a compact pack covering durable anchors, next steps, blockers, and recent activity in a single call.
+
+If the agent cannot call MCP tools, fall back to reading files in this order:
 1. `02-KB/OBSIDIAN.md`
 2. `02-KB/MEMORY.md`
 3. `02-KB/WORKING.md`
@@ -103,6 +107,16 @@ Runtime scripts may resolve placeholders dynamically, but the committed template
 - active task state goes to `02-KB/WORKING.md`
 - project-specific durable facts go to the relevant project note
 - never write secrets into shared memory
+
+## Verbatim Snippet Windows
+
+When the agent calls `search_shared_memory`, it can opt into verbatim snippet extraction with:
+
+- `includeVerbatim: true` — return query-aware exact text windows around each match
+- `snippetWindow` (integer, default 220) — character window kept around each match
+- `maxVerbatimPerResult` (integer, default 1) — maximum snippet windows per result
+
+This is useful when the agent needs to show the user the exact source text rather than only a summary. It works across all retrieval modes (`bm25`, `dense`, `hybrid`, `auto`).
 
 ## Shared MCP Core
 Most new agents should start with:
@@ -144,6 +158,8 @@ If the agent supports skills or prompt libraries:
 - does it write back to the correct durable path?
 - does enabling browser automation avoid spawning a new local Playwright server per task?
 - does the generated or tracked overlay avoid writing workstation-specific absolute paths back into the repo?
+- can the watchdog supervisor be started standalone (`bus/memory-watchdog-supervisor.ps1 -Daemon`) and recover the shared MCP stack after a crash?
+- does periodic inbox hygiene run cleanly (`ops/cleanup-inbox.ps1`)?
 - if runtime validation is enabled, does a failed client task mean the shared MCP stack is really down, or is it only a provider-auth skip such as missing API key / missing login?
 
 ## Documentation To Update
@@ -153,3 +169,11 @@ When a new agent becomes supported, update:
 - `docs/ARCHITECTURE.md`
 - `docs/VALIDATION.md`
 - any agent-specific onboarding or config snippets
+
+## Maintenance
+
+Schedule or run periodically:
+- `ops/cleanup-inbox.ps1` — removes shared inbox entries older than 7 days
+- `ops/build-memory-layers.js` — refreshes the MEMORY-LAYERS generated artifact
+- `ops/build-handoff-pack.js` — refreshes the HANDOFF generated artifact
+- `ops/run-memory-dream.ps1` — consolidates AUTO-DREAM summaries across durable, session, and task layers

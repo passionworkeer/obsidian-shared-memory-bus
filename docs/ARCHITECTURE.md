@@ -30,7 +30,7 @@ Core canonical notes:
    - `shared-mcp/omni-memory-server.js`
    - shared HTTP endpoints for `context7`, `fetch`, `time`, `sequential-thinking`, `obsidian`, `memory`, and the managed `playwright` backend
 - exposes `memory_status`, `search_shared_memory`, embeddings rebuild tools, claude-mem compatibility tools, and OpenClaw blackboard tools
-- exposes `memory_wake_up` for compact bootstrap context and optional verbatim snippet windows on `search_shared_memory`
+- exposes `memory_wake_up` for compact layered bootstrap context (`identity / essential / recent / retrieve`) and optional verbatim snippet windows on `search_shared_memory`
 - keeps a warm shared Python retrieval worker for `search_shared_memory`, with one-shot fallback if the worker is unavailable
 - reports worker cache metrics through `memory_status` and supports explicit cache resets through `clear_shared_memory_search_cache`
 - reports contract/integrity state through `memory_status.memoryIntegrity`
@@ -80,12 +80,10 @@ This bundle intentionally combines the strongest ideas from two native memory st
   - `structured/openclaw-jobs.jsonl`
   - `structured/openclaw-journal.jsonl`
 - generated handoff layers:
-  - `generated/HANDOFF.md`
   - `generated/HANDOFF.json`
-  - `generated/MEMORY-LAYERS.md`
   - `generated/MEMORY-LAYERS.json`
-  - `generated/AUTO-DREAM.md`
   - `generated/AUTO-DREAM.json`
+  - `00-System/ai-memory/generated/GLOBAL-CONTEXT.meta.json`
 
 ## Source Tree Vs Installed Runtime
 - Source tree groups files by responsibility: `bus/`, `ops/`, `retrieval/`, `shared-mcp/`, `scripts/`, `templates/`
@@ -138,11 +136,15 @@ Starts the default shared MCP set: `context7`, `fetch`, `time`, `sequential-thin
 Starts or adopts shared singleton MCP listeners from `shared-mcp/manifest.json`.
 
 ### `shared-mcp/manifest.json`
-Describes which servers are shared, isolated, or optional. `playwright` stays marked as `optional` in the manifest so advanced users can opt out or run their own backend, but the default starter deliberately opts into it because it is usually the biggest per-agent process multiplier.
+Describes which servers are shared, isolated, or optional. `playwright` (port 9337, optional) is marked `optional` in the manifest so advanced users can opt out or run their own backend, but the default starter deliberately opts into it because it is usually the biggest per-agent process multiplier.
+
+### `shared-mcp/singleton-stdio-mcp-proxy.mjs`
+The singleton stdio proxy that deduplicates per-client MCP launcher processes. On Windows it suppresses visible console windows through a three-layer approach: (1) expanded shim resolution via `resolveWindowsCmdShimLaunchSpec` that detects npm-style shims, exe+script pairs, and bare script paths so more commands avoid `cmd.exe` entirely; (2) a `cmdFallbackViaBat` temp-batch fallback that writes a temporary `.bat` file and runs `cmd.exe /c batPath` to avoid console window allocation; (3) auto-cleanup of the temp bat file after the child exits via `_batPath` tracking.
 
 ### `shared-mcp/omni-memory-server.js`
 The shared `memory` MCP server. It is intentionally the main shared operator endpoint today, but it is still a monolithic adapter: retrieval, embeddings rebuilds, handoff generation, dream runs, claude-mem bridge calls, and OpenClaw blackboard access still meet here.
 `search_shared_memory` now accepts an explicit `route` profile (`auto / mixed / durable / task / recent / reference`) and returns route metadata plus per-result ranking factors so operators can see why a result surfaced.
+`memory_wake_up` now returns a more explicit layered wake-up shape, separating durable identity anchors, current essentials, recent activity, and route suggestions for deeper follow-up retrieval.
 
 ## Sharing Boundaries
 - Shared:
@@ -164,7 +166,7 @@ Embedding provider selection is now decoupled into `defaults + providers + profi
 The shared retrieval path now avoids per-request Python cold starts by keeping a long-lived worker behind the `memory` MCP. Cache invalidation is file-signature-driven, so structured JSONL or embeddings changes trigger a refresh without requiring manual restarts. The worker now also keeps query-embedding and bounded result caches in memory, which improves repeated-query latency without pretending the cache is durable truth.
 
 ## Typed Durable Promotion
-Typed durable promotion now exists in the structured record contract instead of only inside the generated dream summary.
+Typed durable promotion now exists in the structured record contract instead of only inside the generated dream summary. Current contract version: **2**, record schema version: **2**.
 
 - `ops/build-memory-layers.js` stamps `metadata.promotion` onto governed records
 - the current typed durable buckets are `user`, `feedback`, `project`, and `reference`
@@ -217,6 +219,7 @@ The current weights are still hand-tuned. They improve operator control and insp
 - retrieval is now warmer and less restart-heavy, but it still favors local simplicity over large-scale indexing sophistication
 - typed durable promotion now exists, but promotion and refresh decisions are still heuristic and not yet benchmark-calibrated or user-tunable
 - query routing and layered reranking now exist, but the weight tables are still hand-tuned and need better evaluation data before they should be treated as settled policy
+- Windows console window elimination is now handled through layered shim resolution and temp-batch cmd.exe fallback in the singleton proxy (this was previously a known gap, not design debt per se)
 
 See [`docs/MEMORY-ARCHITECTURE-CRITIQUE.md`](MEMORY-ARCHITECTURE-CRITIQUE.md) for the fuller critique and next refactor targets.
 

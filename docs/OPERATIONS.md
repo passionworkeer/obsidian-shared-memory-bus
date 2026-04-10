@@ -54,24 +54,24 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shar
 
 ## Regenerate Shared Derived Context
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\memory-bus.ps1 -Action Generate
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\bus\memory-bus.ps1 -Action Generate
 ```
 
 ```bash
-~/.ai-memory/memory-bus.sh -Action Generate
+~/.ai-memory/bus/memory-bus.sh -Action Generate
 ```
 
 ## Rebuild Layered Memory Summaries
 ```powershell
-node $env:AI_MEMORY_ROOT\build-handoff-pack.js
-node $env:AI_MEMORY_ROOT\build-memory-layers.js
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\run-memory-dream.ps1 -Force
+node $env:AI_MEMORY_ROOT\ops\build-handoff-pack.js
+node $env:AI_MEMORY_ROOT\ops\build-memory-layers.js
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\ops\run-memory-dream.ps1 -Force
 ```
 
 ```bash
-node ~/.ai-memory/build-handoff-pack.js
-node ~/.ai-memory/build-memory-layers.js
-~/.ai-memory/run-memory-dream.sh -Force
+node ~/.ai-memory/ops/build-handoff-pack.js
+node ~/.ai-memory/ops/build-memory-layers.js
+~/.ai-memory/ops/run-memory-dream.sh -Force
 ```
 
 ## Rebuild Memory Embeddings
@@ -102,11 +102,11 @@ Interpretation notes:
 
 ## Run Pressure Tests
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks -RunToolCalls -RunClientTaskChecks -IncludeOptionalServers
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\ops\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks -RunToolCalls -RunClientTaskChecks -IncludeOptionalServers
 ```
 
 ```bash
-~/.ai-memory/run-pressure-test.sh -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks -RunToolCalls -RunClientTaskChecks -IncludeOptionalServers
+~/.ai-memory/ops/run-pressure-test.sh -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks -RunToolCalls -RunClientTaskChecks -IncludeOptionalServers
 ```
 
 Treat this as a hard gate too. The script now exits non-zero when `summary.overallPass=false`.
@@ -137,8 +137,8 @@ If `memory_status.watchdog.status` reports `stale` or `watchdog-exit`, recover i
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\status-shared-mcp.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\memory-watchdog.ps1 -Daemon -PollSeconds 15
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks -RunRuntimeChecks
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\bus\memory-watchdog.ps1 -Daemon -PollSeconds 15
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\ops\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks -RunRuntimeChecks
 ```
 
 Notes:
@@ -153,6 +153,20 @@ Detects duplicates, invalid records, and malformed entries across structured JSO
 
 ```powershell
 node $env:AI_MEMORY_ROOT\ops\generate-memory-hygiene-report.js
+```
+
+### Watchdog Supervisor (auto-recovery)
+The watchdog supervisor monitors the watchdog process and auto-restarts it if it crashes.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\bus\memory-watchdog-supervisor.ps1 -Daemon
+```
+
+### Cleanup Inbox
+Removes stale inbox entries that are older than 7 days.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\ops\cleanup-inbox.ps1
 ```
 
 ### PII Redaction
