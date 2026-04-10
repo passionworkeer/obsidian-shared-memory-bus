@@ -1,5 +1,7 @@
 # Validation
 
+Memory contract version: **2**
+
 This document records the current validation story for the public bundle.
 
 ## Shared Ports
@@ -47,6 +49,8 @@ This document records the current validation story for the public bundle.
 - `set_embedding_runtime` now restarts the persistent retrieval worker when the active embedding runtime actually changes, so `memory_status` and live search no longer drift apart after a profile switch
 - shared MCP control-plane status and stop/start decisions now treat the active listener PID on the target port as authoritative; `shared-mcp/state.json.pid` is advisory only
 - the watchdog subprocess wrapper now tolerates empty stdout/stderr temp files from successful helper scripts, so quiet helper runs do not crash the watchdog daemon
+- `memory_wake_up` returns a structured bootstrap pack with durable anchors, handoff data, and recent activity
+- `search_shared_memory` with `includeVerbatim: true` returns query-aware exact text windows around each match, with `snippetWindow` and `maxVerbatimPerResult` controlling the window size and max snippets per result
 
 ## Validated Clients
 - Codex

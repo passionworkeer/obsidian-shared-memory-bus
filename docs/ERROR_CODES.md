@@ -10,7 +10,7 @@
 | `mcp-*` | MCP transport errors |
 | `openai-compatible-*` | OpenAI API errors |
 
-## Embedding Errors (embedding-provider-registry.js)
+## Embedding Errors (bus/embedding-provider-registry.js)
 
 | Code | Meaning |
 |------|---------|
@@ -76,33 +76,3 @@ Validated by `buildMemoryIntegrityReport`. Current contract version: **2**, reco
 | `unknown-visibility` | Record visibility is not `shared` or `private` |
 | `unknown-source-kind` | Record sourceKind is not in the allowed set |
 | `unknown-memory-level` | Record memoryLevel is not in the allowed set |
-
-## Script Execution Errors (shared-mcp/*.js)
-
-| Code | Meaning |
-|------|---------|
-| `embeddings-script-missing` | Embeddings generation script not found |
-| `memory-bus-script-missing` | Memory bus generation script not found |
-| `semantic-search-exit-N` | Semantic search script exited with code N |
-| `search-script-missing` | Search worker script not found |
-| `refresh-derived-artifacts-exit-N` | Derived artifacts refresh script exited with code N |
-
-## Runtime Configuration Errors (bus/runtime-config.js)
-
-| Code | Meaning |
-|------|---------|
-| `runtime-config-invalid` | Runtime configuration file is invalid |
-| `embedding-selection-update-requires-profile-provider-or-clear-flag` | Cannot update embedding selection without profile or provider |
-| `unknown-embedding-profile` | Requested embedding profile not found |
-| `unknown-embedding-provider` | Requested embedding provider not found |
-
-## Server Request Validation Errors (retrieval/semantic-search.py)
-
-| Code | Meaning |
-|------|---------|
-| `query is required` | Search query parameter is missing |
-| `ids must be an array` | Record IDs parameter must be an array |
-| `ids cannot be empty` | Record IDs array cannot be empty |
-| `anchor_id is required` | Timeline anchor ID parameter is missing |
-| `anchor_id not found` | Timeline anchor ID not found in records |
-| `unsupported-action` | Requested server action is not supported |
