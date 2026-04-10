@@ -67,6 +67,20 @@ Remember that my project uses React + TypeScript
 
 The tool should be able to read and write to the shared Obsidian vault.
 
+## After Registration
+
+Once the client is wired to the shared bus, the following tools and scripts are available:
+
+**Compact memory bootstrap**: Use the `memory_wake_up` MCP tool on port 9338 to get a structured session bootstrap pack covering durable anchors, handoff data, and recent activity. This is faster than reading individual bootstrap files for every new session.
+
+**Verbatim snippet search**: `search_shared_memory` supports `includeVerbatim: true` to return query-aware exact text windows around each match, with `snippetWindow` (default 220 chars) and `maxVerbatimPerResult` (default 1) for fine-tuning.
+
+**Inbox hygiene**: Run the cleanup script periodically to remove shared inbox entries older than 7 days:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\ops\cleanup-inbox.ps1
+```
+
 ## Manual Configuration
 
 If the auto-apply doesn't work for your tool, add these MCP endpoints manually:

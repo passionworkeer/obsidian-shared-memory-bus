@@ -10,7 +10,7 @@
 | `mcp-*` | MCP transport errors |
 | `openai-compatible-*` | OpenAI API errors |
 
-## Embedding Errors (embedding-provider-registry.js)
+## Embedding Errors (bus/embedding-provider-registry.js)
 
 | Code | Meaning |
 |------|---------|
@@ -40,3 +40,35 @@
 **Memory bus errors**: Run `ops/check-memory-integrity.js --strict`.
 
 **MCP transport errors**: Restart the MCP server and check logs.
+
+## Memory Integrity / Contract Errors (ops/memory-contract.js)
+
+Validated by `buildMemoryIntegrityReport`. Current contract version: **2**, record schema version: **2**.
+
+### Structured Layer Errors
+
+| Code | Meaning |
+|------|---------|
+| `invalid-records` | Record(s) failed schema validation |
+| `malformed-lines` | Line(s) in JSONL could not be parsed |
+| `duplicate-ids` | Duplicate record IDs across governed layers |
+
+### Generated Artifact Errors
+
+| Code | Meaning |
+|------|---------|
+| `generated-artifacts-missing` | A required generated artifact file does not exist |
+| `generated-artifacts-stale-or-invalid` | Artifact source signature does not match current structured memory |
+| `generated-artifacts-missing-source-signature` | Artifact lacks a source structured signature |
+| `generated-artifacts-contract-mismatch` | Artifact contract or record schema version is out of date |
+
+### Validation Errors
+
+| Code | Meaning |
+|------|---------|
+| `record-not-object` | A JSONL line parsed but is not an object |
+| `unexpected-schema-version` | Record schema version differs from current (2) |
+| `unknown-scope` | Record scope is not in the allowed set |
+| `unknown-visibility` | Record visibility is not `shared` or `private` |
+| `unknown-source-kind` | Record sourceKind is not in the allowed set |
+| `unknown-memory-level` | Record memoryLevel is not in the allowed set |
