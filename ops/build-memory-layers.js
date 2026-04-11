@@ -8,11 +8,11 @@ const {
   MEMORY_RECORD_SCHEMA_VERSION,
 } = require("./memory-contract.js");
 
-function loadVaultRootHelper() {
+function loadStoreRootHelper() {
   const candidates = [
-    path.join(__dirname, "vault-root.js"),
-    path.join(__dirname, "..", "bus", "vault-root.js"),
-    path.join(__dirname, "bus", "vault-root.js"),
+    path.join(__dirname, "store-root.js"),
+    path.join(__dirname, "..", "bus", "store-root.js"),
+    path.join(__dirname, "bus", "store-root.js"),
   ];
 
   for (const candidate of candidates) {
@@ -21,17 +21,17 @@ function loadVaultRootHelper() {
     }
   }
 
-  throw new Error(`vault-root-helper-missing: tried ${candidates.join(", ")}`);
+  throw new Error(`store-root-helper-missing: tried ${candidates.join(", ")}`);
 }
 
-const { resolveVaultRoot } = loadVaultRootHelper();
+const { resolveStoreRoot } = loadStoreRootHelper();
 
 const USER_HOME = process.env.USERPROFILE || process.env.HOME || "";
 const OPENCLAW_HOME = process.env.OPENCLAW_HOME || path.join(USER_HOME, ".openclaw");
 const CLAUDE_HOME = process.env.CLAUDE_HOME || path.join(USER_HOME, ".claude");
 
-const VAULT_ROOT = resolveVaultRoot();
-const AI_MEMORY_ROOT = path.join(VAULT_ROOT, "00-System", "ai-memory");
+const STORE_ROOT = resolveStoreRoot(); // e.g. "E:\\.ai-memory"
+const AI_MEMORY_ROOT = STORE_ROOT;
 const INBOX_ROOT = path.join(AI_MEMORY_ROOT, "inbox");
 const EVENTS_ROOT = path.join(AI_MEMORY_ROOT, "events");
 const STRUCTURED_ROOT = path.join(AI_MEMORY_ROOT, "structured");
@@ -153,7 +153,7 @@ function loadEntityExtractor() {
 function loadKnowledgeGraph() {
   try {
     const { KnowledgeGraph } = require("./knowledge-graph.js");
-    return new KnowledgeGraph({ vaultRoot: VAULT_ROOT });
+    return new KnowledgeGraph({ storeRoot: STORE_ROOT });
   } catch {
     return {
       ingestRecord: () => {},
