@@ -296,3 +296,54 @@ node ~/.ai-memory/generate-embeddings.js
 - `install-manifest.json` is installer-owned state; keep it in the installed runtime so upgrades can clean up stale managed files safely
 - The shared `memory` MCP and OpenClaw blackboard daemon no longer depend on native Node `sqlite3`; they use Python's standard-library `sqlite3` through the resolved Python runtime instead
 - Before install, source-tree direct runs can resolve `templates/config/runtime.json`; after install, the canonical runtime config path should be `~/.ai-memory/config/runtime.json`
+
+---
+
+## Adding Another AI Tool
+
+### Quick Connect (Windows)
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\install-client-integrations.ps1 -WorkspaceRoot <your-project-root>
+```
+
+This auto-configures: Claude Code, OpenCode, Cursor, VS Code/Copilot, Trae.
+
+### Manual HTTP MCP Endpoints
+
+All tools support these shared endpoints:
+
+| Service | Endpoint | What it does |
+|---------|----------|--------------|
+| memory | http://127.0.0.1:9338/mcp | Shared memory search and retrieval |
+| obsidian | http://127.0.0.1:9335/mcp | Read/write Obsidian notes |
+| context7 | http://127.0.0.1:9331/mcp | Code search |
+| fetch | http://127.0.0.1:9332/mcp | Web fetch |
+| time | http://127.0.0.1:9333/mcp | Current time |
+| playwright | http://127.0.0.1:9337/mcp | Browser automation (optional) |
+
+### Shared Memory Read Order
+
+Preferred: use `memory_wake_up` on port 9338 for compact structured bootstrap.
+
+Fallback: read files in this order:
+1. `SKILL.md` (repository root) — universal entry point
+2. `<vault>/02-KB/OBSIDIAN.md`
+3. `<vault>/02-KB/MEMORY.md`
+4. `<vault>/02-KB/WORKING.md`
+5. `<vault>/00-System/ai-memory/generated/GLOBAL-CONTEXT.md`
+
+### Durable Writeback Rules
+- Cross-project facts → `00-System/ai-memory/inbox/`
+- Active task state → `02-KB/WORKING.md`
+- Project-specific facts → relevant project note
+- **Never write secrets into shared memory**
+
+### Canonical Read Order for Structured Bootstrap
+Use `memory_wake_up` MCP tool on port 9338 — returns durable anchors, next steps, blockers, and recent activity in a single call.
+
+### Verbatim Snippet Search
+`search_shared_memory` supports:
+- `includeVerbatim: true` — return query-aware exact text windows
+- `snippetWindow` (default 220 chars) — character window size
+- `maxVerbatimPerResult` (default 1) — snippets per result

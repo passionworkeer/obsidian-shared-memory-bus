@@ -225,3 +225,116 @@ See [`docs/MEMORY-ARCHITECTURE-CRITIQUE.md`](MEMORY-ARCHITECTURE-CRITIQUE.md) fo
 
 ## Deployment Shapes
 See [`docs/DEPLOYMENT-MATRIX.md`](DEPLOYMENT-MATRIX.md) for recommended operating modes, sync guidance, and portability boundaries.
+---
+
+## Language Responsibility Matrix
+
+| Layer | Language | Role | Never does |
+|-------|----------|------|-----------|
+| **Orchestration** | PowerShell | watchdog loop, startup registration, env detection, process lifecycle | Data processing, JSON parsing beyond env config |
+| **Business Logic** | Node.js | MCP servers, embeddings generation, structured sync, artifact building | Pure data transformation without I/O |
+| **Retrieval Core** | Python | semantic search, BM25, dense retrieval, embeddings | Process spawning, HTTP serving |
+| **Canonical Store** | Obsidian + JSONL | durable memory, generated artifacts | — |
+
+### PowerShell Files
+| File | Responsibility |
+|------|---------------|
+| `bus/memory-watchdog.ps1` | Background daemon: polls native sources, triggers sync, artifact refresh, embeddings rebuild |
+| `bus/memory-bus.ps1` | Syncs all native sources → structured JSONL; rebuilds generated artifacts |
+| `ops/run-memory-dream.ps1` | Drives 4-phase consolidation: layers → handoff → dream → typed promotion |
+
+### Node.js Files
+| File | Responsibility |
+|------|---------------|
+| `shared-mcp/omni-memory-server.js` | Shared `memory` MCP server: HTTP transport, tool dispatch, retrieval worker management |
+| `bus/generate-embeddings.js` | Embeddings generation: reads structured JSONL, calls embedding provider, writes index |
+| `ops/build-memory-layers.js` | Reads structured/*.jsonl, builds layered MEMORY-LAYERS snapshot, stamps promotion metadata |
+| `ops/sync-openclaw-to-obsidian.js` | Ingests OpenClaw sessions/runs/jobs/blackboard → structured JSONL |
+
+### Python Files
+| File | Responsibility |
+|------|---------------|
+| `retrieval/semantic-search.py` | Core retrieval: BM25 + dense + hybrid + MMR + temporal decay + caching |
+| `retrieval/embedding_providers.py` | Embedding provider abstraction: hashing-v1, OpenAI-compatible, Ollama |
+| `retrieval/runtime_support.py` | Vault root resolution, env var helpers, Python runtime detection |
+
+### Key Invariants
+1. **PowerShell never parses structured JSON** — only writes paths and triggers.
+2. **Node.js never does retrieval math** — delegates to Python.
+3. **Python never spawns processes** — pure computation layer.
+4. **Structured JSONL is append-only for events** — overwrites done by consolidation pipeline.
+5. **Generated artifacts are content-hash signed** — stale artifacts detected by `sourceStructuredSignature`.
+
+---
+
+## Performance
+
+### Observed Retrieval Latency
+
+| Mode | Condition | p50 | p95 | p99 |
+|------|-----------|-----|-----|-----|
+| `hybrid` | warm (cache hit) | 50–200ms | 200–500ms | 500–1500ms |
+| `hybrid` | cold (Python spawn) | 500–2000ms | 2000–5000ms | 5000–12000ms |
+| `bm25` | warm | 20–100ms | 100–300ms | 300–800ms |
+| `dense` | warm (index aligned) | 80–300ms | 300–1000ms | 1000–3000ms |
+
+### When to Use Each Mode
+
+| Mode | Best for | Weakness |
+|------|---------|---------|
+| `bm25` | keyword-heavy queries, offline, no API key | misses semantic similarity |
+| `dense` | conversational questions, intent queries | misses exact terminology |
+| `hybrid` (default) | most queries | slightly higher latency |
+
+### Embedding Backend Comparison
+
+| Property | hashing-v1 (default) | Remote OpenAI-compatible |
+|----------|---------------------|--------------------------|
+| API cost | $0 | depends on provider |
+| Latency (cold) | 10–50ms | 50–2000ms + network |
+| Quality | lower | higher |
+| China mainland | always works | varies |
+
+> hashing-v1 and Qwen3-Embedding return the same top-3 anchors on small vaults. Remote models mainly change secondary/tertiary neighbors.
+
+### Scale Limits
+
+| Limit | Value |
+|-------|-------|
+| Max per JSONL file | ~10 MB (PowerShell parsing degrades above this) |
+| Recommended per layer | ~50k records |
+| Embeddings rebuild per 1000 records | ~10s (hashing-v1), ~30–120s (remote API) |
+| Search worker count | 1 (persistent inside MCP process) |
+
+---
+
+## Design Debt & Known Limitations
+
+### God Server
+`omni-memory-server.js` is split into focused modules, but still routes all traffic through one process. A crash in one module still affects the server.
+
+### Three-Language Runtime
+PowerShell, Node.js, and Python each own meaningful pieces. Some logic is duplicated (hash embedding in both `generate-embeddings.js` and `semantic-search.py`). This creates drift risk.
+
+### Embedding Providers — Not True Hot Swap
+Query side switches immediately on config change, but stored vectors do not change. A rebuild is still required for clean dense match after changing adapter/model/URL.
+
+### Data Plane Not Yet A Single Write Plane
+Live architecture has multiple write planes: human-written vault notes, shared inbox/event generation, direct claude-mem bridge writes, OpenClaw blackboard writes. "Canonical" means canonical storage, not one unified transactional boundary.
+
+### Query Routing — Hand-Tuned Weights
+Route inference depends on regex/filter hints — ambiguous prompts can route poorly. Weights are hand-tuned, not learned from judgments. No offline benchmark for comparing route profiles.
+
+### Typed Promotion — Not Yet Autopilot
+Promotion typing is driven by heuristics and source text classification. Queue generation does not model conflicts between overlapping durable candidates. The system is auditable but not yet a trustworthy autopilot for long-term writeback.
+
+### Best Next Refactors
+1. Split `omni-memory-server.js` into actual separate processes rather than just modules
+2. Add a persistent retrieval cache or index layer so BM25 corpus is not rebuilt on every query
+3. Add evaluation harness for query routing weight tuning
+4. Add conflict-aware durable promotion scoring with manual resolution
+5. Formalize a versioned adapter schema for new agents and plugin bridges
+6. Improve observability with structured metrics and staleness reporting
+
+### Bottom Line
+The current architecture is strong at what it is trying to be — a local-first, multi-agent, shared-memory bus for one machine with explicit portability across Windows/macOS/Linux. It is not yet a cleanly decomposed micro-architecture, a high-scale retrieval service, or a fully uniform three-platform product. That is a strong place to be for an open-source power-user bundle.

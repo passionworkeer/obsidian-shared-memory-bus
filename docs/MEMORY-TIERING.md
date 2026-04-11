@@ -204,3 +204,51 @@ See: `templates/.memory/config/retention-policy.json`
 | 5 Archive | >500 triggers human review | No |
 
 See: `templates/.memory/config/tier-budget.json`
+---
+
+## Adaptive Retrieval Modes
+
+Retrieval operates in one of three modes, selected dynamically based on Hit@3 history, query characteristics, and cold-start state.
+
+### Cold-Start Rules
+
+**Default to Exploitation during cold-start** (first 100 retrieval calls).
+
+Exploration only triggers on explicit signals:
+| Signal | Description | Trigger |
+|--------|-------------|---------|
+| `query_length < 5 tokens` | Short/ambiguous query | Exploration |
+| Query contains fuzzy chars (`* ? ~`) | Wildcard or partial match | Exploration |
+| First retrieval of a scope category | No history yet | Exploration |
+| `Hit@3 < 0.5` (post-cold-start) | Recent recall failures | Exploration |
+
+### Three Adaptive Modes
+
+| Mode | Trigger | maxResults | minScore | Diversity |
+|------|---------|-----------|----------|-----------|
+| **Exploration** | Hit@3 < 0.5 OR cold-start signal | 8 | 0.25 | High |
+| **Exploitation** | Hit@3 0.5–0.75 | 5 | 0.35 | Standard |
+| **Confidence** | Hit@3 ≥ 0.75 | 3 | 0.50 | Low |
+
+### Recall Signal Accumulation
+
+Agents confirm memories are useful by sending `recall_signal`. When accumulated:
+```
+signal_count >= 3 AND retrieval_score >= 0.65
+  → Flag record as Tier 3→4 promotion candidate
+  → Write to promotion queue
+```
+
+`eval-routing.py` writes `retrieval-stats.json` per route with rolling Hit@3 metrics. Mode switching is route-specific.
+
+### Embedding Index Participation
+
+Only Tier 3 and Tier 4 records are stored in the embedding index (`generate-embeddings.js --tier-filter project+durable`).
+
+| Tier | Embedding | Recommendation Candidate |
+|------|-----------|--------------------------|
+| 1 Event/Working | No | No |
+| 2 Session Durable | No | No |
+| 3 Project Durable | **Yes** | **Yes** |
+| 4 Shared Durable | **Yes** | **Yes** |
+| 5 Archive | No | No |
