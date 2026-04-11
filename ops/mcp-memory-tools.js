@@ -77,15 +77,14 @@ function sha256(value) {
  * }}
  */
 function memory_boot({ agent_id: _agent_id, cwd } = {}) {
-  if (!cwd || typeof cwd !== "string") {
-    throw new Error("memory_boot: cwd is required");
-  }
-
-  const project_key = path.basename(cwd);
   let vaultRoot;
+  let resolvedCwd = cwd || "";
+  let project_key;
+
   try {
     vaultRoot = resolveVaultRoot();
   } catch {
+    project_key = resolvedCwd ? path.basename(resolvedCwd) : "unknown";
     return {
       l0:         "(vault not found)",
       l1:         "(vault not found)",
@@ -94,6 +93,11 @@ function memory_boot({ agent_id: _agent_id, cwd } = {}) {
       source:     "memory_boot",
     };
   }
+
+  // project_key for KG query: use cwd basename, fallback to vault root dir name
+  project_key = resolvedCwd
+    ? path.basename(resolvedCwd)
+    : path.basename(vaultRoot);
 
   // --- L0: read generated L0-bootstrap.md (contains real project context + L1 facts) ---
   const GENERATED_ROOT = path.join(vaultRoot, "00-System", "ai-memory", "generated");

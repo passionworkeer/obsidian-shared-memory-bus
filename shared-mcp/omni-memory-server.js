@@ -16,12 +16,21 @@ import { createMemoryStatus } from "./memory-status.js";
 import { createMemoryEmbeddings } from "./memory-embeddings.js";
 import { TOOLS } from "./memory-tools.js";
 
+// --- ESM globals (must be defined before any code that uses them) ---
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const require = createRequire(import.meta.url);
+
+// --- Derived constants ---
 const USER_HOME = process.env.USERPROFILE || process.env.HOME || "";
 const IS_WINDOWS = process.platform === "win32";
 const AI_MEMORY_ROOT = process.env.AI_MEMORY_ROOT || path.resolve(__dirname, "..");
+
+// memory_boot and memory_query — resolves via resolveProjectPath so it works
+// whether AI_MEMORY_ROOT points to the project dir or to a separate data dir.
+const { handlers: mcpMemoryHandlers } = require(
+  resolveProjectPath("ops", "mcp-memory-tools-handler.js")
+);
 const WINDOWS_ENV_CACHE = new Map();
 const RUNTIME_ENV_NAMES = [
   "AI_MEMORY_ROOT",
@@ -56,6 +65,27 @@ function resolveRuntimePath(...candidates) {
     }
   }
   return path.join(AI_MEMORY_ROOT, candidates[0]);
+}
+
+/**
+ * Resolve a module path that may live in the project directory (E:\desktop\obsidian-shared-memory-bus)
+ * even when AI_MEMORY_ROOT points to a separate data dir (C:\Users\wang\.ai-memory).
+ *
+ * Checks:
+ *   1. process.cwd() + relativePath  (project dir, where ops/ lives)
+ *   2. path.resolve(__dirname, "..") + relativePath  (parent of shared-mcp/)
+ *   3. AI_MEMORY_ROOT + relativePath  (canonical fallback)
+ */
+function resolveProjectPath(...parts) {
+  const relPath = path.join(...parts);
+  for (const base of [process.cwd(), path.resolve(__dirname, "..")]) {
+    const candidate = path.join(base, relPath);
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  // Last resort: use AI_MEMORY_ROOT even if it may not have the file
+  return path.join(AI_MEMORY_ROOT, relPath);
 }
 
 function loadVaultResolver() {
@@ -1173,6 +1203,9 @@ for (const [name, handler] of Object.entries(bridge.handlers)) {
   ALL_HANDLERS[name] = handler;
 }
 for (const [name, handler] of Object.entries(embeddings.handlers)) {
+  ALL_HANDLERS[name] = handler;
+}
+for (const [name, handler] of Object.entries(mcpMemoryHandlers)) {
   ALL_HANDLERS[name] = handler;
 }
 
