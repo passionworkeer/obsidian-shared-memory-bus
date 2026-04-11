@@ -45,22 +45,24 @@ function buildL0L1Bootstrap(cwd) {
   // 1. Read L0-fixed.md
   const L0_content = fs.existsSync(L0_FIXED) ? fs.readFileSync(L0_FIXED, "utf-8") : ""
 
-  // 2. Query KG for current project triples
+  // 2. Query KG for all current project facts via queryCurrentTriples
   let l1_content = "（暂无 L1 事实）"
+  let l1Count = 0
   if (project_key) {
     try {
       const { KnowledgeGraph } = require("./knowledge-graph.js")
       const kg = new KnowledgeGraph({ vaultRoot })
-      const triples = typeof kg.queryEntity === "function"
-        ? kg.queryEntity(project_key, { limit: 20 })
+      const triples = typeof kg.queryCurrentTriples === "function"
+        ? kg.queryCurrentTriples({ limit: 20 })
         : []
+      l1Count = triples.length
       if (triples && triples.length > 0) {
         l1_content = triples
           .slice(0, 20)
           .map(t => {
-            const s = t.subject || t.entity_name || ""
-            const p = t.predicate || t.relation || ""
-            const o = t.object || t.target_name || ""
+            const s = t.subject || ""
+            const p = t.predicate || ""
+            const o = t.object || ""
             return `- ${s} ${p} ${o}`.trim()
           })
           .join("\n")
@@ -88,7 +90,7 @@ function buildL0L1Bootstrap(cwd) {
     l1_content,
     "",
     "---",
-    `共 ${(l1_content && l1_content.startsWith("（") ? 0 : (triples || []).length)} 条 KG 事实 · 通过 memory_boot(cwd) 加载`,
+    `共 ${l1Count} 条 KG 事实 · 通过 memory_boot(cwd) 加载`,
     ""
   ].join("\n")
 
@@ -98,7 +100,7 @@ function buildL0L1Bootstrap(cwd) {
   // 4. Note: @include L0-bootstrap.md is managed by build-memory-layers.js template
   // (do not append here to avoid being overwritten)
 
-  return { project_key, vaultRoot, l0BootstrapPath: L0_BOOTSTRAP }
+  return { project_key, vaultRoot, l0BootstrapPath: L0_BOOTSTRAP, l1Count }
 }
 
 // ---------------------------------------------------------------------------
