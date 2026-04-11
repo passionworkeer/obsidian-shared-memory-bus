@@ -33,7 +33,17 @@ export function parseExtraction(raw) {
 
   // 降级：JSON 解析
   const jsonResult = tryJsonParse(text)
-  if (jsonResult) return jsonResult
+  if (!jsonResult || typeof jsonResult !== 'object') {
+    return {
+      session_type: 'discovery',
+      confidence: 0.3,
+      facts: [],
+      decisions: [],
+      entities: [],
+      summary: text.slice(0, 200)  // 截取前200字作为 summary
+    }
+  }
+  return jsonResult
 
   // 最终降级：返回空结构（不抛出异常）
   return {
