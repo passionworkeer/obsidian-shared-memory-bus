@@ -114,7 +114,7 @@ function memory_boot({ agent_id: _agent_id, cwd } = {}) {
   let l1Count = 0;
 
   try {
-    const { KnowledgeGraph } = require("./knowledge-graph.js");
+    const { KnowledgeGraph } = require("./knowledge-graph.cjs");
     const kg = new KnowledgeGraph({ vaultRoot });
     const triples = kg.queryCurrentTriples({ entityName: project_key, limit: 20 });
 
