@@ -439,4 +439,49 @@ export const TOOLS = [
       required: ["entityName"],
     },
   },
+  {
+    name: "memory_boot",
+    description:
+      "Load L0 (fixed project constraints) and L1 (current project KG facts) memory layers. Call this at the start of every session to bootstrap context. Returns the project key, L0 content (~100 tokens), and L1 facts (~500 tokens) from the knowledge graph.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        cwd: {
+          type: "string",
+          description:
+            "Project working directory. Used to derive the project key and filter KG facts. Defaults to process.cwd() if omitted.",
+        },
+        agent_id: {
+          type: "string",
+          description: "Optional agent identifier for MCP compatibility (unused).",
+        },
+      },
+    },
+  },
+  {
+    name: "memory_query",
+    description:
+      "Search the shared memory inbox by keyword. Returns inbox records matching the query from all projects or a specific project. Use this to retrieve persistent memories, user preferences, and project context that were written by previous sessions.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Search keyword. Matches against inbox record content using token-based keyword search.",
+        },
+        depth: {
+          type: "string",
+          default: "compact",
+          description: "'compact' returns title + summary (~50 tokens per result); 'full' includes full content and SHA256 hash.",
+          enum: ["compact", "full"],
+        },
+        cwd: {
+          type: "string",
+          description:
+            "Optional project working directory. If provided, results are filtered to the matching project key.",
+        },
+      },
+      required: ["query"],
+    },
+  },
 ];

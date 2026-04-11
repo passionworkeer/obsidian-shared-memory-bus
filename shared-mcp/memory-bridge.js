@@ -202,8 +202,8 @@ export function createMemoryBridge(params) {
       return { ok: false, error: `python-runtime-unavailable: ${PYTHON.error || "unknown-error"}` };
     }
 
-    # NOTE: Inline -c string is intentional — avoids a temp file on disk.
-    # Debug tip: to inspect, add `print("DEBUG:", payload)` before json.load().
+    // NOTE: Inline -c string is intentional — avoids a temp file on disk.
+    // Debug tip: to inspect, add `print("DEBUG:", payload)` before json.load().
     const script = `
 import json
 import sqlite3
