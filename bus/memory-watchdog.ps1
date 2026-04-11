@@ -21,6 +21,22 @@ $ErrorActionPreference = "Stop"
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [Console]::OutputEncoding = $Utf8NoBom
 
+# --- Register engine event so Release-WatchdogLock fires on ANY exit path ---
+$script:WatchdogLockStream = $null
+try {
+    $null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
+        if ($script:WatchdogLockStream) {
+            try { $script:WatchdogLockStream.Dispose() } catch { }
+        }
+        try {
+            if ((Test-Path -LiteralPath $LockPath -PathType Leaf)) {
+                Remove-Item -LiteralPath $LockPath -Force -ErrorAction SilentlyContinue
+            }
+        } catch { }
+    }
+} catch {
+}
+
 $sourceRoot = Split-Path -Parent $PSScriptRoot
 $helperPath = @(
     (Join-Path $PSScriptRoot "runtime-platform.ps1"),
@@ -442,11 +458,32 @@ function Start-DetachedPowerShellScript {
 function Acquire-WatchdogLock {
     Ensure-Directory -Path (Split-Path -Parent $LockPath)
 
+    # --- Startup: clear stale lock from THIS host before competing ---
+    if (Test-Path -LiteralPath $LockPath -PathType Leaf) {
+        try {
+            $existingLock = Get-Content -Raw -LiteralPath $LockPath -Encoding utf8 | ConvertFrom-Json
+            if ($null -ne $existingLock) {
+                $existingHost = if ($null -ne $existingLock.hostname) { [string]$existingLock.hostname } else { "" }
+                $existingPid  = if ($null -ne $existingLock.pid)      { [int]$existingLock.pid       } else { 0 }
+                # Only auto-clear locks left by the same host — cross-host locks must be cleared manually
+                if ($existingHost -eq $env:COMPUTERNAME -and $existingPid -gt 0) {
+                    if (-not (Test-ProcessIdAlive -ProcessId $existingPid)) {
+                        Write-WatchdogTrace -Step "lock.stale-cleared" -Data @{ pid = $existingPid; hostname = $existingHost }
+                        Remove-Item -LiteralPath $LockPath -Force -ErrorAction Stop | Out-Null
+                    }
+                }
+            }
+        } catch {
+            # Could not read/clear stale lock — proceed to compete normally
+        }
+    }
+
     while ($true) {
         try {
             $stream = [System.IO.File]::Open($LockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
             $payload = [ordered]@{
                 pid       = $PID
+                hostname  = $env:COMPUTERNAME
                 createdAt = (Get-Date).ToString("o")
             } | ConvertTo-Json -Depth 3
             $bytes = $Utf8NoBom.GetBytes($payload)
@@ -456,14 +493,22 @@ function Acquire-WatchdogLock {
             return $true
         } catch [System.IO.IOException] {
             $lockOwnerPid = 0
+            $lockOwnerHost = ""
             if (Test-Path -LiteralPath $LockPath -PathType Leaf) {
                 try {
                     $lockData = Get-Content -Raw -LiteralPath $LockPath -Encoding utf8 | ConvertFrom-Json
-                    if ($null -ne $lockData.pid) {
-                        $lockOwnerPid = [int]$lockData.pid
+                    if ($null -ne $lockData) {
+                        $lockOwnerPid  = if ($null -ne $lockData.pid)      { [int]$lockData.pid      } else { 0 }
+                        $lockOwnerHost = if ($null -ne $lockData.hostname) { [string]$lockData.hostname } else { "" }
                     }
                 } catch {
                 }
+            }
+
+            # Self-deadlock guard: if this process (same host + same PID) already holds the lock, re-enter safely
+            if ($lockOwnerPid -eq $PID -and $lockOwnerHost -eq $env:COMPUTERNAME) {
+                Write-WatchdogTrace -Step "lock.self-deadlock-guard" -Data @{ pid = $PID; hostname = $env:COMPUTERNAME }
+                return $true
             }
 
             if ($lockOwnerPid -gt 0 -and (Test-ProcessIdAlive -ProcessId $lockOwnerPid)) {
@@ -602,7 +647,10 @@ function Write-State {
         globalContext = $GlobalContextPath
     }
     $tempPath = "$StatePath.tmp"
-    [System.IO.File]::WriteAllText($tempPath, ($payload | ConvertTo-Json -Depth 6), $Utf8NoBom)
+    # NOTE: The state payload includes deep nested structures (ChangedSpecs arrays, full path maps).
+    # Depth 10 is required to serialize all nested properties without truncation.
+    # If this limit is reached in practice, consider restructuring to flatten suspicious sub-objects.
+    [System.IO.File]::WriteAllText($tempPath, ($payload | ConvertTo-Json -Depth 10), $Utf8NoBom)
     Move-Item -LiteralPath $tempPath -Destination $StatePath -Force
 }
 
@@ -748,7 +796,7 @@ function Get-FileContentHash {
         $hashBytes = $sha1.ComputeHash($stream)
         $hash = ([System.BitConverter]::ToString($hashBytes)).Replace("-", "").ToLowerInvariant()
         $item = Get-Item -LiteralPath $Path
-        return "{0}:{1}:{2}" -f $item.Name, $hash, $item.Length
+        return "{0}:{1}:{2}" -f $item.FullName, $hash, $item.Length
     } finally {
         if ($null -ne $stream) {
             $stream.Dispose()

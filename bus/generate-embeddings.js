@@ -5,7 +5,7 @@ const { spawn, spawnSync } = require("child_process");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
-const { createEmbeddingProviderRegistry, getProviderHost, normalizeEmbeddingAdapter } = require("./embedding-provider-registry.js");
+const { createEmbeddingProviderRegistry, getProviderHost, buildEmbeddingConfigHash } = require("./embedding-provider-registry.js");
 const { resolvePythonRuntime, withPythonArgs } = require("./python-runtime.js");
 const { resolveEmbeddingRuntime } = require("./runtime-config.js");
 const { resolveVaultRoot } = require("./vault-root.js");
@@ -166,18 +166,6 @@ function ensureDirectory(targetPath) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function buildEmbeddingConfigHash({ backend, modelName, baseUrl = "" }) {
-  const normalizedBackend = normalizeEmbeddingAdapter(backend, modelName);
-  const normalizedBaseUrl =
-    normalizedBackend === "openai-compatible" ? String(baseUrl || "").trim().replace(/\/+$/, "") : "";
-  const payload = JSON.stringify({
-    backend: normalizedBackend,
-    model: String(modelName || "").trim(),
-    baseUrl: normalizedBaseUrl.toLowerCase(),
-  });
-  return crypto.createHash("sha1").update(payload).digest("hex").slice(0, 16);
 }
 
 function isNoise(text) {

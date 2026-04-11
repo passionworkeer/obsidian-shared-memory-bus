@@ -57,8 +57,6 @@ This avoids Codex reading the full `GLOBAL-CONTEXT.md` (~8000 chars) on every st
 
 ## MCP Configuration
 
-Add to `~/.codex/config.json` or the equivalent MCP settings:
-
 ```json
 {
   "mcpServers": {
@@ -92,6 +90,17 @@ Add to `~/.codex/config.json` or the equivalent MCP settings:
 
 ---
 
+## Rule File Setup
+
+Place the portable skill reference in Codex's skill directory:
+
+```
+~/.codex/skills/shared-memory.md  →  reference to SKILL.md at repo root
+~/.codex/rules/shared-memory.md   →  rule overlay
+```
+
+---
+
 ## Memory Write Targets
 
 ### Cross-Project Durable (Shared Inbox)
@@ -103,7 +112,7 @@ Add to `~/.codex/config.json` or the equivalent MCP settings:
 ```
 <obsidian-vault>/02-KB/WORKING.md
 ```
-Write within your `## Agent: codex` block. Never touch other agent blocks.
+Write within your `## Agent: codex` block.
 
 ---
 
@@ -114,16 +123,6 @@ Write within your `## Agent: codex` block. Never touch other agent blocks.
 - Codex sessions are typically shorter — avoid full `GLOBAL-CONTEXT.md` on quick queries
 
 **Rule: Do not let memory retrieval exceed 10% of your available context budget.**
-
----
-
-## Skill File Location
-
-Place the portable skill reference in Codex's skill directory:
-```
-~/.codex/skills/shared-memory.md  →  reference to SKILL.md at repo root
-~/.codex/rules/shared-memory.md   →  rule overlay
-```
 
 ---
 

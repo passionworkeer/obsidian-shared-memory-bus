@@ -1,5 +1,315 @@
 # Troubleshooting
 
+## Vault Not Found
+
+**Error**: `VAULT_RESOLUTION_FAILED` at session start, or memory files not being written/read.
+
+**What to do**:
+
+1. **Check if Obsidian is installed and has opened a vault at least once.** The vault path is discovered from Obsidian's app config. If no vault was ever opened, the config won't exist.
+
+2. **Set the vault path explicitly.** Open a PowerShell prompt and run:
+   ```powershell
+   [Environment]::SetEnvironmentVariable("AI_MEMORY_OBSIDIAN_VAULT", "E:\desktop\Obsidian Vault", "User")
+   ```
+   Adjust the path to match your actual vault location.
+
+3. **Verify the vault contains the expected folder structure.** The memory bus expects:
+   ```
+   <vault>/
+   ├── 00-System/
+   │   └── ai-memory/
+   │       ├── inbox/
+   │       ├── structured/
+   │       └── generated/
+   ├── 02-KB/
+   │   ├── OBSIDIAN.md
+   │   ├── MEMORY.md
+   │   └── WORKING.md
+   ```
+
+4. **If the folders don't exist**, run the installer which creates them:
+   ```powershell
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
+   ```
+
+5. **Verify the path is correct**:
+   ```powershell
+   # Windows
+   echo $env:AI_MEMORY_OBSIDIAN_VAULT
+   dir "$env:AI_MEMORY_OBSIDIAN_VAULT\00-System\ai-memory"
+
+   # macOS/Linux
+   echo $AI_MEMORY_OBSIDIAN_VAULT
+   ls "$AI_MEMORY_OBSIDIAN_VAULT/00-System/ai-memory"
+   ```
+
+---
+
+## Embedding API Errors
+
+### API Key Not Set
+
+**Error**: `401 Unauthorized`, `403 Forbidden`, or `embedding_config_mismatch` in search results.
+
+**What to do**:
+
+1. **For OpenAI-compatible providers** (Ollama, ModelScope, Groq, etc.):
+   ```powershell
+   [Environment]::SetEnvironmentVariable("AI_MEMORY_EMBED_PROVIDER", "openai-compatible-remote", "User")
+   [Environment]::SetEnvironmentVariable("AI_MEMORY_EMBED_ADAPTER", "openai-compatible", "User")
+   [Environment]::SetEnvironmentVariable("AI_MEMORY_EMBED_BASE_URL", "https://your-endpoint/v1", "User")
+   [Environment]::SetEnvironmentVariable("AI_MEMORY_EMBED_API_KEY", "your-api-key", "User")
+   [Environment]::SetEnvironmentVariable("AI_MEMORY_EMBED_MODEL", "your-model-name", "User")
+   ```
+
+2. **Rebuild the embeddings index** after setting the API key:
+   ```powershell
+   node $env:AI_MEMORY_ROOT\generate-embeddings.js
+   ```
+
+3. **Verify the settings are saved**:
+   ```powershell
+   cat ~/.ai-memory/config/runtime.json
+   ```
+   Confirm `profile`, `provider`, `adapter`, `baseUrl`, and `model` all match your intended provider.
+
+### Rate Limit Errors
+
+**Error**: `429 Too Many Requests` during embeddings build.
+
+**What to do**:
+
+1. **Increase the request delay** to respect rate limits:
+   ```powershell
+   [Environment]::SetEnvironmentVariable("AI_MEMORY_EMBED_REQUEST_DELAY_MS", "500", "User")
+   ```
+
+2. **Retry the embeddings rebuild**:
+   ```powershell
+   node $env:AI_MEMORY_ROOT\generate-embeddings.js
+   ```
+
+3. **If using a remote provider**, wait a few minutes and try again. Rate limits typically reset within 60 seconds.
+
+### Embedding Dimension Mismatch
+
+**Error**: `embedding-dimension-mismatch` in search results.
+
+**What to do**:
+
+1. **This means the stored index was built with a different model than the current query side.** Rebuild the index:
+   ```powershell
+   node $env:AI_MEMORY_ROOT\generate-embeddings.js
+   ```
+
+2. **If the rebuild fails with an API error**, the run now aborts instead of silently mixing vectors. Fix the API issue first, then retry.
+
+---
+
+## Watchdog Not Running
+
+**Symptoms**: Memory entries appear but are not refreshed; `memory_status.watchdog.status: stale`; new inbox entries are not indexed.
+
+**What to do**:
+
+1. **Check if the watchdog process is running**:
+   ```powershell
+   powershell -File shared-mcp/status-shared-mcp.ps1
+   ```
+   Look for `watchdog.running: true`.
+
+2. **Start the watchdog**:
+   ```powershell
+   powershell -File shared-mcp/start-default-shared-mcp.ps1 -ForceRestart
+   ```
+
+3. **Run a one-shot sync** to process pending changes immediately:
+   ```powershell
+   powershell -File bus/memory-watchdog.ps1 -Once
+   ```
+
+4. **If the watchdog keeps stopping**, check the logs under `~/.ai-memory/shared-mcp/logs/`. The most common cause is a Python or Node.js crash during startup.
+
+---
+
+## Memory Not Appearing in Context
+
+**Symptoms**: You wrote to inbox but `search_shared_memory` returns no results. Entries are not in GLOBAL-CONTEXT.md.
+
+**What to do**:
+
+1. **Force a full sync**:
+   ```powershell
+   powershell -File bus/memory-bus.ps1 -Action SyncAll
+   ```
+
+2. **Check if the entry was written to JSONL**:
+   ```powershell
+   # Find the structured JSONL files
+   Get-ChildItem -Path "$env:AI_MEMORY_OBSIDIAN_VAULT\00-System\ai-memory\structured" -Filter "*.jsonl" | ForEach-Object {
+       Select-String -Path $_.FullName -Pattern "your-search-term" -List
+   }
+   ```
+   If the entry is in the JSONL, it was indexed. If not, the sync didn't pick it up.
+
+3. **Check if embeddings were rebuilt**. Run:
+   ```powershell
+   node $env:AI_MEMORY_ROOT\generate-embeddings.js
+   ```
+   Then check:
+   ```powershell
+   (Get-ChildItem -Path "$env:AI_MEMORY_OBSIDIAN_VAULT\00-System\ai-memory\embeddings\index.jsonl").LastWriteTime
+   ```
+   The index timestamp should be newer than when you wrote the entry.
+
+4. **Verify the entry's tier is embeddable** (Tier 3 or 4):
+   ```powershell
+   Select-String -Path "$env:AI_MEMORY_OBSIDIAN_VAULT\00-System\ai-memory\structured\shared-inbox.jsonl" `
+       -Pattern "your-search-term" -List
+   ```
+   Check the `tier` field. Tier 1 and 2 are NOT embedded.
+
+5. **If using `memory_wake_up`**, check that you are using enough `max_items`. Too few items may not surface your entry:
+   ```powershell
+   claude -p "$(cat <<'EOF'
+   {"tools":[{"name":"memory_wake_up","input":{"max_items":8,"include_recent_activity":true}}]}
+   EOF
+   )"
+   ```
+
+---
+
+## KG Extraction Failures
+
+**Symptoms**: Entity extraction runs but no KG triples are stored. `knowledge-graph.js` produces errors. No entity relationships appear in retrieval results.
+
+**What to do**:
+
+1. **Check if the KG SQLite database exists and is writable**:
+   ```powershell
+   $kgPath = Join-Path $env:AI_MEMORY_OBSIDIAN_VAULT "00-System\ai-memory\kg\knowledge-graph.sqlite3"
+   Test-Path $kgPath
+   ```
+   If the file does not exist, the KG initializes automatically on first run. If it exists but is not writable, check file permissions.
+
+2. **Run entity extraction manually** to see errors:
+   ```powershell
+   node ops/entity-extractor.js extract-file "$env:AI_MEMORY_OBSIDIAN_VAULT\00-System\ai-memory\structured\shared-inbox.jsonl"
+   ```
+   Look for error output like `TypeError`, `SyntaxError`, or `ENOENT`.
+
+3. **Check the KG schema** is compatible (requires Node.js 22.5+ for built-in `node:sqlite`):
+   ```powershell
+   node -e "const v = process.version; console.log('Node.js:', v); const hasSqlite = require('node:sqlite') !== undefined; console.log('node:sqlite:', hasSqlite);"
+   ```
+   If `node:sqlite` is not available, upgrade Node.js to 22.5+ or use the Python fallback.
+
+4. **Verify KG query works**:
+   ```powershell
+   node ops/knowledge-graph.js stats
+   ```
+   Expected output shows entity count and triple count.
+
+5. **Check entity extractor output** for your specific content:
+   ```powershell
+   node ops/entity-extractor.js extract "Alice works on the MemPalace project using Python"
+   ```
+   This should return extracted entities and facts.
+
+---
+
+## JSONL Corruption
+
+**Symptoms**: `check-memory-integrity.js --strict` reports contract violations. Entries appear duplicated or truncated. Search results have garbled text.
+
+**What to do**:
+
+1. **Validate the memory contract**:
+   ```powershell
+   node ops/check-memory-integrity.js --strict
+   ```
+   This checks every JSONL file for parse errors, missing fields, and contract violations.
+
+2. **Find corrupted lines**:
+   ```powershell
+   $path = "$env:AI_MEMORY_OBSIDIAN_VAULT\00-System\ai-memory\structured\shared-inbox.jsonl"
+   $lines = Get-Content $path -Encoding UTF8
+   $lineNum = 0
+   foreach ($line in $lines) {
+       $lineNum++
+       try {
+           $null = $line | ConvertFrom-Json -AsHashtable
+       } catch {
+           Write-Host "Corrupted line $lineNum`: $line" -ForegroundColor Red
+       }
+   }
+   ```
+
+3. **Isolate and repair**. If a single line is corrupted, you can either:
+   - **Delete the line**: Remove the corrupted JSONL line
+   - **Fix the line**: Correct the JSON manually
+   - **Backup and rebuild**: Copy the file to `*.jsonl.bak`, then run:
+     ```powershell
+     powershell -File bus/memory-bus.ps1 -Action SyncAll
+     ```
+     This rebuilds all structured files from source.
+
+4. **For a full rebuild from source** (nuclear option):
+   ```powershell
+   # Backup first
+   Copy-Item "$env:AI_MEMORY_OBSIDIAN_VAULT\00-System\ai-memory\structured" `
+       "$env:AI_MEMORY_OBSIDIAN_VAULT\00-System\ai-memory\structured.bak" -Recurse
+
+   # Force full sync
+   powershell -File bus/memory-watchdog.ps1 -Once
+   ```
+
+5. **If the embedding index is corrupted**, rebuild it:
+   ```powershell
+   node $env:AI_MEMORY_ROOT\generate-embeddings.js
+   ```
+
+---
+
+## My Search Results Are Empty or Wrong
+
+**Symptoms**: `search_shared_memory` returns zero results, or returns unrelated results.
+
+**What to do**:
+
+1. **Start with BM25-only** (works offline, zero API cost):
+   ```powershell
+   claude -p "$(cat <<'EOF'
+   {"tools":[{"name":"search_shared_memory","input":{"query":"your search terms here","limit":5,"mode":"bm25"}}]}
+   EOF
+   )"
+   ```
+   If BM25 returns results but dense doesn't, the issue is with the embedding provider.
+
+2. **Check if there are any records to search**:
+   ```powershell
+   (Get-Content "$env:AI_MEMORY_OBSIDIAN_VAULT\00-System\ai-memory\structured\shared-inbox.jsonl" -Encoding UTF8 | Measure-Object -Line).Lines
+   ```
+   Zero records means the sync never ran or failed silently.
+
+3. **Force a full sync and rebuild**:
+   ```powershell
+   powershell -File bus/memory-bus.ps1 -Action SyncAll
+   node $env:AI_MEMORY_ROOT\generate-embeddings.js
+   ```
+
+4. **For Chinese text search**, confirm `jieba` is installed:
+   ```powershell
+   node -e "const jieba = require('jieba'); console.log('jieba loaded:', !!jieba.tokenize);"
+   ```
+   If this fails, reinstall:
+   ```powershell
+   & $env:AI_MEMORY_PYTHON -m pip install jieba rank-bm25
+   ```
+
+---
+
 ## Installer Fails Immediately
 
 Check these first:

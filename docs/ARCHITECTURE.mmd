@@ -1,0 +1,249 @@
+# Architecture Diagram — Obsidian Shared Memory Bus
+
+```mermaid
+graph TB
+    %% ===========================================================================
+    %% AGENT LAYER
+    %% ===========================================================================
+    subgraph AGENTS["<b>AGENTS</b>"]
+        A1["Claude Code"]
+        A2["Codex"]
+        A3["OpenClaw"]
+        A4["Cursor"]
+        A5["Copilot"]
+        A6["Trae / TraeCN"]
+    end
+
+    %% ===========================================================================
+    %% SHARED MCP TRANSPORT
+    %% ===========================================================================
+    subgraph MCP["<b>SHARED MCP TRANSPORT LAYER</b>"]
+        MCP_HTTP["HTTP :9331-9338"]
+        MEM["memory (9338)"]
+        OBS["obsidian (9335)"]
+        CXT7["context7 (9331)"]
+        FCH["fetch (9332)"]
+        TME["time (9333)"]
+        ST["sequential-thinking (9334)"]
+        PWR["playwright (9337)"]
+    end
+
+    %% ===========================================================================
+    %% NODE.JS BUSINESS LAYER
+    %% ===========================================================================
+    subgraph NODE["<b>NODE.JS BUSINESS LAYER</b>"]
+        OMS["omni-memory-server.js"]
+        EMB["generate-embeddings.js"]
+        BML["build-memory-layers.js"]
+        BHP["build-handoff-pack.js"]
+        OBB["obsidian-blackboard-daemon.js"]
+        SOC["sync-openclaw-to-obsidian.js"]
+    end
+
+    %% ===========================================================================
+    %% POWERSHELL ORCHESTRATION LAYER
+    %% ===========================================================================
+    subgraph PS["<b>POWERSHELL ORCHESTRATION LAYER</b>"]
+        MB["memory-bus.ps1"]
+        WD["memory-watchdog.ps1"]
+        RMD["run-memory-dream.ps1"]
+        ROM["run-obsidian-mcp.ps1"]
+        ROMM["run-minimax-mcp.ps1"]
+        SDS["start-default-shared-mcp.ps1"]
+    end
+
+    %% ===========================================================================
+    %% PYTHON RETRIEVAL LAYER
+    %% ===========================================================================
+    subgraph PY["<b>PYTHON RETRIEVAL LAYER</b>"]
+        SS["semantic-search.py"]
+        EP["embedding_providers.py"]
+    end
+
+    %% ===========================================================================
+    %% OBSIDIAN CANONICAL DATA PLANE
+    %% ===========================================================================
+    subgraph OBSIDIAN["<b>OBSIDIAN CANONICAL DATA PLANE</b>"]
+        subgraph STR["structured/"]
+            SI["shared-inbox.jsonl"]
+            SM["session-memory.jsonl"]
+            SE["shared-events.jsonl"]
+            TM["task-memory.jsonl"]
+            CC["claude-code.jsonl"]
+            OC["openclaw.jsonl"]
+            OB["openclaw-blackboard.jsonl"]
+            OR["openclaw-runs.jsonl"]
+            OJ["openclaw-jobs.jsonl"]
+            OJNL["openclaw-journal.jsonl"]
+        end
+
+        subgraph GEN["generated/"]
+            ML["MEMORY-LAYERS.{md,json}"]
+            HO["HANDOFF.{md,json}"]
+            AD["AUTO-DREAM.{md,json}"]
+            GC["GLOBAL-CONTEXT.md"]
+        end
+
+        subgraph KG["kg/"]
+            KGDB["knowledge-graph.sqlite3"]
+        end
+
+        subgraph EMB_IDX["embeddings/"]
+            IDX["index.jsonl"]
+        end
+    end
+
+    %% ===========================================================================
+    %% OPS LAYER (entity extraction + KG)
+    %% ===========================================================================
+    subgraph OPS["<b>OPS LAYER</b>"]
+        EE["entity-extractor.js"]
+        KGJS["knowledge-graph.js"]
+        EB["entity-backfill.js"]
+    end
+
+    %% ===========================================================================
+    %% CONNECTIONS
+    %% ===========================================================================
+
+    %% Agent → MCP
+    A1 & A2 & A3 & A4 & A5 & A6 --> MCP_HTTP
+
+    %% MCP → omni-memory-server
+    MEM & OBS --> OMS
+
+    OMS -->|"spawns Python"| SS
+    OMS -->|"spawns"| MB
+    OMS --> EMB
+    OMS --> BML
+    OMS --> BHP
+
+    %% Node → PowerShell
+    MB -->|"spawn"| WD
+    WD -->|"Invoke-BusSync"| MB
+    WD -->|"Invoke-StructuredRefreshPipeline"| BML
+
+    %% PowerShell → Node
+    RMD --> BHP
+
+    %% Ops → KG
+    EE --> KGJS
+    KGJS --> KGDB
+
+    %% PowerShell → Obsidian Data Plane
+    MB -->|"writes JSONL"| STR
+    BML -->|"writes"| GEN
+    BHP -->|"writes"| GEN
+    RMD -->|"writes"| GEN
+    RMD -->|"writeback durable"| SI
+    EMB -->|"writes"| EMB_IDX
+
+    %% Node → Obsidian Data Plane
+    OMS -->|"read/write"| OBSIDIAN
+    OBB -->|"chokidar watch"| OBSIDIAN
+    SOC -->|"imports"| STR
+
+    %% Python retrieval → Data Plane
+    SS -->|"read"| EMB_IDX
+    SS -->|"read"| STR
+
+    %% Ops → Data Plane
+    EE -->|"reads JSONL, adds facts/concepts"| STR
+    KGJS -->|"stores triples"| KGDB
+    KGJS -->|"reads"| STR
+
+    %% Blackboard daemon
+    OBB -->|"note changes"| WD
+
+    %% ===========================================================================
+    %% LEGEND
+    %% ===========================================================================
+
+    classDef agent fill:#1a1a2e,stroke:#4a90d9,color:#e0e0e0
+    classDef mcp fill:#16213e,stroke:#e94560,color:#ffffff
+    classDef nodejs fill:#1b4332,stroke:#52b788,color:#d8f3dc
+    classDef powershell fill:#3c1518,stroke:#d64346,color:#ffe0e0
+    classDef python fill:#1a1a2e,stroke:#f0c040,color:#fff3cd
+    classDef storage fill:#2d1b4e,stroke:#9b59b6,color:#f5eef8
+    classDef ops fill:#0d3b3e,stroke:#40e0d0,color:#d0f0f0
+
+    class A1,A2,A3,A4,A5,A6 agent
+    class MCP_HTTP,MEM,OBS,CXT7,FCH,TME,ST,PWR mcp
+    class OMS,EMB,BML,BHP,OBB,SOC nodejs
+    class MB,WD,RMD,ROM,ROMM,SDS powershell
+    class SS,EP python
+    class SI,SM,SE,TM,CC,OC,OB,OR,OJ,OJNL,ML,HO,AD,GC,KGDB,IDX storage
+    class EE,KGJS,EB ops
+```
+
+```mermaid
+graph LR
+    %% ===========================================================================
+    %% 5 MEMORY PLANES (TIERS)
+    %% ===========================================================================
+    subgraph PLANES["<b>5 MEMORY PLANES</b>"]
+        P1["Tier 1: Event / Working<br/>(TTL: 1 day)"]
+        P2["Tier 2: Session Durable<br/>(TTL: session + 7d)"]
+        P3["Tier 3: Project Durable<br/>(TTL: project + 30d) · EMBEDDED"]
+        P4["Tier 4: Shared Durable<br/>(TTL: user=never / feedback=90d / ref=180d) · EMBEDDED"]
+        P5["Tier 5: Archive<br/>(Manual review)"]
+    end
+
+    %% ===========================================================================
+    %% DATA FLOW ARROWS
+    %% ===========================================================================
+
+    A1(["Agent writes to inbox"])
+    A1 --> P1
+    P1 -->|"session-end + confidence>=0.5"| P2
+    P2 -->|"3+ sessions + confidence>=0.7"| P3
+    P3 -->|"cross-project / manual"| P4
+    P4 -->|"TTL expiry / 60d no access"| P5
+
+    P1 -.->|"entity extraction"| E1["structured JSONL + facts[]"]
+    E1 -.->|"KG build"| E2["KG triples"]
+    E2 -.->|"embed (T3+T4 only)"| P3
+    E2 -.->|"embed (T3+T4 only)"| P4
+    P3 -.->|"retrieval"| R["MCP search"]
+    P4 -.->|"retrieval"| R
+```
+
+```mermaid
+graph TB
+    subgraph ROLES["<b>RUNTIME ROLES</b>"]
+        ORCH["orchestrator<br/><small>memory-bus.ps1</small>"]
+        WORKER["retrieval worker<br/><small>semantic-search.py (Python)</small>"]
+        WATCH["watchdog<br/><small>memory-watchdog.ps1</small>"]
+    end
+
+    subgraph LANG["<b>LANGUAGE BOUNDARIES</b>"]
+        PS["PowerShell<br/>Orchestration + IPC"]
+        JS["Node.js<br/>Business Logic + IPC"]
+        PY["Python<br/>Retrieval + Embeddings"]
+    end
+
+    ORCH -->|"Invoke-BusSync"| PS
+    ORCH -->|"spawn"| WATCH
+    WATCH -->|"signature drift"| ORCH
+    ORCH -->|"spawn"| JS
+    JS -->|"stdio"| WORKER
+    ORCH -.->|"No direct calls"| WORKER
+    WATCH -.->|"No direct calls"| WORKER
+```
+
+## Key Modules and Relationships
+
+| Module | Language | Role |
+|--------|----------|------|
+| `memory-bus.ps1` | PowerShell | Entry point; runs SyncAll, refreshes derived artifacts |
+| `memory-watchdog.ps1` | PowerShell | Background daemon; monitors sources, triggers sync |
+| `omni-memory-server.js` | Node.js | Shared MCP server; HTTP transport, tool dispatch |
+| `build-memory-layers.js` | Node.js | Builds MEMORY-LAYERS artifact from structured JSONL |
+| `build-handoff-pack.js` | Node.js | Builds bounded HANDOFF packet for next agent |
+| `run-memory-dream.ps1` | PowerShell | Consolidation pass; typed durable promotion |
+| `generate-embeddings.js` | Node.js | Generates BM25 + dense embeddings index |
+| `semantic-search.py` | Python | Retrieval: BM25 + dense + hybrid + MMR + rerank |
+| `entity-extractor.js` | Node.js | Two-pass entity detection (person/project/concept) |
+| `knowledge-graph.js` | Node.js | KG triple storage in SQLite with temporal validity |
+| `obsidian-blackboard-daemon.js` | Node.js | Chokidar watch on vault notes |
+| `sync-openclaw-to-obsidian.js` | Node.js | Imports OpenClaw sessions/runs/blackboard |
