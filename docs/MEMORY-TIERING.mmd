@@ -1,0 +1,153 @@
+# Memory Tiering Diagram — Obsidian Shared Memory Bus
+
+## 5-Tier Overview
+
+```mermaid
+flowchart TB
+    subgraph T1["Tier 1: Event / Working"]
+        direction TB
+        T1_NAME["<b>Event / Working</b>"]
+        T1_TTL["TTL: 1 day"]
+        T1_EMB["Embedding: No"]
+        T1_REC["Recommendation: No"]
+        T1_TRIG["Trigger: session-end + confidence >= 0.5"]
+        T1_BUDGET["Budget: 200 records max"]
+    end
+
+    subgraph T2["Tier 2: Session Durable"]
+        direction TB
+        T2_NAME["<b>Session Durable</b>"]
+        T2_TTL["TTL: session end + 7 days"]
+        T2_EMB["Embedding: No"]
+        T2_REC["Recommendation: No"]
+        T2_TRIG["Trigger: 3+ sessions + confidence >= 0.7"]
+        T2_BUDGET["Budget: 200 records max"]
+    end
+
+    subgraph T3["Tier 3: Project Durable"]
+        direction TB
+        T3_NAME["<b>Project Durable</b>"]
+        T3_TTL["TTL: project end + 30 days"]
+        T3_EMB["Embedding: YES"]
+        T3_REC["Recommendation: YES"]
+        T3_TRIG["Trigger: cross-session validated + manual"]
+        T3_BUDGET["Budget: 100 records/project"]
+    end
+
+    subgraph T4["Tier 4: Shared Durable"]
+        direction TB
+        T4_NAME["<b>Shared Durable</b>"]
+        T4_TTL["TTL: user=never / feedback=90d / reference=180d"]
+        T4_EMB["Embedding: YES"]
+        T4_REC["Recommendation: YES"]
+        T4_TRIG["Trigger: cross-project / manual flag"]
+        T4_BUDGET["Budget: 200 records/type"]
+    end
+
+    subgraph T5["Tier 5: Archive"]
+        direction TB
+        T5_NAME["<b>Archive</b>"]
+        T5_TTL["TTL: Manual review (never auto-deleted)"]
+        T5_EMB["Embedding: No (manifest only)"]
+        T5_REC["Recommendation: No"]
+        T5_TRIG["Trigger: TTL expiry / 60d no access / budget pressure"]
+        T5_BUDGET["Budget: 500+ triggers human review"]
+    end
+
+    T1 -->|"session-end + conf>=0.5"| T2
+    T2 -->|"3+ sessions + conf>=0.7"| T3
+    T3 -->|"cross-project / manual"| T4
+    T4 -->|"TTL / 60d no access"| T5
+    T2 -.->|"age > 30d, no confidence"| T5
+```
+
+## Promotion Rules (Idempotent)
+
+```mermaid
+flowchart LR
+    subgraph RULES["TIER TRANSITION RULES"]
+        R1["<b>1 → 2</b><br/>if session_end_signal == true<br/>AND confidence >= 0.5<br/><br/>no-op if tier >= 2"]
+        R2["<b>2 → 3</b><br/>if unique sessions >= 3<br/>AND confidence >= 0.7<br/><br/>no-op if tier >= 3"]
+        R3["<b>3 → 4</b><br/>if same fact in multiple projects<br/>OR manually flagged by agent<br/><br/>no-op if tier >= 4"]
+        R4["<b>4 → 5</b><br/>if TTL expired<br/>OR access_count == 0 for 60d<br/>OR budget pressure (oldest first)<br/><br/>writes archive-manifest.jsonl"]
+    end
+```
+
+## Embedding Policy
+
+```mermaid
+flowchart TB
+    subgraph EMB["EMBEDDING INDEX POLICY"]
+        E1["<b>Only Tier 3 + Tier 4 are embedded</b>"]
+        E2["Tier 1: NOT embedded — too ephemeral"]
+        E3["Tier 2: NOT embedded — session-specific"]
+        E4["Tier 3: EMBEDDED — durable project knowledge"]
+        E5["Tier 4: EMBEDDED — cross-project shared knowledge"]
+        E6["Tier 5: NOT embedded — flagged archived=true<br/>tracked in archive-manifest.jsonl"]
+        E7["<b>generate-embeddings.js --tier-filter project+durable</b>"]
+    end
+
+    E1 --> E2
+    E1 --> E3
+    E1 --> E4
+    E1 --> E5
+    E1 --> E6
+    E1 --> E7
+```
+
+## Token Budget Per Tier
+
+```mermaid
+flowchart LR
+    subgraph BUDGET["TIER BUDGET ENFORCEMENT"]
+        B1["<b>Tier 1</b><br/>Max 200 records<br/>Auto-archive: YES<br/>Archive trigger: age > 1d, no session signal"]
+        B2["<b>Tier 2</b><br/>Max 200 records<br/>Auto-archive: YES<br/>Archive trigger: age > 30d, no confidence"]
+        B3["<b>Tier 3</b><br/>Max 100 records/project<br/>Auto-archive: YES<br/>Archive trigger: project ended + age > 30d"]
+        B4["<b>Tier 4</b><br/>Max 200 records/type<br/>Auto-archive: YES<br/>Archive trigger: TTL or 60d zero access"]
+        B5["<b>Tier 5</b><br/>>500 triggers human review<br/>Auto-archive: NO<br/>Never auto-deleted"]
+    end
+```
+
+## Tier to MCP Retrieval Mapping
+
+```mermaid
+flowchart TB
+    subgraph RETRIEVAL["MCP RETRIEVAL ROUTES"]
+        RT["route parameter in search_shared_memory"]
+        RT1["auto: infer from query text"]
+        RT2["mixed: all embedded tiers (T3+T4)"]
+        RT3["durable: T3 project + T4 shared"]
+        RT4["task: T2 session task memory"]
+        RT5["recent: T1 event memory"]
+        RT6["reference: T4 reference scope"]
+    end
+
+    RT --> RT1 & RT2 & RT3 & RT4 & RT5 & RT6
+```
+
+## Lifecycle Fields on Every Record
+
+```json
+{
+  "lifecycle": {
+    "tier": 2,
+    "expires_at": "2026-04-18T00:00:00Z",
+    "access_count": 0,
+    "promotion_count": 1,
+    "archived": false
+  },
+  "metadata": {
+    "promotion": {
+      "version": 2,
+      "durable_type": "project",
+      "key": "token_fp:abc123",
+      "reason": "cross_session_validated",
+      "source_type": "session",
+      "source_confidence": 0.75,
+      "source_record_id": "rec_abc123"
+    }
+  }
+}
+```
+
+All tier transitions are idempotent: `if (record.tier >= TARGET_TIER) return`.

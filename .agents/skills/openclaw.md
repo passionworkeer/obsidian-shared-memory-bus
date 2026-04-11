@@ -34,29 +34,8 @@ mcp_server: sequential-thinking (port 9334)
 3. Obsidian app config detection
 4. Default fallback
 
+
 **If resolution fails:** Write `"VAULT_RESOLUTION_FAILED"` to first line of `inbox/openclaw.md` and exit with error.
-
----
-
-## OpenClaw-Native Memory Bridge
-
-OpenClaw already has strong native memory:
-- **Blackboard**: task state, issue tracking, PR status (`ops/obsidian-blackboard-daemon.js`)
-- **Runs/Jobs**: subagent runs, cron jobs, journal entries
-- **Sessions**: daily session logs
-
-These are synced into the shared bus via `ops/sync-openclaw-to-obsidian.js`:
-
-```
-structured/openclaw-blackboard.jsonl   (task state)
-structured/openclaw-runs.jsonl        (subagent runs)
-structured/openclaw-jobs.jsonl        (cron jobs)
-structured/openclaw-journal.jsonl      (journal entries)
-structured/openclaw.jsonl             (sessions)
-```
-
-**Key principle**: The shared `memory` MCP **supplements** OpenClaw's native memory — it does not replace it.
-OpenClaw's task memory remains the authoritative source for task state.
 
 ---
 
@@ -81,12 +60,32 @@ At session start:
     "obsidian": {
       "transport": "http",
       "url": "http://127.0.0.1:9335/mcp"
+    },
+    "context7": {
+      "transport": "http",
+      "url": "http://127.0.0.1:9331/mcp"
+    },
+    "fetch": {
+      "transport": "http",
+      "url": "http://127.0.0.1:9332/mcp"
+    },
+    "time": {
+      "transport": "http",
+      "url": "http://127.0.0.1:9333/mcp"
+    },
+    "sequential-thinking": {
+      "transport": "http",
+      "url": "http://127.0.0.1:9334/mcp"
     }
   }
 }
 ```
 
-The OpenClaw blackboard MCP stays isolated (it manages its own state).
+---
+
+## Rule File Setup
+
+
 
 ---
 
