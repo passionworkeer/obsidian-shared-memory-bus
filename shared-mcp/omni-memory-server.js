@@ -29,7 +29,7 @@ const AI_MEMORY_ROOT = process.env.AI_MEMORY_ROOT || path.resolve(__dirname, "..
 // memory_boot and memory_query — resolves via resolveProjectPath so it works
 // whether AI_MEMORY_ROOT points to the project dir or to a separate data dir.
 const { handlers: mcpMemoryHandlers } = require(
-  resolveProjectPath("ops", "mcp-memory-tools-handler.js")
+  resolveProjectPath("ops", "mcp-memory-tools-handler.cjs")
 );
 const WINDOWS_ENV_CACHE = new Map();
 const RUNTIME_ENV_NAMES = [
@@ -88,9 +88,14 @@ function resolveProjectPath(...parts) {
   return path.join(AI_MEMORY_ROOT, relPath);
 }
 
-function loadVaultResolver() {
-  const helperPath = resolveRuntimePath("vault-root.js", path.join("bus", "vault-root.js"));
+function loadStoreRootHelper() {
+  const helperPath = resolveRuntimePath("store-root.js", path.join("bus", "store-root.js"));
   return require(helperPath);
+}
+
+// Backward compat: still named loadVaultResolver but now loads store-root
+function loadVaultResolver() {
+  return loadStoreRootHelper();
 }
 
 function loadPythonRuntimeHelper() {
@@ -239,7 +244,7 @@ const RUNTIME_ENV = buildMergedEnv();
 const OPENCLAW_HOME = firstNonEmptyEnv("OPENCLAW_HOME") || path.join(USER_HOME, ".openclaw");
 const BLACKBOARD_DB_PATH =
   firstNonEmptyEnv("OPENCLAW_BLACKBOARD_DB") || path.join(OPENCLAW_HOME, "workspace", "ai-shrimp", "blackboard", "tasks.db");
-const { resolveVaultRoot } = loadVaultResolver();
+const { resolveStoreRoot } = loadStoreRootHelper();
 const { resolvePythonRuntime, withPythonArgs } = loadPythonRuntimeHelper();
 const { buildEmbeddingConfigHash } = loadEmbeddingProviderHelper();
 const { buildMemoryIntegrityReport } = loadMemoryContractHelper();
@@ -359,7 +364,7 @@ function refreshMetricsFromFiles() {
       for (const [scope, count] of Object.entries(hygiene.stats?.byScope || {})) {
         METRICS.structured_files_total[`scope:${scope}`] = count;
       }
-      const dreamStatePath = path.join(VAULT_ROOT, "00-System", "ai-memory", "state", "auto-dream-state.json");
+      const dreamStatePath = path.join(STORE_ROOT, "state", "auto-dream-state.json");
       if (fs.existsSync(dreamStatePath)) {
         const dreamState = JSON.parse(fs.readFileSync(dreamStatePath, "utf8"));
         METRICS.promotion_queue_size.promotion = Array.isArray(dreamState.promotionQueue)
@@ -1001,7 +1006,7 @@ async function ensureSearchWorker() {
       windowsHide: true,
       env: {
         ...PYTHON_SPAWN_ENV,
-        AI_MEMORY_OBSIDIAN_VAULT: VAULT_ROOT,
+        AI_MEMORY_STORE: STORE_ROOT,
       },
     });
 
@@ -1124,14 +1129,14 @@ async function getClaudeMemHealth() {
 // Path constants (computed after helpers are loaded)
 // ---------------------------------------------------------------------------
 
-const VAULT_ROOT = resolveVaultRoot();
-const CANONICAL_AI_MEMORY_ROOT = path.join(VAULT_ROOT, "00-System", "ai-memory");
-const STRUCTURED_ROOT = path.join(CANONICAL_AI_MEMORY_ROOT, "structured");
-const GENERATED_ROOT = path.join(CANONICAL_AI_MEMORY_ROOT, "generated");
-const EMBEDDINGS_INDEX_PATH = path.join(VAULT_ROOT, "00-System", "ai-memory", "embeddings", "index.jsonl");
-const HANDOFF_PACK_JSON_PATH = path.join(VAULT_ROOT, "00-System", "ai-memory", "generated", "HANDOFF.json");
-const MEMORY_LAYERS_JSON_PATH = path.join(VAULT_ROOT, "00-System", "ai-memory", "generated", "MEMORY-LAYERS.json");
-const AUTO_DREAM_JSON_PATH = path.join(VAULT_ROOT, "00-System", "ai-memory", "generated", "AUTO-DREAM.json");
+const STORE_ROOT = resolveStoreRoot(); // e.g. "E:\\.ai-memory"
+const MEMORY_STORE_ROOT = STORE_ROOT;
+const STRUCTURED_ROOT = path.join(MEMORY_STORE_ROOT, "structured");
+const GENERATED_ROOT = path.join(MEMORY_STORE_ROOT, "generated");
+const EMBEDDINGS_INDEX_PATH = path.join(MEMORY_STORE_ROOT, "embeddings", "index.jsonl");
+const HANDOFF_PACK_JSON_PATH = path.join(GENERATED_ROOT, "HANDOFF.json");
+const MEMORY_LAYERS_JSON_PATH = path.join(GENERATED_ROOT, "MEMORY-LAYERS.json");
+const AUTO_DREAM_JSON_PATH = path.join(GENERATED_ROOT, "AUTO-DREAM.json");
 
 // ---------------------------------------------------------------------------
 // Module initialization — build params and create all tool modules
@@ -1141,8 +1146,8 @@ const sharedParams = {
   METRICS,
   firstNonEmptyEnv,
   withPythonArgs,
-  VAULT_ROOT,
-  CANONICAL_AI_MEMORY_ROOT,
+  STORE_ROOT,
+  MEMORY_STORE_ROOT,
   STRUCTURED_ROOT,
   GENERATED_ROOT,
   EMBEDDINGS_INDEX_PATH,
@@ -1150,7 +1155,7 @@ const sharedParams = {
   MEMORY_LAYERS_JSON_PATH,
   AUTO_DREAM_JSON_PATH,
   WATCHDOG_STATE_PATH,
-  AI_MEMORY_ROOT,
+  MEMORY_STORE_ROOT,
   BLACKBOARD_DB_PATH,
   CLAUDE_MEM_BASE,
   SEARCH_SCRIPT,
