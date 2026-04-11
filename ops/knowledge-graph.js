@@ -50,11 +50,15 @@ function resolveKgPath(vaultRoot) {
 
 /** Generate a stable entity ID from a name. */
 function entityId(name) {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
+  if (!name || typeof name !== "string") return "_unknown_";
+  // Preserve CJK, Greek, Cyrillic, Arabic, Hebrew characters as-is
+  // Only lowercase ASCII Latin letters; other scripts are case-insensitive by nature
+  const lower = name.replace(/[A-Z]/g, (c) => c.toLowerCase());
+  const sanitized = lower
+    .replace(/[^a-z0-9\u00C0-\u024F\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF\u0400-\u04FF\u0600-\u06FF\u0590-\u05FF\uAC00-\uD7AF]+/g, "_")
     .replace(/^_|_$/g, "")
     .slice(0, 64);
+  return sanitized || "_unknown_";
 }
 
 /** Generate a stable triple ID. */
@@ -634,6 +638,9 @@ class KnowledgeGraph {
    * @returns {string} new triple ID
    */
   upsertTriple(subject, predicate, object, opts = {}) {
+    if (typeof subject !== "string" || typeof predicate !== "string" || typeof object !== "string") {
+      throw new Error("upsertTriple: subject/predicate/object must be strings");
+    }
     const sid        = entityId(subject);
     const oid        = entityId(object);
     const pred       = predicate.toLowerCase().replace(/\s+/g, "_").slice(0, 64);
@@ -674,11 +681,13 @@ class KnowledgeGraph {
     let sql;
     let params;
     if (entityName) {
+      // Normalize entityName so LIKE matches entityId()-stored subjects
+      const normalized = entityId(entityName);
       sql = `SELECT * FROM triples
              WHERE subject LIKE ? AND (valid_to IS NULL OR valid_to > ?)
              ORDER BY confidence DESC, valid_from DESC
              LIMIT ?`;
-      params = [`%${entityName}%`, time, limit];
+      params = [`%${normalized}%`, time, limit];
     } else {
       sql = `SELECT * FROM triples
              WHERE (valid_to IS NULL OR valid_to > ?)
