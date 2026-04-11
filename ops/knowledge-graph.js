@@ -85,8 +85,29 @@ class Db {
   constructor(dbPath, readOnly = false) {
     let { DatabaseSync } = require("node:sqlite");
     this._db = new DatabaseSync(dbPath, { readOnly });
-    this._db.exec("PRAGMA journal_mode = WAL");
-    this._db.exec("PRAGMA foreign_keys = ON");
+    this._execWithRetry("PRAGMA journal_mode = WAL");
+    this._execWithRetry("PRAGMA foreign_keys = ON");
+    // Wait up to 10s for locks to be released before returning SQLITE_BUSY.
+    // WAL mode serialises writers but allows concurrent readers.
+    this._execWithRetry("PRAGMA busy_timeout = 10000");
+  }
+
+  /** Retry an exec up to 3 times with 50ms backoff on SQLITE_BUSY. */
+  _execWithRetry(sql, maxRetries = 3) {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        this._db.exec(sql);
+        return;
+      } catch (err) {
+        if (attempt < maxRetries - 1 && err.code === "ERR_SQLITE_ERROR" && err.errstr && err.errstr.includes("locked")) {
+          // Sleep synchronously using a spin loop (Node SQLite is sync, no setTimeout available here)
+          const end = Date.now() + 50 * Math.pow(2, attempt);
+          while (Date.now() < end) { /* spin */ }
+          continue;
+        }
+        throw err;
+      }
+    }
   }
 
   exec(sql) {
