@@ -95,11 +95,12 @@ function memory_boot({ agent_id: _agent_id, cwd } = {}) {
     };
   }
 
-  // --- L0: read L0-fixed.md (~100 tokens, fixed) ---
-  const L0_FIXED = path.join(vaultRoot, "00-System", "ai-memory", "L0-fixed.md");
-  const l0 = fs.existsSync(L0_FIXED)
-    ? fs.readFileSync(L0_FIXED, "utf-8").trim()
-    : "(no L0-fixed.md)";
+  // --- L0: read generated L0-bootstrap.md (contains real project context + L1 facts) ---
+  const GENERATED_ROOT = path.join(vaultRoot, "00-System", "ai-memory", "generated");
+  const L0_BOOTSTRAP  = path.join(GENERATED_ROOT, "L0-bootstrap.md");
+  const l0 = fs.existsSync(L0_BOOTSTRAP)
+    ? fs.readFileSync(L0_BOOTSTRAP, "utf-8").trim()
+    : "(no L0-bootstrap.md — run build-memory-layers.js first)";
 
   // --- L1: query KG for project-relevant triples (~500 tokens) ---
   let l1 = "（暂无 L1 事实）";
