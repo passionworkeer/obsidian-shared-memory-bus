@@ -51,7 +51,13 @@ function parseArgs(argv) {
 const args = parseArgs(process.argv);
 const serverId = args.get('server-id') || 'shared-mcp';
 const port = Number(args.get('port') || 9330);
-const mcpPath = args.get('path') || '/mcp';
+const mcpPath = (() => {
+  const raw = args.get('path') || '/mcp';
+  // Guard against Git Bash on Windows expanding /mcp to an absolute drive path
+  // such as D:/Git/mcp. In that case, reset to the canonical /mcp.
+  if (/^[A-Za-z]:[/\\]/.test(raw)) return '/mcp';
+  return raw;
+})();
 const healthPath = args.get('health-path') || '/healthz';
 const encodedStdioCommand = args.get('stdio-command-b64');
 const stdioCommand = encodedStdioCommand
