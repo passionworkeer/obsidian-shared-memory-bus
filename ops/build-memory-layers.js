@@ -1970,6 +1970,7 @@ function main() {
     "",
     "@include AUTO-DREAM.md",
     "@include HANDOFF.md",
+    "@include L0-bootstrap.md",
     "",
   ].join("\n");
 
@@ -1981,6 +1982,14 @@ function main() {
   const memoryIndexPath = path.join(GENERATED_ROOT, "MEMORY-INDEX.md");
   writeText(memoryIndexPath, memoryIndex);
   process.stderr.write(`[memory-index] wrote ${memoryIndexPath} (${memoryIndex.length} chars)\n`);
+
+  // Phase 2 L0-L1 bootstrap — runs after all layers are written
+  try {
+    const { buildL0L1Bootstrap } = require("./build-l0-l1-bootstrap.js");
+    buildL0L1Bootstrap(process.cwd());
+  } catch (e) {
+    process.stderr.write(`[L0-L1] bootstrap skipped: ${e.message}\n`);
+  }
 
   process.stdout.write(
     JSON.stringify(
