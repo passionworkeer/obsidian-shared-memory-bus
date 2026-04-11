@@ -9,7 +9,7 @@
 
 "use strict";
 
-const { memory_boot: _boot, memory_query: _query } = require("./mcp-memory-tools.js");
+const { memory_boot: _boot, memory_query: _query } = require("./mcp-memory-tools.cjs");
 
 /** Wrap a sync or async fn → MCP tool handler with error handling. */
 function toolHandler(fn) {
