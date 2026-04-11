@@ -1,0 +1,19 @@
+{
+  "description": "Stop Hook LLM 提取 — 追加到现有 claude-mem hooks，不替换",
+  "mergeStrategy": "append to existing hooks.json, do NOT replace — see README for merge instructions",
+  "version": "1.0.0",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${AI_MEMORY_ROOT}/hooks/stop-hook-llm-extract/stop-extract.mjs\"",
+            "description": "Stop Hook LLM 提取 — 5s 内完成，不阻塞 Claude Code",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -145,9 +145,10 @@ class KnowledgeGraph {
         object       TEXT NOT NULL,
         valid_from   TEXT,
         valid_to     TEXT,
-        confidence   REAL DEFAULT 1.0,
+        confidence   REAL DEFAULT 0.5,
         source_id    TEXT,
         source_file  TEXT,
+        source_scope TEXT DEFAULT 'project',
         extracted_at TEXT DEFAULT CURRENT_TIMESTAMP
       );
 
@@ -227,14 +228,15 @@ class KnowledgeGraph {
    * @returns {string} triple ID
    */
   addTriple(subject, predicate, object, opts = {}) {
-    const sid  = entityId(subject);
-    const oid  = entityId(object);
-    const pred = predicate.toLowerCase().replace(/\s+/g, "_").slice(0, 64);
-    const validFrom   = opts.validFrom   || null;
-    const validTo     = opts.validTo     || null;
-    const confidence  = opts.confidence  ?? 1.0;
-    const sourceId    = opts.sourceId     || null;
-    const sourceFile  = opts.sourceFile   || null;
+    const sid        = entityId(subject);
+    const oid        = entityId(object);
+    const pred       = predicate.toLowerCase().replace(/\s+/g, "_").slice(0, 64);
+    const validFrom  = opts.validFrom    || null;
+    const validTo    = opts.validTo      || null;
+    const confidence = opts.confidence   ?? 0.5;
+    const sourceId   = opts.sourceId      || null;
+    const sourceFile = opts.sourceFile    || null;
+    const sourceScope = opts.sourceScope  || "project";
 
     // Auto-create entity nodes
     this._db.run("INSERT OR IGNORE INTO entities (id, name) VALUES (?, ?)", sid, subject);
@@ -249,9 +251,9 @@ class KnowledgeGraph {
 
     const tid = tripleId(sid, pred, oid, validFrom);
     this._db.run(
-      `INSERT INTO triples (id,subject,predicate,object,valid_from,valid_to,confidence,source_id,source_file)
-       VALUES (?,?,?,?,?,?,?,?,?)`,
-      tid, sid, pred, oid, validFrom, validTo, confidence, sourceId, sourceFile
+      `INSERT INTO triples (id,subject,predicate,object,valid_from,valid_to,confidence,source_id,source_file,source_scope)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      tid, sid, pred, oid, validFrom, validTo, confidence, sourceId, sourceFile, sourceScope
     );
     return tid;
   }
@@ -602,6 +604,113 @@ class KnowledgeGraph {
         created_at: row.created_at,
       }));
   }
+
+  // ── Temporal / scoped query methods ────────────────────────────────────
+
+  /**
+   * Upsert a relationship triple: expire any active identical triple first,
+   * then insert the new version with updated validity window and confidence.
+   * Use this when the same fact can change over time (e.g., role reassignment).
+   *
+   * @param {string} subject
+   * @param {string} predicate
+   * @param {string} object
+   * @param {{ validFrom?: string, validTo?: string, confidence?: number,
+   *           sourceId?: string, sourceFile?: string, sourceScope?: string }} [opts]
+   * @returns {string} new triple ID
+   */
+  upsertTriple(subject, predicate, object, opts = {}) {
+    const sid        = entityId(subject);
+    const oid        = entityId(object);
+    const pred       = predicate.toLowerCase().replace(/\s+/g, "_").slice(0, 64);
+    const validFrom  = opts.validFrom   || new Date().toISOString();
+    const validTo    = opts.validTo     || null;
+    const confidence = opts.confidence  ?? 0.5;
+    const sourceId   = opts.sourceId    || null;
+    const sourceFile = opts.sourceFile  || null;
+    const sourceScope = opts.sourceScope || "project";
+
+    // Expire all currently-active identical triples so only one is current at a time
+    this._db.run(
+      "UPDATE triples SET valid_to=? WHERE subject=? AND predicate=? AND object=? AND valid_to IS NULL",
+      validFrom, sid, pred, oid
+    );
+
+    const tid = tripleId(sid, pred, oid, validFrom);
+    this._db.run(
+      `INSERT INTO triples (id,subject,predicate,object,valid_from,valid_to,confidence,source_id,source_file,source_scope)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      tid, sid, pred, oid, validFrom, validTo, confidence, sourceId, sourceFile, sourceScope
+    );
+    return tid;
+  }
+
+  /**
+   * Query triples currently valid at a point in time (valid_to IS NULL or > validAt).
+   *
+   * @param {object} opts
+   * @param {string} [opts.entityName]  — filter by entity name (LIKE %entityName%)
+   * @param {string} [opts.validAt]     — ISO timestamp; defaults to now
+   * @param {number} [opts.limit]        — max rows returned (default 50)
+   * @returns {object[]}
+   */
+  queryCurrentTriples({ entityName = "", validAt = null, limit = 50 } = {}) {
+    const time = validAt || new Date().toISOString();
+
+    let sql;
+    let params;
+    if (entityName) {
+      sql = `SELECT * FROM triples
+             WHERE subject LIKE ? AND (valid_to IS NULL OR valid_to > ?)
+             ORDER BY confidence DESC, valid_from DESC
+             LIMIT ?`;
+      params = [`%${entityName}%`, time, limit];
+    } else {
+      sql = `SELECT * FROM triples
+             WHERE (valid_to IS NULL OR valid_to > ?)
+             ORDER BY confidence DESC, valid_from DESC
+             LIMIT ?`;
+      params = [time, limit];
+    }
+
+    const rows = this._db.all(sql, ...params);
+    return rows.map((row) => ({
+        subject:     row.subject,
+        predicate:   row.predicate,
+        object:      row.object,
+        valid_from:  row.valid_from,
+        valid_to:    row.valid_to,
+        confidence:  row.confidence,
+        source_scope: row.source_scope,
+        current:     row.valid_to === null,
+      }));
+  }
+
+  /**
+   * Increment the confidence score for an entity.
+   * When the same entity is observed across multiple projects it becomes more trusted.
+   *
+   * @param {string} entityName
+   * @param {number} [delta=0.05] — amount to add (capped at 1.0)
+   */
+  incrementConfidence(entityName, delta = 0.05) {
+    const eid = entityId(entityName);
+
+    // Find all active triples for this entity (as subject or object)
+    const rows = this._db.all(
+      `SELECT id, confidence FROM triples
+          WHERE (subject = ? OR object = ?)
+            AND (valid_to IS NULL OR valid_to > ?)
+          LIMIT 100`,
+      eid, eid, new Date().toISOString()
+    );
+
+    for (const row of rows) {
+      const current = row.confidence ?? 0.5;
+      const updated = Math.min(1.0, current + delta);
+      this._db.run("UPDATE triples SET confidence = ? WHERE id = ?", updated, row.id);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -626,13 +735,25 @@ if (require.main === module) {
         case "add": {
           const [subject, predicate, object] = args;
           if (!subject || !predicate || !object) {
-            console.error("Usage: node knowledge-graph.js add <subject> <predicate> <object> [--valid-from YYYY-MM-DD]");
+            console.error("Usage: node knowledge-graph.js add <subject> <predicate> <object> [--valid-from YYYY-MM-DD] [--source-scope project|shared|archive]");
             process.exit(1);
           }
-          const vfIdx = args.indexOf("--valid-from");
+          const vfIdx    = args.indexOf("--valid-from");
           const validFrom = vfIdx >= 0 ? args[vfIdx + 1] : null;
-          const tid = kg.addTriple(subject, predicate, object, { validFrom });
+          const ssIdx    = args.indexOf("--source-scope");
+          const sourceScope = ssIdx >= 0 ? args[ssIdx + 1] : "project";
+          const tid = kg.addTriple(subject, predicate, object, { validFrom, sourceScope });
           console.log(`Added: ${subject} --${predicate}--> ${object}  [${tid}]`);
+          break;
+        }
+        case "upsert": {
+          const [subject, predicate, object] = args;
+          if (!subject || !predicate || !object) {
+            console.error("Usage: node knowledge-graph.js upsert <subject> <predicate> <object>");
+            process.exit(1);
+          }
+          const tid = kg.upsertTriple(subject, predicate, object);
+          console.log(`Upserted: ${subject} --${predicate}--> ${object}  [${tid}]`);
           break;
         }
         case "query": {
@@ -669,7 +790,7 @@ if (require.main === module) {
           break;
         }
         default:
-          console.error("Actions: add | query | stats | timeline | invalidate | search");
+          console.error("Actions: add | upsert | query | stats | timeline | invalidate | search");
           process.exit(1);
       }
     } finally {
