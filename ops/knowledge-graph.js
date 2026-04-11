@@ -201,9 +201,13 @@ class KnowledgeGraph {
   addEntity(name, type = "unknown", properties = {}) {
     const eid = entityId(name);
     const existing = this._db.get("SELECT properties, type FROM entities WHERE id = ?", eid);
-    const mergedProps = existing
-      ? { ...JSON.parse(existing.properties || "{}"), ...properties }
-      : properties;
+    const mergedProps = (() => {
+      try {
+        return existing ? { ...JSON.parse(existing.properties || "{}"), ...properties } : properties;
+      } catch (_) {
+        return properties; // corrupt JSON — discard and use fresh
+      }
+    })();
     // Keep the most-specific type seen so far (person > project > concept > tool > unknown)
     const TYPE_RANK = { person: 5, project: 4, concept: 3, tool: 2, unknown: 1 };
     const rank = (t) => TYPE_RANK[t] ?? 0;
@@ -458,7 +462,7 @@ class KnowledgeGraph {
            JOIN entities s ON t.subject = s.id
            JOIN entities o ON t.object  = o.id
           WHERE t.subject = ? OR t.object = ?
-          ORDER BY t.valid_from ASC NULLS LAST
+          ORDER BY CASE WHEN t.valid_from IS NULL THEN 1 ELSE 0 END, t.valid_from ASC
           LIMIT 200`,
         eid, eid
       ).map(r => ({
@@ -475,7 +479,7 @@ class KnowledgeGraph {
          FROM triples t
          JOIN entities s ON t.subject = s.id
          JOIN entities o ON t.object  = o.id
-        ORDER BY t.valid_from ASC NULLS LAST
+        ORDER BY CASE WHEN t.valid_from IS NULL THEN 1 ELSE 0 END, t.valid_from ASC
         LIMIT 200`
     ).map(r => ({
       subject:   r.sub_name,
@@ -516,12 +520,14 @@ class KnowledgeGraph {
   getEntity(name) {
     const row = this._db.get("SELECT * FROM entities WHERE id = ?", entityId(name));
     if (!row) return null;
+    let props = {};
+    try { props = JSON.parse(row.properties || "{}"); } catch (_) { /* corrupt — use {} */ }
     return {
       ok: true,
       id: row.id,
       name: row.name,
       type: row.type,
-      properties: JSON.parse(row.properties || "{}"),
+      properties: props,
       created_at: row.created_at,
     };
   }
@@ -573,13 +579,17 @@ class KnowledgeGraph {
     };
 
     return rows
-      .map((row) => ({
-        id:         row.id,
-        name:       row.name,
-        type:       row.type,
-        relevance:  score(row.name),
-        properties: JSON.parse(row.properties || "{}"),
-      }))
+      .map((row) => {
+        let props = {};
+        try { props = JSON.parse(row.properties || "{}"); } catch (_) { /* corrupt */ }
+        return {
+          id:         row.id,
+          name:       row.name,
+          type:       row.type,
+          relevance:  score(row.name),
+          properties: props,
+        };
+      })
       .filter((e) => e.relevance > 0)
       .sort((a, b) => {
         if (b.relevance !== a.relevance) return b.relevance - a.relevance;
@@ -596,13 +606,17 @@ class KnowledgeGraph {
   getEntitiesByType(type) {
     return this._db
       .all("SELECT * FROM entities WHERE type = ? ORDER BY name", type)
-      .map((row) => ({
-        id:         row.id,
-        name:       row.name,
-        type:       row.type,
-        properties: JSON.parse(row.properties || "{}"),
-        created_at: row.created_at,
-      }));
+      .map((row) => {
+        let props = {};
+        try { props = JSON.parse(row.properties || "{}"); } catch (_) { /* corrupt */ }
+        return {
+          id:         row.id,
+          name:       row.name,
+          type:       row.type,
+          properties: props,
+          created_at: row.created_at,
+        };
+      });
   }
 
   // ── Temporal / scoped query methods ────────────────────────────────────
@@ -705,10 +719,17 @@ class KnowledgeGraph {
       eid, eid, new Date().toISOString()
     );
 
-    for (const row of rows) {
-      const current = row.confidence ?? 0.5;
-      const updated = Math.min(1.0, current + delta);
-      this._db.run("UPDATE triples SET confidence = ? WHERE id = ?", updated, row.id);
+    this._db.exec("BEGIN TRANSACTION");
+    try {
+      for (const row of rows) {
+        const current = row.confidence ?? 0.5;
+        const updated = Math.min(1.0, current + delta);
+        this._db.run("UPDATE triples SET confidence = ? WHERE id = ?", updated, row.id);
+      }
+      this._db.exec("COMMIT");
+    } catch(e) {
+      this._db.exec("ROLLBACK");
+      throw e;
     }
   }
 }

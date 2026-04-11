@@ -17,9 +17,30 @@ const PENDING_JSONL = path.join(VAULT_ROOT, '00-System/ai-memory/structured/pend
 
 // === stdin 读取（Claude Code Hook JSON）===
 function readStdin() {
-  let data = ''
-  process.stdin.on('data', chunk => { data += chunk })
-  return new Promise(resolve => process.stdin.on('end', () => resolve(JSON.parse(data || '{}'))))
+  return new Promise((resolve) => {
+    const chunks = []
+    process.stdin.on('data', chunk => chunks.push(chunk))
+    process.stdin.on('end', () => {
+      const data = chunks.join('')
+      try {
+        resolve(JSON.parse(data || '{}'))
+      } catch (_) {
+        resolve({}) // graceful fallback
+      }
+    })
+  })
+}
+
+// === Markdown 转义 ===
+function escapeForMarkdown(str) {
+  return String(str)
+    .replace(/\\/g, '\\\\')
+    .replace(/\[/g, '\\[')
+    .replace(/\]/g, '\\]')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)')
+    .replace(/^#\s/mg, '\\# ')
+    .replace(/`/g, '\\`')
 }
 
 // === 去重检测 ===
@@ -73,6 +94,13 @@ async function extractFacts(content) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
 
+  const allowedBase = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(\:\d+)?$/
+  if (!allowedBase.test(API_BASE)) {
+    clearTimeout(timer)
+    console.error('[stop-extract] ANTHROPIC_BASE_URL must be localhost/loopback, skipping extraction')
+    process.exit(0)
+  }
+
   try {
     const response = await fetch(`${API_BASE}/v1/messages`, {
       method: 'POST',
@@ -125,11 +153,11 @@ function writeToInbox(sessionId, cwd, result) {
   const lines = [
     `\n## [session] ${result.session_type} | ${date}`,
     ``,
-    result.summary ? `> ${result.summary}` : '',
+    result.summary ? `> ${escapeForMarkdown(result.summary)}` : '',
     ``,
-    result.facts.length ? `**事实：**\n${result.facts.map(f => `- ${f}`).join('\n')}` : '',
-    result.decisions.length ? `**决策：**\n${result.decisions.map(d => `- ${d}`).join('\n')}` : '',
-    result.entities.length ? `**实体：**\n${result.entities.map(e => `- [[${e.name}]] (${e.type})`).join('\n')}` : '',
+    result.facts.length ? `**事实：**\n${result.facts.map(f => `- ${escapeForMarkdown(f)}`).join('\n')}` : '',
+    result.decisions.length ? `**决策：**\n${result.decisions.map(d => `- ${escapeForMarkdown(d)}`).join('\n')}` : '',
+    result.entities.length ? `**实体：**\n${result.entities.map(e => `- [[${escapeForMarkdown(e.name)}]] (${e.type})`).join('\n')}` : '',
     ``,
     `---`,
     `来源：session_${sessionId} | cwd: ${cwd}`,
@@ -181,12 +209,44 @@ function writePending(sessionId, cwd, transcriptPath, reason) {
   }) + '\n', 'utf-8')
 }
 
+// === Phase 1+3: 写入实体到 KG（提取成功后调用）=======================
+async function writeEntitiesToKg(cwd, entities) {
+  const project_key = path.basename(cwd)
+  try {
+    // knowledge-graph.js 是 CommonJS，使用 createRequire 兼容 ESM
+    const { KnowledgeGraph } = await import(
+      new URL('../../../ops/knowledge-graph.js', import.meta.url).href
+    )
+    const kg = new KnowledgeGraph({ vaultRoot: VAULT_ROOT })
+    for (const entity of entities || []) {
+      kg.upsertTriple({
+        subject:      entity.name,
+        subject_type: entity.type,
+        predicate:    'mentioned_in',
+        object:       project_key,
+        source_scope: 'project',
+      })
+    }
+    kg.close()
+  } catch (e) {
+    // Non-fatal: KG 写入失败不影响主流程，只记录日志
+    console.error(`[stop-extract] KG write failed: ${e.message}`)
+  }
+}
+
 // === 主流程 ===
 async function main() {
   const input = await readStdin()
   const cwd = process.argv[2] || input.cwd || ''
   const sessionId = process.argv[3] || input.session_id || `unknown_${Date.now()}`
   const transcriptPath = process.argv[4] || input.transcript_path || ''
+
+  // Reject paths outside Claude Code session directory
+  const sessionDir = process.env.CLAUDE_SESSION_DIR || path.join(process.env.APPDATA || '', '.claude', 'sessions')
+  if (!transcriptPath.startsWith(sessionDir) && !transcriptPath.includes(path.join('.claude', 'sessions'))) {
+    console.error('[stop-extract] transcript_path not in allowed session directory, skipping')
+    process.exit(0)
+  }
 
   // 前置检查
   if (!transcriptPath || !existsSync(transcriptPath)) {
@@ -209,6 +269,8 @@ async function main() {
     const result = await extractFacts(slice.content)
     writeToInbox(sessionId, cwd, result)
     writeToJsonl(sessionId, cwd, result)
+    // Phase 1+3 integration: write extracted entities to the KG
+    await writeEntitiesToKg(cwd, result.entities)
   } catch (e) {
     // 超时或其他错误：写 pending，下次 SessionStart 补提取
     writePending(sessionId, cwd, transcriptPath, e.message || 'timeout')
