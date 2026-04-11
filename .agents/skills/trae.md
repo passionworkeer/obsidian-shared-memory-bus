@@ -54,8 +54,6 @@ max_items: 3   (compact — Trae sessions are typically IDE-bound and short)
 
 ## MCP Configuration
 
-Trae supports MCP servers via its settings UI. Add these as HTTP MCP servers:
-
 ```json
 {
   "mcpServers": {
@@ -92,6 +90,7 @@ Trae supports MCP servers via its settings UI. Add these as HTTP MCP servers:
 ## Rule File Setup
 
 Add to Trae's user rules or project rules:
+
 ```
 Reference: <repo-root>/SKILL.md
 ```

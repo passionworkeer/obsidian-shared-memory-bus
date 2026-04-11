@@ -521,6 +521,112 @@ Only include records that are genuinely relevant. Return fewer than max_results 
     }
   }
 
+  // ── KG stats ───────────────────────────────────────────────────────────
+
+  async function handleGetKgStats(_args) {
+    const kg = loadKnowledgeGraph();
+    if (!kg) return errorResult("knowledge-graph-unavailable: run build-memory-layers.js first");
+    try {
+      const stats = kg.stats();
+      // Get entity counts by type via the known type list
+      const knownTypes = ["person", "project", "concept", "tool", "org", "location", "unknown"];
+      const entitiesByType = {};
+      let totalFromTypes = 0;
+      for (const t of knownTypes) {
+        const rows = kg.getEntitiesByType(t);
+        entitiesByType[t] = rows.length;
+        totalFromTypes += rows.length;
+      }
+      // Handle any unknown custom types not in the known list
+      if (totalFromTypes < stats.entities) {
+        entitiesByType["other"] = stats.entities - totalFromTypes;
+      }
+      return jsonResult({
+        ok: true,
+        totalEntities: stats.entities,
+        totalRelationships: stats.triples,
+        currentFacts: stats.currentFacts,
+        expiredFacts: stats.expiredFacts,
+        relationshipTypes: stats.relationshipTypes,
+        entitiesByType,
+      });
+    } finally {
+      try { kg.close(); } catch {}
+    }
+  }
+
+  async function handleQueryKg(args) {
+    const query = String(args.query || "").trim();
+    if (!query) return errorResult("query is required");
+    const limit = Math.max(1, Number(args.limit ?? 10) || 10);
+    const typeFilter = args.type ? String(args.type).trim() : null;
+
+    const kg = loadKnowledgeGraph();
+    if (!kg) return errorResult("knowledge-graph-unavailable: run build-memory-layers.js first");
+    try {
+      let matched = kg.searchEntities(query, { limit });
+      if (typeFilter) {
+        matched = matched.filter((e) => e.type === typeFilter);
+      }
+      const results = [];
+      for (const entity of matched.slice(0, limit)) {
+        const rels = kg.queryEntity(entity.name, { direction: "both" });
+        results.push({ entity, relationships: rels.slice(0, limit) });
+      }
+      return jsonResult({
+        ok: true,
+        query,
+        typeFilter,
+        totalMatched: matched.length,
+        results,
+      });
+    } finally {
+      try { kg.close(); } catch {}
+    }
+  }
+
+  async function handleGetEntities(args) {
+    const entityType = String(args.entityType || "").trim();
+    if (!entityType) return errorResult("entityType is required");
+    const limit = Math.max(1, Number(args.limit ?? 50) || 50);
+
+    const kg = loadKnowledgeGraph();
+    if (!kg) return errorResult("knowledge-graph-unavailable: run build-memory-layers.js first");
+    try {
+      const rows = kg.getEntitiesByType(entityType);
+      return jsonResult({
+        ok: true,
+        entityType,
+        total: rows.length,
+        entities: rows.slice(0, limit),
+      });
+    } finally {
+      try { kg.close(); } catch {}
+    }
+  }
+
+  async function handleGetRelationships(args) {
+    const entityName = String(args.entityName || "").trim();
+    if (!entityName) return errorResult("entityName is required");
+    const direction = args.direction || "both";
+    const limit = Math.max(1, Number(args.limit ?? 50) || 50);
+
+    const kg = loadKnowledgeGraph();
+    if (!kg) return errorResult("knowledge-graph-unavailable: run build-memory-layers.js first");
+    try {
+      const rels = kg.queryEntity(entityName, { direction });
+      return jsonResult({
+        ok: true,
+        entityName,
+        direction,
+        total: rels.length,
+        relationships: rels.slice(0, limit),
+      });
+    } finally {
+      try { kg.close(); } catch {}
+    }
+  }
+
   return {
     handlers: {
       search_shared_memory: handleSearchSharedMemory,
@@ -530,6 +636,10 @@ Only include records that are genuinely relevant. Return fewer than max_results 
       clear_shared_memory_search_cache: handleClearSharedMemorySearchCache,
       get_entity_info: handleGetEntityInfo,
       search_by_entity: handleSearchByEntity,
+      get_kg_stats: handleGetKgStats,
+      query_kg: handleQueryKg,
+      get_entities: handleGetEntities,
+      get_relationships: handleGetRelationships,
     },
   };
 }
