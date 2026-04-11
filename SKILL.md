@@ -9,6 +9,37 @@ version: 1.0.0
 > Any AI agent that reads this file can onboard to the shared memory bus.
 > Clone the repo, read this file, follow the 5 steps. That's it.
 
+## Vault Path Resolution
+
+`<obsidian-vault>` resolves in this order:
+
+| Priority | Source | Windows Default | macOS/Linux Default |
+|----------|--------|-----------------|---------------------|
+| 1 | `AI_MEMORY_OBSIDIAN_VAULT` env var | Any path | Any path |
+| 2 | `OBSIDIAN_VAULT_ROOT` env var | Any path | Any path |
+| 3 | Obsidian app config | `%APPDATA%\obsidian\obsidian.json` | `~/Library/Application Support/obsidian/obsidian.json` |
+| 4 | Default fallback | `E:\desktop\Obsidian Vault` | `~/Obsidian Vault` |
+
+**If you cannot resolve `<obsidian-vault>`:**
+- Write `"VAULT_RESOLUTION_FAILED"` to the first line of `inbox/<agent>.md`
+- Exit with a clear error message explaining which resolution methods failed
+- Agents without environment variable injection: use the MCP `obsidian` tool to dynamically discover the vault root path
+
+**Expected vault structure:**
+```
+<obsidian-vault>/
+  00-System/ai-memory/
+    inbox/          ← agent writeback
+    structured/     ← JSONL records
+    generated/      ← derived artifacts
+    embeddings/     ← BM25 + dense index
+    kg/             ← knowledge graph SQLite
+  02-KB/
+    OBSIDIAN.md
+    MEMORY.md
+    WORKING.md
+```
+
 ## 5-Step Quick Start
 
 1. **Read canonical vault order** (see Vault Path Resolution below):
@@ -90,16 +121,7 @@ For project-level facts: write to a note at `<obsidian-vault>/<project>/MEMORY.m
 
 **Must resolve `<obsidian-vault>` before reading. If resolution fails, exit immediately with an error.**
 
-Resolution priority:
-1. `AI_MEMORY_OBSIDIAN_VAULT` environment variable
-2. `OBSIDIAN_VAULT_ROOT` environment variable
-3. Obsidian app config on Windows/macOS/Linux
-4. Default fallback: `~/Obsidian Vault` or `~/Documents/Obsidian Vault`
-
-**If you cannot resolve `<obsidian-vault>`:**
-- Write `"VAULT_RESOLUTION_FAILED"` to the first line of `inbox/<agent>.md`
-- Exit with a clear error message explaining which resolution methods failed
-- Agents without environment variable injection: use the MCP `obsidian` tool to dynamically discover the vault root path
+See the **Vault Path Resolution** reference box at the top of this file for the full resolution order, expected vault structure, and failure behavior.
 
 ---
 

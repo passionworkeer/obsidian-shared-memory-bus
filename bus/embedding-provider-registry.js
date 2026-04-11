@@ -1,26 +1,8 @@
-const crypto = require("crypto");
 const { spawn } = require("child_process");
+const { buildEmbeddingConfigHash, normalizeEmbeddingAdapter } = require("./shared-crypto.js");
 
 function normalizeString(value) {
   return String(value || "").trim();
-}
-
-function normalizeEmbeddingAdapter(value, fallback = "") {
-  const normalized = normalizeString(value).toLowerCase();
-  if (!normalized) {
-    return normalizeString(fallback).toLowerCase();
-  }
-
-  if (normalized === "openai") {
-    return "openai-compatible";
-  }
-  if (normalized === "hashing") {
-    return "hash";
-  }
-  if (normalized === "sentence-transformer" || normalized === "sentence-transformers") {
-    return "transformer";
-  }
-  return normalized;
 }
 
 function getProviderHost(baseUrl) {
@@ -32,18 +14,6 @@ function getProviderHost(baseUrl) {
   } catch (_error) {
     return "";
   }
-}
-
-function buildEmbeddingConfigHash({ backend, modelName, baseUrl = "" }) {
-  const normalizedBackend = normalizeEmbeddingAdapter(backend, modelName);
-  const normalizedBaseUrl =
-    normalizedBackend === "openai-compatible" ? normalizeString(baseUrl).replace(/\/+$/, "") : "";
-  const payload = JSON.stringify({
-    backend: normalizedBackend,
-    model: normalizeString(modelName),
-    baseUrl: normalizedBaseUrl.toLowerCase(),
-  });
-  return crypto.createHash("sha1").update(payload).digest("hex").slice(0, 16);
 }
 
 function createEmbeddingProviderRegistry(options = {}) {
@@ -98,17 +68,23 @@ json.dump([vector.tolist() for vector in vectors], sys.stdout)
       });
 
       let stdout = "";
-      let stderr = "";
+      // FIX: Drain stderr immediately on each chunk to prevent buffer deadlock.
+      // The Python embedding worker emits errors/logs to stderr — never accumulate.
+      child.stderr.on("data", (chunk) => {
+        const text = chunk.toString("utf8").trim();
+        if (text) {
+          console.error("[python-embedding-worker]", text);
+        }
+      });
       child.stdout.on("data", (chunk) => {
         stdout += chunk.toString();
       });
-      child.stderr.on("data", (chunk) => {
-        stderr += chunk.toString();
+      child.on("error", (err) => {
+        reject(new Error(`embedding-process-error: ${err.message}`));
       });
-      child.on("error", reject);
       child.on("close", (code) => {
         if (code !== 0) {
-          reject(new Error(stderr.trim() || `embedding-process-exit-${code}`));
+          reject(new Error(`embedding-process-exit-${code}`));
           return;
         }
         try {

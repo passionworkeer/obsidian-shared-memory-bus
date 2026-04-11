@@ -1,6 +1,8 @@
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
+const readline = require("readline");
+const { createJsonlStream } = require("./jsonl-stream.js");
 const {
   buildGeneratedArtifactMetadata,
   MEMORY_RECORD_SCHEMA_VERSION,
@@ -178,15 +180,16 @@ function getTargetJsonl(record) {
 /**
  * Patch a single record in a JSONL file by id (immutable rewrite).
  * Only rewrites the line matching the given id — other lines untouched.
+ * Uses exclusive file lock to prevent concurrent write corruption.
  * @param {string} jsonlPath
  * @param {string} recordId
  * @param {object} enriched  — record with entities/facts/concepts added
  */
 function patchJsonlRecord(jsonlPath, recordId, enriched) {
-  try {
-    const lines = fs.readFileSync(jsonlPath, "utf-8").split("\n");
+  withFileLock(jsonlPath, (fd) => {
+    const content = fs.readFileSync(jsonlPath, "utf-8");
     let changed = false;
-    const patched = lines.map((line) => {
+    const patched = content.split("\n").map((line) => {
       if (!line.trim()) return line;
       try {
         const rec = JSON.parse(line);
@@ -200,7 +203,7 @@ function patchJsonlRecord(jsonlPath, recordId, enriched) {
           const seenFacts = new Set(existingFacts.map((f) => typeof f === "string" ? f : f.value));
           const seenConcepts = new Set(existingConcepts.map((c) => typeof c === "string" ? c : c.value));
 
-          return JSON.stringify({
+          const result = JSON.stringify({
             ...rec,
             entities: enriched.entities || rec.entities || [],
             facts: [
@@ -213,16 +216,151 @@ function patchJsonlRecord(jsonlPath, recordId, enriched) {
             ],
           });
           changed = true;
+          return result;
         }
       } catch {}
       return line;
     });
     if (changed) {
       fs.writeFileSync(jsonlPath, patched.join("\n"), "utf-8");
+      if (fd >= 0) fs.fsyncSync(fd);  // durability before close (no-op in fallback mode)
     }
-  } catch {
-    // Non-fatal: patch failures should not break the pipeline
+  });
+}
+
+/**
+ * Acquire an exclusive lock on a file, execute fn, then unlock and close.
+ * Uses exponential backoff (100ms, 200ms, 400ms) up to 3 retries.
+ * Falls back to lock-free atomic write when tryLockSync is unavailable (e.g. some Windows builds).
+ * @param {string} filePath
+ * @param {function(number): void} fn  - receives the file descriptor
+ */
+function withFileLock(filePath, fn) {
+  const MAX_RETRIES = 3;
+  const BASE_DELAY_MS = 100;
+
+  // Detect availability of tryLockSync (not available on some Node.js/Windows builds)
+  const supportsTryLock = typeof fs.tryLockSync === "function";
+
+  if (!supportsTryLock) {
+    // Fallback: use a cross-process lock file (.lock suffix) as semaphore.
+    // The lock is advisory — all concurrent writers must cooperate.
+    const lockFile = `${filePath}.lock`;
+    let lockFd = null;
+    let attempt = 0;
+
+    const wait = (delay) => {
+      const start = Date.now();
+      while (Date.now() - start < delay) { /* spin */ }
+    };
+
+    while (attempt < MAX_RETRIES) {
+      attempt++;
+      try {
+        // Ensure the target file exists (create it if needed)
+        if (!fs.existsSync(filePath)) {
+          fs.writeFileSync(filePath, "", "utf8");
+        }
+        // Try to create/open the lock file exclusively
+        lockFd = fs.openSync(lockFile, "w+");
+        // If the lock file is non-empty, another process holds the lock
+        const content = fs.readFileSync(lockFile, "utf8");
+        if (content && content.trim()) {
+          // Another process holds the lock
+          fs.closeSync(lockFd);
+          lockFd = null;
+          if (attempt < MAX_RETRIES) {
+            wait(BASE_DELAY_MS * Math.pow(2, attempt - 1));
+          }
+          continue;
+        }
+        // Write PID as lock token
+        fs.writeFileSync(lockFile, `${process.pid}`, "utf8");
+        try {
+          fn(-1);  // no valid fd in fallback mode
+          return;
+        } finally {
+          try { fs.unlinkSync(lockFile); } catch {}
+          if (lockFd !== null) {
+            try { fs.closeSync(lockFd); } catch {}
+          }
+        }
+      } catch (err) {
+        if (attempt >= MAX_RETRIES) {
+          throw new Error(
+            `[withFileLock] could not acquire lock on ${filePath} after ${MAX_RETRIES} attempts: ${err.message}`
+          );
+        }
+        if (lockFd !== null) {
+          try { fs.closeSync(lockFd); } catch {}
+        }
+        lockFd = null;
+        wait(BASE_DELAY_MS * Math.pow(2, attempt - 1));
+      }
+    }
+    throw new Error(`[withFileLock] could not acquire lock on ${filePath}: lock held after ${MAX_RETRIES} retries`);
   }
+
+  // Primary path: use native tryLockSync / unlockSync
+  let fd = null;
+  let attempt = 0;
+
+  while (attempt < MAX_RETRIES) {
+    attempt++;
+    try {
+      fd = fs.openSync(filePath, "r+");
+      if (fs.tryLockSync(fd, "ex")) {
+        try {
+          fn(fd);
+          return;
+        } finally {
+          try { fs.unlockSync(fd); } catch {}
+          try { fs.closeSync(fd); } catch {}
+        }
+      } else {
+        // Lock held by another process — close and retry with backoff
+        try { fs.closeSync(fd); } catch {}
+        fd = null;
+        if (attempt < MAX_RETRIES) {
+          const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1);
+          const start = Date.now();
+          while (Date.now() - start < delay) { /* spin */ }
+        }
+      }
+    } catch (err) {
+      if (err.code === "ENOENT") {
+        // File doesn't exist yet — create it with 'w' flag, lock, then proceed
+        try {
+          fd = fs.openSync(filePath, "w");
+          if (fs.tryLockSync(fd, "ex")) {
+            try {
+              fn(fd);
+              return;
+            } finally {
+              try { fs.unlockSync(fd); } catch {}
+              try { fs.closeSync(fd); } catch {}
+            }
+          } else {
+            try { fs.closeSync(fd); } catch {}
+          }
+        } catch {}
+      }
+      if (attempt >= MAX_RETRIES) {
+        throw new Error(
+          `[withFileLock] could not acquire lock on ${filePath} after ${MAX_RETRIES} attempts: ${err.message}`
+        );
+      }
+      try { if (fd) fs.closeSync(fd); } catch {}
+      fd = null;
+      const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1);
+      const start = Date.now();
+      while (Date.now() - start < delay) { /* spin */ }
+    }
+  }
+
+  throw new Error(
+    `[withFileLock] could not acquire lock on ${filePath}: lock held after ${MAX_RETRIES} retries`
+  );
 }
 
 function readText(filePath) {
@@ -238,7 +376,10 @@ function writeText(filePath, content) {
 }
 
 function normalizeSpaces(value) {
-  return String(value || "").replace(/\s+/g, " ").trim();
+  return String(value || "")
+    .replace(/\uFEFF/g, "")   // strip BOM
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 // ---------------------------------------------------------------------------
@@ -345,9 +486,7 @@ function getFreshness(isoTimestamp) {
     return "unknown";
   }
   const ageMs = Date.now() - new Date(isoTimestamp).getTime();
-  if (!Number.isFinite(ageMs)) {
-    return "unknown";
-  }
+  if (!Number.isFinite(ageMs)) return "unknown";  // guard: invalid date string
   if (ageMs <= 24 * 60 * 60 * 1000) {
     return "hot";
   }
@@ -369,11 +508,16 @@ function buildPromotionKey({
   title = "",
   content = "",
   sourceRecordId = "",
+  id = "",
+  t = "",
 } = {}) {
   const normalizedTargetScope = normalizeSpaces(durableType || fallbackScope || "record").toLowerCase();
   const normalizedProject = normalizeSpaces(project || workspace).toLowerCase();
   const text = normalizeSpaces([title, content].filter(Boolean).join(" ")).toLowerCase();
   const normalizedSourceRecordId = normalizeSpaces(sourceRecordId).toLowerCase();
+  // Salt fields: id and timestamp prevent hash collisions from content truncation
+  const idSalt = normalizeSpaces(id || "").toLowerCase();
+  const tSalt = normalizeSpaces(t || "").toLowerCase();
   const tokens = tokenize(text)
     .map((token) => token.trim())
     .filter((token) => token.length >= 3)
@@ -390,7 +534,7 @@ function buildPromotionKey({
     return "";
   }
 
-  return sha1(`${normalizedTargetScope}|${normalizedProject}|${fingerprint}`);
+  return sha1(`${normalizedTargetScope}|${normalizedProject}|${idSalt}|${tSalt}|${fingerprint}`);
 }
 
 function classifyScope(text, toolName) {
@@ -932,6 +1076,26 @@ function parseStructuredJsonl(filePath, defaults = {}) {
   return records;
 }
 
+/**
+ * Stream-parse a JSONL file and coerce each line to a structured record.
+ * Uses createJsonlStream to avoid loading the entire file into memory.
+ * Returns an array (consumes the async generator eagerly).
+ *
+ * @param {string} filePath
+ * @param {object} defaults
+ * @returns {Promise<object[]>}
+ */
+async function loadStructuredRecords(filePath, defaults = {}) {
+  const records = [];
+  for await (const payload of createJsonlStream(filePath)) {
+    const record = coerceStructuredRecord(payload, defaults);
+    if (record) {
+      records.push(record);
+    }
+  }
+  return records;
+}
+
 function parseTaskMemoryEntries() {
   const sources = [
     {
@@ -1045,7 +1209,7 @@ function buildDailyLogEntry(record) {
 /**
  * Appends new records to daily log files (logs/YYYY/MM/YYYY-MM-DD.jsonl).
  * Only appends records from today and yesterday — never rewrites history.
- * Uses atomic write: write to .tmp, fsync, rename.
+ * Uses exclusive file lock around the full read-modify-write cycle.
  *
  * @param {object[]} newRecords - All records to consider (all layers combined).
  * @param {boolean} dryRun - If true, only log what would be written.
@@ -1065,21 +1229,8 @@ function appendDailyLogs(newRecords, dryRun = false) {
     const logFile = path.join(logDir, `${date}.jsonl`);
     const tmpFile = `${logFile}.tmp.${process.pid}`;
 
-    // Read existing entry IDs for this date (to avoid duplicates by id)
-    const existingIds = new Set();
-    if (fs.existsSync(logFile)) {
-      const existing = fs.readFileSync(logFile, "utf8").split(/\r?\n/).filter((l) => l.trim());
-      for (const line of existing) {
-        try {
-          existingIds.add(JSON.parse(line).id);
-        } catch {
-          // skip malformed lines
-        }
-      }
-    }
-
-    // Filter out already-logged records
-    const newEntries = recs.filter((r) => !existingIds.has(r.id)).map(buildDailyLogEntry);
+    // Filter out already-logged records (checked under lock)
+    const newEntries = recs.map(buildDailyLogEntry);
 
     if (newEntries.length === 0) continue;
 
@@ -1091,13 +1242,33 @@ function appendDailyLogs(newRecords, dryRun = false) {
     // Ensure log directory exists before any file I/O
     ensureDirectory(logDir);
 
-    // Atomic write: read existing, append to temp, fsync, rename
-    const existingContent = fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : "";
-    const newLines = newEntries.map((e) => JSON.stringify(e)).join("\n") + "\n";
-    fs.writeFileSync(tmpFile, existingContent + newLines, "utf8");
-    fs.fsyncSync(fs.openSync(tmpFile, "r+"));
-    fs.renameSync(tmpFile, logFile);
-    process.stderr.write(`[daily-log] appended ${newEntries.length} entries to ${logFile}\n`);
+    // Exclusive lock guards the entire read-modify-write cycle
+    withFileLock(logFile, (fd) => {
+      // Read existing entry IDs under lock to detect duplicates
+      const existingIds = new Set();
+      if (fs.existsSync(logFile)) {
+        const existing = fs.readFileSync(logFile, "utf8").split(/\r?\n/).filter((l) => l.trim());
+        for (const line of existing) {
+          try {
+            existingIds.add(JSON.parse(line).id);
+          } catch {
+            // skip malformed lines
+          }
+        }
+      }
+
+      const toAppend = newEntries.filter((e) => !existingIds.has(e.id));
+      if (toAppend.length === 0) return;
+
+      // Atomic write: read existing, append to temp, fsync, rename
+      const existingContent = fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : "";
+      const newLines = toAppend.map((e) => JSON.stringify(e)).join("\n") + "\n";
+      fs.writeFileSync(tmpFile, existingContent + newLines, "utf8");
+      fs.fsyncSync(fs.openSync(tmpFile, "r+"));
+      fs.renameSync(tmpFile, logFile);
+      fs.fsyncSync(fd);  // durability of the rename target
+      process.stderr.write(`[daily-log] appended ${toAppend.length} entries to ${logFile}\n`);
+    });
   }
 }
 
@@ -1635,6 +1806,15 @@ function deduplicateSharedInbox(newInboxEntries, dreamRecords, existingRecordsBy
       continue;
     }
 
+    // Detect content_hash collisions: same hash but different id → truncation risk
+    if (newByHash.has(hash) && newByHash.get(hash).id !== rec.id) {
+      console.warn(
+        `[build-memory-layers] content_hash collision detected: id=${rec.id} ` +
+        `collides with existing record id=${newByHash.get(hash).id} ` +
+        `(hash: ${hash.substring(0, 8)}). Review for truncation-based collision.`
+      );
+    }
+
     byId.set(rec.id, rec);
     newByHash.set(hash, rec);
   }
@@ -1742,6 +1922,31 @@ function main() {
   }
 
   try { knowledgeGraph.endBatch(true); } catch {}
+
+  // KG batch transaction verification: confirm the committed entity count is plausible
+  // (exact equality with recordCount is not expected since entities may be deduplicated
+  // across records, but a dramatic mismatch signals a transaction failure)
+  try {
+    const preCommitEntities = 0;
+    const statsBefore = knowledgeGraph.stats ? knowledgeGraph.stats() : null;
+    const postCommitEntities = statsBefore ? statsBefore.entities : null;
+    const expectedEntities = allRecords.filter(
+      (r) => (r.entities?.length > 0) || (r.facts?.length > 0) || (r.concepts?.length > 0)
+    ).length;
+    if (
+      typeof postCommitEntities === "number" &&
+      expectedEntities > 0 &&
+      postCommitEntities < Math.floor(expectedEntities * 0.05)
+    ) {
+      // Fewer than 5% of records produced entities — possible batch failure
+      console.warn(
+        `[build-memory-layers] KG batch commit mismatch: expected ~${expectedEntities} entity-producing records, ` +
+        `but KG has only ${postCommitEntities} total entities. Transaction may have been rolled back.`
+      );
+    }
+  } catch (_verifyErr) {
+    // Non-fatal — verification failures must never block memory writes
+  }
 
   appendDailyLogs(allRecords);
 
