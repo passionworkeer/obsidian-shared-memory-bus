@@ -28,19 +28,18 @@ mcp_server: sequential-thinking (port 9334)
 
 ## Vault Path Resolution
 
-Claude Code has access to environment variables and the Claude settings system.
-
 **Resolution order:**
 1. `AI_MEMORY_OBSIDIAN_VAULT` environment variable
 2. `OBSIDIAN_VAULT_ROOT` environment variable
 3. Obsidian app config detection
 4. Default fallback
 
+
 **If resolution fails:** Write `"VAULT_RESOLUTION_FAILED"` to first line of `inbox/claude-code.md` and exit with error.
 
 ---
 
-## Session Startup Hook
+## Startup Behavior
 
 Claude Code's `sessionMemoryCompact` hook fires at session end. Map it to write a session summary:
 
@@ -54,8 +53,6 @@ This feeds into `ops/sync-claudemem-to-obsidian.ps1` → `structured/claude-code
 ---
 
 ## MCP Configuration
-
-Add to `~/.claude/settings.json` (or equivalent):
 
 ```json
 {
@@ -90,6 +87,50 @@ Add to `~/.claude/settings.json` (or equivalent):
 
 ---
 
+## Rule File Setup
+
+Add to `~/.claude/settings.json` (or equivalent):
+
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "transport": "http",
+      "url": "http://127.0.0.1:9338/mcp"
+    },
+    "obsidian": {
+      "transport": "http",
+      "url": "http://127.0.0.1:9335/mcp"
+    },
+    "context7": {
+      "transport": "http",
+      "url": "http://127.0.0.1:9331/mcp"
+    },
+    "fetch": {
+      "transport": "http",
+      "url": "http://127.0.0.1:9332/mcp"
+    },
+    "time": {
+      "transport": "http",
+      "url": "http://127.0.0.1:9333/mcp"
+    },
+    "sequential-thinking": {
+      "transport": "http",
+      "url": "http://127.0.0.1:9334/mcp"
+    }
+  }
+}
+```
+
+Place portable skill reference in your session start:
+
+```
+Skill: shared-memory-portable  (from templates/agents/portable-skill/SKILL.md)
+Rule: .claude/rules/shared-memory.md
+```
+
+---
+
 ## Memory Write Targets
 
 ### Cross-Project Durable (Shared Inbox)
@@ -101,7 +142,7 @@ Add to `~/.claude/settings.json` (or equivalent):
 ```
 <obsidian-vault>/02-KB/WORKING.md
 ```
-Write within your `## Agent: claude-code` block. Never touch other agent blocks.
+Write within your `## Agent: claude-code` block.
 
 ---
 
@@ -113,21 +154,7 @@ Write within your `## Agent: claude-code` block. Never touch other agent blocks.
 
 ---
 
-## Portable Skill Loading
-
-Claude Code reads skill files from `~/.claude/skills/` and `.claude/rules/`.
-Place this reference in your session start:
-
-```
-Skill: shared-memory-portable  (from templates/agents/portable-skill/SKILL.md)
-Rule: .claude/rules/shared-memory.md
-```
-
----
-
 ## Vault Path Resolution Check
-
-Claude Code can resolve `<obsidian-vault>` via environment variables.
 
 **Verification command:**
 ```bash
@@ -135,5 +162,4 @@ echo $AI_MEMORY_OBSIDIAN_VAULT
 echo $OBSIDIAN_VAULT_ROOT
 ```
 
-If both are empty and Obsidian config is not found, this agent cannot auto-resolve.
-In that case: write `"VAULT_RESOLUTION_FAILED"` to first line of `inbox/claude-code.md`.
+If both are empty and Obsidian config is not found, this agent cannot auto-resolve. In that case: write `"VAULT_RESOLUTION_FAILED"` to first line of `inbox/claude-code.md`.

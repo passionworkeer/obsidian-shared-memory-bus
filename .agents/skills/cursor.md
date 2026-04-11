@@ -57,8 +57,6 @@ Use `route=project` to surface memories relevant to the current workspace.
 
 ## MCP Configuration
 
-Cursor supports MCP servers via `.cursor/mcp.json`:
-
 ```json
 {
   "mcpServers": {
@@ -95,6 +93,7 @@ Cursor supports MCP servers via `.cursor/mcp.json`:
 ## Rule File Setup
 
 For project-level rules, add to `.cursor/rules/`:
+
 ```
 shared-memory.md  →  reference to <repo-root>/SKILL.md
 ```

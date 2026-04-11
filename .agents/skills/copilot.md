@@ -8,12 +8,10 @@ generated-from: SKILL.md
 
 # GitHub Copilot — Shared Memory Bus Integration
 
-This file extends `SKILL.md` (repo root) with Copilot-specific configuration.
+This file extends `SKILL.md` (repo root) with GitHub Copilot-specific configuration.
 Read `SKILL.md` first, then apply the specifics below.
 
-**Important limitation**: GitHub Copilot operates per-file or per-commit with no native session memory system. Memory integration relies entirely on MCP calls and direct file writes. There is no environment variable injection capability in Copilot sessions.
-
-## Copilot Skill Metadata
+## GitHub Copilot Skill Metadata
 
 ```yaml
 name: copilot-shared-memory
@@ -27,7 +25,17 @@ mcp_server: time (port 9333)
 
 ---
 
-## Vault Path Resolution (Fallback Strategy)
+## Vault Path Resolution
+
+**Resolution order:**
+1. `AI_MEMORY_OBSIDIAN_VAULT` environment variable
+2. `OBSIDIAN_VAULT_ROOT` environment variable
+3. Obsidian app config detection
+4. Default fallback
+
+**Important limitation**: GitHub Copilot operates per-file or per-commit with no native session memory system. Memory integration relies entirely on MCP calls and direct file writes. There is no environment variable injection capability in Copilot sessions.
+
+**Vault Resolution (Fallback Strategy)**
 
 Copilot cannot inject environment variables. Use a two-step fallback:
 
@@ -48,11 +56,7 @@ If yes: use that vault root.
 If no: use the configured vault root from the repo's .github/copilot-instructions.md.
 ```
 
-### Vault Resolution Check
-
 **If resolution fails:** Write `"VAULT_RESOLUTION_FAILED"` to first line of `inbox/copilot.md` and exit with error.
-
-Copilot-specific resolution note: Without environment variable injection or MCP vault discovery, this agent requires manual vault path configuration in `.github/copilot-instructions.md` or equivalent.
 
 ---
 
@@ -76,8 +80,6 @@ prefer_summaries: true
 ---
 
 ## MCP Configuration
-
-GitHub Copilot in VS Code supports MCP servers. Add via VS Code MCP settings:
 
 ```json
 {
@@ -108,7 +110,7 @@ GitHub Copilot in VS Code supports MCP servers. Add via VS Code MCP settings:
 
 ---
 
-## Repo-Level Instruction File
+## Rule File Setup
 
 Add to `.github/copilot-instructions.md` (or equivalent):
 
@@ -128,12 +130,12 @@ Memory inbox: <vault-root>/00-System/ai-memory/inbox/copilot.md
 
 ### Cross-Project Durable (Shared Inbox)
 ```
-<vault-root>/00-System/ai-memory/inbox/copilot.md
+<obsidian-vault>/00-System/ai-memory/inbox/copilot.md
 ```
 
 ### Active Task State
 ```
-<vault-root>/02-KB/WORKING.md
+<obsidian-vault>/02-KB/WORKING.md
 ```
 Write within your `## Agent: copilot` block.
 
@@ -154,7 +156,10 @@ Copilot has the most constrained token budget. Follow these rules strictly:
 
 ## Vault Path Resolution Check
 
-Copilot cannot run shell commands or check environment variables directly.
-Manual configuration required: set the vault root in `.github/copilot-instructions.md`.
+**Verification command:**
+```bash
+echo $AI_MEMORY_OBSIDIAN_VAULT
+echo $OBSIDIAN_VAULT_ROOT
+```
 
-If no vault is configured: write `"VAULT_RESOLUTION_FAILED"` to first line of `inbox/copilot.md`.
+Copilot cannot run shell commands or check environment variables directly. Manual configuration required: set the vault root in `.github/copilot-instructions.md`. If no vault is configured: write `"VAULT_RESOLUTION_FAILED"` to first line of `inbox/copilot.md`.

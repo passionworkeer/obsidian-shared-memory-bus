@@ -126,7 +126,7 @@ $Script:BusLockTimeoutMs = 180000
 $Script:StaleSyncSeconds = 20
 $Script:CacheRoot = Join-Path $Script:BusHome "cache"
 $Script:RuntimeCache = @{}
-$Script:ProfileSync = @("1", "true", "yes", "on") -contains ([string]$env:AI_MEMORY_PROFILE_SYNC).ToLowerInvariant()
+$Script:ProfileSync = $env:AI_MEMORY_PROFILE_SYNC -eq "1" -or $env:AI_MEMORY_PROFILE_SYNC -eq "true"
 
 . (Join-Path $PSScriptRoot "memory-bus-helpers.ps1")
 . (Join-Path $PSScriptRoot "memory-bus-agents.ps1")
@@ -173,7 +173,10 @@ function With-BusLock {
         }
 
         if (-not $lockAcquired) {
-            throw "Timed out waiting for AI memory bus lock."
+            $msg = "Timed out waiting for AI memory bus lock after " + [int]($TimeoutMs / 1000) + "s. " +
+                   "Another process is likely running SyncAll or Initialize. Wait for it to complete."
+            Write-Error $msg
+            throw "WATCHDOG_LOCK_FAILED: $msg"
         }
 
         & $ScriptBlock
@@ -635,8 +638,10 @@ $EndMarker
         $endIndex = $normalizedExisting.IndexOf($EndMarker, $startIndex, [System.StringComparison]::Ordinal)
         if ($startIndex -ge 0 -and $endIndex -ge 0) {
             $endIndex += $EndMarker.Length
-            $prefix = $normalizedExisting.Substring(0, $startIndex).Trim()
-            $suffix = $normalizedExisting.Substring($endIndex).Trim()
+            $prefix = $normalizedExisting.Substring(0, $startIndex).TrimEnd()
+            # Split with limit=2 so we get at most 2 parts: [before, after]
+            # Using Count check avoids an exception when -split returns only 1 element (no match).
+            $suffix = if (($afterParts = @($normalizedExisting -split [regex]::Escape($EndMarker), 2)).Count -gt 1) { $afterParts[1] } else { "" }
             $parts = @()
             if (-not [string]::IsNullOrWhiteSpace($prefix)) { $parts += $prefix }
             $parts += $block
@@ -1568,7 +1573,7 @@ switch ($Action) {
     "RefreshDerivedArtifacts" {
         With-BusLock {
             if (-not (Invoke-GeneratedArtifactRefresh -Force)) {
-                throw "Failed to refresh generated memory artifacts."
+                throw "STRUCTURED_SYNC_FAILED: Failed to refresh generated memory artifacts. Check watchdog-error.log for details."
             }
 
             if (-not $Quiet) {
