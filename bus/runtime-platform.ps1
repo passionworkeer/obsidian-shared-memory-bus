@@ -149,7 +149,7 @@ function Resolve-SharedPowerShellExecutable {
         }
     }
 
-    throw "PowerShell 7 (pwsh) is required on macOS/Linux. Install pwsh or set AI_MEMORY_PWSH."
+    throw "RUNTIME_CONFIG_INVALID: PowerShell 7 (pwsh) is required on macOS/Linux. Install pwsh from https://github.com/PowerShell/PowerShell or set AI_MEMORY_PWSH to the pwsh executable path."
 }
 
 function Get-SharedPowerShellCommandName {
@@ -168,7 +168,7 @@ function Resolve-SharedNodeExecutable {
         }
     }
 
-    throw "Node.js was not found on PATH."
+    throw "RUNTIME_CONFIG_INVALID: Node.js was not found on PATH. Install Node.js from https://nodejs.org or set the NODE_PATH environment variable."
 }
 
 function Get-SharedUvManagedPythonCandidates {
@@ -1218,7 +1218,11 @@ function Resolve-SharedObsidianVaultRoot {
     }
 
     if ($ThrowIfMissing) {
-        throw "No Obsidian vault directory found."
+        $msg = "Cannot find Obsidian vault. Set AI_MEMORY_OBSIDIAN_VAULT or OBSIDIAN_VAULT_ROOT env var, " +
+               "or open a vault in the Obsidian app. Searched: " +
+               ([string]::Join(", ", @($FallbackPath) + @(Get-SharedDefaultObsidianVaultCandidates)))
+        Write-Error $msg
+        throw "VAULT_RESOLUTION_FAILED: $msg"
     }
 
     return $FallbackPath

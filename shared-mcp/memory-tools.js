@@ -359,4 +359,84 @@ export const TOOLS = [
       required: ["repo", "issue_number"],
     },
   },
+  {
+    name: "get_kg_stats",
+    description:
+      "Get knowledge graph statistics: total entities, total relationships, and entity counts broken down by type.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
+  {
+    name: "query_kg",
+    description:
+      "Search the knowledge graph by entity name. Returns matching entities with their relationships and confidence scores. Use this to explore connections between people, projects, concepts, and tools.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Entity name (partial or full) to search for.",
+        },
+        type: {
+          type: "string",
+          description: "Optional entity type filter: 'person', 'project', 'concept', 'org', 'location'.",
+          enum: ["person", "project", "concept", "org", "location"],
+        },
+        limit: {
+          type: "number",
+          default: 10,
+          description: "Maximum number of matching entities to return.",
+        },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "get_entities",
+    description:
+      "Get all entities of a specific type from the knowledge graph. Useful for listing all people, projects, concepts, etc.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        entityType: {
+          type: "string",
+          description: "Entity type: 'person', 'project', 'concept', 'tool', 'org', 'location', or 'unknown'.",
+        },
+        limit: {
+          type: "number",
+          default: 50,
+          description: "Maximum number of entities to return.",
+        },
+      },
+      required: ["entityType"],
+    },
+  },
+  {
+    name: "get_relationships",
+    description:
+      "Get all relationships (incoming and outgoing) for an entity in the knowledge graph.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        entityName: {
+          type: "string",
+          description: "Entity name to look up.",
+        },
+        direction: {
+          type: "string",
+          default: "both",
+          description: "Relationship direction: 'outgoing', 'incoming', or 'both'.",
+          enum: ["outgoing", "incoming", "both"],
+        },
+        limit: {
+          type: "number",
+          default: 50,
+          description: "Maximum number of relationships to return.",
+        },
+      },
+      required: ["entityName"],
+    },
+  },
 ];
