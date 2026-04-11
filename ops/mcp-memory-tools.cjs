@@ -21,9 +21,9 @@ const path = require("node:path");
 
 function loadStoreRootHelper() {
   const candidates = [
-    path.join(__dirname, "store-root.cjs"),
-    path.join(__dirname, "..", "bus", "store-root.cjs"),
-    path.join(__dirname, "bus", "store-root.cjs"),
+    path.join(__dirname, "store-root.js"),
+    path.join(__dirname, "..", "bus", "store-root.js"),
+    path.join(__dirname, "bus", "store-root.js"),
   ];
   for (const c of candidates) {
     if (fs.existsSync(c)) return require(c);
@@ -114,7 +114,7 @@ function memory_boot({ agent_id: _agent_id, cwd } = {}) {
   let l1Count = 0;
 
   try {
-    const { KnowledgeGraph } = require("./knowledge-graph.js");
+    const { KnowledgeGraph } = require("./knowledge-graph.cjs");
     const kg = new KnowledgeGraph({ vaultRoot });
     const triples = kg.queryCurrentTriples({ entityName: project_key, limit: 20 });
 

@@ -4,26 +4,26 @@ const fs = require("node:fs")
 const path = require("node:path")
 
 // ---------------------------------------------------------------------------
-// Vault root resolution (same pattern as build-memory-layers.js)
+// Store root resolution — no Obsidian dependency
 // ---------------------------------------------------------------------------
-function loadVaultRootHelper() {
+function loadStoreRootHelper() {
   const candidates = [
-    path.join(__dirname, "vault-root.js"),
-    path.join(__dirname, "..", "bus", "vault-root.js"),
+    path.join(__dirname, "store-root.js"),
+    path.join(__dirname, "..", "bus", "store-root.js"),
+    path.join(__dirname, "bus", "store-root.js"),
   ]
   for (const c of candidates) {
     if (fs.existsSync(c)) return require(c)
   }
-  throw new Error("vault-root-helper missing")
+  return null
 }
 
-function resolveVaultRoot() {
-  try {
-    const { resolveVaultRoot: fn } = loadVaultRootHelper()
-    return fn()
-  } catch {
-    return process.env.AI_MEMORY_OBSIDIAN_VAULT || "E:\\desktop\\Obsidian Vault"
+function resolveStoreRoot() {
+  const helper = loadStoreRootHelper()
+  if (helper) {
+    try { return helper.resolveStoreRoot() } catch { /* fall through */ }
   }
+  return process.env.AI_MEMORY_STORE || "E:\\.ai-memory"
 }
 
 // ---------------------------------------------------------------------------
@@ -31,14 +31,14 @@ function resolveVaultRoot() {
 // ---------------------------------------------------------------------------
 /**
  * @param {string} cwd  — project working directory (default: process.cwd())
- * @returns {{ project_key: string, vaultRoot: string, l0BootstrapPath: string }}
+ * @returns {{ project_key: string, storeRoot: string, l0BootstrapPath: string }}
  */
 function buildL0L1Bootstrap(cwd) {
-  const vaultRoot = resolveVaultRoot()
+  const storeRoot = resolveStoreRoot()
   const project_key = cwd ? path.basename(cwd) : ""
 
-  const L0_FIXED = path.join(vaultRoot, "00-System/ai-memory/L0-fixed.md")
-  const GENERATED = path.join(vaultRoot, "00-System/ai-memory/generated")
+  const L0_FIXED = path.join(storeRoot, "L0-fixed.md")
+  const GENERATED = path.join(storeRoot, "generated")
   const L0_BOOTSTRAP = path.join(GENERATED, "L0-bootstrap.md")
   const BODY_MD = path.join(GENERATED, "GLOBAL-CONTEXT.body.md")
 
@@ -51,7 +51,7 @@ function buildL0L1Bootstrap(cwd) {
   if (project_key) {
     try {
       const { KnowledgeGraph } = require("./knowledge-graph.js")
-      const kg = new KnowledgeGraph({ vaultRoot })
+      const kg = new KnowledgeGraph({ storeRoot })
       const triples = typeof kg.queryCurrentTriples === "function"
         ? kg.queryCurrentTriples({ limit: 20 })
         : []
@@ -100,7 +100,7 @@ function buildL0L1Bootstrap(cwd) {
   // 4. Note: @include L0-bootstrap.md is managed by build-memory-layers.js template
   // (do not append here to avoid being overwritten)
 
-  return { project_key, vaultRoot, l0BootstrapPath: L0_BOOTSTRAP, l1Count }
+  return { project_key, storeRoot, l0BootstrapPath: L0_BOOTSTRAP, l1Count }
 }
 
 // ---------------------------------------------------------------------------
