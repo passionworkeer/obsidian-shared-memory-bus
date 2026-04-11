@@ -182,3 +182,55 @@ python $AI_MEMORY_ROOT/ops/redaction.py --input <file> --output <redacted-file>
 Specialized or migration scripts no longer needed in the active pipeline live in `ops/archived/`:
 - `repair-codex-runtime.ps1` — Codex crash recovery (no longer maintained)
 - `migrate-memory-v2.js` — ADR-001 → ADR-002 schema migration (completed)
+---
+
+## Observability
+
+### Log Format
+```
+{timestamp} [{level}] [{component}] {message} {context_json}
+```
+
+| Component | Source | Description |
+|-----------|--------|-------------|
+| `watchdog` | `memory-watchdog.ps1` | Watchdog scan, sync triggers, source change detection |
+| `memory-bus` | `memory-bus.ps1` | Structured sync, artifact refresh |
+| `mcp-server` | `omni-memory-server.js` | MCP tool calls, HTTP requests, retrieval dispatch |
+| `semantic-search` | `semantic-search.py` | BM25, dense, hybrid search, cache hits/misses |
+| `embeddings` | `generate-embeddings.js` | Embedding generation, provider calls, index writes |
+| `blackboard-daemon` | `obsidian-blackboard-daemon.js` | Chokidar vault watch events |
+
+### Key Metrics
+
+| Metric | Source | Good | Warn | Alert |
+|--------|--------|------|------|-------|
+| `memory.retrieval.latency_ms.p50` | `memory_status` | < 200ms | 200–1000ms | > 1000ms |
+| `memory.retrieval.cache_hit_rate` | `memory_status` | > 60% | 30–60% | < 30% |
+| `memory.embeddings.count` | `memory_status` | growing | 0 (not built) | — |
+| `memory.embeddings.index_state` | `memory_status` | `aligned` | `stale` | `mixed` |
+| `memory.watchdog.running` | `memory_status` | `true` | — | `false` |
+| `memory.structured.signature_stale` | `memory_status` | `false` | — | `true` |
+
+### Alert Thresholds
+
+| Condition | Severity | Action |
+|-----------|----------|--------|
+| `watchdog.running` → `false` | **ALERT** | Restart: `start-default-shared-mcp.ps1` |
+| `embeddings.count` = 0 | **WARN** | Run `node generate-embeddings.js` |
+| `embeddings.indexState` = `stale` | **WARN** | Run `node generate-embeddings.js` |
+| `memoryIntegrity.status` ≠ `ok` | **ALERT** | Run `check-memory-integrity.js --strict` |
+| Shared MCP port not listening | **ALERT** | Restart: `stop && start-default-shared-mcp.ps1` |
+
+### Health Check
+```bash
+claude -p '{"tools":[{"name":"memory_status"}]}'
+```
+Look for: `watchdog.running: true`, `embeddings.indexState: aligned`, `memoryIntegrity.status: ok`
+
+### Structured Error Taxonomy
+
+| Error Key | Meaning | Resolution |
+|-----------|---------|-----------|
+| `bm25:provider-unavailable` | rank-bm25/jieba not installed | `pip install rank-bm25 jieba` |
+| `bus-sync:timeout` | `memory-bus.ps1` exceeded 300s | Check vault path; reduce watched sources |
+| `embeddings-refresh-failed:*` | Embedding generation failed | Check `AI_MEMORY_EMBED_*` env vars |
