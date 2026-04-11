@@ -677,3 +677,95 @@ The current `shared-mcp/package-lock.json` is expected to audit cleanly. If a fu
 - keep the repo clean and secret-free
 - prefer controlled dependency updates
 - avoid `npm audit fix --force` unless you have revalidated the shared MCP runtime afterward
+
+---
+
+## FAQ
+
+### Why Is Obsidian The Canonical Store?
+Because it keeps durable memory in plain local files that multiple tools can read and write with low lock-in.
+
+### Does Shared MCP Mean All Agents Share One Giant Context?
+No. Shared MCP deduplicates processes. Each client still has its own session lifecycle and tool calls.
+
+### Should I Integrate Via MCP, Skills, Or Plugins?
+- **MCP**: shared runtime access, process deduplication, and tool transport
+- **skills**: portable onboarding, read order, writeback policy, and task decomposition habits
+- **plugins**: native lifecycle hooks or UI only — use as last resort
+
+Default: MCP plus skills. Add plugins only as a host-specific last mile.
+
+### When Should I Use `bm25`, `dense`, Or `hybrid`?
+- `bm25`: exact or keyword-heavy queries (works offline, zero API cost)
+- `dense`: semantic similarity
+- `hybrid` (default): balances both
+
+### Does This Require Remote Embeddings?
+No. Offline `hashing-v1` is the default dense path and works fully offline.
+
+### Can Embedding Providers Be Hot-Swapped?
+You can switch the active profile/provider without editing code, but if adapter, model, or base URL changes, **rebuild the stored embeddings index** so query and stored vectors match.
+
+### How Long Until a New Note Appears in Shared Memory?
+The watchdog polls every 15s. Embeddings rebuild runs every 15 minutes by default. For immediate indexing, call `rebuild_memory_embeddings` tool or run `memory-watchdog.ps1 -Once`.
+
+### How Do I Disable the Background Watchdog?
+```powershell
+$env:AI_MEMORY_WATCHDOG_ENABLED = "0"
+```
+Or set the environment variable permanently. When disabled, trigger sync manually with `memory-bus.ps1 -Action SyncAll`.
+
+### How Do I Stop All Shared MCP Services?
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\start-default-shared-mcp.ps1 -Stop
+```
+
+### How Do I See All Environment Variables?
+See `docs/ENVIRONMENT.md`.
+
+---
+
+## Error Codes
+
+### Prefix Conventions
+| Prefix | Layer |
+|--------|-------|
+| `embedding-*` | Embedding generation errors |
+| `memory-*` | Memory bus errors |
+| `mcp-*` | MCP transport errors |
+| `openai-compatible-*` | OpenAI API errors |
+| `python-runtime-*` | Python runtime errors |
+
+### Embedding Errors
+| Code | Meaning | Fix |
+|------|---------|-----|
+| `embedding-process-exit-N` | Python process exited with code N | Check Python deps |
+| `invalid-embedding-json` | Python output was not valid JSON | Check Python deps |
+| `openai-compatible-http-429` | Rate limited | Increase `AI_MEMORY_EMBED_REQUEST_DELAY_MS` |
+| `openai-compatible-http-5XX` | Server error | Check API endpoint |
+| `openai-compatible-count-mismatch` | Vector count mismatch | Rebuild index |
+| `embedding-dimension-mismatch` | Index built with different model | Rebuild index |
+
+### Memory Errors
+| Code | Meaning | Fix |
+|------|---------|-----|
+| `invalid-records` | Record(s) failed schema validation | Run `check-memory-integrity.js --strict` |
+| `malformed-lines` | JSONL parse errors | Repair JSONL files |
+| `duplicate-ids` | Duplicate record IDs | Run hygiene report |
+| `generated-artifacts-stale` | Artifact signature mismatch | Rebuild: `memory-bus.ps1 -Action Generate` |
+| `generated-artifacts-contract-mismatch` | Schema version mismatch | Rebuild all artifacts |
+
+### Script Errors
+| Code | Meaning | Fix |
+|------|---------|-----|
+| `embeddings-script-missing` | Script not found | Reinstall runtime |
+| `memory-bus-script-missing` | Script not found | Reinstall runtime |
+| `semantic-search-exit-N` | Search script crashed (code N) | Check Python runtime |
+
+### Server Request Errors
+| Code | Meaning |
+|------|---------|
+| `query is required` | Search query missing |
+| `ids must be an array` | Parameter type error |
+| `anchor_id not found` | Timeline anchor not in records |
+| `unknown-embedding-profile` | Profile not in `runtime.json` |

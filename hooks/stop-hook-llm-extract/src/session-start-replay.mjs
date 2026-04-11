@@ -68,7 +68,23 @@ export async function replayPendingExtractions() {
 }
 
 async function extractWithTimeout(content) {
-  const systemPrompt = `你是记忆工程师。从会话记录中提取结构化事实。...（同上）`
+  const systemPrompt = `你是记忆工程师。从会话记录中提取结构化事实。
+
+规则：
+- 只提取客观事实
+- session_type 枚举：bugfix | feature | refactor | discovery | docs | chore
+- entities 类型：module | concept | person | project | decision | bug | api
+- confidence：0.0-1.0
+
+输出格式（XML）：
+<result>
+  <session_type>...</session_type>
+  <confidence>0.0</confidence>
+  <facts><fact>...</fact></facts>
+  <decisions><decision>...</decision></decisions>
+  <entities><entity name="..." type="..."/></entities>
+  <summary>一行话概括</summary>
+</result>`
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
@@ -142,7 +158,12 @@ async function removePendingRecord(sessionId) {
     } catch {}
   }
   const { writeFileSync } = await import('fs')
-  writeFileSync(PENDING_PATH, lines.join('\n') + (lines.length ? '\n' : ''), 'utf-8')
+  try {
+    writeFileSync(PENDING_PATH, lines.join('\n') + (lines.length ? '\n' : ''), 'utf-8')
+  } catch (writeErr) {
+    // Log but don't throw — failing to remove from pending is not fatal
+    process.stderr.write(`[replay] warning: could not update pending file: ${writeErr.message}\n`)
+  }
 }
 
 // CLI 入口
