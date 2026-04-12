@@ -539,7 +539,11 @@ function classifyEntity(name, frequency, scores) {
     type: "uncertain",
     confidence: 0.3,
     frequency,
-    signals: [...scores.person_signals, ...scores.project_signals, ...scores.concept_signals].slice(0, 3),
+    signals: [
+      ...(scores.person_signals || []),
+      ...(scores.project_signals || []),
+      ...(scores.concept_signals || []),
+    ].slice(0, 3),
   };
 }
 
