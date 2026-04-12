@@ -259,15 +259,16 @@ API keys, passwords, 敏感个人信息
 
 | 维度 | claude-mem | obsidian-shared-memory-bus |
 |------|-------------|---------------------------|
-| 持久化 | SQLite + ChromaDB | Obsidian Vault (Markdown) |
+| 持久化 | SQLite + ChromaDB | 本地 `.ai-memory` store (纯文件) |
 | 协议层 | HTTP (Worker) + MCP | 直接 MCP 暴露 |
 | AI 压缩 | Claude Agent SDK 内置 | 依赖外部 LLM |
 | 会话跟踪 | SQLite session 表 | 无 session 概念 |
 | 进程模型 | 独立 Worker 进程 | 内嵌 MCP Server |
 | 渐进 Disclosure | MCP 三层工具 | search → get 多步工具 |
 | 隐私处理 | Hook 层 tag stripping | 无（依赖 vault 隔离） |
+| Obsidian 依赖 | 无 | 无（纯本地文件系统） |
 
-**核心差异**：claude-mem 有独立的压缩 Worker + SDK；本项目将记忆直接落盘 Obsidian，更轻量但缺乏 AI 压缩层。
+**核心差异**：claude-mem 有独立的压缩 Worker + SDK；本项目将记忆直接落盘 `.ai-memory` store，更轻量但缺乏 AI 压缩层。
 
 ---
 

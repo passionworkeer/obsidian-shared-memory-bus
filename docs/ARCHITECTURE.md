@@ -1,23 +1,24 @@
 # Architecture
 
 ## Canonical Source Of Truth
-Shared long-term memory lives in an Obsidian vault.
+Shared long-term memory lives in a local `.ai-memory` store — no Obsidian dependency required.
 
-Treat the vault as the canonical local data plane. Memory indexing, MCP transport, backup, and optional sync are separate layers built around that source of truth rather than replacements for it.
+The store is the canonical data plane. Memory indexing, MCP transport, backup, and optional sync are separate layers built around that source of truth rather than replacements for it. The store can live on any drive with sufficient space; `AI_MEMORY_STORE` selects the root, defaulting to `E:\.ai-memory\` on this machine.
 
-Core canonical notes:
-- `02-KB/OBSIDIAN.md`
-- `02-KB/MEMORY.md`
-- `02-KB/WORKING.md`
-- `00-System/ai-memory/generated/GLOBAL-CONTEXT.md`
+Core canonical paths:
+- `{store}/generated/L0-bootstrap.md` — L0 + L1 bootstrap for session start
+- `{store}/generated/GLOBAL-CONTEXT.md` — onboarding overlay (full history)
+- `{store}/generated/SHARED-SKILLS.md` — shared skill context
+- `{store}/structured/shared-inbox.jsonl` — cross-agent shared inbox
+- `{store}/kg/knowledge-graph.sqlite3` — knowledge graph triples
 
 ## Main Layers
 1. Native tool memory
-   - claude-mem
+   - claude-mem (personal, `~/.claude-mem/`) — separate from shared store
    - OpenClaw sessions and blackboard
    - Codex/OpenCode/Copilot/other local activity
 2. Shared structured memory
-   - JSONL records under `00-System/ai-memory/structured/`
+   - JSONL records under `{store}/structured/`
    - governed as one contract universe, including imported `claude-code.jsonl` and `openclaw.jsonl`
 3. Retrieval layer
    - `retrieval/semantic-search.py`
@@ -28,8 +29,8 @@ Core canonical notes:
    - source-tree direct runs can fall back to `templates/config/runtime.json` before install
 4. Shared MCP access layer
    - `shared-mcp/omni-memory-server.js`
-   - shared HTTP endpoints for `context7`, `fetch`, `time`, `sequential-thinking`, `obsidian`, `memory`, and the managed `playwright` backend
-- exposes `memory_status`, `search_shared_memory`, embeddings rebuild tools, claude-mem compatibility tools, and OpenClaw blackboard tools
+   - shared HTTP endpoints for `context7`, `fetch`, `time`, `sequential-thinking`, `memory`, and the managed `playwright` backend
+- exposes `memory_status`, `memory_boot`, `memory_query`, `search_shared_memory`, embeddings rebuild tools, claude-mem compatibility tools, and OpenClaw blackboard tools
 - exposes `memory_wake_up` for compact layered bootstrap context (`identity / essential / recent / retrieve`) and optional verbatim snippet windows on `search_shared_memory`
 - keeps a warm shared Python retrieval worker for `search_shared_memory`, with one-shot fallback if the worker is unavailable
 - reports worker cache metrics through `memory_status` and supports explicit cache resets through `clear_shared_memory_search_cache`
@@ -41,7 +42,7 @@ Core canonical notes:
 Thinking about the system in planes helps keep the portability and sharing story honest.
 
 - Canonical data plane:
-  - the Obsidian vault plus structured JSONL records under `00-System/ai-memory/`
+  - the local `.ai-memory` store (pure files, no Obsidian dependency) plus structured JSONL records under `{store}/structured/`
 - Retrieval plane:
   - BM25, dense, and hybrid search over the canonical data plane
 - Bridge plane:
@@ -66,6 +67,8 @@ This bundle intentionally combines the strongest ideas from two native memory st
   - subagent activity captured as structured recall targets
 
 ## Memory Outputs
+All paths are relative to the store root (`AI_MEMORY_STORE`, default `E:\.ai-memory\`).
+
 - durable shared inbox:
   - `structured/shared-inbox.jsonl`
 - session and event memory:
@@ -83,7 +86,11 @@ This bundle intentionally combines the strongest ideas from two native memory st
   - `generated/HANDOFF.json`
   - `generated/MEMORY-LAYERS.json`
   - `generated/AUTO-DREAM.json`
-  - `00-System/ai-memory/generated/GLOBAL-CONTEXT.meta.json`
+  - `generated/GLOBAL-CONTEXT.meta.json`
+- knowledge graph:
+  - `kg/knowledge-graph.sqlite3`
+- embeddings:
+  - `embeddings/index.jsonl`
 
 ## Source Tree Vs Installed Runtime
 - Source tree groups files by responsibility: `bus/`, `ops/`, `retrieval/`, `shared-mcp/`, `scripts/`, `templates/`
@@ -148,7 +155,7 @@ The shared `memory` MCP server. It is intentionally the main shared operator end
 
 ## Sharing Boundaries
 - Shared:
-  `memory`, `obsidian`, `context7`, `fetch`, `time`, `sequential-thinking`, optional `MiniMax`
+  `memory`, `context7`, `fetch`, `time`, `sequential-thinking`, optional `MiniMax`
 - Shared process, but session-isolated:
   `playwright`
 - Must remain isolated:
@@ -204,7 +211,7 @@ The current weights are still hand-tuned. They improve operator control and insp
   - startup registration is emitted as LaunchAgents on macOS and as `systemd --user` units or XDG autostart entries on Linux, but still has less live field validation than the Windows path
 
 ## Why The Architecture Works
-- Obsidian stays canonical
+- The local `.ai-memory` store stays canonical — no Obsidian dependency, pure filesystem
 - memory retrieval is shared over HTTP, not duplicated per agent
 - stateless MCPs are centralized
 - Playwright can be centralized because one HTTP backend can still serve isolated MCP sessions and isolated browser profiles
@@ -234,7 +241,7 @@ See [`docs/DEPLOYMENT-MATRIX.md`](DEPLOYMENT-MATRIX.md) for recommended operatin
 | **Orchestration** | PowerShell | watchdog loop, startup registration, env detection, process lifecycle | Data processing, JSON parsing beyond env config |
 | **Business Logic** | Node.js | MCP servers, embeddings generation, structured sync, artifact building | Pure data transformation without I/O |
 | **Retrieval Core** | Python | semantic search, BM25, dense retrieval, embeddings | Process spawning, HTTP serving |
-| **Canonical Store** | Obsidian + JSONL | durable memory, generated artifacts | — |
+| **Canonical Store** | `.ai-memory` store + JSONL | durable memory, generated artifacts, KG | — |
 
 ### PowerShell Files
 | File | Responsibility |
