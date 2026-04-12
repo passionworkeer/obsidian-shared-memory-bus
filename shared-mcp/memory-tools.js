@@ -184,6 +184,51 @@ export const TOOLS = [
     },
   },
   {
+    name: "get_entity_info",
+    description:
+      "Query the knowledge graph for an entity's relationships and metadata. Use this to find what is known about a specific person, project, tool, or concept across all memory records.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "Entity name to look up (e.g. 'Alice', 'MemPalace', 'ChromaDB').",
+        },
+        direction: {
+          type: "string",
+          default: "both",
+          description: "Relationship direction: 'outgoing' (entity → ?), 'incoming' (? → entity), or 'both'.",
+          enum: ["outgoing", "incoming", "both"],
+        },
+        as_of: {
+          type: "string",
+          description: "Optional date (YYYY-MM-DD) — return only facts that were true at that time.",
+        },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "search_by_entity",
+    description:
+      "Search the knowledge graph for entities matching a name query, then return their relationships and optionally a timeline. Use this to explore connections between people, projects, and concepts across your memory.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        entity_query: {
+          type: "string",
+          description: "Partial or full name to search for in the entity index.",
+        },
+        include_timeline: {
+          type: "boolean",
+          default: false,
+          description: "When true, also return a chronological timeline for the top matched entity.",
+        },
+      },
+      required: ["entity_query"],
+    },
+  },
+  {
     name: "list_embedding_runtimes",
     description:
       "List the configured embedding defaults, providers, and profiles, along with the currently resolved active runtime and whether the dense index is aligned or needs a rebuild.",
@@ -312,6 +357,131 @@ export const TOOLS = [
         issue_title: { type: "string", description: "Optional issue title." },
       },
       required: ["repo", "issue_number"],
+    },
+  },
+  {
+    name: "get_kg_stats",
+    description:
+      "Get knowledge graph statistics: total entities, total relationships, and entity counts broken down by type.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
+  {
+    name: "query_kg",
+    description:
+      "Search the knowledge graph by entity name. Returns matching entities with their relationships and confidence scores. Use this to explore connections between people, projects, concepts, and tools.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Entity name (partial or full) to search for.",
+        },
+        type: {
+          type: "string",
+          description: "Optional entity type filter: 'person', 'project', 'concept', 'org', 'location'.",
+          enum: ["person", "project", "concept", "org", "location"],
+        },
+        limit: {
+          type: "number",
+          default: 10,
+          description: "Maximum number of matching entities to return.",
+        },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "get_entities",
+    description:
+      "Get all entities of a specific type from the knowledge graph. Useful for listing all people, projects, concepts, etc.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        entityType: {
+          type: "string",
+          description: "Entity type: 'person', 'project', 'concept', 'tool', 'org', 'location', or 'unknown'.",
+        },
+        limit: {
+          type: "number",
+          default: 50,
+          description: "Maximum number of entities to return.",
+        },
+      },
+      required: ["entityType"],
+    },
+  },
+  {
+    name: "get_relationships",
+    description:
+      "Get all relationships (incoming and outgoing) for an entity in the knowledge graph.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        entityName: {
+          type: "string",
+          description: "Entity name to look up.",
+        },
+        direction: {
+          type: "string",
+          default: "both",
+          description: "Relationship direction: 'outgoing', 'incoming', or 'both'.",
+          enum: ["outgoing", "incoming", "both"],
+        },
+        limit: {
+          type: "number",
+          default: 50,
+          description: "Maximum number of relationships to return.",
+        },
+      },
+      required: ["entityName"],
+    },
+  },
+  {
+    name: "memory_boot",
+    description:
+      "Load L0 (fixed project constraints) and L1 (current project KG facts) memory layers. Call this at the start of every session to bootstrap context. Returns the project key, L0 content (~100 tokens), and L1 facts (~500 tokens) from the knowledge graph.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        cwd: {
+          type: "string",
+          description:
+            "Project working directory. Used to derive the project key and filter KG facts. Defaults to process.cwd() if omitted.",
+        },
+        agent_id: {
+          type: "string",
+          description: "Optional agent identifier for MCP compatibility (unused).",
+        },
+      },
+    },
+  },
+  {
+    name: "memory_query",
+    description:
+      "Search the shared memory inbox by keyword. Returns inbox records matching the query from all projects or a specific project. Use this to retrieve persistent memories, user preferences, and project context that were written by previous sessions.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Search keyword. Matches against inbox record content using token-based keyword search.",
+        },
+        depth: {
+          type: "string",
+          default: "compact",
+          description: "'compact' returns title + summary (~50 tokens per result); 'full' includes full content and SHA256 hash.",
+          enum: ["compact", "full"],
+        },
+        cwd: {
+          type: "string",
+          description:
+            "Optional project working directory. If provided, results are filtered to the matching project key.",
+        },
+      },
+      required: ["query"],
     },
   },
 ];

@@ -11,7 +11,17 @@
     "lint": "npm run lint --prefix shared-mcp",
     "lint:fix": "npm run lint:fix --prefix shared-mcp",
     "validate": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/validate-layout.ps1",
-    "check-integrity": "node ops/check-memory-integrity.js --strict"
+    "check-integrity": "node ops/check-memory-integrity.js --strict",
+    "watchdog": "bash scripts/watchdog.sh /tmp/memory-bus.pid 'node scripts/vault-detect.js'",
+    "vault:detect": "node scripts/vault-detect.js",
+    "env:check": "node scripts/env-check.js",
+    "test:cross-platform": "node scripts/cross-platform-test.js",
+    "test:smoke": "node scripts/cross-platform-test.js",
+    "test": "node --test tests/unit/js/*.test.js",
+    "test:py": "pytest tests/ -v",
+    "test:cross": "node --test tests/cross-language/",
+    "test:integration": "node --test tests/integration/js/*.test.mjs",
+    "test:all": "node --test tests/unit/js/ && pytest tests/unit/py/ tests/cross-language/ -v"
   },
   "keywords": [
     "obsidian",

@@ -149,7 +149,7 @@ function Resolve-SharedPowerShellExecutable {
         }
     }
 
-    throw "PowerShell 7 (pwsh) is required on macOS/Linux. Install pwsh or set AI_MEMORY_PWSH."
+    throw "RUNTIME_CONFIG_INVALID: PowerShell 7 (pwsh) is required on macOS/Linux. Install pwsh from https://github.com/PowerShell/PowerShell or set AI_MEMORY_PWSH to the pwsh executable path."
 }
 
 function Get-SharedPowerShellCommandName {
@@ -168,7 +168,7 @@ function Resolve-SharedNodeExecutable {
         }
     }
 
-    throw "Node.js was not found on PATH."
+    throw "RUNTIME_CONFIG_INVALID: Node.js was not found on PATH. Install Node.js from https://nodejs.org or set the NODE_PATH environment variable."
 }
 
 function Get-SharedUvManagedPythonCandidates {
@@ -452,7 +452,7 @@ function Get-SharedPowerShellFileArguments {
     )
 
     $prefix = if (Test-SharedIsWindows) {
-        @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $ScriptPath)
+        @("-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", $ScriptPath)
     } else {
         @("-NoProfile", "-File", $ScriptPath)
     }
@@ -872,6 +872,13 @@ function Start-SharedWindowsHeadlessProcess {
         [string]$WorkingDirectory = ""
     )
 
+    # On Windows, PowerShell -File ignores CreateNoWindow=true and always allocates
+    # a console. Inject -WindowStyle Hidden so child processes stay invisible.
+    $isWindowsPowerShell = $FilePath -replace '\\', '/' -like '*/powershell.exe'
+    if ($isWindowsPowerShell -and $ArgumentList -notcontains '-WindowStyle') {
+        $ArgumentList = @('-WindowStyle', 'Hidden') + @($ArgumentList)
+    }
+
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
     $startInfo.FileName = $FilePath
     $startInfo.Arguments = Join-SharedWindowsProcessArguments -Arguments $ArgumentList
@@ -1084,6 +1091,14 @@ function Invoke-SharedShellCommand {
     param([Parameter(Mandatory = $true)][string]$Command)
 
     if (Test-SharedIsWindows) {
+        # NOTE: & cmd.exe /d /s /c runs the command synchronously (this function
+        # blocks until the child exits). Callers that need async background execution
+        # should use Start-SharedShellProcess instead.
+        # The spawned child does NOT get -WindowStyle Hidden here because this
+        # function is used for short-lived commands where a brief visible window
+        # is acceptable. For long-running servers that must stay hidden, use
+        # Start-SharedShellProcess (Windows branch) which uses Start-SharedWindows
+        # HeadlessProcess with CREATE_NO_WINDOW.
         & cmd.exe /d /s /c $Command
         return
     }
@@ -1203,7 +1218,11 @@ function Resolve-SharedObsidianVaultRoot {
     }
 
     if ($ThrowIfMissing) {
-        throw "No Obsidian vault directory found."
+        $msg = "Cannot find Obsidian vault. Set AI_MEMORY_OBSIDIAN_VAULT or OBSIDIAN_VAULT_ROOT env var, " +
+               "or open a vault in the Obsidian app. Searched: " +
+               ([string]::Join(", ", @($FallbackPath) + @(Get-SharedDefaultObsidianVaultCandidates)))
+        Write-Error $msg
+        throw "VAULT_RESOLUTION_FAILED: $msg"
     }
 
     return $FallbackPath
@@ -1399,9 +1418,13 @@ function New-SharedDirectoryLink {
 
     if (Test-SharedIsWindows) {
         try {
+            # Use PowerShell's native New-Item -ItemType Junction instead of cmd.exe mklink.
+            # This avoids spawning a visible cmd.exe window.
             [void](New-Item -ItemType Junction -Path $TargetPath -Target $SourcePath -Force)
             return
         } catch {
+            # If PowerShell junction creation fails (e.g. insufficient privilege),
+            # fall back to Invoke-SharedShellCommand which now uses a hidden cmd.exe.
             $mklinkOutput = Invoke-SharedShellCommand -Command ('mklink /J "{0}" "{1}"' -f $TargetPath, $SourcePath) 2>&1
             if ($LASTEXITCODE -ne 0) {
                 throw ("Failed to create junction '{0}' -> '{1}': {2}" -f $TargetPath, $SourcePath, (($mklinkOutput | Out-String).Trim()))

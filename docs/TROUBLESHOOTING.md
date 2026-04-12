@@ -1,5 +1,322 @@
 # Troubleshooting
 
+## Store Not Found
+
+**Error**: `VAULT_RESOLUTION_FAILED` at session start, or memory files not being written/read.
+
+**What to do**:
+
+1. **The system now uses `AI_MEMORY_STORE`** (default `E:\.ai-memory\`), not the Obsidian vault path. Set it explicitly if auto-detection is wrong:
+   ```powershell
+   [Environment]::SetEnvironmentVariable("AI_MEMORY_STORE", "E:\.ai-memory", "User")
+   ```
+   Adjust the path to match your preferred drive and location.
+
+2. **Verify the store contains the expected folder structure.** The memory bus expects:
+   ```
+   <store>\
+   ├── inbox/
+   │   └── {tool}.md         ← per-agent inbox
+   ├── structured/
+   │   ├── shared-inbox.jsonl
+   │   └── session-memory.jsonl
+   ├── generated/
+   │   ├── L0-bootstrap.md
+   │   └── GLOBAL-CONTEXT.md
+   ├── kg/
+   │   └── knowledge-graph.sqlite3
+   └── embeddings/
+       └── index.jsonl
+   ```
+
+3. **If the folders don't exist**, run the installer which creates them:
+   ```powershell
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
+   ```
+
+4. **Verify the store root is correct**:
+   ```powershell
+   # Windows
+   echo $env:AI_MEMORY_STORE
+   dir "$env:AI_MEMORY_STORE"
+
+   # macOS/Linux
+   echo $AI_MEMORY_STORE
+   ls "$AI_MEMORY_STORE"
+   ```
+
+5. **Run the migration script** if you are migrating from the old Obsidian vault store:
+   ```powershell
+   node ops/migrate-to-store.js
+   ```
+   This copies all data from the old vault store to the new `.ai-memory` store location.
+
+---
+
+## Embedding API Errors
+
+### API Key Not Set
+
+**Error**: `401 Unauthorized`, `403 Forbidden`, or `embedding_config_mismatch` in search results.
+
+**What to do**:
+
+1. **For OpenAI-compatible providers** (Ollama, ModelScope, Groq, etc.):
+   ```powershell
+   [Environment]::SetEnvironmentVariable("AI_MEMORY_EMBED_PROVIDER", "openai-compatible-remote", "User")
+   [Environment]::SetEnvironmentVariable("AI_MEMORY_EMBED_ADAPTER", "openai-compatible", "User")
+   [Environment]::SetEnvironmentVariable("AI_MEMORY_EMBED_BASE_URL", "https://your-endpoint/v1", "User")
+   [Environment]::SetEnvironmentVariable("AI_MEMORY_EMBED_API_KEY", "your-api-key", "User")
+   [Environment]::SetEnvironmentVariable("AI_MEMORY_EMBED_MODEL", "your-model-name", "User")
+   ```
+
+2. **Rebuild the embeddings index** after setting the API key:
+   ```powershell
+   node $env:AI_MEMORY_ROOT\generate-embeddings.js
+   ```
+
+3. **Verify the settings are saved**:
+   ```powershell
+   cat ~/.ai-memory/config/runtime.json
+   ```
+   Confirm `profile`, `provider`, `adapter`, `baseUrl`, and `model` all match your intended provider.
+
+### Rate Limit Errors
+
+**Error**: `429 Too Many Requests` during embeddings build.
+
+**What to do**:
+
+1. **Increase the request delay** to respect rate limits:
+   ```powershell
+   [Environment]::SetEnvironmentVariable("AI_MEMORY_EMBED_REQUEST_DELAY_MS", "500", "User")
+   ```
+
+2. **Retry the embeddings rebuild**:
+   ```powershell
+   node $env:AI_MEMORY_ROOT\generate-embeddings.js
+   ```
+
+3. **If using a remote provider**, wait a few minutes and try again. Rate limits typically reset within 60 seconds.
+
+### Embedding Dimension Mismatch
+
+**Error**: `embedding-dimension-mismatch` in search results.
+
+**What to do**:
+
+1. **This means the stored index was built with a different model than the current query side.** Rebuild the index:
+   ```powershell
+   node $env:AI_MEMORY_ROOT\generate-embeddings.js
+   ```
+
+2. **If the rebuild fails with an API error**, the run now aborts instead of silently mixing vectors. Fix the API issue first, then retry.
+
+---
+
+## Watchdog Not Running
+
+**Symptoms**: Memory entries appear but are not refreshed; `memory_status.watchdog.status: stale`; new inbox entries are not indexed.
+
+**What to do**:
+
+1. **Check if the watchdog process is running**:
+   ```powershell
+   powershell -File shared-mcp/status-shared-mcp.ps1
+   ```
+   Look for `watchdog.running: true`.
+
+2. **Start the watchdog**:
+   ```powershell
+   powershell -File shared-mcp/start-default-shared-mcp.ps1 -ForceRestart
+   ```
+
+3. **Run a one-shot sync** to process pending changes immediately:
+   ```powershell
+   powershell -File bus/memory-watchdog.ps1 -Once
+   ```
+
+4. **If the watchdog keeps stopping**, check the logs under `~/.ai-memory/shared-mcp/logs/`. The most common cause is a Python or Node.js crash during startup.
+
+---
+
+## Memory Not Appearing in Context
+
+**Symptoms**: You wrote to inbox but `search_shared_memory` returns no results. Entries are not in GLOBAL-CONTEXT.md.
+
+**What to do**:
+
+1. **Force a full sync**:
+   ```powershell
+   powershell -File bus/memory-bus.ps1 -Action SyncAll
+   ```
+
+2. **Check if the entry was written to JSONL**:
+   ```powershell
+   # Find the structured JSONL files
+   Get-ChildItem -Path "$env:AI_MEMORY_STORE\structured" -Filter "*.jsonl" | ForEach-Object {
+       Select-String -Path $_.FullName -Pattern "your-search-term" -List
+   }
+   ```
+   If the entry is in the JSONL, it was indexed. If not, the sync didn't pick it up.
+
+3. **Check if embeddings were rebuilt**. Run:
+   ```powershell
+   node $env:AI_MEMORY_ROOT\generate-embeddings.js
+   ```
+   Then check:
+   ```powershell
+   (Get-ChildItem -Path "$env:AI_MEMORY_STORE\embeddings\index.jsonl").LastWriteTime
+   ```
+   The index timestamp should be newer than when you wrote the entry.
+
+4. **Verify the entry's tier is embeddable** (Tier 3 or 4):
+   ```powershell
+   Select-String -Path "$env:AI_MEMORY_STORE\structured\shared-inbox.jsonl" `
+       -Pattern "your-search-term" -List
+   ```
+   Check the `tier` field. Tier 1 and 2 are NOT embedded.
+
+5. **If using `memory_wake_up`**, check that you are using enough `max_items`. Too few items may not surface your entry:
+   ```powershell
+   claude -p "$(cat <<'EOF'
+   {"tools":[{"name":"memory_wake_up","input":{"max_items":8,"include_recent_activity":true}}]}
+   EOF
+   )"
+   ```
+
+---
+
+## KG Extraction Failures
+
+**Symptoms**: Entity extraction runs but no KG triples are stored. `knowledge-graph.js` produces errors. No entity relationships appear in retrieval results.
+
+**What to do**:
+
+1. **Check if the KG SQLite database exists and is writable**:
+   ```powershell
+   $kgPath = Join-Path $env:AI_MEMORY_STORE "kg\knowledge-graph.sqlite3"
+   Test-Path $kgPath
+   ```
+   If the file does not exist, the KG initializes automatically on first run. If it exists but is not writable, check file permissions.
+
+2. **Run entity extraction manually** to see errors:
+   ```powershell
+   node ops/entity-extractor.js extract-file "$env:AI_MEMORY_STORE\structured\shared-inbox.jsonl"
+   ```
+   Look for error output like `TypeError`, `SyntaxError`, or `ENOENT`.
+
+3. **Check the KG schema** is compatible (requires Node.js 22.5+ for built-in `node:sqlite`):
+   ```powershell
+   node -e "const v = process.version; console.log('Node.js:', v); const hasSqlite = require('node:sqlite') !== undefined; console.log('node:sqlite:', hasSqlite);"
+   ```
+   If `node:sqlite` is not available, upgrade Node.js to 22.5+ or use the Python fallback.
+
+4. **Verify KG query works**:
+   ```powershell
+   node ops/knowledge-graph.js stats
+   ```
+   Expected output shows entity count and triple count.
+
+5. **Check entity extractor output** for your specific content:
+   ```powershell
+   node ops/entity-extractor.js extract "Alice works on the MemPalace project using Python"
+   ```
+   This should return extracted entities and facts.
+
+---
+
+## JSONL Corruption
+
+**Symptoms**: `check-memory-integrity.js --strict` reports contract violations. Entries appear duplicated or truncated. Search results have garbled text.
+
+**What to do**:
+
+1. **Validate the memory contract**:
+   ```powershell
+   node ops/check-memory-integrity.js --strict
+   ```
+   This checks every JSONL file for parse errors, missing fields, and contract violations.
+
+2. **Find corrupted lines**:
+   ```powershell
+   $path = "$env:AI_MEMORY_STORE\structured\shared-inbox.jsonl"
+   $lines = Get-Content $path -Encoding UTF8
+   $lineNum = 0
+   foreach ($line in $lines) {
+       $lineNum++
+       try {
+           $null = $line | ConvertFrom-Json -AsHashtable
+       } catch {
+           Write-Host "Corrupted line $lineNum`: $line" -ForegroundColor Red
+       }
+   }
+   ```
+
+3. **Isolate and repair**. If a single line is corrupted, you can either:
+   - **Delete the line**: Remove the corrupted JSONL line
+   - **Fix the line**: Correct the JSON manually
+   - **Backup and rebuild**: Copy the file to `*.jsonl.bak`, then run:
+     ```powershell
+     powershell -File bus/memory-bus.ps1 -Action SyncAll
+     ```
+     This rebuilds all structured files from source.
+
+4. **For a full rebuild from source** (nuclear option):
+   ```powershell
+   # Backup first
+   Copy-Item "$env:AI_MEMORY_STORE\structured" `
+       "$env:AI_MEMORY_STORE\structured.bak" -Recurse
+
+   # Force full sync
+   powershell -File bus/memory-watchdog.ps1 -Once
+   ```
+
+5. **If the embedding index is corrupted**, rebuild it:
+   ```powershell
+   node $env:AI_MEMORY_ROOT\generate-embeddings.js
+   ```
+
+---
+
+## My Search Results Are Empty or Wrong
+
+**Symptoms**: `search_shared_memory` returns zero results, or returns unrelated results.
+
+**What to do**:
+
+1. **Start with BM25-only** (works offline, zero API cost):
+   ```powershell
+   claude -p "$(cat <<'EOF'
+   {"tools":[{"name":"search_shared_memory","input":{"query":"your search terms here","limit":5,"mode":"bm25"}}]}
+   EOF
+   )"
+   ```
+   If BM25 returns results but dense doesn't, the issue is with the embedding provider.
+
+2. **Check if there are any records to search**:
+   ```powershell
+   (Get-Content "$env:AI_MEMORY_STORE\structured\shared-inbox.jsonl" -Encoding UTF8 | Measure-Object -Line).Lines
+   ```
+   Zero records means the sync never ran or failed silently.
+
+3. **Force a full sync and rebuild**:
+   ```powershell
+   powershell -File bus/memory-bus.ps1 -Action SyncAll
+   node $env:AI_MEMORY_ROOT\generate-embeddings.js
+   ```
+
+4. **For Chinese text search**, confirm `jieba` is installed:
+   ```powershell
+   node -e "const jieba = require('jieba'); console.log('jieba loaded:', !!jieba.tokenize);"
+   ```
+   If this fails, reinstall:
+   ```powershell
+   & $env:AI_MEMORY_PYTHON -m pip install jieba rank-bm25
+   ```
+
+---
+
 ## Installer Fails Immediately
 
 Check these first:
@@ -13,6 +330,18 @@ Quick checks:
 node -v
 npm -v
 ```
+
+## Node.js Console Windows Appear On Startup
+
+Cause:
+- The shared MCP proxy runs on Windows with console subsystem executables (cmd.exe, npx.cmd, uvx.cmd) that may create visible console windows when spawned through `cmd.exe /c`.
+- `windowsHide: true` in Node.js `spawn()` only suppresses the immediate child process window -- grandchild processes can still create their own visible consoles.
+- This was especially visible for `playwright-mcp.cmd`, `npx` fallback paths, and any batch-file shim that could not be parsed.
+
+Fix (applied in the latest version):
+- The singleton proxy now uses a temp-batch approach for all fallback cmd.exe launches: it writes a temporary `.bat` file and runs `cmd.exe /c batPath` which avoids console window allocation.
+- Shim resolution has been expanded to detect three patterns (npm-style shims, exe+script pairs, bare script paths) so more commands bypass cmd.exe entirely.
+- If you still see console windows, the relevant log file under `shared-mcp/logs/` will show the actual command being run.
 
 ## `.sh` Wrappers Cannot Find `pwsh`
 
@@ -86,7 +415,9 @@ node .\ops\sync-openclaw-to-obsidian.js
 
 ## Obsidian MCP Does Not Start
 
-`ops/run-obsidian-mcp.ps1` looks for the vault in this order:
+> **Note:** The shared `memory` MCP no longer requires Obsidian. If you still need the Obsidian MCP for reading/writing vault notes, configure it separately.
+
+`ops/run-obsidian-mcp.ps1` (if used) looks for the vault in this order:
 1. `AI_MEMORY_OBSIDIAN_VAULT`
 2. `OBSIDIAN_VAULT_ROOT`
 3. the active or most recent vault in Obsidian's app config (`%APPDATA%\obsidian\obsidian.json`, `~/Library/Application Support/obsidian/obsidian.json`, or `~/.config/obsidian/obsidian.json`)
@@ -177,7 +508,10 @@ Disable-ScheduledTask -TaskName "OpenClaw Gateway"
 
 Notes:
 - the current `AI Memory Watchdog.vbs` startup entry should launch only hidden PowerShell hosts
-- current installs also try to disable a clearly stale per-user `OpenClaw Gateway` task automatically when it points at a missing `\.openclaw\gateway.cmd` or another profile's path; older installs may need one reinstall before that cleanup runs
+- current installs also replace legacy `OpenClaw.lnk` Startup entries with a hidden `OpenClaw.vbs` launcher when `~/.openclaw/start-gateway.ps1` exists
+- current installs now treat `OpenClaw Gateway` task actions that still call `\.openclaw\gateway.cmd` as repair-worthy, because the `.cmd` entrypoint itself can still flash a console window even when it points at the current profile
+- current installs also try to disable a clearly stale per-user `OpenClaw Gateway` task automatically when it points at a missing `\.openclaw\gateway.cmd`, another profile's path, or a legacy `.cmd` entrypoint; older installs may need one reinstall before that cleanup runs
+- when automatic disable hits `Access is denied`, current installs also write `~/.ai-memory/reports/repair-openclaw-gateway.admin.ps1` so one elevated PowerShell run can remove the stale task cleanly
 - if Windows still refuses the disable/delete with `Access is denied`, current installs also drop a compatibility shim at the stale `\.openclaw\gateway.cmd` path when possible so the leftover task stops triggering `Open With` prompts for Node/NPM scripts
 - if deletion or disable returns `Access is denied`, that specific task still requires an administrator shell even if the rest of the memory bus runs correctly
 - on the affected Windows profile, that `Access is denied` case can happen even when the task says `Run As User = wang`; the task file can still be ACL-owned by `Administrators`, so the practical fix is one elevated disable/delete in Task Scheduler or an admin PowerShell session
@@ -352,3 +686,95 @@ The current `shared-mcp/package-lock.json` is expected to audit cleanly. If a fu
 - keep the repo clean and secret-free
 - prefer controlled dependency updates
 - avoid `npm audit fix --force` unless you have revalidated the shared MCP runtime afterward
+
+---
+
+## FAQ
+
+### Why Is The `.ai-memory` Store The Canonical Store?
+Because it keeps durable memory in plain local files that multiple tools can read and write with low lock-in, without requiring Obsidian installed.
+
+### Does Shared MCP Mean All Agents Share One Giant Context?
+No. Shared MCP deduplicates processes. Each client still has its own session lifecycle and tool calls.
+
+### Should I Integrate Via MCP, Skills, Or Plugins?
+- **MCP**: shared runtime access, process deduplication, and tool transport
+- **skills**: portable onboarding, read order, writeback policy, and task decomposition habits
+- **plugins**: native lifecycle hooks or UI only — use as last resort
+
+Default: MCP plus skills. Add plugins only as a host-specific last mile.
+
+### When Should I Use `bm25`, `dense`, Or `hybrid`?
+- `bm25`: exact or keyword-heavy queries (works offline, zero API cost)
+- `dense`: semantic similarity
+- `hybrid` (default): balances both
+
+### Does This Require Remote Embeddings?
+No. Offline `hashing-v1` is the default dense path and works fully offline.
+
+### Can Embedding Providers Be Hot-Swapped?
+You can switch the active profile/provider without editing code, but if adapter, model, or base URL changes, **rebuild the stored embeddings index** so query and stored vectors match.
+
+### How Long Until a New Note Appears in Shared Memory?
+The watchdog polls every 15s. Embeddings rebuild runs every 15 minutes by default. For immediate indexing, call `rebuild_memory_embeddings` tool or run `memory-watchdog.ps1 -Once`.
+
+### How Do I Disable the Background Watchdog?
+```powershell
+$env:AI_MEMORY_WATCHDOG_ENABLED = "0"
+```
+Or set the environment variable permanently. When disabled, trigger sync manually with `memory-bus.ps1 -Action SyncAll`.
+
+### How Do I Stop All Shared MCP Services?
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\start-default-shared-mcp.ps1 -Stop
+```
+
+### How Do I See All Environment Variables?
+See `docs/ENVIRONMENT.md`.
+
+---
+
+## Error Codes
+
+### Prefix Conventions
+| Prefix | Layer |
+|--------|-------|
+| `embedding-*` | Embedding generation errors |
+| `memory-*` | Memory bus errors |
+| `mcp-*` | MCP transport errors |
+| `openai-compatible-*` | OpenAI API errors |
+| `python-runtime-*` | Python runtime errors |
+
+### Embedding Errors
+| Code | Meaning | Fix |
+|------|---------|-----|
+| `embedding-process-exit-N` | Python process exited with code N | Check Python deps |
+| `invalid-embedding-json` | Python output was not valid JSON | Check Python deps |
+| `openai-compatible-http-429` | Rate limited | Increase `AI_MEMORY_EMBED_REQUEST_DELAY_MS` |
+| `openai-compatible-http-5XX` | Server error | Check API endpoint |
+| `openai-compatible-count-mismatch` | Vector count mismatch | Rebuild index |
+| `embedding-dimension-mismatch` | Index built with different model | Rebuild index |
+
+### Memory Errors
+| Code | Meaning | Fix |
+|------|---------|-----|
+| `invalid-records` | Record(s) failed schema validation | Run `check-memory-integrity.js --strict` |
+| `malformed-lines` | JSONL parse errors | Repair JSONL files |
+| `duplicate-ids` | Duplicate record IDs | Run hygiene report |
+| `generated-artifacts-stale` | Artifact signature mismatch | Rebuild: `memory-bus.ps1 -Action Generate` |
+| `generated-artifacts-contract-mismatch` | Schema version mismatch | Rebuild all artifacts |
+
+### Script Errors
+| Code | Meaning | Fix |
+|------|---------|-----|
+| `embeddings-script-missing` | Script not found | Reinstall runtime |
+| `memory-bus-script-missing` | Script not found | Reinstall runtime |
+| `semantic-search-exit-N` | Search script crashed (code N) | Check Python runtime |
+
+### Server Request Errors
+| Code | Meaning |
+|------|---------|
+| `query is required` | Search query missing |
+| `ids must be an array` | Parameter type error |
+| `anchor_id not found` | Timeline anchor not in records |
+| `unknown-embedding-profile` | Profile not in `runtime.json` |

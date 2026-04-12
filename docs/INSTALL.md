@@ -5,9 +5,10 @@
 - PowerShell 7 (`pwsh`) for macOS/Linux install and shared-MCP control scripts
 - Node.js on `PATH`
 - A usable Python runtime for shared semantic search; `scripts/install.ps1` auto-detects one and can fall back to uv-managed Python
-- Obsidian installed locally
 - `uv` if you want the shared `fetch` and `time` MCP services
 - `npx` if you want the shared `context7` and `sequential-thinking` MCP services
+
+> **Note:** Obsidian is no longer required. The shared memory store is a pure local filesystem at `AI_MEMORY_STORE` (default `E:\.ai-memory\`). Obsidian can still be used as a human-readable browsing layer, but it is not a dependency.
 
 ## Support Levels
 - Windows:
@@ -92,19 +93,68 @@ That default starter brings up:
 - `fetch`
 - `time`
 - `sequential-thinking`
-- `obsidian`
-- `memory`
+- `memory` (with `memory_boot`, `memory_query`, `search_shared_memory`, etc.)
 - `playwright`
 - `MiniMax` only when its environment variables are configured or the starter is told to include it explicitly
+
+### Search Capabilities
+
+The `memory` MCP server exposes `memory_wake_up` as a compact session bootstrap tool available at port 9338. It returns a structured pack combining durable anchors, handoff data, and recent activity without requiring individual file reads.
+
+The server also supports verbatim snippet extraction on `search_shared_memory`:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `includeVerbatim` | `boolean` | `false` | Return query-aware exact snippet windows around matched text |
+| `snippetWindow` | `integer` | `220` | Character window kept around each exact match |
+| `maxVerbatimPerResult` | `integer` | `1` | Maximum verbatim snippet windows per result |
+
+### Standalone Operations
+
+The watchdog supervisor can be started independently of the shared MCP stack:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\bus\memory-watchdog-supervisor.ps1 -Daemon
+```
+
+```bash
+pwsh "$HOME/.ai-memory/bus/memory-watchdog-supervisor.ps1" -Daemon
+```
+
+Inbox hygiene removes entries older than 7 days:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\ops\cleanup-inbox.ps1
+```
+
+```bash
+pwsh "$HOME/.ai-memory/ops/cleanup-inbox.ps1"
+```
+
+### Memory Generation Pipeline
+
+After install, run the full memory generation pipeline for complete bootstrap data:
+
+```powershell
+node $env:AI_MEMORY_ROOT\ops\build-memory-layers.js
+node $env:AI_MEMORY_ROOT\ops\build-handoff-pack.js
+```
+
+```bash
+node ~/.ai-memory/ops/build-memory-layers.js
+node ~/.ai-memory/ops/build-handoff-pack.js
+```
+
+These are also run automatically by `install.ps1`, but you can re-run them to refresh generated artifacts at any time.
 
 If you want a narrower shared set and prefer to leave Playwright out, start an explicit subset instead:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\start-shared-mcp.ps1 -Only context7,fetch,time,sequential-thinking,obsidian,memory
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\start-shared-mcp.ps1 -Only context7,fetch,time,sequential-thinking,memory
 ```
 
 ```bash
-~/.ai-memory/shared-mcp/start-shared-mcp.sh -Only context7,fetch,time,sequential-thinking,obsidian,memory
+~/.ai-memory/shared-mcp/start-shared-mcp.sh -Only context7,fetch,time,sequential-thinking,memory
 ```
 
 Register a client pack explicitly if you need a generated onboarding preset:
@@ -246,3 +296,52 @@ node ~/.ai-memory/generate-embeddings.js
 - `install-manifest.json` is installer-owned state; keep it in the installed runtime so upgrades can clean up stale managed files safely
 - The shared `memory` MCP and OpenClaw blackboard daemon no longer depend on native Node `sqlite3`; they use Python's standard-library `sqlite3` through the resolved Python runtime instead
 - Before install, source-tree direct runs can resolve `templates/config/runtime.json`; after install, the canonical runtime config path should be `~/.ai-memory/config/runtime.json`
+
+---
+
+## Adding Another AI Tool
+
+### Quick Connect (Windows)
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\install-client-integrations.ps1 -WorkspaceRoot <your-project-root>
+```
+
+This auto-configures: Claude Code, OpenCode, Cursor, VS Code/Copilot, Trae.
+
+### Manual HTTP MCP Endpoints
+
+All tools support these shared endpoints:
+
+| Service | Endpoint | What it does |
+|---------|----------|--------------|
+| memory | http://127.0.0.1:9338/mcp | Shared memory search, memory_boot, memory_query |
+| context7 | http://127.0.0.1:9331/mcp | Code search |
+| fetch | http://127.0.0.1:9332/mcp | Web fetch |
+| time | http://127.0.0.1:9333/mcp | Current time |
+| playwright | http://127.0.0.1:9337/mcp | Browser automation (optional) |
+
+### Shared Memory Read Order
+
+Preferred: use `memory_wake_up` on port 9338 for compact structured bootstrap.
+
+Fallback: read files in this order:
+1. `SKILL.md` (repository root) — universal entry point
+2. `{store}/generated/L0-bootstrap.md` — L0 + L1 facts (project-aware)
+3. `{store}/generated/GLOBAL-CONTEXT.md` — full history overlay
+4. `{store}/generated/SHARED-SKILLS.md` — shared skill context
+
+### Durable Writeback Rules
+- Cross-project facts → `{store}/inbox/{tool}.md`
+- Active task state → `{store}/structured/session-memory.jsonl`
+- Project-specific facts → relevant project note in vault or store
+- **Never write secrets into shared memory**
+
+### Canonical Read Order for Structured Bootstrap
+Use `memory_wake_up` MCP tool on port 9338 — returns durable anchors, next steps, blockers, and recent activity in a single call.
+
+### Verbatim Snippet Search
+`search_shared_memory` supports:
+- `includeVerbatim: true` — return query-aware exact text windows
+- `snippetWindow` (default 220 chars) — character window size
+- `maxVerbatimPerResult` (default 1) — snippets per result

@@ -1,30 +1,36 @@
 # Documentation Index
 
+## Core Docs
+- [ARCHITECTURE.md](./ARCHITECTURE.md) — System architecture, language responsibilities, performance
+- [MEMORY-TIERING.md](./MEMORY-TIERING.md) — 5-tier memory spec + adaptive retrieval modes
+- [OPERATIONS.md](./OPERATIONS.md) — Day-to-day commands + observability
+- [architecture/OVERVIEW.md](./architecture/OVERVIEW.md) — High-level plane architecture overview
+- [architecture/PLATFORM_ABSTRACTION.md](./architecture/PLATFORM_ABSTRACTION.md) — Cross-platform abstraction design
+
 ## Getting Started
-- [INSTALL.md](./INSTALL.md) — Installation and setup
-- [ADDING-CLIENT.md](./ADDING-CLIENT.md) — Connect another AI tool to shared memory
-- [NEW-AGENT-INTEGRATION.md](./NEW-AGENT-INTEGRATION.md) — Onboarding a new agent
-
-## Architecture
-- [ARCHITECTURE.md](./ARCHITECTURE.md) — System architecture overview
-- [MEMORY-ARCHITECTURE-CRITIQUE.md](./MEMORY-ARCHITECTURE-CRITIQUE.md) — Architecture review
-- [INTEGRATION-MODES.md](./INTEGRATION-MODES.md) — Agent integration modes
-
-## Operations
-- [OPERATIONS.md](./OPERATIONS.md) — Day-to-day operations guide
-- [DEPLOYMENT-MATRIX.md](./DEPLOYMENT-MATRIX.md) — Deployment configurations
-- [UNINSTALL.md](./UNINSTALL.md) — How to remove the memory bus
-- [ENVIRONMENT.md](./ENVIRONMENT.md) — All environment variables reference
+- [INSTALL.md](./INSTALL.md) — Installation + adding new AI tools
+- [reference/QUICKSTART.md](./reference/QUICKSTART.md) — 5-step, 30-minute guide
+- [platform/SETUP_OVERVIEW.md](./platform/SETUP_OVERVIEW.md) — Cross-platform quick reference
+- [platform/MACOS_SETUP.md](./platform/MACOS_SETUP.md) — macOS-specific install guide
+- [platform/LINUX_SETUP.md](./platform/LINUX_SETUP.md) — Linux-specific install guide
 
 ## Troubleshooting
-- [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) — Common issues and solutions
-- [FAQ.md](./FAQ.md) — Frequently asked questions
-- [SECURITY.md](./SECURITY.md) — Security policy and vulnerability reporting
-- [VALIDATION.md](./VALIDATION.md) — Validation procedures
-- [MCP-DEDUP.md](./MCP-DEDUP.md) — MCP deduplication guide
-- [MIGRATION.md](./MIGRATION.md) — Migration between versions
-- [ERROR_CODES.md](./ERROR_CODES.md) — Error code reference
+- [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) — Common issues, FAQ, error codes
 
-## Development
-- [RELEASING.md](./RELEASING.md) — Release process
-- [DEVELOPMENT.md](./DEVELOPMENT.md) — Pre-commit checks and CI
+## Reference
+- [reference/MCP-TOOLS.md](./reference/MCP-TOOLS.md) — All MCP tool definitions (visual dependency matrix)
+- [reference/MCP-TOOLS.schema.json](./reference/MCP-TOOLS.schema.json) — JSON Schema for MCP tools
+- [reference/DATA-FLOW.md](./reference/DATA-FLOW.md) — End-to-end data flow diagrams (ASCII art)
+- [guides/API_REFERENCE.md](./guides/API_REFERENCE.md) — MCP tool parameter and output reference
+- [guides/DEVELOPMENT.md](./guides/DEVELOPMENT.md) — Dev environment, testing, code style, debugging
+
+## Architecture Decisions
+- [adr/ADR-002-unified-memory-architecture-v2.md](./adr/ADR-002-unified-memory-architecture-v2.md) — ADR-002: unified memory v2 (SQLite chunks, BM25, typed promotion, MMR, temporal decay)
+- [guides/CONTRIBUTING_ARCHITECTURE.md](./guides/CONTRIBUTING_ARCHITECTURE.md) — ADR-003 (cross-platform abstraction) and ADR-004 (WAL concurrency) + ADR writing guide
+
+## External References
+- [MEMPALACE-ARCHITECTURE.md](./MEMPALACE-ARCHITECTURE.md) — MemPalace memory framework deep-dive
+- [claude-mem-architecture.md](./claude-mem-architecture.md) — claude-mem architecture analysis
+
+## Environment
+- [ENVIRONMENT.md](./ENVIRONMENT.md) — All environment variables reference

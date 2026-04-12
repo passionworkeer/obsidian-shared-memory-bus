@@ -10,7 +10,6 @@
  */
 
 import fs from "node:fs";
-import path from "node:path";
 import { spawn } from "node:child_process";
 
 function jsonResult(payload) {
@@ -136,37 +135,6 @@ export function createMemoryGeneration(params) {
   }
 
   return {
-    tools: [
-      {
-        name: "rebuild_memory_layers",
-        description:
-          "Rebuild derived shared memory layers such as shared inbox records, session-layer records, and shared event records.",
-        inputSchema: {
-          type: "object",
-          properties: {},
-        },
-      },
-      {
-        name: "build_handoff_pack",
-        description:
-          "Build a bounded handoff pack with current goal, done, next, blocked, files, open threads, and tool invariants.",
-        inputSchema: {
-          type: "object",
-          properties: {},
-        },
-      },
-      {
-        name: "run_memory_dream",
-        description:
-          "Run one memory dream consolidation pass over durable, session, and task layers to refresh AUTO-DREAM summaries.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            force: { type: "boolean", default: false, description: "Force a dream pass even when gates would normally skip." },
-          },
-        },
-      },
-    ],
     handlers: {
       rebuild_memory_layers: handleRebuildMemoryLayers,
       build_handoff_pack: handleBuildHandoffPack,

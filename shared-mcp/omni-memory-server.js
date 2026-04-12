@@ -16,12 +16,21 @@ import { createMemoryStatus } from "./memory-status.js";
 import { createMemoryEmbeddings } from "./memory-embeddings.js";
 import { TOOLS } from "./memory-tools.js";
 
+// --- ESM globals (must be defined before any code that uses them) ---
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const require = createRequire(import.meta.url);
+
+// --- Derived constants ---
 const USER_HOME = process.env.USERPROFILE || process.env.HOME || "";
 const IS_WINDOWS = process.platform === "win32";
 const AI_MEMORY_ROOT = process.env.AI_MEMORY_ROOT || path.resolve(__dirname, "..");
+
+// memory_boot and memory_query — resolves via resolveProjectPath so it works
+// whether AI_MEMORY_ROOT points to the project dir or to a separate data dir.
+const { handlers: mcpMemoryHandlers } = require(
+  resolveProjectPath("ops", "mcp-memory-tools-handler.cjs")
+);
 const WINDOWS_ENV_CACHE = new Map();
 const RUNTIME_ENV_NAMES = [
   "AI_MEMORY_ROOT",
@@ -58,9 +67,35 @@ function resolveRuntimePath(...candidates) {
   return path.join(AI_MEMORY_ROOT, candidates[0]);
 }
 
-function loadVaultResolver() {
-  const helperPath = resolveRuntimePath("vault-root.js", path.join("bus", "vault-root.js"));
+/**
+ * Resolve a module path that may live in the project directory (E:\desktop\obsidian-shared-memory-bus)
+ * even when AI_MEMORY_ROOT points to a separate data dir (C:\Users\wang\.ai-memory).
+ *
+ * Checks:
+ *   1. process.cwd() + relativePath  (project dir, where ops/ lives)
+ *   2. path.resolve(__dirname, "..") + relativePath  (parent of shared-mcp/)
+ *   3. AI_MEMORY_ROOT + relativePath  (canonical fallback)
+ */
+function resolveProjectPath(...parts) {
+  const relPath = path.join(...parts);
+  for (const base of [process.cwd(), path.resolve(__dirname, "..")]) {
+    const candidate = path.join(base, relPath);
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  // Last resort: use AI_MEMORY_ROOT even if it may not have the file
+  return path.join(AI_MEMORY_ROOT, relPath);
+}
+
+function loadStoreRootHelper() {
+  const helperPath = resolveRuntimePath("store-root.js", path.join("bus", "store-root.js"));
   return require(helperPath);
+}
+
+// Backward compat: still named loadVaultResolver but now loads store-root
+function loadVaultResolver() {
+  return loadStoreRootHelper();
 }
 
 function loadPythonRuntimeHelper() {
@@ -204,7 +239,7 @@ const RUNTIME_ENV = buildMergedEnv();
 const OPENCLAW_HOME = firstNonEmptyEnv("OPENCLAW_HOME") || path.join(USER_HOME, ".openclaw");
 const BLACKBOARD_DB_PATH =
   firstNonEmptyEnv("OPENCLAW_BLACKBOARD_DB") || path.join(OPENCLAW_HOME, "workspace", "ai-shrimp", "blackboard", "tasks.db");
-const { resolveVaultRoot } = loadVaultResolver();
+const { resolveStoreRoot } = loadStoreRootHelper();
 const { resolvePythonRuntime, withPythonArgs } = loadPythonRuntimeHelper();
 const { buildEmbeddingConfigHash } = loadEmbeddingProviderHelper();
 const { buildMemoryIntegrityReport } = loadMemoryContractHelper();
@@ -264,9 +299,6 @@ const METRICS = {
   dream_lock_held_seconds: [],   // circular buffer, last 20 values
   mcp_requests_total: {},       // {tool: count}
 };
-const MAX_LATENCY_BUFFER = 100;
-const MAX_LOCK_BUFFER = 20;
-// ---------------------------------------------------------------------------
 // Metrics collection helpers
 // ---------------------------------------------------------------------------
 
@@ -327,7 +359,7 @@ function refreshMetricsFromFiles() {
       for (const [scope, count] of Object.entries(hygiene.stats?.byScope || {})) {
         METRICS.structured_files_total[`scope:${scope}`] = count;
       }
-      const dreamStatePath = path.join(VAULT_ROOT, "00-System", "ai-memory", "state", "auto-dream-state.json");
+      const dreamStatePath = path.join(STORE_ROOT, "state", "auto-dream-state.json");
       if (fs.existsSync(dreamStatePath)) {
         const dreamState = JSON.parse(fs.readFileSync(dreamStatePath, "utf8"));
         METRICS.promotion_queue_size.promotion = Array.isArray(dreamState.promotionQueue)
@@ -464,20 +496,6 @@ function readWatchdogState() {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Embedding helpers
-// ---------------------------------------------------------------------------
-
-function readOptionalJson(filePath) {
-  if (!fs.existsSync(filePath)) {
-    return null;
-  }
-  try {
-    return JSON.parse(fs.readFileSync(filePath, "utf8"));
-  } catch (error) {
-    return { ok: false, error: String(error), path: filePath };
-  }
-}
 
 function readEmbeddingsSummary() {
   if (!fs.existsSync(EMBEDDINGS_INDEX_PATH)) {
@@ -983,7 +1001,7 @@ async function ensureSearchWorker() {
       windowsHide: true,
       env: {
         ...PYTHON_SPAWN_ENV,
-        AI_MEMORY_OBSIDIAN_VAULT: VAULT_ROOT,
+        AI_MEMORY_STORE: STORE_ROOT,
       },
     });
 
@@ -1106,14 +1124,14 @@ async function getClaudeMemHealth() {
 // Path constants (computed after helpers are loaded)
 // ---------------------------------------------------------------------------
 
-const VAULT_ROOT = resolveVaultRoot();
-const CANONICAL_AI_MEMORY_ROOT = path.join(VAULT_ROOT, "00-System", "ai-memory");
-const STRUCTURED_ROOT = path.join(CANONICAL_AI_MEMORY_ROOT, "structured");
-const GENERATED_ROOT = path.join(CANONICAL_AI_MEMORY_ROOT, "generated");
-const EMBEDDINGS_INDEX_PATH = path.join(VAULT_ROOT, "00-System", "ai-memory", "embeddings", "index.jsonl");
-const HANDOFF_PACK_JSON_PATH = path.join(VAULT_ROOT, "00-System", "ai-memory", "generated", "HANDOFF.json");
-const MEMORY_LAYERS_JSON_PATH = path.join(VAULT_ROOT, "00-System", "ai-memory", "generated", "MEMORY-LAYERS.json");
-const AUTO_DREAM_JSON_PATH = path.join(VAULT_ROOT, "00-System", "ai-memory", "generated", "AUTO-DREAM.json");
+const STORE_ROOT = resolveStoreRoot(); // e.g. "E:\\.ai-memory" (Windows) or "$HOME/.ai-memory" (macOS/Linux)
+const MEMORY_STORE_ROOT = STORE_ROOT;
+const STRUCTURED_ROOT = path.join(MEMORY_STORE_ROOT, "structured");
+const GENERATED_ROOT = path.join(MEMORY_STORE_ROOT, "generated");
+const EMBEDDINGS_INDEX_PATH = path.join(MEMORY_STORE_ROOT, "embeddings", "index.jsonl");
+const HANDOFF_PACK_JSON_PATH = path.join(GENERATED_ROOT, "HANDOFF.json");
+const MEMORY_LAYERS_JSON_PATH = path.join(GENERATED_ROOT, "MEMORY-LAYERS.json");
+const AUTO_DREAM_JSON_PATH = path.join(GENERATED_ROOT, "AUTO-DREAM.json");
 
 // ---------------------------------------------------------------------------
 // Module initialization — build params and create all tool modules
@@ -1123,8 +1141,8 @@ const sharedParams = {
   METRICS,
   firstNonEmptyEnv,
   withPythonArgs,
-  VAULT_ROOT,
-  CANONICAL_AI_MEMORY_ROOT,
+  STORE_ROOT,
+  MEMORY_STORE_ROOT,
   STRUCTURED_ROOT,
   GENERATED_ROOT,
   EMBEDDINGS_INDEX_PATH,
@@ -1132,7 +1150,7 @@ const sharedParams = {
   MEMORY_LAYERS_JSON_PATH,
   AUTO_DREAM_JSON_PATH,
   WATCHDOG_STATE_PATH,
-  AI_MEMORY_ROOT,
+  MEMORY_STORE_ROOT,
   BLACKBOARD_DB_PATH,
   CLAUDE_MEM_BASE,
   SEARCH_SCRIPT,
@@ -1192,6 +1210,9 @@ for (const [name, handler] of Object.entries(bridge.handlers)) {
 for (const [name, handler] of Object.entries(embeddings.handlers)) {
   ALL_HANDLERS[name] = handler;
 }
+for (const [name, handler] of Object.entries(mcpMemoryHandlers)) {
+  ALL_HANDLERS[name] = handler;
+}
 
 // ---------------------------------------------------------------------------
 // MCP Server
@@ -1218,10 +1239,6 @@ process.on("exit", () => {
     // Best-effort cleanup only.
   }
 });
-
-function jsonResult(payload) {
-  return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
-}
 
 function errorResult(message) {
   return {

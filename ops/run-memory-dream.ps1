@@ -2,6 +2,7 @@ param(
     [switch]$Force,
     [switch]$DryRun,
     [switch]$Writeback,
+    [switch]$SkipArchive,
     [int]$MinHours = 24,
     [int]$MinRecords = 10
 )
@@ -1186,6 +1187,17 @@ try {
     $durableByScope = Build-CountMap -Records $durableRecords -PropertyName "scope"
     $promotionTargetCounts = Build-CountMap -Records $promotionCandidates -PropertyName "targetScope"
     $refreshTargetCounts = Build-CountMap -Records $refreshTargets -PropertyName "targetScope"
+
+    # ── Phase 1b: Trigger idempotent archival before promotion (Q1 fix: hygiene reports, dream triggers)
+    $archivalScript = Join-Path $PSScriptRoot "memory-archival.js"
+    if (-not $SkipArchive -and -not $DryRun -and (Test-Path -LiteralPath $archivalScript -PathType Leaf)) {
+        try {
+            $archivalJob = Start-Process -FilePath "node" -ArgumentList @($archivalScript, "--vault-root", $VaultRoot, "--trigger", "dream") -WindowStyle Hidden -PassThru -ErrorAction SilentlyContinue
+            Write-Verbose "Archival triggered: pid=$($archivalJob.Id)"
+        } catch {
+            Write-Verbose "Archival trigger failed (non-blocking): $_"
+        }
+    }
 
     $generatedAt = (Get-Date).ToString("o")
 

@@ -168,6 +168,25 @@ function Set-ScalarProperty {
     }
 }
 
+function Remove-FileIfPresent {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [ref]$Report
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $false
+    }
+
+    $backupPath = Backup-IfExists -Path $Path
+    Remove-Item -LiteralPath $Path -Force
+    if ($backupPath) {
+        $Report.Value.backups.Add($backupPath) | Out-Null
+    }
+    $Report.Value.updated.Add($Path) | Out-Null
+    return $true
+}
+
 function Set-ManagedBlock {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -387,6 +406,81 @@ function Update-CodexConfigToml {
     Write-TextFile -Path $Path -Content $content -Report $Report
 }
 
+function Normalize-VsCodeSharedServerAliases {
+    param(
+        [Parameter(Mandatory = $true)]$ServersObject,
+        [Parameter(Mandatory = $true)]$Manifest
+    )
+
+    $playwrightServer = @($Manifest.servers | Where-Object { [string]$_.id -eq "playwright" } | Select-Object -First 1)
+    if (@($playwrightServer).Count -eq 0) {
+        return
+    }
+
+    $aliasName = "microsoft/playwright-mcp"
+    $aliasProperty = $ServersObject.PSObject.Properties[$aliasName]
+    if (-not $aliasProperty) {
+        return
+    }
+
+    $aliasPayload = [ordered]@{
+        type = "http"
+        url = (Get-SharedMcpUrl -Manifest $Manifest -Server $playwrightServer[0])
+    }
+
+    $existingAlias = $aliasProperty.Value
+    if ($null -ne $existingAlias) {
+        foreach ($field in @("gallery", "version")) {
+            $existingField = $existingAlias.PSObject.Properties[$field]
+            if ($existingField -and -not [string]::IsNullOrWhiteSpace([string]$existingField.Value)) {
+                $aliasPayload[$field] = [string]$existingField.Value
+            }
+        }
+    }
+
+    Set-ScalarProperty -Object $ServersObject -Name $aliasName -Value ([pscustomobject]$aliasPayload)
+}
+
+function Repair-OpenClawWindowsStartupEntry {
+    param([ref]$Report)
+
+    if (-not (Test-SharedIsWindows)) {
+        return
+    }
+
+    $startupDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Startup"
+    Ensure-Directory -Path $startupDir
+
+    $openClawHome = Join-SharedPath @((Get-SharedUserHome), ".openclaw")
+    $startGatewayPath = Join-SharedPath @($openClawHome, "start-gateway.ps1")
+    $openClawVbsPath = Join-Path $startupDir "OpenClaw.vbs"
+    $legacyPaths = @(
+        (Join-Path $startupDir "OpenClaw.lnk"),
+        (Join-Path $startupDir "OpenClaw Gateway.lnk"),
+        (Join-Path $startupDir "OpenClaw Gateway.cmd"),
+        (Join-Path $startupDir "OpenClaw.cmd"),
+        (Join-Path $startupDir "OpenClaw.ps1")
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+    foreach ($legacyPath in @($legacyPaths)) {
+        [void](Remove-FileIfPresent -Path $legacyPath -Report $Report)
+    }
+
+    if (-not (Test-Path -LiteralPath $startGatewayPath -PathType Leaf)) {
+        [void](Remove-FileIfPresent -Path $openClawVbsPath -Report $Report)
+        return
+    }
+
+    $powerShellExe = Resolve-SharedPowerShellExecutable
+    $arguments = Get-SharedPowerShellFileArguments -ScriptPath $startGatewayPath -ArgumentList @()
+    $command = Join-SharedWindowsProcessArguments -Arguments (@($powerShellExe) + @($arguments))
+    $vbsContent = @"
+Set shell = CreateObject("Wscript.Shell")
+shell.Run "$($command -replace '"', '""')", 0, False
+"@.Trim() + "`r`n"
+    Write-TextFile -Path $openClawVbsPath -Content $vbsContent -Report $Report
+}
+
 function Normalize-ClientName {
     param([Parameter(Mandatory = $true)][string]$Name)
 
@@ -556,6 +650,7 @@ if ((Test-ClientSelected -Name "vscode") -or (Test-ClientSelected -Name "copilot
     foreach ($entry in $vsCodeServerMap.GetEnumerator()) {
         Set-ScalarProperty -Object $vsCodeServers -Name $entry.Key -Value $entry.Value
     }
+    Normalize-VsCodeSharedServerAliases -ServersObject $vsCodeServers -Manifest $manifest
     Write-JsonFile -Path $vsCodeMcpPath -Object $vsCodeMcp -Report ([ref]$report)
 
     $vsCodeSettingsPath = Join-SharedPath @($vsCodeUserRoot, "settings.json")
@@ -699,6 +794,7 @@ if (Test-ClientSelected -Name "trae") {
 
 if (Test-ClientSelected -Name "openclaw") {
     $report.notes.Add("OpenClaw does not need a separate live MCP client config here; the shared-memory bridge is refreshed through memory-bus generation and watchdog sync.") | Out-Null
+    Repair-OpenClawWindowsStartupEntry -Report ([ref]$report)
 }
 
 if ((-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) -and (-not $SkipWorkspaceOverlays)) {
