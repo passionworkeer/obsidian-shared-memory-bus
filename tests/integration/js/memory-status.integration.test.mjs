@@ -162,8 +162,9 @@ describe("memory-status integration", () => {
   });
 
   test("handleMemoryWakeUp returns correct layer structure", async () => {
-    const generatedDir = path.join(os.tmpdir(), "memory-wakeup-test-" + Date.now());
-    fs.mkdirSync(path.join(generatedDir, "00-System", "ai-memory", "generated"), { recursive: true });
+    const vaultRoot = path.join(os.tmpdir(), "memory-wakeup-test-" + Date.now());
+    const generatedDir = path.join(vaultRoot, "00-System", "ai-memory", "generated");
+    fs.mkdirSync(generatedDir, { recursive: true });
     fs.writeFileSync(path.join(generatedDir, "HANDOFF.json"), JSON.stringify({
       goal: "Finish integration tests",
       done: ["task-a", "task-b"],
@@ -186,7 +187,7 @@ describe("memory-status integration", () => {
 
     const statusModule = await import(resolveAsFileUrl(path.join(__dirname, "..", "..", "..", "shared-mcp", "memory-status.js")));
     const factory = statusModule.createMemoryStatus({
-      VAULT_ROOT: generatedDir,
+      VAULT_ROOT: vaultRoot,
       GENERATED_ROOT: generatedDir,
       readEmbeddingRuntimeSummary: () => ({}),
       readEmbeddingsSummary: () => ({}),

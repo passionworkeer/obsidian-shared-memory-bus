@@ -23,8 +23,8 @@
     "node": ">=18"
   },
   "scripts": {
-    "lint": "eslint --ignore-path ../.eslintignore .",
-    "lint:fix": "eslint --fix --ignore-path ../.eslintignore ."
+    "lint": "eslint --ignore-path ../.eslintignore --max-warnings=-1 .",
+    "lint:fix": "eslint --fix --ignore-path ../.eslintignore --max-warnings=-1 ."
   },
   "dependencies": {
     "@bitbonsai/mcpvault": "^0.11.0",
