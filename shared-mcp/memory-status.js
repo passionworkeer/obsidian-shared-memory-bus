@@ -225,7 +225,7 @@ export function createMemoryStatus(params) {
     if (fs.existsSync(gitConfig)) {
       try {
         const content = fs.readFileSync(gitConfig, "utf8");
-        const remoteMatch = content.match(/url\s*=\s*.*[\/:]([^\/]+\/[^\/]+?)(?:\.git)?$/m);
+        const remoteMatch = content.match(/url\s*=\s*.*?[\/:]([^\/]+?)(?:\.git)?$/m);
         if (remoteMatch) {
           return remoteMatch[1];
         }
@@ -266,6 +266,7 @@ export function createMemoryStatus(params) {
       HANDOFF_PACK_JSON_PATH,
       MEMORY_LAYERS_JSON_PATH,
       AUTO_DREAM_JSON_PATH,
+      METRICS,
       readEmbeddingRuntimeSummary,
       readEmbeddingsSummary,
       refreshEmbeddingMetricsFromSummary,
@@ -274,6 +275,8 @@ export function createMemoryStatus(params) {
       readMemoryHygieneReport,
       readWatchdogState,
       getClaudeMemHealth,
+      getSearchWorkerHealth,
+      getSearchWorkerSnapshot,
     } = params;
 
     const embeddingRuntime = readEmbeddingRuntimeSummary();
