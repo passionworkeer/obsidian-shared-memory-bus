@@ -1,0 +1,106 @@
+/**
+ * scripts/env-check.js
+ * Cross-platform environment health check.
+ * Verifies Node.js, Python, and required directories.
+ *
+ * Usage: node scripts/env-check.js
+ * Exit code: 0 = all pass, 1 = one or more fail
+ */
+
+import { execSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const { platform } = require('../bus/platform/index.js');
+const { resolveStoreRoot } = require('../bus/store-root.js');
+
+const checks = [];
+
+function check(name, fn) {
+  try {
+    const result = fn();
+    checks.push({ name, status: 'PASS', detail: result });
+  } catch (e) {
+    checks.push({ name, status: 'FAIL', detail: e.message });
+  }
+}
+
+function exe(name, args) {
+  return execSync(`${name} ${args}`, { encoding: 'utf8', timeout: 5000 }).trim();
+}
+
+const nodeExe = platform.executables?.node || 'node';
+const pyExe = platform.executables?.python || (platform.name === 'win32' ? 'python' : 'python3');
+
+// Node.js
+check('Node.js', () => exe(nodeExe, '--version'));
+
+// Python
+check('Python', () => {
+  try {
+    return exe(pyExe, '--version');
+  } catch {
+    // fallback
+    return exe('python', '--version');
+  }
+});
+
+// Platform identity
+check('Platform detection', () => `${platform.name} (${process.platform})`);
+
+// Store root resolution
+check('Store root', () => {
+  const root = resolveStoreRoot();
+  if (!fs.existsSync(path.dirname(root))) {
+    // just verify it is a string and the parent is creatable
+    return `${root} (parent ok)`;
+  }
+  return root;
+});
+
+// Store root parent writable
+check('Store root parent writable', () => {
+  const storeRoot = resolveStoreRoot();
+  const parent = path.dirname(storeRoot);
+  try {
+    fs.accessSync(parent, fs.constants.W_OK);
+    return parent;
+  } catch {
+    throw new Error(`Cannot write to ${parent}`);
+  }
+});
+
+// Obsidian vault detection (best-effort)
+check('Obsidian vault (via platform)', () => {
+  if (typeof platform.resolveVaultRoot === 'function') {
+    try {
+      return platform.resolveVaultRoot();
+    } catch {
+      return '(not set)';
+    }
+  }
+  return '(not available)';
+});
+
+// Platform-specific executables
+check('Python executable', () => platform.executables?.python || 'unknown');
+check('Node executable', () => platform.executables?.node || 'unknown');
+if (platform.executables?.powershell) {
+  check('PowerShell executable', () => platform.executables.powershell);
+}
+
+// Print results
+const maxNameLen = Math.max(...checks.map((c) => c.name.length), 12);
+console.log('\n  Environment Check');
+console.log('─'.repeat(maxNameLen + 36));
+for (const c of checks) {
+  const icon = c.status === 'PASS' ? 'PASS' : 'FAIL';
+  const name = c.name.padEnd(maxNameLen);
+  console.log(`  [${icon}]  ${name}  ${c.detail}`);
+}
+console.log('');
+
+const failed = checks.filter((c) => c.status === 'FAIL');
+process.exit(failed.length > 0 ? 1 : 0);

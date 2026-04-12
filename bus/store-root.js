@@ -6,7 +6,7 @@
  * Priority:
  *   1. AI_MEMORY_STORE env var (user-specified absolute path)
  *   2. Auto-detect best drive: scan D:/E:/F:/... pick the one with most free space
- *   3. Fallback: AI_MEMORY_ROOT + "\\.ai-memory"
+ *   3. Fallback: AI_MEMORY_ROOT + platform-specific path or platform.storeRootDefault
  *
  * Usage:
  *   const { resolveStoreRoot } = require('./store-root');
@@ -18,8 +18,7 @@
 const fs   = require("node:fs");
 const path = require("node:path");
 const { execSync } = require("node:child_process");
-
-const IS_WINDOWS = process.platform === "win32";
+const { platform } = require("./platform/index.js");
 
 // ---------------------------------------------------------------------------
 // Drive detection (Windows only)
@@ -34,7 +33,7 @@ const MIN_FREE_SPACE_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB minimum
  * @returns {number} bytes free, or 0
  */
 function getDriveFreeSpace(driveLetter) {
-  if (!IS_WINDOWS) return 0;
+  if (process.platform !== "win32") return 0;
   try {
     const psScript = `[math]::Round((Get-PSDrive -Name '${driveLetter}' | Select-Object -ExpandProperty Free) / 1KB)`;
     const out = execSync(
@@ -87,6 +86,18 @@ function detectBestDrive() {
 }
 
 // ---------------------------------------------------------------------------
+// Default store root constant (cross-platform via platform.storeRootDefault)
+// ---------------------------------------------------------------------------
+
+/**
+ * Default store root when all other resolution mechanisms are unavailable.
+ * Exported so all sibling modules can import it as a consistent fallback
+ * instead of each hardcoding their own path string.
+ * @type {string}
+ */
+const DEFAULT_STORE_ROOT = platform.storeRootDefault;
+
+// ---------------------------------------------------------------------------
 // Store root resolution
 // ---------------------------------------------------------------------------
 
@@ -111,11 +122,11 @@ function isDirectory(p) {
  *
  * Resolution order:
  *   1. AI_MEMORY_STORE env var (user-specified)
- *   2. Auto-detect best drive via scan
- *   3. Fallback to AI_MEMORY_ROOT/.ai-memory or E:\.ai-memory
+ *   2. Auto-detect best drive via scan (Windows only)
+ *   3. Fallback to AI_MEMORY_ROOT/.ai-memory or platform.storeRootDefault
  *
  * @param {{ refresh?: boolean }} [options]
- * @returns {string}  Absolute path to the store root (e.g. "E:\\.ai-memory")
+ * @returns {string}  Absolute path to the store root
  */
 function resolveStoreRoot(options = {}) {
   if (cachedStoreRoot && !options.refresh) {
@@ -134,8 +145,8 @@ function resolveStoreRoot(options = {}) {
     }
   }
 
-  // 2. Auto-detect best drive
-  if (IS_WINDOWS) {
+  // 2. Auto-detect best drive (Windows only)
+  if (process.platform === "win32") {
     const best = detectBestDrive();
     if (best) {
       cachedStoreRoot = best.path;
@@ -143,11 +154,11 @@ function resolveStoreRoot(options = {}) {
     }
   }
 
-  // 3. Fallback: AI_MEMORY_ROOT/.ai-memory or E:\.ai-memory
+  // 3. Fallback: AI_MEMORY_ROOT/.ai-memory or DEFAULT_STORE_ROOT
   const aiMemoryRoot = process.env.AI_MEMORY_ROOT || "";
   const fallback = aiMemoryRoot
     ? path.join(aiMemoryRoot, STORE_NAME)
-    : path.join(process.env.USERPROFILE || "C:\\Users\\wang", STORE_NAME);
+    : DEFAULT_STORE_ROOT;
 
   cachedStoreRoot = fallback;
   return fallback;
@@ -196,6 +207,7 @@ function getStructuredRoot(storeRoot) {
 }
 
 module.exports = {
+  DEFAULT_STORE_ROOT,
   resolveStoreRoot,
   ensureStoreRoot,
   getInboxRoot,

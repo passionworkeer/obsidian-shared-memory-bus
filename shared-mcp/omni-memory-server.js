@@ -1124,7 +1124,7 @@ async function getClaudeMemHealth() {
 // Path constants (computed after helpers are loaded)
 // ---------------------------------------------------------------------------
 
-const STORE_ROOT = resolveStoreRoot(); // e.g. "E:\\.ai-memory"
+const STORE_ROOT = resolveStoreRoot(); // e.g. "E:\\.ai-memory" (Windows) or "$HOME/.ai-memory" (macOS/Linux)
 const MEMORY_STORE_ROOT = STORE_ROOT;
 const STRUCTURED_ROOT = path.join(MEMORY_STORE_ROOT, "structured");
 const GENERATED_ROOT = path.join(MEMORY_STORE_ROOT, "generated");

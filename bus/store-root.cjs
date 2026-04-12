@@ -87,6 +87,18 @@ function detectBestDrive() {
 }
 
 // ---------------------------------------------------------------------------
+// Default store root constant (Windows fallback — used when no env/config)
+// ---------------------------------------------------------------------------
+
+/**
+ * Default store root when all other resolution mechanisms are unavailable.
+ * Exported so all sibling modules can import it as a consistent fallback
+ * instead of each hardcoding their own "E:\\.ai-memory" string.
+ * @type {string}
+ */
+const DEFAULT_STORE_ROOT = "E:\\.ai-memory";
+
+// ---------------------------------------------------------------------------
 // Store root resolution
 // ---------------------------------------------------------------------------
 
@@ -143,11 +155,11 @@ function resolveStoreRoot(options = {}) {
     }
   }
 
-  // 3. Fallback: AI_MEMORY_ROOT/.ai-memory or E:\.ai-memory
+  // 3. Fallback: AI_MEMORY_ROOT/.ai-memory or DEFAULT_STORE_ROOT
   const aiMemoryRoot = process.env.AI_MEMORY_ROOT || "";
   const fallback = aiMemoryRoot
     ? path.join(aiMemoryRoot, STORE_NAME)
-    : path.join(process.env.USERPROFILE || "C:\\Users\\wang", STORE_NAME);
+    : DEFAULT_STORE_ROOT;
 
   cachedStoreRoot = fallback;
   return fallback;
@@ -196,6 +208,7 @@ function getStructuredRoot(storeRoot) {
 }
 
 module.exports = {
+  DEFAULT_STORE_ROOT,
   resolveStoreRoot,
   ensureStoreRoot,
   getInboxRoot,

@@ -88,8 +88,23 @@ function parseJsonl(filePath) {
   return records;
 }
 
+// ── Atomic JSONL append ────────────────────────────────────────────────────────
+
+// Lazy-load to avoid a hard require cycle during module parsing.
+function getAppendLineAtomic() {
+  return require("./inbox-atomic-write.js").appendLineAtomic;
+}
+
+/**
+ * Atomically append a JSON object as one line to a JSONL file.
+ * Replaces the previous fs.appendFileSync() call which could drop lines
+ * under concurrent load (Windows FILE_APPEND_DATA race).
+ *
+ * @param {string} filePath
+ * @param {object} obj
+ */
 function appendJsonl(filePath, obj) {
-  fs.appendFileSync(filePath, JSON.stringify(obj) + "\n", "utf8");
+  getAppendLineAtomic()(filePath, obj, { createDir: true });
 }
 
 function ensureDir(dir) {

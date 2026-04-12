@@ -28,6 +28,15 @@ All notable changes to this project should be documented here.
 - `docs/reference/MCP-TOOLS.md` and JSON schema updated for new tool parameters
 - `bus/memory-watchdog.ps1` watchdog improvements for more reliable auto-restart
 
+## 2026-04-12
+
+### New
+- Added open-source community health files: `README.md` badges, `.editorconfig`, `.github/PULL_REQUEST_TEMPLATE.md`, `.github/workflows/test.yml`, `.github/workflows/release.yml`, `CONTRIBUTING.md` update, `docs/architecture/OVERVIEW.md`
+
+### Docs
+- Updated README with shields.io badges, Quick Start section, and cross-platform install commands
+- Updated CONTRIBUTING.md with complete development setup, testing guide, platform support policy, and ADR references
+
 ## Unreleased
 - **ADR-002 (Unified Memory Architecture v2)**: Complete redesign of memory architecture based on cross-system benchmarking (OpenClaw + Claude Code + claude-mem). Key additions: SQLite chunk schema with FTS5+BM25 Phase 1 content index, chunk-native session logs with hash tracking, typed promotion contract now enforced in frontmatter schema (not just documented), embedding cache table, MMR + temporal decay result reranking, Phase 3 consolidation lock, session-end compaction trigger. Supersedes ADR-001.
 - Hardened Windows background process launch so shared MCP and watchdog flows avoid foreground console windows more reliably
