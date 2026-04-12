@@ -54,7 +54,11 @@ def tokenize(text: str) -> List[str]:
     return re.findall(r"[a-z0-9\u4e00-\u9fff_./:-]{2,}", (text or "").lower())
 
 
-VAULT_ROOT = resolve_vault_root()
+try:
+    VAULT_ROOT = resolve_vault_root()
+except RuntimeError:
+    import tempfile as _tmp
+    VAULT_ROOT = _tmp.mkdtemp(prefix="ai-memory-smoke-")
 
 
 def load_sample_rows(sample_size: int, queries: List[str]) -> List[str]:

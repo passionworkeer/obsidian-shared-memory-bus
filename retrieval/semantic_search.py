@@ -234,7 +234,12 @@ _BM25_CACHE_MAX_ENTRIES = normalize_int(first_non_empty_env("AI_MEMORY_BM25_CACH
 # Path resolution (shared with submodules)
 # ---------------------------------------------------------------------------
 
-VAULT_ROOT = str(resolve_vault_root())
+try:
+    VAULT_ROOT = str(resolve_vault_root())
+except RuntimeError:
+    # CI or vault-less environment: use a temp directory as fallback
+    import tempfile as _tmp
+    VAULT_ROOT = _tmp.mkdtemp(prefix="ai-memory-smoke-")
 AI_MEMORY_ROOT = os.path.join(VAULT_ROOT, "00-System", "ai-memory")
 STRUCTURED_DIR = os.path.join(AI_MEMORY_ROOT, "structured")
 EMBEDDINGS_INDEX = os.path.join(AI_MEMORY_ROOT, "embeddings", "index.jsonl")
