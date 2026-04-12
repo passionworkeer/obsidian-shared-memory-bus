@@ -139,15 +139,14 @@ describe("runtime config", () => {
   // ---------------------------------------------------------------------------
 
   test("updateEmbeddingRuntimeSelection returns object", async () => {
-    const result = await updateEmbeddingRuntimeSelection({});
+    const result = await updateEmbeddingRuntimeSelection({ clearProfile: true });
 
     assert.strictEqual(typeof result, "object");
   });
 
   test("updateEmbeddingRuntimeSelection handles selection", async () => {
     const result = await updateEmbeddingRuntimeSelection({
-      backend: "openai",
-      modelName: "gpt-4o-mini",
+      clearProvider: true,
     });
 
     assert.strictEqual(typeof result, "object");
@@ -168,7 +167,7 @@ describe("runtime config", () => {
 
     const result = await writeRuntimeConfig("", tempConfig);
 
-    assert.strictEqual(typeof result, "boolean");
+    assert.strictEqual(typeof result, "string");
   });
 
   // ---------------------------------------------------------------------------

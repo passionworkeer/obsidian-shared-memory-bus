@@ -721,6 +721,7 @@ function extractEntities(text) {
  * @returns {object} - record augmented with `entities`, `facts`, `concepts`
  */
 function extractFromRecord(record) {
+  if (!record) return { entities: [], facts: [], concepts: [] };
   const content = (record.content || record.text || "") + " " + (record.title || "");
   const { entities, facts, concepts } = extractEntities(content);
 
