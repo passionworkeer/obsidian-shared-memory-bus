@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "durable_type": "not_a_valid_type",
+  "key": "",
+  "reason": "",
+  "source_record_id": "test-record-001",
+  "is_refresh": true
+}

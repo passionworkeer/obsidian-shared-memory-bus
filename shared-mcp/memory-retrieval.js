@@ -7,6 +7,8 @@
  *   refine_memory_selection
  *   get_memory_timeline
  *   clear_shared_memory_search_cache
+ *   get_entity_info
+ *   search_by_entity
  *
  * Exposes a factory: createMemoryRetrieval(params) => { tools, handlers }
  * All state is passed in via params to avoid circular import issues.
@@ -450,127 +452,194 @@ Only include records that are genuinely relevant. Return fewer than max_results 
     );
   }
 
+  // ── Entity / knowledge-graph handlers ─────────────────────────────────
+
+  function loadKnowledgeGraph() {
+    try {
+      const { KnowledgeGraph } = require("../../ops/knowledge-graph.js");
+      return new KnowledgeGraph({ vaultRoot: params.VAULT_ROOT });
+    } catch {
+      return null;
+    }
+  }
+
+  async function handleGetEntityInfo(args) {
+    const name = String(args.name || "").trim();
+    if (!name) return errorResult("name is required");
+
+    const kg = loadKnowledgeGraph();
+    if (!kg) return errorResult("knowledge-graph-unavailable: run build-memory-layers.js first");
+
+    try {
+      const entity = kg.getEntity(name);
+      if (!entity) {
+        return jsonResult({ ok: true, name, found: false, relationships: [] });
+      }
+      const relationships = kg.queryEntity(name, {
+        direction: args.direction || "both",
+        asOf: args.as_of || null,
+      });
+      return jsonResult({ ok: true, found: true, entity, relationships });
+    } finally {
+      try { kg.close(); } catch {}
+    }
+  }
+
+  async function handleSearchByEntity(args) {
+    const entityQuery = String(args.entity_query || "").trim();
+    if (!entityQuery) return errorResult("entity_query is required");
+
+    const kg = loadKnowledgeGraph();
+    if (!kg) return errorResult("knowledge-graph-unavailable: run build-memory-layers.js first");
+
+    try {
+      // 1. Find matching entities
+      const matchedEntities = kg.searchEntities(entityQuery);
+
+      // 2. For each matched entity, get their relationships
+      const results = [];
+      for (const entity of matchedEntities.slice(0, 10)) {
+        const rels = kg.queryEntity(entity.name, { direction: "both" });
+        results.push({ entity, relationships: rels });
+      }
+
+      // 3. Optionally get the full timeline for top entity
+      let timeline = [];
+      if (results.length > 0 && args.include_timeline) {
+        timeline = kg.timeline(results[0].entity.name).slice(0, 20);
+      }
+
+      return jsonResult({
+        ok: true,
+        query: entityQuery,
+        matchedEntities: matchedEntities.length,
+        results,
+        timeline,
+      });
+    } finally {
+      try { kg.close(); } catch {}
+    }
+  }
+
+  // ── KG stats ───────────────────────────────────────────────────────────
+
+  async function handleGetKgStats(_args) {
+    const kg = loadKnowledgeGraph();
+    if (!kg) return errorResult("knowledge-graph-unavailable: run build-memory-layers.js first");
+    try {
+      const stats = kg.stats();
+      // Get entity counts by type via the known type list
+      const knownTypes = ["person", "project", "concept", "tool", "org", "location", "unknown"];
+      const entitiesByType = {};
+      let totalFromTypes = 0;
+      for (const t of knownTypes) {
+        const rows = kg.getEntitiesByType(t);
+        entitiesByType[t] = rows.length;
+        totalFromTypes += rows.length;
+      }
+      // Handle any unknown custom types not in the known list
+      if (totalFromTypes < stats.entities) {
+        entitiesByType["other"] = stats.entities - totalFromTypes;
+      }
+      return jsonResult({
+        ok: true,
+        totalEntities: stats.entities,
+        totalRelationships: stats.triples,
+        currentFacts: stats.currentFacts,
+        expiredFacts: stats.expiredFacts,
+        relationshipTypes: stats.relationshipTypes,
+        entitiesByType,
+      });
+    } finally {
+      try { kg.close(); } catch {}
+    }
+  }
+
+  async function handleQueryKg(args) {
+    const query = String(args.query || "").trim();
+    if (!query) return errorResult("query is required");
+    const limit = Math.max(1, Number(args.limit ?? 10) || 10);
+    const typeFilter = args.type ? String(args.type).trim() : null;
+
+    const kg = loadKnowledgeGraph();
+    if (!kg) return errorResult("knowledge-graph-unavailable: run build-memory-layers.js first");
+    try {
+      let matched = kg.searchEntities(query, { limit });
+      if (typeFilter) {
+        matched = matched.filter((e) => e.type === typeFilter);
+      }
+      const results = [];
+      for (const entity of matched.slice(0, limit)) {
+        const rels = kg.queryEntity(entity.name, { direction: "both" });
+        results.push({ entity, relationships: rels.slice(0, limit) });
+      }
+      return jsonResult({
+        ok: true,
+        query,
+        typeFilter,
+        totalMatched: matched.length,
+        results,
+      });
+    } finally {
+      try { kg.close(); } catch {}
+    }
+  }
+
+  async function handleGetEntities(args) {
+    const entityType = String(args.entityType || "").trim();
+    if (!entityType) return errorResult("entityType is required");
+    const limit = Math.max(1, Number(args.limit ?? 50) || 50);
+
+    const kg = loadKnowledgeGraph();
+    if (!kg) return errorResult("knowledge-graph-unavailable: run build-memory-layers.js first");
+    try {
+      const rows = kg.getEntitiesByType(entityType);
+      return jsonResult({
+        ok: true,
+        entityType,
+        total: rows.length,
+        entities: rows.slice(0, limit),
+      });
+    } finally {
+      try { kg.close(); } catch {}
+    }
+  }
+
+  async function handleGetRelationships(args) {
+    const entityName = String(args.entityName || "").trim();
+    if (!entityName) return errorResult("entityName is required");
+    const direction = args.direction || "both";
+    const limit = Math.max(1, Number(args.limit ?? 50) || 50);
+
+    const kg = loadKnowledgeGraph();
+    if (!kg) return errorResult("knowledge-graph-unavailable: run build-memory-layers.js first");
+    try {
+      const rels = kg.queryEntity(entityName, { direction });
+      return jsonResult({
+        ok: true,
+        entityName,
+        direction,
+        total: rels.length,
+        relationships: rels.slice(0, limit),
+      });
+    } finally {
+      try { kg.close(); } catch {}
+    }
+  }
+
   return {
-    tools: [
-      {
-        name: "search_shared_memory",
-        description:
-          "Search the canonical shared Obsidian memory bus across Codex, Claude Code, OpenCode, Copilot, Cursor, Trae, and OpenClaw. Defaults to hybrid retrieval and falls back to BM25 when dense embeddings are unavailable.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            query: { type: "string", description: "Search query." },
-            mode: {
-              type: "string",
-              enum: ["bm25", "dense", "hybrid", "auto"],
-              default: "hybrid",
-              description: "Retrieval mode. hybrid is recommended.",
-            },
-            strategy: {
-              type: "string",
-              enum: ["bm25", "dense", "hybrid", "auto"],
-              description: "Alias for mode.",
-            },
-            route: {
-              type: "string",
-              enum: ["auto", "mixed", "durable", "task", "recent", "reference"],
-              default: "auto",
-              description: "Optional query routing profile. auto infers the best layer mix from the query intent.",
-            },
-            limit: { type: "number", default: 8, description: "Maximum number of results." },
-            tool: { type: "string", description: "Optional exact tool filter." },
-            project: { type: "string", description: "Optional project/workspace substring filter." },
-            scope: { type: "string", description: "Optional scope filter such as user, feedback, project, task, run, or summary." },
-            sourceKind: { type: "string", description: "Optional source kind filter such as session, writeback, cron, run, or blackboard." },
-            workspace: { type: "string", description: "Optional workspace filter." },
-            taskState: { type: "string", description: "Optional task state filter." },
-            preferSummaries: { type: "boolean", default: false, description: "Boost session/summary records slightly in ranking." },
-            includeVerbatim: {
-              type: "boolean",
-              default: false,
-              description: "When true, attach query-aware exact snippet windows from the matched record text.",
-            },
-            snippetWindow: {
-              type: "number",
-              default: 220,
-              description: "Approximate character window to keep around each exact snippet match.",
-            },
-            maxVerbatimPerResult: {
-              type: "number",
-              default: 1,
-              description: "Maximum exact snippet windows to return per result when includeVerbatim is enabled.",
-            },
-          },
-          required: ["query"],
-        },
-      },
-      {
-        name: "get_memory_records",
-        description:
-          "Fetch full structured records by ID from the canonical shared Obsidian memory bus. Returns all available fields including content, facts, concepts, files_read, files_modified, scope, memory_level, freshness, and confidence.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            ids: { type: "array", items: { type: "string" }, description: "Array of record IDs to fetch." },
-          },
-          required: ["ids"],
-        },
-      },
-      {
-        name: "refine_memory_selection",
-        description:
-          "Given a query and a list of memory record IDs, use an LLM to select the most relevant subset. Use this after get_memory_records returns too many results and you need the top-N most relevant to your current task.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            query: { type: "string", description: "The current task or question context" },
-            ids: {
-              type: "array",
-              items: { type: "string" },
-              description: "Array of memory record IDs to refine from (from get_memory_records)",
-              maxItems: 50,
-            },
-            max_results: { type: "number", default: 5, description: "Maximum number of records to return (default 5)" },
-          },
-          required: ["query", "ids"],
-        },
-      },
-      {
-        name: "get_memory_timeline",
-        description:
-          "Given an anchor record ID, return chronologically interleaved nearby records. Useful for navigating backward and forward from a known record.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            anchor_id: { type: "string", description: "The anchor record ID." },
-            depth_before: { type: "number", default: 3, description: "Number of records to return before the anchor." },
-            depth_after: { type: "number", default: 3, description: "Number of records to return after the anchor." },
-          },
-          required: ["anchor_id"],
-        },
-      },
-      {
-        name: "clear_shared_memory_search_cache",
-        description:
-          "Clear the persistent shared retrieval worker's in-memory search caches. Optionally also clear loaded entry/index data so the next query fully reloads state from disk.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            includeDataCaches: {
-              type: "boolean",
-              default: false,
-              description: "When true, also drop the loaded entries and embeddings index caches in addition to query/BM25/result caches.",
-            },
-          },
-        },
-      },
-    ],
     handlers: {
       search_shared_memory: handleSearchSharedMemory,
       get_memory_records: handleGetMemoryRecords,
       refine_memory_selection: handleRefineMemorySelection,
       get_memory_timeline: handleGetMemoryTimeline,
       clear_shared_memory_search_cache: handleClearSharedMemorySearchCache,
+      get_entity_info: handleGetEntityInfo,
+      search_by_entity: handleSearchByEntity,
+      get_kg_stats: handleGetKgStats,
+      query_kg: handleQueryKg,
+      get_entities: handleGetEntities,
+      get_relationships: handleGetRelationships,
     },
   };
 }

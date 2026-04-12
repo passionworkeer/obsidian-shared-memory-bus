@@ -13,6 +13,28 @@ const ALLOWED_SOURCE_KINDS = new Set(["writeback", "hook", "session", "event", "
 const ALLOWED_MEMORY_LEVELS = new Set(["durable", "session", "event", "task"]);
 const ALLOWED_DURABLE_TYPES = new Set(["user", "feedback", "project", "reference"]);
 
+// 5-tier system (ADR-002 v2)
+// Tier 1 = Event/Working (1d TTL, no embedding)
+// Tier 2 = Session Durable (session+7d, no embedding)
+// Tier 3 = Project Durable (project+30d, embedding=yes, recommend=yes)
+// Tier 4 = Shared Durable (user=never/feedback=90d/reference=180d, embedding=yes, recommend=yes)
+// Tier 5 = Archive (manual, no embedding, archive-manifest.jsonl instead of tombstone)
+const ALLOWED_TIERS = new Set([1, 2, 3, 4, 5]);
+
+// Tombstone strategy REMOVED in v2 — replaced by archive-manifest.jsonl
+// to prevent embedding index pollution. See docs/MEMORY-TIERING.md.
+// Mirrors REQUIRED_FIELDS in retrieval/schema_validation.py
+const REQUIRED_RECORD_FIELDS = [
+  "schemaVersion",
+  "id",
+  "tool",
+  "type",
+  "title",
+  "source",
+  "scope",
+  "memory_level",
+];
+
 const STRUCTURED_LAYER_DEFINITIONS = [
   {
     key: "sharedInbox",
@@ -171,7 +193,7 @@ function validatePromotionMetadata(promotion) {
   return errors;
 }
 
-function validateStructuredRecord(record, requiredFields = []) {
+function validateStructuredRecord(record, requiredFields = REQUIRED_RECORD_FIELDS) {
   if (!isPlainObject(record)) {
     return {
       ok: false,
@@ -205,6 +227,17 @@ function validateStructuredRecord(record, requiredFields = []) {
   }
   if (normalizeLower(record.memory_level || record.memoryLevel) && !ALLOWED_MEMORY_LEVELS.has(normalizeLower(record.memory_level || record.memoryLevel))) {
     errors.push(`unknown-memory-level:${normalizeString(record.memory_level || record.memoryLevel)}`);
+  }
+  // Tier field validation (optional, v2+)
+  if (typeof record.tier !== "undefined") {
+    const t = Number(record.tier);
+    if (!Number.isFinite(t) || !ALLOWED_TIERS.has(t)) {
+      errors.push(`invalid-tier:${record.tier} (must be integer 1–5)`);
+    }
+  }
+  // lifecycle.archived boolean (optional, replaces tombstone in v2)
+  if (typeof record.lifecycle !== "undefined" && typeof record.lifecycle !== "object") {
+    errors.push("invalid-lifecycle-type");
   }
   if (isPlainObject(record.metadata) && isPlainObject(record.metadata.promotion)) {
     const promoErrors = validatePromotionMetadata(record.metadata.promotion);
@@ -583,15 +616,20 @@ module.exports = {
   ALLOWED_MEMORY_LEVELS,
   ALLOWED_SCOPES,
   ALLOWED_SOURCE_KINDS,
+  ALLOWED_TIERS,
   ALLOWED_VISIBILITY,
   GENERATED_MEMORY_DEFINITIONS,
   MEMORY_INTEGRITY_CONTRACT_VERSION,
   MEMORY_RECORD_SCHEMA_VERSION,
+  REQUIRED_RECORD_FIELDS,
   STRUCTURED_LAYER_DEFINITIONS,
   buildGeneratedArtifactMetadata,
   buildMemoryIntegrityReport,
   buildStructuredSignature,
   isExpectedDerivedDuplicate,
+  normalizeLower,
+  normalizeString,
+  sha1,
   validatePromotionMetadata,
   validateStructuredRecord,
 };

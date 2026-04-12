@@ -2,6 +2,41 @@
 
 All notable changes to this project should be documented here.
 
+## 2026-04-10
+
+### Fixed
+- Windows background runtime launchers now use a three-layer console-hiding approach (Start-Process -WindowStyle Hidden + helper launcher wrapper + background wrapper) to reliably keep background Node.js processes invisible
+- `singleton-stdio-mcp-proxy.mjs` hardened for edge cases in background execution
+- `shared-mcp/start-shared-mcp.ps1` improved fallback logic, process lifecycle management, and orphaned process cleanup
+- `ops/verify-client-integrations.ps1` expanded client integration checks
+- `ops/run-pressure-test.ps1` hardened with broader validation coverage
+
+### New
+- Comprehensive Windows installer (`scripts/install.ps1`) with guided setup, background launcher setup, and client integration registration
+- `ops/install-client-integrations.ps1` streamlined client integration installation on Windows
+- `memory_wake_up` MCP tool: builds compact session bootstrap pack from canonical shared memory bus (HANDOFF records, MEMORY-LAYERS, active task records)
+- `search_shared_memory` gains three new parameters:
+  - `includeVerbatim` — attach query-aware exact snippet windows to results
+  - `snippetWindow` — control character window around each match
+  - `maxVerbatimPerResult` — limit snippets per result
+- `ops/check-memory-integrity.js` validates structured JSONL files against versioned memory contract schema
+
+### Changed
+- `shared-mcp/memory-status.js` now calls `memory_wake_up` internally to build its bootstrap pack
+- `docs/TROUBLESHOOTING.md` expanded with new Windows-specific guidance
+- `docs/ENVIRONMENT.md` updated with all current environment variables
+- `docs/reference/MCP-TOOLS.md` and JSON schema updated for new tool parameters
+- `bus/memory-watchdog.ps1` watchdog improvements for more reliable auto-restart
+
+## 2026-04-12
+
+### New
+- Added open-source community health files: `README.md` badges, `.editorconfig`, `.github/PULL_REQUEST_TEMPLATE.md`, `.github/workflows/test.yml`, `.github/workflows/release.yml`, `CONTRIBUTING.md` update, `docs/architecture/OVERVIEW.md`
+
+### Docs
+- Updated README with shields.io badges, Quick Start section, and cross-platform install commands
+- Updated CONTRIBUTING.md with complete development setup, testing guide, platform support policy, and ADR references
+
 ## Unreleased
 - **ADR-002 (Unified Memory Architecture v2)**: Complete redesign of memory architecture based on cross-system benchmarking (OpenClaw + Claude Code + claude-mem). Key additions: SQLite chunk schema with FTS5+BM25 Phase 1 content index, chunk-native session logs with hash tracking, typed promotion contract now enforced in frontmatter schema (not just documented), embedding cache table, MMR + temporal decay result reranking, Phase 3 consolidation lock, session-end compaction trigger. Supersedes ADR-001.
 - Hardened Windows background process launch so shared MCP and watchdog flows avoid foreground console windows more reliably

@@ -5,11 +5,12 @@ const { spawn, spawnSync } = require("child_process");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
-const { createEmbeddingProviderRegistry, getProviderHost, normalizeEmbeddingAdapter } = require("./embedding-provider-registry.js");
+const { createEmbeddingProviderRegistry, getProviderHost, buildEmbeddingConfigHash, normalizeEmbeddingAdapter } = require("./embedding-provider-registry.js");
 const { resolvePythonRuntime, withPythonArgs } = require("./python-runtime.js");
 const { resolveEmbeddingRuntime } = require("./runtime-config.js");
 const { resolveVaultRoot } = require("./vault-root.js");
 const { VECTOR_SCHEMA_VERSION, fnv1a32, buildHashFeatures, buildHashEmbedding } = require("./lsh-hash.js");
+const { createJsonlStream } = require("../ops/jsonl-stream.js");
 const WINDOWS_ENV_CACHE = new Map();
 
 hydrateProcessEnvFromWindows([
@@ -166,18 +167,6 @@ function ensureDirectory(targetPath) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function buildEmbeddingConfigHash({ backend, modelName, baseUrl = "" }) {
-  const normalizedBackend = normalizeEmbeddingAdapter(backend, modelName);
-  const normalizedBaseUrl =
-    normalizedBackend === "openai-compatible" ? String(baseUrl || "").trim().replace(/\/+$/, "") : "";
-  const payload = JSON.stringify({
-    backend: normalizedBackend,
-    model: String(modelName || "").trim(),
-    baseUrl: normalizedBaseUrl.toLowerCase(),
-  });
-  return crypto.createHash("sha1").update(payload).digest("hex").slice(0, 16);
 }
 
 function isNoise(text) {
@@ -339,6 +328,18 @@ function collectDocuments() {
     return documents;
   }
 
+  // ADR-002 v2: --tier-filter defaults to Tier 3+4 (Project Durable + Shared Durable)
+  // Only these tiers participate in the embedding index.
+  const tierFilterArg = (() => {
+    const idx = process.argv.indexOf("--tier-filter");
+    return idx >= 0 ? (process.argv[idx + 1] || "project+durable") : "project+durable";
+  })();
+  const allowedTiers = new Set(
+    tierFilterArg === "all"
+      ? [1, 2, 3, 4, 5]
+      : tierFilterArg.split("+").map((t) => ({ project: 3, durable: 4, "3": 3, "4": 4 })[t.trim()] ?? 3)
+  );
+
   for (const fileName of fs.readdirSync(STRUCTURED_DIR).sort()) {
     if (!fileName.endsWith(".jsonl")) {
       continue;
@@ -351,6 +352,26 @@ function collectDocuments() {
       }
       try {
         const entry = JSON.parse(line);
+
+        // ADR-002 v2: Skip archived records (Q3 fix — no tombstone, use archived flag)
+        const isArchived = entry.lifecycle?.archived === true;
+        if (isArchived) {
+          // Write archived=true marker so retrieval layer can skip these vectors
+          documents.set(String(entry.id || "").trim() || fallbackId(entry, "", ""), {
+            recordId: String(entry.id || "").trim() || fallbackId(entry, "", ""),
+            tool: normalizeSpaces(entry.tool || "unknown") || "unknown",
+            type: normalizeSpaces(entry.type || ""),
+            archived: true,
+            t: normalizeSpaces(entry.t || ""),
+          });
+          continue;
+        }
+
+        // ADR-002 v2: Tier filter — only embed Tier 3+4 by default
+        const recordTier = Number(entry.lifecycle?.tier ?? 2);
+        if (!allowedTiers.has(recordTier)) {
+          continue;
+        }
         const { title, content, facts, concepts } = extractFieldTexts(entry);
         const rawText = [title, content].filter(Boolean).join(" ");
 
@@ -407,6 +428,9 @@ function collectDocuments() {
           excerpt: (content || rawText || "").slice(0, 240),
           fieldTexts,
           fieldHashes,
+          // ADR-002 v2: tier + lifecycle metadata
+          tier: recordTier,
+          archived: false,
         });
       } catch (err) {
         // Ignore malformed records during rebuild.
@@ -429,22 +453,29 @@ function collectDocuments() {
  * (one entry per record_id, no record_id/field) are also loaded and treated
  * as having field="content".
  */
-function loadExistingIndex() {
+/**
+ * Load the existing index.jsonl (v1 or v2 format) using streaming.
+ * Never loads the entire file into memory — iterates one record at a time.
+ *
+ * Returns a Map keyed by entry_id (sub-entry id).  Each value is the parsed
+ * index record with an added `fieldTexts` dict derived from its `contentHash`
+ * map for the reuse check.
+ *
+ * v2 records (with record_id/field) are preferred; legacy v1 records
+ * (one entry per record_id, no record_id/field) are also loaded and treated
+ * as having field="content".
+ */
+async function loadExistingIndex() {
   const existing = new Map();
   if (!fs.existsSync(INDEX_FILE)) {
     return existing;
   }
 
-  const lines = fs.readFileSync(INDEX_FILE, "utf8").split(/\r?\n/);
-  for (const line of lines) {
-    if (!line.trim()) {
+  for await (const record of createJsonlStream(INDEX_FILE)) {
+    if (!record || !record.id) {
       continue;
     }
     try {
-      const record = JSON.parse(line);
-      if (!record || !record.id) {
-        continue;
-      }
       const entryId = String(record.id).trim();
 
       // Reconstruct fieldTexts from the stored record:
@@ -525,7 +556,7 @@ async function main() {
   ensureDirectory(EMBEDDINGS_DIR);
 
   const documents = collectDocuments();
-  const existing = loadExistingIndex();
+  const existing = await loadExistingIndex();
   const preferredBackend = normalizeEmbeddingAdapter(EMBED_ADAPTER, MODEL) || "hash";
   const preferredModelName = preferredBackend === "hash" ? HASH_MODEL : MODEL;
   const preferredConfigHash = buildEmbeddingConfigHash({

@@ -208,6 +208,42 @@ function Test-ServerReady {
     }
 }
 
+function Get-ServerReadyTimeoutSeconds {
+    param(
+        $Server,
+        [int]$Default = 5
+    )
+
+    $candidate = $Default
+    if ($null -ne $Server -and $Server.PSObject.Properties.Name -contains "startupProbeTimeoutSeconds") {
+        $raw = [string]$Server.startupProbeTimeoutSeconds
+        $parsed = 0
+        if ([int]::TryParse($raw, [ref]$parsed) -and $parsed -gt 0) {
+            $candidate = $parsed
+        }
+    }
+
+    return [Math]::Min([Math]::Max($candidate, 1), 60)
+}
+
+function Get-ServerStartupProbeAttempts {
+    param(
+        $Server,
+        [int]$Default = 30
+    )
+
+    $candidate = $Default
+    if ($null -ne $Server -and $Server.PSObject.Properties.Name -contains "startupProbeAttempts") {
+        $raw = [string]$Server.startupProbeAttempts
+        $parsed = 0
+        if ([int]::TryParse($raw, [ref]$parsed) -and $parsed -gt 0) {
+            $candidate = $parsed
+        }
+    }
+
+    return [Math]::Min([Math]::Max($candidate, 1), 180)
+}
+
 function ConvertTo-ShellLiteral {
     param([AllowEmptyString()][string]$Value)
 
@@ -224,6 +260,136 @@ function ConvertTo-ShellLiteral {
     $replacement = $singleQuote + $doubleQuote + $singleQuote + $doubleQuote + $singleQuote
     $escapedValue = [string]$Value -replace [regex]::Escape($singleQuote), $replacement
     return "'$escapedValue'"
+}
+
+function Split-CommandLineTokens {
+    param([AllowEmptyString()][string]$CommandText)
+
+    $tokens = New-Object System.Collections.Generic.List[string]
+    if ([string]::IsNullOrWhiteSpace($CommandText)) {
+        return @()
+    }
+
+    $matches = [regex]::Matches($CommandText, '"([^"]*)"|[^\s"]+')
+    foreach ($match in @($matches)) {
+        if ($match.Groups.Count -gt 1 -and $match.Groups[1].Success) {
+            $tokens.Add([string]$match.Groups[1].Value) | Out-Null
+        } else {
+            $tokens.Add([string]$match.Value) | Out-Null
+        }
+    }
+
+    return @($tokens)
+}
+
+function Resolve-WindowsCommandTokenPath {
+    param([AllowEmptyString()][string]$Token)
+
+    if ([string]::IsNullOrWhiteSpace($Token)) {
+        return ""
+    }
+
+    if (Test-Path -LiteralPath $Token -PathType Leaf) {
+        return (Get-Item -LiteralPath $Token).FullName
+    }
+
+    $command = Get-Command $Token -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($command -and -not [string]::IsNullOrWhiteSpace([string]$command.Source)) {
+        return [string]$command.Source
+    }
+
+    return ""
+}
+
+function Resolve-WindowsCmdShimLaunchSpec {
+    param(
+        [Parameter(Mandatory = $true)][string]$CommandPath,
+        [string[]]$PassThroughArgs = @(),
+        [Parameter(Mandatory = $true)][string]$FallbackNodeExecutable
+    )
+
+    if (-not (Test-Path -LiteralPath $CommandPath -PathType Leaf)) {
+        return $null
+    }
+
+    $content = ""
+    try {
+        $content = Get-Content -Raw -LiteralPath $CommandPath -Encoding utf8
+    } catch {
+        return $null
+    }
+
+    $match = [regex]::Match(
+        $content,
+        '"%_prog%"\s+"%(?:dp0|~dp0)%\\([^"\r\n]+\.(?:js|mjs|cjs))"',
+        [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+    )
+    if (-not $match.Success) {
+        return $null
+    }
+
+    $scriptRelativePath = [string]$match.Groups[1].Value
+    $scriptPath = Join-Path (Split-Path -Parent $CommandPath) ($scriptRelativePath -replace '\\', [System.IO.Path]::DirectorySeparatorChar)
+    if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
+        return $null
+    }
+
+    $bundledNodePath = Join-Path (Split-Path -Parent $CommandPath) "node.exe"
+    $effectiveNodeExecutable = if (Test-Path -LiteralPath $bundledNodePath -PathType Leaf) {
+        $bundledNodePath
+    } else {
+        $FallbackNodeExecutable
+    }
+
+    return [pscustomobject]@{
+        filePath = $effectiveNodeExecutable
+        argumentList = @($scriptPath) + @($PassThroughArgs)
+    }
+}
+
+function Resolve-WindowsCommandLaunchSpec {
+    param(
+        [Parameter(Mandatory = $true)][string]$Command,
+        [Parameter(Mandatory = $true)][string]$FallbackNodeExecutable
+    )
+
+    $tokens = @(Split-CommandLineTokens -CommandText $Command)
+    if ($tokens.Count -eq 0) {
+        throw "Command produced no launch tokens: $Command"
+    }
+
+    $firstToken = [string]$tokens[0]
+    $passThroughArgs = @($tokens | Select-Object -Skip 1)
+    $resolvedTokenPath = Resolve-WindowsCommandTokenPath -Token $firstToken
+    $effectiveFirstToken = if (-not [string]::IsNullOrWhiteSpace($resolvedTokenPath)) {
+        $resolvedTokenPath
+    } else {
+        $firstToken
+    }
+
+    if ($effectiveFirstToken -match '\.(js|mjs|cjs)$') {
+        return [pscustomobject]@{
+            filePath = $FallbackNodeExecutable
+            argumentList = @($effectiveFirstToken) + @($passThroughArgs)
+        }
+    }
+
+    if ($effectiveFirstToken -match '\.(cmd|bat)$') {
+        $shimLaunchSpec = Resolve-WindowsCmdShimLaunchSpec -CommandPath $effectiveFirstToken -PassThroughArgs $passThroughArgs -FallbackNodeExecutable $FallbackNodeExecutable
+        if ($null -ne $shimLaunchSpec) {
+            return $shimLaunchSpec
+        }
+
+        return [pscustomobject]@{
+            filePath = "cmd.exe"
+            argumentList = @("/d", "/s", "/c", $Command)
+        }
+    }
+
+    return [pscustomobject]@{
+        filePath = $effectiveFirstToken
+        argumentList = $passThroughArgs
+    }
 }
 
 function Resolve-ManagedRuntimeFile {
@@ -530,7 +696,8 @@ function Start-ManagedHttpProcess {
     )
 
     if (Test-SharedIsWindows) {
-        return Start-SharedWindowsHeadlessProcess -FilePath "cmd.exe" -ArgumentList @("/d", "/s", "/c", $Command) -Environment $Environment -WorkingDirectory $root
+        $launchSpec = Resolve-WindowsCommandLaunchSpec -Command $Command -FallbackNodeExecutable $nodeExecutable
+        return Start-SharedWindowsHeadlessProcess -FilePath ([string]$launchSpec.filePath) -ArgumentList @($launchSpec.argumentList) -Environment $Environment -WorkingDirectory $root
     }
 
     return Start-SharedShellProcess -Command $Command -Environment $Environment -WorkingDirectory $root -StdoutPath $StdoutPath -StderrPath $StderrPath
@@ -687,6 +854,8 @@ try {
         $port = [int]$server.port
         $url = Get-ServerUrl -Server $server
         $healthUrl = Get-ServerHealthUrl -Server $server
+        $readyTimeoutSeconds = Get-ServerReadyTimeoutSeconds -Server $server
+        $startupProbeAttempts = Get-ServerStartupProbeAttempts -Server $server
         $existing = $state[[string]$server.id]
         $existingPid = 0
         if ($existing -and $existing.ContainsKey("pid")) {
@@ -718,7 +887,7 @@ try {
         $listenerPid = if ($listenerPids.Count -gt 0) { [int]$listenerPids[0] } else { 0 }
         $listenerHealthy = $false
         if ($listenerPid -gt 0) {
-            $listenerHealthy = Test-ServerReady -Server $server -Url $url -HealthUrl $healthUrl
+            $listenerHealthy = Test-ServerReady -Server $server -Url $url -HealthUrl $healthUrl -TimeoutSeconds $readyTimeoutSeconds
             if (-not $listenerHealthy) {
                 foreach ($pidToStop in @($listenerPids | Select-Object -Unique)) {
                     if ([int]$pidToStop -gt 0) {
@@ -728,7 +897,7 @@ try {
                 Start-Sleep -Milliseconds 750
                 $listenerPids = @(Get-SharedListeningProcessIds -Port $port | Select-Object -Unique)
                 $listenerPid = if ($listenerPids.Count -gt 0) { [int]$listenerPids[0] } else { 0 }
-                $listenerHealthy = $listenerPid -gt 0 -and (Test-ServerReady -Server $server -Url $url -HealthUrl $healthUrl)
+                $listenerHealthy = $listenerPid -gt 0 -and (Test-ServerReady -Server $server -Url $url -HealthUrl $healthUrl -TimeoutSeconds $readyTimeoutSeconds)
             }
         }
 
@@ -803,9 +972,9 @@ try {
         }
 
         $healthy = $false
-        for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        for ($attempt = 0; $attempt -lt $startupProbeAttempts; $attempt++) {
             Start-Sleep -Seconds 1
-            if (Test-ServerReady -Server $server -Url $url -HealthUrl $healthUrl -TimeoutSeconds 3) {
+            if (Test-ServerReady -Server $server -Url $url -HealthUrl $healthUrl -TimeoutSeconds $readyTimeoutSeconds) {
                 $healthy = $true
                 break
             }

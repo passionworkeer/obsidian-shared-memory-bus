@@ -139,7 +139,6 @@ export function createMemoryEmbeddings(params) {
   async function handleSetEmbeddingRuntime(args) {
     const {
       AI_MEMORY_ROOT,
-      METRICS,
       EMBEDDING_RUNTIME_DEFAULTS,
       readEmbeddingRuntimeSummary,
       readEmbeddingsSummary,
@@ -208,51 +207,6 @@ export function createMemoryEmbeddings(params) {
   }
 
   return {
-    tools: [
-      {
-        name: "rebuild_memory_embeddings",
-        description: "Rebuild the dense embeddings index from shared Obsidian structured memory.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            force: { type: "boolean", default: false, description: "Re-embed even unchanged records." },
-          },
-        },
-      },
-      {
-        name: "rebuild_shared_embeddings",
-        description: "Alias for rebuild_memory_embeddings.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            force: { type: "boolean", default: false },
-          },
-        },
-      },
-      {
-        name: "list_embedding_runtimes",
-        description:
-          "List the configured embedding defaults, providers, and profiles, along with the currently resolved active runtime and whether the dense index is aligned or needs a rebuild.",
-        inputSchema: {
-          type: "object",
-          properties: {},
-        },
-      },
-      {
-        name: "set_embedding_runtime",
-        description:
-          "Activate an embedding profile or provider in the runtime config. Returns the updated runtime selection and whether the dense embeddings index now needs a rebuild.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            profile: { type: "string", description: "Configured embedding profile name to activate." },
-            provider: { type: "string", description: "Configured provider name to activate directly." },
-            clearProfile: { type: "boolean", default: false, description: "Clear the persisted activeProfile selection." },
-            clearProvider: { type: "boolean", default: false, description: "Clear the persisted activeProvider selection." },
-          },
-        },
-      },
-    ],
     handlers: {
       rebuild_memory_embeddings: handleRebuildMemoryEmbeddings,
       rebuild_shared_embeddings: handleRebuildMemoryEmbeddings,

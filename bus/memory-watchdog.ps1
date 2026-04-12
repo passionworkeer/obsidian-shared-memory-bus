@@ -18,6 +18,22 @@ $ErrorActionPreference = "Stop"
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [Console]::OutputEncoding = $Utf8NoBom
 
+# --- Register engine event so Release-WatchdogLock fires on ANY exit path ---
+$script:WatchdogLockStream = $null
+try {
+    $null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
+        if ($script:WatchdogLockStream) {
+            try { $script:WatchdogLockStream.Dispose() } catch { }
+        }
+        try {
+            if ((Test-Path -LiteralPath $LockPath -PathType Leaf)) {
+                Remove-Item -LiteralPath $LockPath -Force -ErrorAction SilentlyContinue
+            }
+        } catch { }
+    }
+} catch {
+}
+
 $sourceRoot = Split-Path -Parent $PSScriptRoot
 $helperPath = @(
     (Join-Path $PSScriptRoot "runtime-platform.ps1"),
@@ -81,6 +97,7 @@ $BuildHandoffPackScript = Resolve-BusPath -Candidates @("build-handoff-pack.js",
 $BuildMemoryLayersScript = Resolve-BusPath -Candidates @("build-memory-layers.js", "ops/build-memory-layers.js")
 $GenerateHygieneScript = Resolve-BusPath -Candidates @("generate-memory-hygiene-report.js", "ops/generate-memory-hygiene-report.js")
 $MemoryDreamScript = Resolve-BusPath -Candidates @("run-memory-dream.ps1", "ops/run-memory-dream.ps1")
+$MemoryArchivalScript = Resolve-BusPath -Candidates @("memory-archival.js", "ops/memory-archival.js")
 $BackgroundExtractionScript = Resolve-BusPath -Candidates @("run-background-extraction.ps1", "ops/run-background-extraction.ps1")
 $EmbeddingsScript = Resolve-BusPath -Candidates @("generate-embeddings.js", "bus/generate-embeddings.js")
 $EmbeddingsIndexPath = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "embeddings", "index.jsonl")
@@ -437,11 +454,32 @@ function Start-DetachedPowerShellScript {
 function Acquire-WatchdogLock {
     Ensure-Directory -Path (Split-Path -Parent $LockPath)
 
+    # --- Startup: clear stale lock from THIS host before competing ---
+    if (Test-Path -LiteralPath $LockPath -PathType Leaf) {
+        try {
+            $existingLock = Get-Content -Raw -LiteralPath $LockPath -Encoding utf8 | ConvertFrom-Json
+            if ($null -ne $existingLock) {
+                $existingHost = if ($null -ne $existingLock.hostname) { [string]$existingLock.hostname } else { "" }
+                $existingPid  = if ($null -ne $existingLock.pid)      { [int]$existingLock.pid       } else { 0 }
+                # Only auto-clear locks left by the same host — cross-host locks must be cleared manually
+                if ($existingHost -eq $env:COMPUTERNAME -and $existingPid -gt 0) {
+                    if (-not (Test-ProcessIdAlive -ProcessId $existingPid)) {
+                        Write-WatchdogTrace -Step "lock.stale-cleared" -Data @{ pid = $existingPid; hostname = $existingHost }
+                        Remove-Item -LiteralPath $LockPath -Force -ErrorAction Stop | Out-Null
+                    }
+                }
+            }
+        } catch {
+            # Could not read/clear stale lock — proceed to compete normally
+        }
+    }
+
     while ($true) {
         try {
             $stream = [System.IO.File]::Open($LockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
             $payload = [ordered]@{
                 pid       = $PID
+                hostname  = $env:COMPUTERNAME
                 createdAt = (Get-Date).ToString("o")
             } | ConvertTo-Json -Depth 3
             $bytes = $Utf8NoBom.GetBytes($payload)
@@ -451,14 +489,22 @@ function Acquire-WatchdogLock {
             return $true
         } catch [System.IO.IOException] {
             $lockOwnerPid = 0
+            $lockOwnerHost = ""
             if (Test-Path -LiteralPath $LockPath -PathType Leaf) {
                 try {
                     $lockData = Get-Content -Raw -LiteralPath $LockPath -Encoding utf8 | ConvertFrom-Json
-                    if ($null -ne $lockData.pid) {
-                        $lockOwnerPid = [int]$lockData.pid
+                    if ($null -ne $lockData) {
+                        $lockOwnerPid  = if ($null -ne $lockData.pid)      { [int]$lockData.pid      } else { 0 }
+                        $lockOwnerHost = if ($null -ne $lockData.hostname) { [string]$lockData.hostname } else { "" }
                     }
                 } catch {
                 }
+            }
+
+            # Self-deadlock guard: if this process (same host + same PID) already holds the lock, re-enter safely
+            if ($lockOwnerPid -eq $PID -and $lockOwnerHost -eq $env:COMPUTERNAME) {
+                Write-WatchdogTrace -Step "lock.self-deadlock-guard" -Data @{ pid = $PID; hostname = $env:COMPUTERNAME }
+                return $true
             }
 
             if ($lockOwnerPid -gt 0 -and (Test-ProcessIdAlive -ProcessId $lockOwnerPid)) {
@@ -597,7 +643,10 @@ function Write-State {
         globalContext = $GlobalContextPath
     }
     $tempPath = "$StatePath.tmp"
-    [System.IO.File]::WriteAllText($tempPath, ($payload | ConvertTo-Json -Depth 6), $Utf8NoBom)
+    # NOTE: The state payload includes deep nested structures (ChangedSpecs arrays, full path maps).
+    # Depth 10 is required to serialize all nested properties without truncation.
+    # If this limit is reached in practice, consider restructuring to flatten suspicious sub-objects.
+    [System.IO.File]::WriteAllText($tempPath, ($payload | ConvertTo-Json -Depth 10), $Utf8NoBom)
     Move-Item -LiteralPath $tempPath -Destination $StatePath -Force
 }
 
@@ -743,7 +792,7 @@ function Get-FileContentHash {
         $hashBytes = $sha1.ComputeHash($stream)
         $hash = ([System.BitConverter]::ToString($hashBytes)).Replace("-", "").ToLowerInvariant()
         $item = Get-Item -LiteralPath $Path
-        return "{0}:{1}:{2}" -f $item.Name, $hash, $item.Length
+        return "{0}:{1}:{2}" -f $item.FullName, $hash, $item.Length
     } finally {
         if ($null -ne $stream) {
             $stream.Dispose()
@@ -1041,7 +1090,7 @@ function Invoke-BuildHandoffPack {
 
 function Invoke-GenerateHygieneReport {
     if (-not (Test-Path -LiteralPath $GenerateHygieneScript -PathType Leaf)) {
-        return $false
+        return $null
     }
 
     try {
@@ -1057,17 +1106,56 @@ function Invoke-GenerateHygieneReport {
             } catch {
             }
             Write-State -Running $true -LastReason ("hygiene-report-timeout") -ChangedSpecs @() -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
-            return $false
+            return $null
         }
 
         if ($waitResult.exitCode -ne 0) {
             Write-State -Running $true -LastReason ("hygiene-report-exitcode-" + $waitResult.exitCode) -ChangedSpecs @() -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
-            return $false
+            return $null
         }
 
         return $true
     } catch {
         Write-State -Running $true -LastReason ("hygiene-report-failed:" + $_) -ChangedSpecs @() -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
+        return $null
+    }
+}
+
+function Invoke-MemoryArchival {
+    # Read hygiene report to check archival_needed flag (Q1 fix: do NOT self-trigger, only act on report)
+    $hygieneReportPath = Join-Path $GeneratedRoot "memory_hygiene_report.json"
+    $archivalNeeded = $false
+    if (Test-Path -LiteralPath $hygieneReportPath -PathType Leaf) {
+        try {
+            $report = Get-Content -Raw -LiteralPath $hygieneReportPath -Encoding UTF8 | ConvertFrom-Json
+            if ($null -ne $report.tier_budget_status) {
+                $archivalNeeded = [bool]$report.tier_budget_status.archival_needed
+            }
+        } catch {
+        }
+    }
+
+    if (-not $archivalNeeded) {
+        Write-WatchdogTrace -Step "archival.skip" -Data @{ reason = "archival_not_needed" }
+        return $false
+    }
+
+    if (-not (Test-Path -LiteralPath $MemoryArchivalScript -PathType Leaf)) {
+        Write-WatchdogTrace -Step "archival.skip" -Data @{ reason = "script_missing" }
+        return $false
+    }
+
+    try {
+        # Use Start-Process (non-blocking, idempotent lock protects concurrent runs)
+        if (Test-SharedIsWindows) {
+            Start-SharedWindowsHeadlessProcess -FilePath (Get-NodeExecutable) -ArgumentList @($MemoryArchivalScript, "--vault-root", $VaultRoot, "--trigger", "watchdog") -WorkingDirectory (Split-Path -Parent $MemoryArchivalScript) | Out-Null
+        } else {
+            Start-SharedBackgroundProcess -FilePath (Get-NodeExecutable) -ArgumentList @($MemoryArchivalScript, "--vault-root", $VaultRoot, "--trigger", "watchdog") -WorkingDirectory (Split-Path -Parent $MemoryArchivalScript) | Out-Null
+        }
+        Write-WatchdogTrace -Step "archival.launched" -Data @{ reason = "archival_needed=true" }
+        return $true
+    } catch {
+        Write-State -Running $true -LastReason ("archival-failed:" + $_) -ChangedSpecs @() -StructuredSignature (Get-StructuredDataSignature) -HeavySyncAt $script:lastHeavySyncAt
         return $false
     }
 }
@@ -1242,6 +1330,9 @@ function Invoke-ArtifactCatchup {
 
     # Generate memory hygiene report
     [void](Invoke-GenerateHygieneReport)
+
+    # Trigger idempotent archival if hygiene report says archival_needed=true (Q1 fix: hygiene only reports)
+    [void](Invoke-MemoryArchival)
 
     return $lastSyncAt
 }

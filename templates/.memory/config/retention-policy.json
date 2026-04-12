@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "name": "retention-policy",
+  "description": "Memory retention and tier-transition policy. Supersedes 4-layer retention (2025).",
+  "version": 2,
+  "adr": "002",
+  "tiers": {
+    "1_event_working": {
+      "label": "Event / Working",
+      "ttl_days": 1,
+      "embedding_index": false,
+      "recommendation_candidate": false,
+      "archive_rule": "age > 1d AND no session-end signal → scanned by memory-archival.js",
+      "promotion": {
+        "trigger": "session-end signal received AND confidence >= 0.5",
+        "target": 2
+      }
+    },
+    "2_session_durable": {
+      "label": "Session Durable",
+      "ttl_days": null,
+      "ttl_from": "session_end",
+      "ttl_offset_days": 7,
+      "embedding_index": false,
+      "recommendation_candidate": false,
+      "archive_rule": "age > 30d without confidence signal → memory-archival.js",
+      "promotion": {
+        "trigger": "cross_session_hits >= 3 AND confidence >= 0.7",
+        "target": 3
+      }
+    },
+    "3_project_durable": {
+      "label": "Project Durable",
+      "ttl_days": null,
+      "ttl_from": "project_end",
+      "ttl_offset_days": 30,
+      "embedding_index": true,
+      "recommendation_candidate": true,
+      "archive_rule": "project ended AND age > 30d → memory-archival.js",
+      "promotion": {
+        "trigger": "same fact appears in 2+ projects OR agent manually flags",
+        "target": 4
+      }
+    },
+    "4_shared_durable": {
+      "label": "Shared Durable",
+      "ttl_days": null,
+      "embedding_index": true,
+      "recommendation_candidate": true,
+      "ttl_by_scope": {
+        "user": null,
+        "feedback": 90,
+        "reference": 180
+      },
+      "archive_rule": "TTL expired OR access_count == 0 for 60d → memory-archival.js",
+      "promotion": {
+        "trigger": "never (terminal tier unless archived)",
+        "target": null
+      }
+    },
+    "5_archive": {
+      "label": "Archive",
+      "ttl_days": null,
+      "ttl_from": "manual",
+      "embedding_index": false,
+      "recommendation_candidate": false,
+      "archive_rule": "never auto-archived (terminal)",
+      "promotion": {
+        "trigger": "none",
+        "target": null
+      },
+      "tombstone_strategy": "REMOVED — replaced by archive-manifest.jsonl (see docs/MEMORY-TIERING.md)"
+    }
+  },
+  "archive": {
+    "manifest_file": "00-System/ai-memory/structured/archive-manifest.jsonl",
+    "manifest_schema_version": 1,
+    "tombstone_in_embedding": false,
+    "note": "Use archive-manifest.jsonl for audit trail instead of writing tombstones to embedding index"
+  },
+  "idempotency": {
+    "pattern": "if (record.tier >= TARGET_TIER) return  // no-op",
+    "guarantees": [
+      "Re-running dream consolidation never double-promotes a record",
+      "Watchdog and dream can both evaluate the same record without conflict",
+      "memory-archival.js can be re-triggered mid-run without side effects"
+    ]
+  },
+  "retention_defaults": {
+    "1": 1,
+    "2_session_plus_7d": "session_end_offset_7",
+    "3_project_plus_30d": "project_end_offset_30",
+    "4_user_never": null,
+    "4_feedback_90d": 90,
+    "4_reference_180d": 180,
+    "5_manual_never": null
+  },
+  "tier_transition": {
+    "require_session_signal_for_tier12": true,
+    "require_confidence_threshold": true,
+    "confidence_tier12": 0.5,
+    "confidence_tier23": 0.7,
+    "cross_session_threshold": 3
+  }
+}

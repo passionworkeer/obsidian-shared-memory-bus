@@ -59,7 +59,7 @@
       "displayName": "Obsidian",
       "mode": "shared",
       "port": 9335,
-      "stdioCommandWindows": "{{powershell}} -NoProfile -ExecutionPolicy Bypass -File {{obsidianRunner}}",
+      "stdioCommandWindows": "{{powershell}} -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File {{obsidianRunner}}",
       "stdioCommandPosix": "{{powershell}} -NoProfile -File {{obsidianRunner}}",
       "notes": "Already points at one canonical vault. Shared mode avoids duplicated launch cost."
     },
@@ -68,7 +68,7 @@
       "displayName": "MiniMax Coding Plan",
       "mode": "optional",
       "port": 9336,
-      "stdioCommandWindows": "{{powershell}} -NoProfile -ExecutionPolicy Bypass -File {{minimaxRunner}}",
+      "stdioCommandWindows": "{{powershell}} -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File {{minimaxRunner}}",
       "stdioCommandPosix": "{{powershell}} -NoProfile -File {{minimaxRunner}}",
       "notes": "Optional shared MiniMax MCP. Requires MINIMAX_API_KEY and an installed minimax-coding-plan-mcp executable, or set MINIMAX_MCP_COMMAND explicitly."
     },
@@ -78,7 +78,9 @@
       "mode": "shared",
       "port": 9338,
       "probeType": "mcp-initialize",
-      "stdioCommandWindows": "{{node}} --experimental-default-type=module {{omniMemoryServer}}",
+      "startupProbeTimeoutSeconds": 10,
+      "startupProbeAttempts": 45,
+      "stdioCommandWindows": "{{node}} --experimental-default-type=module \"{{omniMemoryServer}}\"",
       "stdioCommandPosix": "{{node}} --experimental-default-type=module {{omniMemoryServer}}",
       "notes": "Unified shared memory interface over canonical Obsidian structured memory with bm25/dense/hybrid retrieval, embeddings rebuild, claude-mem compatibility, and OpenClaw blackboard tools."
     },
