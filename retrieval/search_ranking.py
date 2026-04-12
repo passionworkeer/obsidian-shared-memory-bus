@@ -29,21 +29,12 @@ try:
 except Exception:
     BM25Okapi = None
 
-# jieba 延迟加载（轻量化优化：避免冷启动开销）
-jieba = None
+try:
+    import jieba  # type: ignore
 
-def _ensure_jieba():
-    """懒加载 jieba 分词器，首次使用时才初始化"""
-    global jieba
-    if jieba is not None:
-        return jieba
-    try:
-        import jieba as _jieba_module
-        _jieba_module.setLogLevel(20)
-        jieba = _jieba_module
-        return jieba
-    except Exception:
-        return None
+    jieba.setLogLevel(20)
+except Exception:
+    jieba = None
 
 try:
     from streaming_index import StreamingIndex
@@ -149,11 +140,9 @@ def tokenize(text: str) -> List[str]:
             seen.add(normalized)
             tokens.append(normalized)
 
-    # 懒加载 jieba（轻量化优化）
-    _jieba = _ensure_jieba()
-    if _jieba is not None:
+    if jieba is not None:
         try:
-            for piece in _jieba.cut(source):
+            for piece in jieba.cut(source):
                 add(piece)
         except Exception:
             pass

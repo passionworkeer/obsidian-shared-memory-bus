@@ -5,11 +5,12 @@ const { spawn, spawnSync } = require("child_process");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
-const { createEmbeddingProviderRegistry, getProviderHost, buildEmbeddingConfigHash } = require("./embedding-provider-registry.js");
+const { createEmbeddingProviderRegistry, getProviderHost, buildEmbeddingConfigHash, normalizeEmbeddingAdapter } = require("./embedding-provider-registry.js");
 const { resolvePythonRuntime, withPythonArgs } = require("./python-runtime.js");
 const { resolveEmbeddingRuntime } = require("./runtime-config.js");
 const { resolveVaultRoot } = require("./vault-root.js");
 const { VECTOR_SCHEMA_VERSION, fnv1a32, buildHashFeatures, buildHashEmbedding } = require("./lsh-hash.js");
+const { createJsonlStream } = require("../ops/jsonl-stream.js");
 const WINDOWS_ENV_CACHE = new Map();
 
 hydrateProcessEnvFromWindows([
@@ -452,22 +453,29 @@ function collectDocuments() {
  * (one entry per record_id, no record_id/field) are also loaded and treated
  * as having field="content".
  */
-function loadExistingIndex() {
+/**
+ * Load the existing index.jsonl (v1 or v2 format) using streaming.
+ * Never loads the entire file into memory — iterates one record at a time.
+ *
+ * Returns a Map keyed by entry_id (sub-entry id).  Each value is the parsed
+ * index record with an added `fieldTexts` dict derived from its `contentHash`
+ * map for the reuse check.
+ *
+ * v2 records (with record_id/field) are preferred; legacy v1 records
+ * (one entry per record_id, no record_id/field) are also loaded and treated
+ * as having field="content".
+ */
+async function loadExistingIndex() {
   const existing = new Map();
   if (!fs.existsSync(INDEX_FILE)) {
     return existing;
   }
 
-  const lines = fs.readFileSync(INDEX_FILE, "utf8").split(/\r?\n/);
-  for (const line of lines) {
-    if (!line.trim()) {
+  for await (const record of createJsonlStream(INDEX_FILE)) {
+    if (!record || !record.id) {
       continue;
     }
     try {
-      const record = JSON.parse(line);
-      if (!record || !record.id) {
-        continue;
-      }
       const entryId = String(record.id).trim();
 
       // Reconstruct fieldTexts from the stored record:
@@ -548,7 +556,7 @@ async function main() {
   ensureDirectory(EMBEDDINGS_DIR);
 
   const documents = collectDocuments();
-  const existing = loadExistingIndex();
+  const existing = await loadExistingIndex();
   const preferredBackend = normalizeEmbeddingAdapter(EMBED_ADAPTER, MODEL) || "hash";
   const preferredModelName = preferredBackend === "hash" ? HASH_MODEL : MODEL;
   const preferredConfigHash = buildEmbeddingConfigHash({
