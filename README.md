@@ -12,19 +12,29 @@
 
 > **In plain English**: Your AI tools share one notebook for memory instead of each forgetting everything when you switch.
 
-## Universal Skill File
+## Agent-Centric Architecture
 
-This repository ships a **root `SKILL.md`** as the single universal entry point for all AI agents. Any agent that can read a skill or rule file can clone this repo and follow `SKILL.md` to auto-configure optimal access to the shared Obsidian memory bus.
+This repository is **written for AI agents first**. When any AI agent clones the repo, it reads `SKILL.md` → `AGENT_BOOT.md` → applies its platform/agent-specific skill, and the entire memory architecture auto-configures. No manual setup required.
 
-Supported agents:
-- **Claude Code** → `.agents/skills/claude-code.md`
-- **Codex** → `.agents/skills/codex.md`
-- **OpenClaw** → `.agents/skills/openclaw.md`
-- **Trae** → `.agents/skills/trae.md`
-- **Cursor** → `.agents/skills/cursor.md`
-- **Copilot** → `.agents/skills/copilot.md`
+```
+Universal entry    → SKILL.md
+Agent bootstrap    → .agents/skills/AGENT_BOOT.md
+macOS overrides    → .agents/skills/macos.md
+Linux overrides    → .agents/skills/linux.md
+Agent-specific    → .agents/skills/<agent-name>.md
+```
 
-Each per-agent file covers vault path resolution, token budget guidance, MCP wiring, and durable writeback targets specific to that agent. Git hooks for automatic hygiene and context refresh on pull/checkout are documented in `docs/GIT-HOOKS-INTEGRATION.md`.
+**One-line agent bootstrap (any platform):**
+```bash
+git clone https://github.com/passionworkeer/obsidian-shared-memory-bus.git && \
+  cd obsidian-shared-memory-bus && \
+  node -e "console.log('Platform:', require('./bus/platform/index.js').platform.name)" && \
+  node scripts/vault-detect.js && \
+  node scripts/env-check.js && \
+  node scripts/cross-platform-test.js
+```
+
+Supported agents: Claude Code, Codex, OpenClaw, Trae, Cursor, Copilot.
 
 The 5-tier memory architecture is documented in `docs/MEMORY-TIERING.md`. Only Tier 3 and Tier 4 records are embedded; Tier 5 Archive uses `archive-manifest.jsonl` instead of a tombstone to avoid polluting the vector space.
 
