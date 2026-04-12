@@ -25,6 +25,8 @@ Memory records live in one of five tiers, each with distinct TTL, embedding beha
 | 4 | **Shared Durable** | user=never / feedback=90 d / reference=180 d | **Yes** | **Yes** | TTL expiry OR 60 d no access → Archive |
 | 5 | **Archive** | Manual (never auto-deleted) | No (manifest only) | No | Manual or budget-pressure eviction |
 
+> **Store root:** All paths in this document are relative to the store root (`AI_MEMORY_STORE`, default `E:\.ai-memory\`). Structured JSONL files live under `structured/`, embeddings under `embeddings/`, generated artifacts under `generated/`.
+
 ---
 
 ## Tier 1 — Event / Working
@@ -35,7 +37,7 @@ Memory records live in one of five tiers, each with distinct TTL, embedding beha
 - TTL = **1 day** from creation (not 7 days — see Q2 fix note below).
 - Age alone does **not** trigger Tier 1→2 promotion.
 - Promotion trigger: **session-end signal** + `confidence ≥ 0.5`.
-- Records older than 1 day with no session-end signal → scanned by `memory-archival.js` for Archive.
+- Records older than 1 day with no session-end signal → scanned by `ops/memory-archival.js` for Archive.
 
 ### Idempotent Promotion 1→2
 ```js
@@ -179,7 +181,7 @@ lifecycle:
 
 ## Retention Policy
 
-See: `templates/.memory/config/retention-policy.json`
+See: retention policy configuration in the store config directory.
 
 | Tier | Default TTL | Archive Rule |
 |------|------------|--------------|
@@ -193,7 +195,7 @@ See: `templates/.memory/config/retention-policy.json`
 
 ## Tier Budget Enforcement
 
-`memory-archival.js` enforces per-tier maximums. Exceeding budget triggers budget-pressure Archive (oldest first by `freshness_score`).
+`ops/memory-archival.js` enforces per-tier maximums. Exceeding budget triggers budget-pressure Archive (oldest first by `freshness_score`).
 
 | Tier | Max Records | Auto Archive |
 |------|------------|--------------|
@@ -203,7 +205,7 @@ See: `templates/.memory/config/retention-policy.json`
 | 4 Shared Durable | 200 / type | Yes |
 | 5 Archive | >500 triggers human review | No |
 
-See: `templates/.memory/config/tier-budget.json`
+See: tier budget configuration in the store config directory.
 ---
 
 ## Adaptive Retrieval Modes
