@@ -21,7 +21,7 @@ const { resolvePythonRuntime, withPythonArgs } = require(
     : path.join(__dirname, "..", "bus", "python-runtime.js")
 );
 const PYTHON = resolvePythonRuntime();
-const SCRIPT = path.join(AI_MEMORY_ROOT, "semantic-search.py");
+const SCRIPT = path.join(AI_MEMORY_ROOT, "semantic_search.py");
 
 function main() {
   const parsed = parseCliArgs(process.argv.slice(2));

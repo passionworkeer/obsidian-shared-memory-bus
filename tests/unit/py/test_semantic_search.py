@@ -3,6 +3,10 @@ Pytest tests for retrieval/semantic-search.py
 
 Tests pure functions: classify_query_intent, normalize_request_payload,
 build_query_embedding_cache_key, build_bm25_cache_key, and parse_args.
+
+After the split into submodules, semantic_search imports from search_ranking,
+search_index, search_cache, and search_server. We must load those first and
+inject them into sys.modules so semantic_search finds them.
 """
 
 import os
@@ -11,15 +15,64 @@ import pytest
 from unittest.mock import patch
 import importlib.util
 
-# Load semantic-search.py (has hyphen in filename, needs importlib)
+# Load submodules in dependency order, inject into sys.modules so that
+# semantic_search (which imports them) can find them.
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(_SCRIPT_DIR)))
-_SEARCH_PATH = os.path.join(_PROJECT_ROOT, "retrieval", "semantic-search.py")
-_spec = importlib.util.spec_from_file_location("semantic_search", _SEARCH_PATH)
-if _spec is None or _spec.loader is None:
-    raise ImportError("Could not create module spec for semantic-search.py")
-_semantic_search_module = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_semantic_search_module)
+_RETRIEVAL_DIR = os.path.join(_PROJECT_ROOT, "retrieval")
+
+# Shared namespace for inter-module references
+_ns: dict = {}
+
+# 1. search_ranking — no dependencies on the other new modules
+# Guard: reuse any already-loaded instance so that other test-file module-level
+# cache references (e.g. in test_search_index.py) remain valid.
+if "search_ranking" in sys.modules:
+    _ns["search_ranking"] = sys.modules["search_ranking"]
+else:
+    _spec_rank = importlib.util.spec_from_file_location("search_ranking", os.path.join(_RETRIEVAL_DIR, "search_ranking.py"))
+    assert _spec_rank and _spec_rank.loader
+    _ns["search_ranking"] = importlib.util.module_from_spec(_spec_rank)
+    _spec_rank.loader.exec_module(_ns["search_ranking"])
+    sys.modules["search_ranking"] = _ns["search_ranking"]
+
+# 2. search_index — depends on search_ranking (guard against re-execution)
+if "search_index" in sys.modules:
+    _ns["search_index"] = sys.modules["search_index"]
+else:
+    _spec_idx = importlib.util.spec_from_file_location("search_index", os.path.join(_RETRIEVAL_DIR, "search_index.py"))
+    assert _spec_idx and _spec_idx.loader
+    _ns["search_index"] = importlib.util.module_from_spec(_spec_idx)
+    _spec_idx.loader.exec_module(_ns["search_index"])
+    sys.modules["search_index"] = _ns["search_index"]
+
+# 3. search_cache — depends on search_ranking and search_index (guard against re-execution)
+if "search_cache" in sys.modules:
+    _ns["search_cache"] = sys.modules["search_cache"]
+else:
+    _spec_cache = importlib.util.spec_from_file_location("search_cache", os.path.join(_RETRIEVAL_DIR, "search_cache.py"))
+    assert _spec_cache and _spec_cache.loader
+    _ns["search_cache"] = importlib.util.module_from_spec(_spec_cache)
+    _spec_cache.loader.exec_module(_ns["search_cache"])
+    sys.modules["search_cache"] = _ns["search_cache"]
+
+# 4. search_server — depends on all above + semantic_search (deferred) (guard against re-execution)
+if "search_server" in sys.modules:
+    _ns["search_server"] = sys.modules["search_server"]
+else:
+    _spec_srv = importlib.util.spec_from_file_location("search_server", os.path.join(_RETRIEVAL_DIR, "search_server.py"))
+    assert _spec_srv and _spec_srv.loader
+    _ns["search_server"] = importlib.util.module_from_spec(_spec_srv)
+    _spec_srv.loader.exec_module(_ns["search_server"])
+    sys.modules["search_server"] = _ns["search_server"]
+
+# 5. semantic_search — imports from all submodules
+_SEMANTIC_PATH = os.path.join(_RETRIEVAL_DIR, "semantic_search.py")
+_semantic_search_module = importlib.util.module_from_spec(
+    importlib.util.spec_from_file_location("semantic_search", _SEMANTIC_PATH)
+)
+assert _semantic_search_module.__spec__
+_semantic_search_module.__spec__.loader.exec_module(_semantic_search_module)
 
 from retrieval.embedding_providers import normalize_embedding_adapter
 

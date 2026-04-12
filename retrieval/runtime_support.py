@@ -4,15 +4,37 @@ Shared runtime helpers for portable ai-memory Python scripts.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
+# Dynamically import the sibling platform.py module (avoids stdlib name collision
+# and works whether or not retrieval/ is a package with __init__.py).
+_platform_spec = importlib.util.spec_from_file_location(
+    "_retrieval_platform", os.path.join(os.path.dirname(__file__), "platform.py")
+)
+assert _platform_spec and _platform_spec.loader
+_platform_mod = importlib.util.module_from_spec(_platform_spec)
+_platform_spec.loader.exec_module(_platform_mod)
 
-IS_WINDOWS = os.name == "nt"
-IS_MACOS = sys.platform == "darwin"
+# Module-level aliases (use underscore prefix to avoid shadowing wrapper functions below)
+_get_config_home = _platform_mod.get_config_home
+_get_default_store_root = _platform_mod.get_default_store_root
+_get_home_dir = _platform_mod.get_home_dir
+_get_obsidian_config_candidates = _platform_mod.get_obsidian_config_candidates
+_get_platform_name = _platform_mod.get_platform_name
+_is_windows_fn = _platform_mod.is_windows
+
+IS_WINDOWS = _is_windows_fn()
+IS_MACOS = _get_platform_name() == "darwin"
+
+# Re-export for external callers (same interface as original)
+is_windows = _is_windows_fn
+get_platform_name = _get_platform_name
+get_default_store_root = _get_default_store_root
 _WINDOWS_ENV_CACHE: Dict[str, str] = {}
 EMBEDDING_RUNTIME_RESERVED_KEYS = {
     "activeProfile",
@@ -138,41 +160,27 @@ def process_env(name: str) -> str:
 
 
 def get_user_home() -> Path:
-    for candidate in (
-        os.environ.get("USERPROFILE", "").strip(),
-        os.environ.get("HOME", "").strip(),
-        str(Path.home()).strip(),
-    ):
-        if candidate:
-            return Path(candidate).expanduser().resolve()
-    raise RuntimeError("Unable to resolve the current user's home directory.")
+    # Delegate to platform.py to keep detection logic in one place.
+    return _get_home_dir()
 
 
 def get_config_home() -> Path:
-    user_home = get_user_home()
-    if IS_WINDOWS:
-        appdata = os.environ.get("APPDATA", "").strip()
-        if appdata:
-            return Path(appdata).expanduser().resolve()
-        return user_home / "AppData" / "Roaming"
-    if IS_MACOS:
-        return user_home / "Library" / "Application Support"
-    xdg_config = os.environ.get("XDG_CONFIG_HOME", "").strip()
-    if xdg_config:
-        return Path(xdg_config).expanduser().resolve()
-    return user_home / ".config"
+    # Delegate to platform.py to keep detection logic in one place.
+    return _get_config_home()
 
 
 def get_obsidian_config_candidates() -> List[Path]:
-    return [get_config_home() / "obsidian" / "obsidian.json"]
+    # Delegate to platform.py to keep detection logic in one place.
+    return _get_obsidian_config_candidates()
 
 
 def get_default_vault_candidates() -> List[Path]:
-    user_home = get_user_home()
+    # Delegate to platform.py to keep detection logic in one place.
+    home = _get_home_dir()
     return [
-        user_home / "Obsidian Vault",
-        user_home / "Documents" / "Obsidian Vault",
-        user_home / "Desktop" / "Obsidian Vault",
+        home / "Obsidian Vault",
+        home / "Documents" / "Obsidian Vault",
+        home / "Desktop" / "Obsidian Vault",
     ]
 
 
@@ -253,8 +261,11 @@ def resolve_runtime_root_candidates(anchor_file: str = "", root_override: str = 
 
 
 def resolve_runtime_root(anchor_file: str = "", root_override: str = "") -> Path:
+    # _platform_mod is already loaded at module level.
+    is_runtime_root = _platform_mod.is_runtime_root
+
     signatures = (
-        "memory-bus.ps1",
+        os.path.join("retrieval", "embedding_providers.py"),
         os.path.join("bus", "memory-bus.ps1"),
         os.path.join("shared-mcp", "manifest.json"),
     )

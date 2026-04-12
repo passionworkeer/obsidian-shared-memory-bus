@@ -21,9 +21,12 @@ const path = require("node:path");
 
 function loadStoreRootHelper() {
   const candidates = [
-    path.join(__dirname, "store-root.cjs"),
-    path.join(__dirname, "..", "bus", "store-root.cjs"),
-    path.join(__dirname, "bus", "store-root.cjs"),
+    // bus/ sibling (project layout)
+    path.join(__dirname, "..", "bus", "store-root.js"),
+    // ops/bus/ (legacy nested layout)
+    path.join(__dirname, "bus", "store-root.js"),
+    // Script-local (installed flat layout: ~/.ai-memory/ops/)
+    path.join(__dirname, "store-root.js"),
   ];
   for (const c of candidates) {
     if (fs.existsSync(c)) return require(c);
@@ -40,8 +43,9 @@ function resolveVaultRoot() {
       // fall through
     }
   }
-  // Last resort: use AI_MEMORY_STORE or E:\.ai-memory
-  return process.env.AI_MEMORY_STORE || "E:\\.ai-memory";
+  // Last resort: use DEFAULT_STORE_ROOT from store-root.js to avoid hardcoding
+  const { DEFAULT_STORE_ROOT } = require("./store-root.js");
+  return process.env.AI_MEMORY_STORE || DEFAULT_STORE_ROOT;
 }
 
 // ---------------------------------------------------------------------------
@@ -114,7 +118,7 @@ function memory_boot({ agent_id: _agent_id, cwd } = {}) {
   let l1Count = 0;
 
   try {
-    const { KnowledgeGraph } = require("./knowledge-graph.cjs");
+    const { KnowledgeGraph } = require("./knowledge-graph.js");
     const kg = new KnowledgeGraph({ vaultRoot });
     const triples = kg.queryCurrentTriples({ entityName: project_key, limit: 20 });
 
