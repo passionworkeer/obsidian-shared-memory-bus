@@ -162,8 +162,9 @@ describe("entity extraction", () => {
   });
 
   test("extractEntities handles mixed Chinese and English", () => {
+    // Names must appear >=2 times to pass extractEntityCandidates min-frequency filter
     const text =
-      "Zhang Wei and Alice are collaborating on the multi-agent memory system.";
+      "Zhang Wei and Alice are working on the memory system. Zhang Wei helped Alice with the collaboration. Alice uses the system daily.";
     const result = extractEntities(text);
 
     assert.strictEqual(typeof result, "object");
@@ -282,13 +283,15 @@ describe("entity extraction", () => {
     const result = extractEntitiesFromRecords(records);
 
     assert.strictEqual(typeof result, "object");
-    assert.ok(Array.isArray(result.entities));
+    assert.ok(Array.isArray(result));
+    assert.ok(result.length === 2);
+    assert.ok(Array.isArray(result[0].entities));
   });
 
   test("extractEntitiesFromRecords handles empty array", () => {
     const result = extractEntitiesFromRecords([]);
-    assert.strictEqual(typeof result, "object");
-    assert.ok(Array.isArray(result.entities));
+    assert.ok(Array.isArray(result));
+    assert.strictEqual(result.length, 0);
   });
 
   test("extractEntitiesFromRecords handles null records gracefully", () => {
