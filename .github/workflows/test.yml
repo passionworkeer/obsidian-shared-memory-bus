@@ -76,9 +76,10 @@ jobs:
   # ---------------------------------------------------------------------------
   python-unit-tests:
     runs-on: ubuntu-latest
-    env:
-      AI_MEMORY_OBSIDIAN_VAULT: ${{ runner.temp }}/vault-smoke
     steps:
+      - name: Set vault env
+        run: echo "AI_MEMORY_OBSIDIAN_VAULT=$RUNNER_TEMP/vault-smoke" >> $GITHUB_ENV
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -102,9 +103,10 @@ jobs:
   # ---------------------------------------------------------------------------
   cross-language-tests:
     runs-on: ubuntu-latest
-    env:
-      AI_MEMORY_OBSIDIAN_VAULT: ${{ runner.temp }}/vault-smoke
     steps:
+      - name: Set vault env
+        run: echo "AI_MEMORY_OBSIDIAN_VAULT=$RUNNER_TEMP/vault-smoke" >> $GITHUB_ENV
+
       - name: Checkout
         uses: actions/checkout@v4
 
