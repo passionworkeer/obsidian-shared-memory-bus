@@ -7,6 +7,9 @@
     "type": "git",
     "url": "https://github.com/passionworkeer/obsidian-shared-memory-bus"
   },
+  "workspaces": [
+    "shared-mcp"
+  ],
   "scripts": {
     "lint": "npm run lint --prefix shared-mcp",
     "lint:fix": "npm run lint:fix --prefix shared-mcp",

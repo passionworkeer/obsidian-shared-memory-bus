@@ -29,7 +29,7 @@ jobs:
         run: npm ci
 
       - name: Run JS unit tests
-        run: node --test tests/unit/js/*.test.js
+        run: node --test "tests/unit/js/*.test.{js,mjs}"
 
   # ---------------------------------------------------------------------------
   # Unit tests — macOS (Node.js 20)
@@ -49,7 +49,7 @@ jobs:
         run: npm ci
 
       - name: Run JS unit tests
-        run: node --test tests/unit/js/*.test.js
+        run: node --test "tests/unit/js/*.test.{js,mjs}"
 
   # ---------------------------------------------------------------------------
   # Unit tests — Windows (Node.js 20)
@@ -69,7 +69,8 @@ jobs:
         run: npm ci
 
       - name: Run JS unit tests
-        run: node --test tests/unit/js/*.test.js
+        run: node --test "tests/unit/js/*.test.{js,mjs}"
+        shell: bash
 
   # ---------------------------------------------------------------------------
   # Python unit tests (Linux)
