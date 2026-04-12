@@ -171,7 +171,7 @@ jobs:
         run: npm ci
 
       - name: Platform smoke test
-        run: node -e "import('./bus/platform/index.js').then(m => console.log('Platform:', m.platform.name, '| Path sep:', m.platform.path.sep))"
+        run: node -e "import('./bus/platform/index.js').then(m => console.log('Platform:', m.platform.name, '| Path sep:', m.platform.pathSep))"
 
   # ---------------------------------------------------------------------------
   # Lint (Linux only)
