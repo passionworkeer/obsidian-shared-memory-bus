@@ -18,6 +18,7 @@ const EMBEDDING_CONFIG_META_KEYS = new Set([
   "enabled",
 ]);
 
+const KNOWN_ADAPTERS = new Set(["hash", "transformer", "openai-compatible", "huggingface"]);
 const EMBEDDING_ADAPTER_ALIASES = {
   hash: "hash",
   hashing: "hash",
@@ -64,11 +65,18 @@ function normalizeInteger(value, fallback = 0, min = 0) {
 }
 
 function normalizeEmbeddingAdapter(value, fallback = "") {
+  if (value == null) {
+    return normalizeString(fallback).toLowerCase();
+  }
   const normalized = normalizeString(value).toLowerCase();
   if (!normalized) {
     return normalizeString(fallback).toLowerCase();
   }
-  return EMBEDDING_ADAPTER_ALIASES[normalized] || normalized;
+  const canonical = EMBEDDING_ADAPTER_ALIASES[normalized] || normalized;
+  if (!KNOWN_ADAPTERS.has(canonical)) {
+    return normalizeString(fallback).toLowerCase();
+  }
+  return canonical;
 }
 
 function stripConfigMetadata(config) {
