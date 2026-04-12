@@ -24,14 +24,15 @@ MemPalace 是一个**本地优先（Local-First）、零 API 依赖**的 AI 记�
 
 | 维度 | MemPalace | Obsidian Shared Memory Bus |
 |------|-----------|--------------------------|
-| **规范存储** | ChromaDB + SQLite | Obsidian Vault + JSONL |
-| **知识结构化** | 内置三元组知识图谱（有时间维度） | 依赖实体提取 + JSONL schema 约束 |
+| **规范存储** | ChromaDB + SQLite | 本地 `.ai-memory` store + JSONL |
+| **知识结构化** | 内置三元组知识图谱（有时间维度） | 依赖 KG + JSONL schema 约束 |
 | **摘要格式** | AAAK 符号化格式（~30x 压缩） | AUTO-DREAM / GLOBAL-CONTEXT JSON |
 | **多工具共享** | MCP 单服务器（无 watchdog 跨源同步） | Shared MCP + Watchdog 多源同步 |
 | **向量检索** | 内置 ChromaDB（开箱即用） | Python 混合检索（BM25 + dense） |
 | **外部数据源** | 项目文件 + 对话导出 | claude-mem + OpenClaw + 多源导入 |
 | **中文支持** | 无内置 | jieba 分词支持 |
 | **安装复杂度** | 极简（chromadb + pyyaml） | 复杂（PowerShell + Node.js + Python） |
+| **Obsidian 依赖** | 无 | 无（纯本地文件系统） |
 
 ---
 
@@ -232,7 +233,7 @@ WHERE subject = 'Alice' OR object = 'Alice'
 
 | 层 | MemPalace | OSMB |
 |----|-----------|------|
-| 身份 | `identity.txt` (手写) | `identity.md` (Obsidian) |
+| 身份 | `identity.txt` (手写) | `L0-bootstrap.md` (store) |
 | 核心事实 | L1 Essential Story (自动生成) | `GLOBAL-CONTEXT.md` (生成) |
 | 按需加载 | L2 AAAK (按 wing/room) | `HANDOFF.json` / `MEMORY-LAYERS.json` |
 | 全量搜索 | L3 ChromaDB | JSONL + BM25/dense |

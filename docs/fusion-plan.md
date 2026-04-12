@@ -107,8 +107,8 @@ memory_query(query, depth?, cwd)
 
 const project_key = path.basename(cwd)
 
-// L0: 固定上下文，手写存储在 00-System/ai-memory/L0-fixed.md
-const L0_fixed = read("00-System/ai-memory/L0-fixed.md")
+// L0: 固定上下文，手写存储在 store/L0-fixed.md
+const L0_fixed = read("L0-fixed.md")
 
 // L1: 从 KG 抽取（仅限当前 project_key）
 const L1_knowledge = kg
@@ -117,7 +117,7 @@ const L1_knowledge = kg
 
 // 拼接 bootstrap
 const bootstrap = L0_fixed + "\n\n## L1 本次相关事实\n" + L1_knowledge
-write("00-System/ai-memory/L1-bootstrap.md", bootstrap)
+write("L1-bootstrap.md", bootstrap)
 ```
 
 **current_project 解析规则（明确）：**
@@ -401,9 +401,9 @@ function collectL0Suggestions(): Suggestion[] {
 }
 
 function mergeToL0(suggestions: Suggestion[]) {
-  const current = read('00-System/ai-memory/L0-fixed.md')
+  const current = read('L0-fixed.md')
   const merged = applyMergeStrategy(current, suggestions)  // diff3 合并
-  write('00-System/ai-memory/L0-fixed.md', merged)
+  write('L0-fixed.md', merged)
   // 从 inbox 移除已合并的 suggestion
 }
 
@@ -471,7 +471,7 @@ Claude Code Hook 触发时通过 **stdin 传入 JSON**：
 ### 3. L0-fixed.md：用户手写初始内容 + Watchdog 审核合并
 
 ```
-<vault-root>/00-System/ai-memory/L0-fixed.md
+{store-root}/L0-fixed.md
 ```
 
 初始内容用户手写，Agent 通过 inbox 写入 `tags: [L0-update]`，Watchdog 每小时审核合并一次。

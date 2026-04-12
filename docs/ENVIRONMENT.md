@@ -14,8 +14,9 @@ This page documents the environment variables the runtime understands. For an in
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `AI_MEMORY_ROOT` | No | `~/.ai-memory` (installed) or repo root | Where the runtime files live |
+| `AI_MEMORY_STORE` | No | Auto-detected (best free drive, min 2 GB) | **Root path for shared memory store** — e.g. `E:\.ai-memory`. Overrides auto-detection. |
 | `AI_MEMORY_RUNTIME_CONFIG_PATH` | No | Auto-resolved | Explicit runtime config path for source-tree or advanced runs |
-| `AI_MEMORY_OBSIDIAN_VAULT` | No | Auto-detected | Path to your Obsidian vault root |
+| `AI_MEMORY_OBSIDIAN_VAULT` | No | — | **Deprecated.** Previously used to point at an Obsidian vault. The system now uses `AI_MEMORY_STORE` instead. Kept for backward compatibility only. |
 | `AI_MEMORY_WATCHDOG_ENABLED` | No | `1` (enabled) | Set to `0` to disable the background watchdog |
 | `AI_MEMORY_BASE_PORT` | No | `9330` | Base port; servers use basePort+N (memory=9338) |
 | `AI_MEMORY_PROFILE_SYNC` | No | `false` | Enable profile sync on startup |
@@ -60,8 +61,8 @@ This page documents the environment variables the runtime understands. For an in
 ## Quick Reference
 
 ```powershell
-# Set your vault path
-$env:AI_MEMORY_OBSIDIAN_VAULT = "D:\Your\Vault"
+# Set your shared memory store root
+$env:AI_MEMORY_STORE = "E:\.ai-memory"
 
 # Disable background watchdog (use manual sync only)
 $env:AI_MEMORY_WATCHDOG_ENABLED = "0"
