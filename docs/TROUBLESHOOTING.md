@@ -1,48 +1,55 @@
 # Troubleshooting
 
-## Vault Not Found
+## Store Not Found
 
 **Error**: `VAULT_RESOLUTION_FAILED` at session start, or memory files not being written/read.
 
 **What to do**:
 
-1. **Check if Obsidian is installed and has opened a vault at least once.** The vault path is discovered from Obsidian's app config. If no vault was ever opened, the config won't exist.
-
-2. **Set the vault path explicitly.** Open a PowerShell prompt and run:
+1. **The system now uses `AI_MEMORY_STORE`** (default `E:\.ai-memory\`), not the Obsidian vault path. Set it explicitly if auto-detection is wrong:
    ```powershell
-   [Environment]::SetEnvironmentVariable("AI_MEMORY_OBSIDIAN_VAULT", "E:\desktop\Obsidian Vault", "User")
+   [Environment]::SetEnvironmentVariable("AI_MEMORY_STORE", "E:\.ai-memory", "User")
    ```
-   Adjust the path to match your actual vault location.
+   Adjust the path to match your preferred drive and location.
 
-3. **Verify the vault contains the expected folder structure.** The memory bus expects:
+2. **Verify the store contains the expected folder structure.** The memory bus expects:
    ```
-   <vault>/
-   ├── 00-System/
-   │   └── ai-memory/
-   │       ├── inbox/
-   │       ├── structured/
-   │       └── generated/
-   ├── 02-KB/
-   │   ├── OBSIDIAN.md
-   │   ├── MEMORY.md
-   │   └── WORKING.md
+   <store>\
+   ├── inbox/
+   │   └── {tool}.md         ← per-agent inbox
+   ├── structured/
+   │   ├── shared-inbox.jsonl
+   │   └── session-memory.jsonl
+   ├── generated/
+   │   ├── L0-bootstrap.md
+   │   └── GLOBAL-CONTEXT.md
+   ├── kg/
+   │   └── knowledge-graph.sqlite3
+   └── embeddings/
+       └── index.jsonl
    ```
 
-4. **If the folders don't exist**, run the installer which creates them:
+3. **If the folders don't exist**, run the installer which creates them:
    ```powershell
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
    ```
 
-5. **Verify the path is correct**:
+4. **Verify the store root is correct**:
    ```powershell
    # Windows
-   echo $env:AI_MEMORY_OBSIDIAN_VAULT
-   dir "$env:AI_MEMORY_OBSIDIAN_VAULT\00-System\ai-memory"
+   echo $env:AI_MEMORY_STORE
+   dir "$env:AI_MEMORY_STORE"
 
    # macOS/Linux
-   echo $AI_MEMORY_OBSIDIAN_VAULT
-   ls "$AI_MEMORY_OBSIDIAN_VAULT/00-System/ai-memory"
+   echo $AI_MEMORY_STORE
+   ls "$AI_MEMORY_STORE"
    ```
+
+5. **Run the migration script** if you are migrating from the old Obsidian vault store:
+   ```powershell
+   node ops/migrate-to-store.js
+   ```
+   This copies all data from the old vault store to the new `.ai-memory` store location.
 
 ---
 
@@ -147,7 +154,7 @@
 2. **Check if the entry was written to JSONL**:
    ```powershell
    # Find the structured JSONL files
-   Get-ChildItem -Path "$env:AI_MEMORY_OBSIDIAN_VAULT\00-System\ai-memory\structured" -Filter "*.jsonl" | ForEach-Object {
+   Get-ChildItem -Path "$env:AI_MEMORY_STORE\structured" -Filter "*.jsonl" | ForEach-Object {
        Select-String -Path $_.FullName -Pattern "your-search-term" -List
    }
    ```
@@ -159,13 +166,13 @@
    ```
    Then check:
    ```powershell
-   (Get-ChildItem -Path "$env:AI_MEMORY_OBSIDIAN_VAULT\00-System\ai-memory\embeddings\index.jsonl").LastWriteTime
+   (Get-ChildItem -Path "$env:AI_MEMORY_STORE\embeddings\index.jsonl").LastWriteTime
    ```
    The index timestamp should be newer than when you wrote the entry.
 
 4. **Verify the entry's tier is embeddable** (Tier 3 or 4):
    ```powershell
-   Select-String -Path "$env:AI_MEMORY_OBSIDIAN_VAULT\00-System\ai-memory\structured\shared-inbox.jsonl" `
+   Select-String -Path "$env:AI_MEMORY_STORE\structured\shared-inbox.jsonl" `
        -Pattern "your-search-term" -List
    ```
    Check the `tier` field. Tier 1 and 2 are NOT embedded.
@@ -188,14 +195,14 @@
 
 1. **Check if the KG SQLite database exists and is writable**:
    ```powershell
-   $kgPath = Join-Path $env:AI_MEMORY_OBSIDIAN_VAULT "00-System\ai-memory\kg\knowledge-graph.sqlite3"
+   $kgPath = Join-Path $env:AI_MEMORY_STORE "kg\knowledge-graph.sqlite3"
    Test-Path $kgPath
    ```
    If the file does not exist, the KG initializes automatically on first run. If it exists but is not writable, check file permissions.
 
 2. **Run entity extraction manually** to see errors:
    ```powershell
-   node ops/entity-extractor.js extract-file "$env:AI_MEMORY_OBSIDIAN_VAULT\00-System\ai-memory\structured\shared-inbox.jsonl"
+   node ops/entity-extractor.js extract-file "$env:AI_MEMORY_STORE\structured\shared-inbox.jsonl"
    ```
    Look for error output like `TypeError`, `SyntaxError`, or `ENOENT`.
 
@@ -233,7 +240,7 @@
 
 2. **Find corrupted lines**:
    ```powershell
-   $path = "$env:AI_MEMORY_OBSIDIAN_VAULT\00-System\ai-memory\structured\shared-inbox.jsonl"
+   $path = "$env:AI_MEMORY_STORE\structured\shared-inbox.jsonl"
    $lines = Get-Content $path -Encoding UTF8
    $lineNum = 0
    foreach ($line in $lines) {
@@ -258,8 +265,8 @@
 4. **For a full rebuild from source** (nuclear option):
    ```powershell
    # Backup first
-   Copy-Item "$env:AI_MEMORY_OBSIDIAN_VAULT\00-System\ai-memory\structured" `
-       "$env:AI_MEMORY_OBSIDIAN_VAULT\00-System\ai-memory\structured.bak" -Recurse
+   Copy-Item "$env:AI_MEMORY_STORE\structured" `
+       "$env:AI_MEMORY_STORE\structured.bak" -Recurse
 
    # Force full sync
    powershell -File bus/memory-watchdog.ps1 -Once
@@ -289,7 +296,7 @@
 
 2. **Check if there are any records to search**:
    ```powershell
-   (Get-Content "$env:AI_MEMORY_OBSIDIAN_VAULT\00-System\ai-memory\structured\shared-inbox.jsonl" -Encoding UTF8 | Measure-Object -Line).Lines
+   (Get-Content "$env:AI_MEMORY_STORE\structured\shared-inbox.jsonl" -Encoding UTF8 | Measure-Object -Line).Lines
    ```
    Zero records means the sync never ran or failed silently.
 
@@ -408,7 +415,9 @@ node .\ops\sync-openclaw-to-obsidian.js
 
 ## Obsidian MCP Does Not Start
 
-`ops/run-obsidian-mcp.ps1` looks for the vault in this order:
+> **Note:** The shared `memory` MCP no longer requires Obsidian. If you still need the Obsidian MCP for reading/writing vault notes, configure it separately.
+
+`ops/run-obsidian-mcp.ps1` (if used) looks for the vault in this order:
 1. `AI_MEMORY_OBSIDIAN_VAULT`
 2. `OBSIDIAN_VAULT_ROOT`
 3. the active or most recent vault in Obsidian's app config (`%APPDATA%\obsidian\obsidian.json`, `~/Library/Application Support/obsidian/obsidian.json`, or `~/.config/obsidian/obsidian.json`)
@@ -682,8 +691,8 @@ The current `shared-mcp/package-lock.json` is expected to audit cleanly. If a fu
 
 ## FAQ
 
-### Why Is Obsidian The Canonical Store?
-Because it keeps durable memory in plain local files that multiple tools can read and write with low lock-in.
+### Why Is The `.ai-memory` Store The Canonical Store?
+Because it keeps durable memory in plain local files that multiple tools can read and write with low lock-in, without requiring Obsidian installed.
 
 ### Does Shared MCP Mean All Agents Share One Giant Context?
 No. Shared MCP deduplicates processes. Each client still has its own session lifecycle and tool calls.

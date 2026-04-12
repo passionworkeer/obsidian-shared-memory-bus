@@ -64,29 +64,32 @@ This document maps the complete data flow from agent activity to shared memory r
                                  │
                                  ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                    OBSIDIAN CANONICAL DATA PLANE                            │
+│                  LOCAL .AI-MEMORY STORE (CANONICAL DATA PLANE)               │
 │                                                                              │
-│  00-System/ai-memory/                                                     │
+│  {AI_MEMORY_STORE}\  (default: E:\.ai-memory\)                            │
+│    ├── inbox/                                                              │
+│    │   └── {tool}.md                  ← per-agent inbox                      │
 │    ├── structured/                                                         │
 │    │   ├── shared-inbox.jsonl          ← cross-agent shared inbox          │
-│    │   ├── session-memory.jsonl        ← session-layer events              │
-│    │   ├── shared-events.jsonl          ← cross-agent events                │
-│    │   ├── task-memory.jsonl            ← shared task state                 │
-│    │   ├── claude-code.jsonl            ← Claude Code cross-session records │
-│    │   ├── openclaw.jsonl               ← OpenClaw cross-session records    │
-│    │   ├── openclaw-blackboard.jsonl    ← OpenClaw task blackboard          │
-│    │   ├── openclaw-runs.jsonl          ← OpenClaw run ledger               │
-│    │   ├── openclaw-jobs.jsonl          ← OpenClaw cron job recall          │
-│    │   └── openclaw-journal.jsonl       ← OpenClaw daily journal            │
-│    │                                                                   │
-│    ├── generated/                                                         │
-│    │   ├── MEMORY-LAYERS.{md,json}   ← layered memory snapshot            │
-│    │   ├── HANDOFF.{md,json}         ← bounded resume packet               │
-│    │   ├── AUTO-DREAM.{md,json}      ← consolidated dream summary         │
-│    │   └── GLOBAL-CONTEXT.md         ← onboarding overlay                  │
-│    │                                                                   │
-│    └── embeddings/                                                        │
-│        └── index.jsonl              ← BM25 + dense embeddings index        │
+│    │   ├── session-memory.jsonl         ← session-layer events             │
+│    │   ├── shared-events.jsonl          ← cross-agent events               │
+│    │   ├── task-memory.jsonl             ← shared task state                │
+│    │   ├── claude-code.jsonl             ← Claude Code cross-session records│
+│    │   ├── openclaw.jsonl                ← OpenClaw cross-session records   │
+│    │   ├── openclaw-blackboard.jsonl     ← OpenClaw task blackboard         │
+│    │   ├── openclaw-runs.jsonl           ← OpenClaw run ledger              │
+│    │   ├── openclaw-jobs.jsonl           ← OpenClaw cron job recall         │
+│    │   └── openclaw-journal.jsonl        ← OpenClaw daily journal           │
+│    ├── generated/                                                          │
+│    │   ├── L0-bootstrap.md               ← L0 + L1 project-aware bootstrap │
+│    │   ├── MEMORY-LAYERS.{md,json}  ← layered memory snapshot              │
+│    │   ├── HANDOFF.{md,json}        ← bounded resume packet                │
+│    │   ├── AUTO-DREAM.{md,json}     ← consolidated dream summary           │
+│    │   └── GLOBAL-CONTEXT.md        ← onboarding overlay                   │
+│    ├── kg/                                                              │
+│    │   └── knowledge-graph.sqlite3  ← knowledge graph triples             │
+│    └── embeddings/                                                       │
+│        └── index.jsonl               ← BM25 + dense embeddings index       │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -233,4 +236,4 @@ embeddings/index.jsonl (BM25 + dense)
 Agent query result
 ```
 
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full layer definition and [`MEMORY-ARCHITECTURE-CRITIQUE.md`](MEMORY-ARCHITECTURE-CRITIQUE.md) for known limitations.
+See [`ARCHITECTURE.md`](../ARCHITECTURE.md) for the full layer definition.

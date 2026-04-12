@@ -5,9 +5,10 @@
 - PowerShell 7 (`pwsh`) for macOS/Linux install and shared-MCP control scripts
 - Node.js on `PATH`
 - A usable Python runtime for shared semantic search; `scripts/install.ps1` auto-detects one and can fall back to uv-managed Python
-- Obsidian installed locally
 - `uv` if you want the shared `fetch` and `time` MCP services
 - `npx` if you want the shared `context7` and `sequential-thinking` MCP services
+
+> **Note:** Obsidian is no longer required. The shared memory store is a pure local filesystem at `AI_MEMORY_STORE` (default `E:\.ai-memory\`). Obsidian can still be used as a human-readable browsing layer, but it is not a dependency.
 
 ## Support Levels
 - Windows:
@@ -92,8 +93,7 @@ That default starter brings up:
 - `fetch`
 - `time`
 - `sequential-thinking`
-- `obsidian`
-- `memory`
+- `memory` (with `memory_boot`, `memory_query`, `search_shared_memory`, etc.)
 - `playwright`
 - `MiniMax` only when its environment variables are configured or the starter is told to include it explicitly
 
@@ -150,11 +150,11 @@ These are also run automatically by `install.ps1`, but you can re-run them to re
 If you want a narrower shared set and prefer to leave Playwright out, start an explicit subset instead:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\start-shared-mcp.ps1 -Only context7,fetch,time,sequential-thinking,obsidian,memory
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\start-shared-mcp.ps1 -Only context7,fetch,time,sequential-thinking,memory
 ```
 
 ```bash
-~/.ai-memory/shared-mcp/start-shared-mcp.sh -Only context7,fetch,time,sequential-thinking,obsidian,memory
+~/.ai-memory/shared-mcp/start-shared-mcp.sh -Only context7,fetch,time,sequential-thinking,memory
 ```
 
 Register a client pack explicitly if you need a generated onboarding preset:
@@ -315,8 +315,7 @@ All tools support these shared endpoints:
 
 | Service | Endpoint | What it does |
 |---------|----------|--------------|
-| memory | http://127.0.0.1:9338/mcp | Shared memory search and retrieval |
-| obsidian | http://127.0.0.1:9335/mcp | Read/write Obsidian notes |
+| memory | http://127.0.0.1:9338/mcp | Shared memory search, memory_boot, memory_query |
 | context7 | http://127.0.0.1:9331/mcp | Code search |
 | fetch | http://127.0.0.1:9332/mcp | Web fetch |
 | time | http://127.0.0.1:9333/mcp | Current time |
@@ -328,15 +327,14 @@ Preferred: use `memory_wake_up` on port 9338 for compact structured bootstrap.
 
 Fallback: read files in this order:
 1. `SKILL.md` (repository root) — universal entry point
-2. `<vault>/02-KB/OBSIDIAN.md`
-3. `<vault>/02-KB/MEMORY.md`
-4. `<vault>/02-KB/WORKING.md`
-5. `<vault>/00-System/ai-memory/generated/GLOBAL-CONTEXT.md`
+2. `{store}/generated/L0-bootstrap.md` — L0 + L1 facts (project-aware)
+3. `{store}/generated/GLOBAL-CONTEXT.md` — full history overlay
+4. `{store}/generated/SHARED-SKILLS.md` — shared skill context
 
 ### Durable Writeback Rules
-- Cross-project facts → `00-System/ai-memory/inbox/`
-- Active task state → `02-KB/WORKING.md`
-- Project-specific facts → relevant project note
+- Cross-project facts → `{store}/inbox/{tool}.md`
+- Active task state → `{store}/structured/session-memory.jsonl`
+- Project-specific facts → relevant project note in vault or store
 - **Never write secrets into shared memory**
 
 ### Canonical Read Order for Structured Bootstrap

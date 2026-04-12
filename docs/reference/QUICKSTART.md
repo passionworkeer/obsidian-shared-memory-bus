@@ -103,11 +103,11 @@ EOF
 )"
 ```
 
-Expected: top 3 results from your Obsidian vault's `00-System/ai-memory/structured/` layer.
+Expected: top 3 results from your `.ai-memory` store's `structured/` layer.
 
 If results are empty:
 1. Run `powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\memory-watchdog.ps1 -Once` to force a sync
-2. Check that `AI_MEMORY_OBSIDIAN_VAULT` points to a vault with notes
+2. Check that `AI_MEMORY_STORE` points to the correct store root (default `E:\.ai-memory\`)
 3. See [`TROUBLESHOOTING.md`](../TROUBLESHOOTING.md) "My memory retrieval returns empty results"
 
 ---
@@ -181,7 +181,7 @@ Look for `overallPass: true`, `singleListenerPerPort: true`, `allPidsStable: tru
 | Symptom | Fix |
 |---------|-----|
 | `embeddings.count` stays 0 | Run `node $env:AI_MEMORY_ROOT\generate-embeddings.js` |
-| `search_shared_memory` returns empty | Check vault path; force sync with `memory-watchdog.ps1 -Once` |
+| `search_shared_memory` returns empty | Check `AI_MEMORY_STORE` path; force sync with `memory-watchdog.ps1 -Once` |
 | Playwright MCP failed in `mcp list` | This is a false negative — verify with real browser tasks |
 | `memory_status.watchdog.status: stale` | Restart watchdog: `start-shared-mcp.ps1` |
 | All agents returning same old results | Run `node $env:AI_MEMORY_ROOT\generate-embeddings.js` then verify with `memory_status` |
@@ -197,7 +197,7 @@ After these 5 steps you have:
 ```
 ✅ Shared MCP stack running on ports 9331–9338
 ✅ Watchdog auto-refreshing memory every 15s
-✅ BM25 + dense hybrid retrieval over your Obsidian vault
+✅ BM25 + dense hybrid retrieval over your local `.ai-memory` store
 ✅ Multi-agent memory sharing across Claude Code / Codex / OpenCode / Cursor / Copilot / Trae
 ✅ Generated artifacts (MEMORY-LAYERS, HANDOFF, AUTO-DREAM) auto-refreshing
 ```

@@ -121,8 +121,8 @@ Look here first:
 These are operational files, not canonical memory.
 
 ## Backup Guidance
-- back up the Obsidian vault separately from the runtime bundle
-- treat the vault as canonical and the runtime as reproducible
+- back up the `.ai-memory` store directory (at `AI_MEMORY_STORE`, default `E:\.ai-memory\`) separately from the runtime bundle
+- treat the store as canonical and the runtime as reproducible
 - do not assume logs or caches are durable memory
 - treat `MEMORY-LAYERS` and `AUTO-DREAM` as generated outputs, not hand-edited source of truth
 

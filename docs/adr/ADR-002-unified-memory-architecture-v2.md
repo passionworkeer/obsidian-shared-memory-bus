@@ -10,6 +10,8 @@
 
 ## Context
 
+> **Implementation note:** The current system uses `E:\.ai-memory\` (configurable via `AI_MEMORY_STORE`) as the canonical store root. The directory structure described in this ADR has been adapted to fit the `.ai-memory` store layout (inbox, structured, generated, kg, embeddings subdirectories).
+
 ADR-001 established the event sourcing + dream consolidation model for shared multi-agent memory. Three-system benchmarking revealed the following confirmed gaps:
 
 | Gap | Evidence | Severity |
@@ -22,7 +24,7 @@ ADR-001 established the event sourcing + dream consolidation model for shared mu
 | No temporal decay | OpenClaw has configurable half-life decay (default 30d); ADR-001 all memories equal weight | P1 — stale memories not demoted |
 | No embedding cache | OpenClaw has `embedding_cache` table (provider/model/key/hash); ADR-001 re-embeds on every query | P1 — API cost waste |
 | Consolidation Phase 3 has no lock | 4-phase consolidation writes user/feedback/project/ simultaneously; multi-agent concurrent consolidation has race condition | P1 — data corruption risk |
-| Obsidian optional-UI vs Markdown portability tension | ADR-001 says "Obsidian optional" but "Markdown human-readable" — without Obsidian, value of Markdown is just human editing, not the full experience | P2 — value proposition unclear |
+| Store portability vs. feature depth | The store (`.ai-memory/`) is pure local files with no Obsidian dependency — Markdown is kept for human readability and git-versioning | P2 — optional Obsidian overlay still possible for human browsing |
 | Cross-language runtime complexity | claude-mem has Node.js → Python → PowerShell chain; ADR-001's MCP stdio+HTTP dual-mode adds Windows subprocess lifecycle risk | P2 — operational complexity |
 | No session-compaction trigger | Claude Code native has `sessionMemoryCompact` on session end; ADR-001 has no such mechanism, relying only on idle consolidation | P2 — session-end memory leak |
 
@@ -40,7 +42,7 @@ ADR-001 贡献:     event sourcing (append-only sessions) + Tier 1/2/3 agent int
 ```
 
 Core design principles preserved from ADR-001:
-- Canonical store is filesystem (`.memory/`)
+- Canonical store is filesystem (`{AI_MEMORY_STORE}/.ai-memory/`)
 - Event sourcing: append-only sessions, consolidation is only write authority for durable memory
 - Dreamer model: user's most-used agent executes consolidation
 - Tier 1/2/3 agent integration protocol
@@ -60,7 +62,7 @@ Core design principles added:
 ### Directory Structure
 
 ```
-.memory/                              ← Root (git-syncable, agent-native Markdown)
+{AI_MEMORY_STORE}/                      ← Store root (default: E:\.ai-memory\), git-syncable
 ├── MEMORY.md                         ← Index (max 200 lines, one entry per line)
 ├── README.md                         ← Agent integration guide (self-describing)
 ├── TEMPLATE.md                       ← Memory file template with frontmatter

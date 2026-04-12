@@ -190,7 +190,7 @@ Rebuilds the dense embeddings index from shared Obsidian structured memory. Spaw
 
 **Notes**
 - Calls Node.js (`generate-embeddings.js`), not Python.
-- Writes to `embeddings/index.jsonl` in the Obsidian vault.
+- Writes to `embeddings/index.jsonl` in the store (`AI_MEMORY_STORE`).
 - No fixed timeout; relies on subprocess completion.
 - `force: true` bypasses content-hash diff checks and re-embeds all records.
 
@@ -266,7 +266,7 @@ Rebuilds derived shared memory layers: shared inbox records, session-layer recor
 **Notes**
 - Calls PowerShell (`memory-bus.ps1 RefreshDerivedArtifacts`).
 - Python: not required.
-- Reads back `MEMORY-LAYERS.json` from the vault generated folder.
+- Reads back `MEMORY-LAYERS.json` from the store generated folder.
 - No fixed timeout.
 
 ---
@@ -298,7 +298,7 @@ Builds a bounded handoff pack with current goal, done, next, blocked, files, ope
 
 **Notes**
 - Calls PowerShell (`memory-bus.ps1 RefreshDerivedArtifacts`).
-- Reads back `HANDOFF.json` from the vault generated folder.
+- Reads back `HANDOFF.json` from the store generated folder.
 - No fixed timeout.
 
 ---
@@ -327,7 +327,7 @@ Runs one memory dream consolidation pass over durable, session, and task layers 
 
 **Notes**
 - Calls PowerShell (`memory-bus.ps1 RefreshDerivedArtifacts`).
-- Reads back `AUTO-DREAM.json` from the vault generated folder.
+- Reads back `AUTO-DREAM.json` from the store generated folder.
 - No fixed timeout.
 
 ---
