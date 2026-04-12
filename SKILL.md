@@ -1,13 +1,44 @@
 ---
 name: obsidian-shared-memory-bus
 description: Unified shared memory bus for all AI agents, backed by Obsidian
-version: 1.0.0
+version: 1.1.0
 ---
 
 # Obsidian Shared Memory Bus — Universal Skill
 
 > Any AI agent that reads this file can onboard to the shared memory bus.
-> Clone the repo, read this file, follow the 5 steps. That's it.
+> Clone the repo, read this file, follow the steps. That's it.
+
+## Agent Startup Protocol (Read First)
+
+**Autonomous bootstrap — no human needed beyond `git clone`:**
+
+```
+1. Read .agents/skills/AGENT_BOOT.md
+   → This is the machine-executable bootstrap for any AI agent.
+
+2. Apply platform-specific overrides:
+   - Windows → .agents/skills/AGENT_BOOT.md (default)
+   - macOS   → .agents/skills/macos.md
+   - Linux   → .agents/skills/linux.md
+
+3. Read agent-specific integration:
+   → .agents/skills/<agent-name>.md
+```
+
+**Full bootstrap sequence (copy-paste for any platform):**
+```bash
+cd /path/to/obsidian-shared-memory-bus && \
+  node -e "console.log('Platform:', require('./bus/platform/index.js').platform.name)" && \
+  node scripts/vault-detect.js && \
+  node -e "console.log('Store:', require('./bus/store-root.js').resolveStoreRoot())" && \
+  node scripts/env-check.js && \
+  node scripts/cross-platform-test.js
+```
+
+**If any step fails: report the exact failure, do not proceed silently.**
+
+---
 
 ## Vault Path Resolution
 
@@ -131,12 +162,15 @@ Each agent has an optimized integration guide. Read the one that matches your ag
 
 | Agent | Integration Guide |
 |-------|-----------------|
+| **Any Agent** | `.agents/skills/AGENT_BOOT.md` (start here) |
 | Claude Code | `.agents/skills/claude-code.md` |
 | Codex | `.agents/skills/codex.md` |
 | OpenClaw | `.agents/skills/openclaw.md` |
 | Trae | `.agents/skills/trae.md` |
 | Cursor | `.agents/skills/cursor.md` |
 | Copilot | `.agents/skills/copilot.md` |
+| macOS (any) | `.agents/skills/macos.md` |
+| Linux (any) | `.agents/skills/linux.md` |
 
 ---
 
@@ -223,7 +257,14 @@ Default endpoint: `http://127.0.0.1:PORT/mcp`
 
 | Document | Purpose |
 |----------|---------|
-| `docs/ARCHITECTURE.md` | Full 5-plane architecture overview |
+| `.agents/skills/AGENT_BOOT.md` | **Agent bootstrap protocol** (start here) |
+| `.agents/skills/macos.md` | macOS-specific agent setup |
+| `.agents/skills/linux.md` | Linux-specific agent setup |
+| `docs/architecture/PLATFORM_ABSTRACTION.md` | Platform abstraction layer design |
+| `docs/architecture/OVERVIEW.md` | System architecture overview |
+| `docs/platform/SETUP_OVERVIEW.md` | Cross-platform setup quick reference |
+| `docs/platform/MACOS_SETUP.md` | macOS detailed setup guide (bilingual) |
+| `docs/platform/LINUX_SETUP.md` | Linux detailed setup guide (bilingual) |
 | `docs/adr/ADR-002-unified-memory-architecture-v2.md` | Canonical memory schema v2, KG, consolidation |
 | `docs/MEMORY-TIERING.md` | Formal 5-tier specification with transition rules |
 | `docs/RECOMMENDATION-TIER.md` | Recall quality metrics and adaptive modes |
@@ -231,3 +272,4 @@ Default endpoint: `http://127.0.0.1:PORT/mcp`
 | `docs/NEW-AGENT-INTEGRATION.md` | How to add a new agent type |
 | `scripts/validate-layout.ps1` | Validate install/runtime layout |
 | `ops/check-memory-integrity.js --strict` | Validate memory contract integrity |
+| `.github/workflows/test.yml` | CI: 3×3 matrix (ubuntu/macos/windows × node 18/20/22) |

@@ -29,7 +29,7 @@ const AI_MEMORY_ROOT = process.env.AI_MEMORY_ROOT || path.resolve(__dirname, "..
 // memory_boot and memory_query — resolves via resolveProjectPath so it works
 // whether AI_MEMORY_ROOT points to the project dir or to a separate data dir.
 const { handlers: mcpMemoryHandlers } = require(
-  resolveProjectPath("ops", "mcp-memory-tools-handler.cjs")
+  resolveProjectPath("ops", "mcp-memory-tools-handler.js")
 );
 const WINDOWS_ENV_CACHE = new Map();
 const RUNTIME_ENV_NAMES = [
@@ -1124,7 +1124,7 @@ async function getClaudeMemHealth() {
 // Path constants (computed after helpers are loaded)
 // ---------------------------------------------------------------------------
 
-const STORE_ROOT = resolveStoreRoot(); // e.g. "E:\\.ai-memory"
+const STORE_ROOT = resolveStoreRoot(); // e.g. "E:\\.ai-memory" (Windows) or "$HOME/.ai-memory" (macOS/Linux)
 const MEMORY_STORE_ROOT = STORE_ROOT;
 const STRUCTURED_ROOT = path.join(MEMORY_STORE_ROOT, "structured");
 const GENERATED_ROOT = path.join(MEMORY_STORE_ROOT, "generated");
