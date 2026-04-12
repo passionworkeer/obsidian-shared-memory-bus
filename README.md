@@ -1,5 +1,13 @@
 # Obsidian Shared AI Memory Bus
 
+[![GitHub stars](https://img.shields.io/github/stars/passionworkeer/obsidian-shared-memory-bus)](https://github.com/passionworkeer/obsidian-shared-memory-bus/stargazers)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Test CI](https://github.com/passionworkeer/obsidian-shared-memory-bus/actions/workflows/test.yml/badge.svg)](https://github.com/passionworkeer/obsidian-shared-memory-bus/actions/workflows/test.yml)
+[![Node.js >=18](https://img.shields.io/badge/Node.js-%3E%3D18-brightgreen)](https://nodejs.org)
+[![Platform: Windows](https://img.shields.io/badge/Platform-Windows-brightgreen)](https://github.com/passionworkeer/obsidian-shared-memory-bus/tree/codex/windows-popup-fixes)
+[![Platform: macOS](https://img.shields.io/badge/Platform-macOS-brightgreen)](https://github.com/passionworkeer/obsidian-shared-memory-bus/tree/codex/windows-popup-fixes)
+[![Platform: Linux](https://img.shields.io/badge/Platform-Linux-brightgreen)](https://github.com/passionworkeer/obsidian-shared-memory-bus/tree/codex/windows-popup-fixes)
+
 > **What problem does this solve?** If you use multiple AI coding tools (like Claude Code, Codex, OpenCode, Cursor, or Copilot) on the same machine, each one has its own memory and doesn't know what the others remember. This tool gives all your AI tools a shared memory backed by your Obsidian vault — so you don't have to re-explain context to every tool.
 
 > **In plain English**: Your AI tools share one notebook for memory instead of each forgetting everything when you switch.
@@ -58,8 +66,54 @@ $env:AI_MEMORY_OBSIDIAN_VAULT = "D:\Your\Vault\Path"
 **Something is broken:**
 → See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
 
-**I use macOS or Linux:**
-→ See [docs/INSTALL.md](docs/INSTALL.md) for `pwsh`-based setup
+**I use macOS:**
+→ See [docs/platform/MACOS_SETUP.md](docs/platform/MACOS_SETUP.md)
+
+**I use Linux:**
+→ See [docs/platform/LINUX_SETUP.md](docs/platform/LINUX_SETUP.md)
+
+## Quick Start — 3 Steps / 快速开始 — 3 步
+
+Want to try it right now? Here is the minimal install + verify flow:
+
+### Step 1 — Install / 安装
+
+```powershell
+# Windows
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -WorkspaceRoot .
+```
+
+```bash
+# macOS / Linux
+./scripts/install.sh -WorkspaceRoot "$(pwd)"
+```
+
+### Step 2 — Verify / 验证
+
+```powershell
+# Windows
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\status-shared-mcp.ps1
+```
+
+```bash
+# macOS / Linux
+~/.ai-memory/shared-mcp/status-shared-mcp.sh
+```
+
+Look for `running: true` on ports 9331–9338.
+
+### Step 3 — Use It / 使用
+
+Point any MCP-capable AI tool at:
+```
+http://127.0.0.1:9338/mcp   # memory (search, memory_boot, memory_wake_up)
+http://127.0.0.1:9331/mcp   # context7
+http://127.0.0.1:9332/mcp   # fetch
+http://127.0.0.1:9333/mcp   # time
+http://127.0.0.1:9337/mcp   # playwright (optional)
+```
+
+The installer auto-wires Claude Code, Codex, OpenCode, Cursor, VS Code/Copilot, and Trae when `-WorkspaceRoot` is provided.
 
 ## Project Status
 - Ready for real local use on Windows
@@ -176,6 +230,60 @@ flowchart LR
 4. Wire clients to shared HTTP MCP endpoints
 5. Let the watchdog keep shared memory fresh
 6. Verify with pressure tests before heavy multi-agent use
+
+## Quick Start
+
+### 1. Install (5 minutes)
+
+**Windows:**
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -WorkspaceRoot .
+```
+
+**macOS / Linux:**
+```bash
+./scripts/install.sh -WorkspaceRoot .
+```
+
+### 2. Verify installation
+
+**Windows:**
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\status-shared-mcp.ps1
+```
+
+**macOS / Linux:**
+```bash
+~/.ai-memory/shared-mcp/status-shared-mcp.sh
+```
+
+### 3. Run a pressure test
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\run-pressure-test.ps1 -WorkspaceRoot . -Waves 3 -RunCliChecks
+```
+
+```bash
+~/.ai-memory/run-pressure-test.sh -WorkspaceRoot . -Waves 3 -RunCliChecks
+```
+
+### 4. Start using shared memory
+
+Wire your agent to the shared MCP endpoints in `shared-mcp/manifest.json`. See [`docs/NEW-AGENT-INTEGRATION.md`](docs/NEW-AGENT-INTEGRATION.md) for step-by-step instructions per agent.
+
+### Configuration
+
+Set vault path before install if your vault is not in the default location:
+
+```powershell
+$env:AI_MEMORY_OBSIDIAN_VAULT = "D:\Your\Vault\Path"
+```
+
+```bash
+export AI_MEMORY_OBSIDIAN_VAULT="$HOME/Obsidian Vault"
+```
+
+See [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) for all configuration variables.
 
 ## Trust Boundaries
 - Shared:
@@ -481,19 +589,22 @@ Use the included probe and benchmark scripts before doing any full reindex.
 - Before publishing a fork, rescan for accidental credentials in configs or reports
 
 ## Docs
-- [`docs/INSTALL.md`](docs/INSTALL.md)
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- [`docs/MEMORY-ARCHITECTURE-CRITIQUE.md`](docs/MEMORY-ARCHITECTURE-CRITIQUE.md)
-- [`docs/DEPLOYMENT-MATRIX.md`](docs/DEPLOYMENT-MATRIX.md)
-- [`docs/FAQ.md`](docs/FAQ.md)
-- [`docs/NEW-AGENT-INTEGRATION.md`](docs/NEW-AGENT-INTEGRATION.md)
-- [`docs/INTEGRATION-MODES.md`](docs/INTEGRATION-MODES.md)
-- [`docs/OPERATIONS.md`](docs/OPERATIONS.md)
-- [`docs/releases/RELEASE-NOTES-2026-04-03.md`](docs/releases/RELEASE-NOTES-2026-04-03.md)
-- [`docs/RELEASING.md`](docs/RELEASING.md)
-- [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)
-- [`SECURITY.md`](SECURITY.md)
-- [`docs/VALIDATION.md`](docs/VALIDATION.md)
+- [Quick Setup (all platforms)](docs/platform/SETUP_OVERVIEW.md)
+- [Windows — use README install section above](README.md)
+- [macOS Setup](docs/platform/MACOS_SETUP.md)
+- [Linux Setup](docs/platform/LINUX_SETUP.md)
+- [Architecture Overview](docs/architecture/OVERVIEW.md)
+- [Platform Abstraction](docs/architecture/PLATFORM_ABSTRACTION.md)
+- [Data Flow](docs/reference/DATA-FLOW.md)
+- [MCP Tools Reference](docs/guides/API_REFERENCE.md)
+- [Architecture Decision Records](docs/guides/CONTRIBUTING_ARCHITECTURE.md)
+- [Development Guide](docs/guides/DEVELOPMENT.md)
+- [Installation Guide](docs/INSTALL.md)
+- [Operations Runbook](docs/OPERATIONS.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [VALIDATION.md](docs/VALIDATION.md)
+- [RELEASING.md](docs/RELEASING.md)
+- [SECURITY.md](SECURITY.md)
 
 ## Community
 - [`CONTRIBUTING.md`](CONTRIBUTING.md)

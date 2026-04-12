@@ -50,7 +50,32 @@ async function readJsonlStream(filePath) {
   return records;
 }
 
+/**
+ * Stream JSONL records in batches for memory-efficient processing.
+ *
+ * @param {string} filePath
+ * @param {{ batchSize?: number }} opts
+ * @yields {object[]} Batch of records (last batch may be smaller)
+ */
+async function* createJsonlBatcher(filePath, opts = {}) {
+  const { batchSize = 100 } = opts;
+  let batch = [];
+
+  for await (const record of createJsonlStream(filePath)) {
+    batch.push(record);
+    if (batch.length >= batchSize) {
+      yield batch;
+      batch = [];
+    }
+  }
+
+  if (batch.length > 0) {
+    yield batch;
+  }
+}
+
 module.exports = {
   createJsonlStream,
   readJsonlStream,
+  createJsonlBatcher,
 };
