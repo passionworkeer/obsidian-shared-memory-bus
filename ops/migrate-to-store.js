@@ -34,9 +34,12 @@ const path = require("node:path");
 // ---------------------------------------------------------------------------
 function loadStoreRootHelper() {
   const candidates = [
-    path.join(__dirname, "store-root.js"),
+    // bus/ sibling (project layout)
     path.join(__dirname, "..", "bus", "store-root.js"),
+    // ops/bus/ (legacy nested layout)
     path.join(__dirname, "bus", "store-root.js"),
+    // Script-local (installed flat layout: ~/.ai-memory/ops/)
+    path.join(__dirname, "store-root.js"),
   ];
   for (const c of candidates) {
     if (fs.existsSync(c)) return require(c);
@@ -49,8 +52,9 @@ function resolveStoreRoot() {
   if (helper) {
     try { return helper.resolveStoreRoot(); } catch { /* fall through */ }
   }
-  // Minimal fallback (should not happen in normal use)
-  return process.env.AI_MEMORY_STORE || "E:\\.ai-memory";
+  // Use DEFAULT_STORE_ROOT from store-root.js to avoid hardcoding
+  const { DEFAULT_STORE_ROOT } = require("./store-root.js");
+  return process.env.AI_MEMORY_STORE || DEFAULT_STORE_ROOT;
 }
 
 function resolveVaultRoot() {

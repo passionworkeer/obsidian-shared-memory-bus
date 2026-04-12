@@ -26,6 +26,7 @@ _compilePatches.set(GENERATE_EMBEDDINGS_PATH, `
 module.exports = {
   normalizeSpaces,
   buildEmbeddingConfigHash,
+  normalizeEmbeddingAdapter,
   isNoise,
   fallbackId,
   extractFieldTexts,

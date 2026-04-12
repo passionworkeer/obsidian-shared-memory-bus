@@ -1,0 +1,1 @@
+const m = require('./bus/platform/index.js');; const s = m.platform.makeWatchdogScript('E:\.ai-memory\watchdog.pid', 'echo recovered');; const match = s.match(/pidPath = '([^']+)'/);; console.log('pidPath VBS string:', match ? match[1] : 'NOT FOUND');
