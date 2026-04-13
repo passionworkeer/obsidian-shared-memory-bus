@@ -1,4 +1,4 @@
-# Obsidian Shared AI Memory Bus
+# Shared AI Memory Bus
 
 [![GitHub stars](https://img.shields.io/github/stars/passionworkeer/obsidian-shared-memory-bus)](https://github.com/passionworkeer/obsidian-shared-memory-bus/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -29,9 +29,8 @@ Agent-specific    → .agents/skills/<agent-name>.md
 git clone https://github.com/passionworkeer/obsidian-shared-memory-bus.git && \
   cd obsidian-shared-memory-bus && \
   node -e "console.log('Platform:', require('./bus/platform/index.js').platform.name)" && \
-  node scripts/vault-detect.js && \
-  node scripts/env-check.js && \
-  node scripts/cross-platform-test.js
+  node -e "console.log('Store:', require('./bus/store-root.js').resolveStoreRoot())" && \
+  node ops/generate-context.js
 ```
 
 Supported agents: Claude Code, Codex, OpenClaw, Trae, Cursor, Copilot.
@@ -143,7 +142,7 @@ The installer auto-wires Claude Code, Codex, OpenCode, Cursor, VS Code/Copilot, 
 ## What This Is
 - A reusable local memory bus template for multi-agent setups
 - A process-deduplicated shared MCP stack for safe-to-share services
-- A canonical Obsidian-backed memory layer with hybrid retrieval
+- A canonical local `.ai-memory` store with hybrid retrieval and optional Obsidian overlays
 
 ## What This Is Not
 - Not a hosted SaaS
@@ -152,7 +151,7 @@ The installer auto-wires Claude Code, Codex, OpenCode, Cursor, VS Code/Copilot, 
 - Not a replacement for backup or sync hygiene in your Obsidian vault
 
 ## What This Gives You
-- One canonical long-term memory store in Obsidian
+- One canonical long-term memory store in `.ai-memory`
 - Layered memory outputs inspired by Claude-style session memory and OpenClaw-style task blackboards
 - One shared `memory` MCP service instead of per-agent local memory processes
 - Shared `obsidian` MCP for direct note reads and writes

@@ -1,302 +1,379 @@
+"use strict";
+
 /**
- * ops/mcp-memory-tools.js
- * ======================
- * Memory MCP tools: memory_boot and memory_query.
+ * Shared memory MCP helpers backed by the local .ai-memory store.
  *
  * Callable as:
- *   Node.js module:  const { memory_boot, memory_query } = require('./ops/mcp-memory-tools')
- *   CLI:             node ops/mcp-memory-tools.js <cmd> [args]
+ *   Node.js module: const { memory_boot, memory_search, memory_query, memory_write } = require("./ops/mcp-memory-tools")
+ *   CLI:            node ops/mcp-memory-tools.js <boot|search|query|write> [args]
  *
  * CLI output is always JSON.
  */
 
-"use strict";
-
-const fs   = require("node:fs");
+const fs = require("node:fs");
 const path = require("node:path");
+const crypto = require("node:crypto");
 
-// ---------------------------------------------------------------------------
-// Store root resolution — no Obsidian dependency
-// ---------------------------------------------------------------------------
-
-function loadStoreRootHelper() {
+function loadHelper(relativeParts) {
   const candidates = [
-    // bus/ sibling (project layout)
-    path.join(__dirname, "..", "bus", "store-root.js"),
-    // ops/bus/ (legacy nested layout)
-    path.join(__dirname, "bus", "store-root.js"),
-    // Script-local (installed flat layout: ~/.ai-memory/ops/)
-    path.join(__dirname, "store-root.js"),
+    path.join(__dirname, "..", ...relativeParts),
+    path.join(__dirname, ...relativeParts),
   ];
-  for (const c of candidates) {
-    if (fs.existsSync(c)) return require(c);
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return require(candidate);
+    }
   }
   return null;
 }
 
-function resolveVaultRoot() {
+function loadStoreRootHelper() {
+  return loadHelper(["bus", "store-root.js"]);
+}
+
+function loadBm25Helper() {
+  return loadHelper(["bus", "bm25.js"]);
+}
+
+function resolveStoreHelpers() {
   const helper = loadStoreRootHelper();
   if (helper) {
-    try {
-      return helper.resolveStoreRoot();
-    } catch {
-      // fall through
-    }
+    return helper;
   }
-  // Last resort: use DEFAULT_STORE_ROOT from store-root.js to avoid hardcoding
-  const { DEFAULT_STORE_ROOT } = require("./store-root.js");
-  return process.env.AI_MEMORY_STORE || DEFAULT_STORE_ROOT;
+  return {
+    DEFAULT_STORE_ROOT: process.env.AI_MEMORY_STORE || process.env.AI_MEMORY_STORE_ROOT || path.resolve(".ai-memory"),
+    resolveStoreRoot() {
+      return process.env.AI_MEMORY_STORE || process.env.AI_MEMORY_STORE_ROOT || path.resolve(".ai-memory");
+    },
+    getProjectsRoot(storeRoot) {
+      return path.join(storeRoot || this.resolveStoreRoot(), "projects");
+    },
+    getContextPath(storeRoot) {
+      return path.join(storeRoot || this.resolveStoreRoot(), "CONTEXT.md");
+    },
+  };
 }
 
-// ---------------------------------------------------------------------------
-// Normalisation helpers
-// ---------------------------------------------------------------------------
+const {
+  DEFAULT_STORE_ROOT,
+  resolveStoreRoot,
+  getProjectsRoot,
+  getContextPath,
+} = resolveStoreHelpers();
+const { search: bm25Search } = loadBm25Helper() || {
+  search() {
+    return [];
+  },
+};
 
-function readText(filePath) {
-  if (!fs.existsSync(filePath)) return "";
-  return fs.readFileSync(filePath, "utf8");
-}
+const VALID_SCOPES = new Set(["user", "project", "feedback", "reference"]);
+const VALID_TYPES = new Set(["bugfix", "feature", "refactor", "discovery", "docs", "chore", "note"]);
 
 function sha256(value) {
-  return require("node:crypto")
-    .createHash("sha256")
-    .update(String(value || ""), "utf8")
-    .digest("hex");
+  return crypto.createHash("sha256").update(String(value || ""), "utf8").digest("hex");
 }
 
-// ---------------------------------------------------------------------------
-// memory_boot
-// ---------------------------------------------------------------------------
-
-/**
- * Load L0 + L1 memory layers for a given project.
- *
- * @param {{ agent_id?: string, cwd: string }} opts
- * @param {string} opts.cwd       — required; project working directory
- * @param {string} [opts.agent_id] — optional; present for MCP compat, unused here
- * @returns {{
- *   l0: string,
- *   l1: string,
- *   l1Count: number,
- *   project_key: string,
- *   source: 'memory_boot'
- * }}
- */
-function memory_boot({ agent_id: _agent_id, cwd } = {}) {
-  let vaultRoot;
-  let resolvedCwd = cwd || "";
-  let project_key;
-
-  try {
-    vaultRoot = resolveVaultRoot();
-  } catch {
-    project_key = resolvedCwd ? path.basename(resolvedCwd) : "unknown";
-    return {
-      l0:         "(vault not found)",
-      l1:         "(vault not found)",
-      l1Count:    0,
-      project_key,
-      source:     "memory_boot",
-    };
+function detectProjectKey({ project = "", cwd = "" } = {}) {
+  if (typeof project === "string" && project.trim()) {
+    return project.trim();
   }
-
-  // project_key for KG query: use cwd basename, fallback to vault root dir name
-  project_key = resolvedCwd
-    ? path.basename(resolvedCwd)
-    : path.basename(vaultRoot);
-
-  // --- L0: read generated L0-bootstrap.md (contains real project context + L1 facts) ---
-  // vaultRoot is now the store root (e.g. E:\.ai-memory\) — no 00-System/ai-memory prefix
-  const GENERATED_ROOT = path.join(vaultRoot, "generated");
-  const L0_BOOTSTRAP  = path.join(GENERATED_ROOT, "L0-bootstrap.md");
-  const l0 = fs.existsSync(L0_BOOTSTRAP)
-    ? fs.readFileSync(L0_BOOTSTRAP, "utf-8").trim()
-    : "(no L0-bootstrap.md — run build-memory-layers.js first)";
-
-  // --- L1: query KG for project-relevant triples (~500 tokens) ---
-  let l1 = "（暂无 L1 事实）";
-  let l1Count = 0;
-
-  try {
-    const { KnowledgeGraph } = require("./knowledge-graph.js");
-    const kg = new KnowledgeGraph({ vaultRoot });
-    const triples = kg.queryCurrentTriples({ entityName: project_key, limit: 20 });
-
-    if (triples && triples.length > 0) {
-      l1Count = triples.length;
-      l1 = triples
-        .slice(0, 20)
-        .map((t) => {
-          const s = t.subject     || "";
-          const p = t.predicate   || "";
-          const o = t.object      || "";
-          return `- ${s} ${p} ${o}`.trim();
-        })
-        .join("\n");
+  if (typeof cwd === "string" && cwd.trim()) {
+    const normalized = cwd.replace(/[\\/]+$/, "");
+    const leaf = path.basename(normalized);
+    if (leaf) {
+      return leaf;
     }
-    kg.close();
-  } catch (e) {
-    l1 = `（KG 不可用: ${e.message}）`;
   }
-
-  return { l0, l1, l1Count, project_key, source: "memory_boot" };
+  return "default";
 }
 
-// ---------------------------------------------------------------------------
-// memory_query
-// ---------------------------------------------------------------------------
+function readJsonl(jsonlPath) {
+  if (!fs.existsSync(jsonlPath)) {
+    return [];
+  }
+  return fs
+    .readFileSync(jsonlPath, "utf8")
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
 
-/**
- * Search inbox records by keyword.
- *
- * @param {{
- *   query: string,
- *   depth?: 'compact' | 'full',
- *   cwd?: string
- * }} opts
- * @returns {{
- *   results: object[],
- *   query: string,
- *   depth: string,
- *   project_key: string,
- *   error?: string
- * }}
- */
-function memory_query({ query = "", depth = "compact", cwd = "" } = {}) {
-  const project_key = cwd ? path.basename(cwd) : "";
-  let vaultRoot;
+function readProjectFacts(projectKey, { limit = 20, storeRoot } = {}) {
+  const jsonlPath = path.join(getProjectsRoot(storeRoot), `${projectKey}.jsonl`);
+  return readJsonl(jsonlPath).filter((record) => !record.extraction_failed).reverse().slice(0, limit);
+}
 
-  try {
-    vaultRoot = resolveVaultRoot();
-  } catch {
+function buildBootContext(globalMd, facts, projectKey) {
+  const lines = ["# Memory Context", "", "## Global", globalMd || "(no global.md yet)"];
+
+  lines.push("");
+  lines.push(`## Project: ${projectKey}`);
+  if (facts.length === 0) {
+    lines.push("(no project facts yet)");
+    return lines.join("\n");
+  }
+
+  for (const fact of facts) {
+    const date = String(fact.t || "").slice(0, 10) || "?";
+    const content = fact.content || (Array.isArray(fact.facts) ? fact.facts[0] : "") || "(empty)";
+    lines.push(`- [${date}] ${content}`);
+    for (const decision of Array.isArray(fact.decisions) ? fact.decisions : []) {
+      lines.push(`  -> ${decision}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function collectSearchDocuments(projectKey, storeRoot) {
+  const projectsRoot = getProjectsRoot(storeRoot);
+  const targets = projectKey
+    ? [path.join(projectsRoot, `${projectKey}.jsonl`)]
+    : fs.existsSync(projectsRoot)
+      ? fs
+          .readdirSync(projectsRoot)
+          .filter((name) => name.endsWith(".jsonl"))
+          .map((name) => path.join(projectsRoot, name))
+      : [];
+
+  const docs = [];
+  for (const jsonlPath of targets) {
+    const project = path.basename(jsonlPath, ".jsonl");
+    for (const record of readJsonl(jsonlPath)) {
+      if (!record || !record.id || record.extraction_failed) {
+        continue;
+      }
+      const text = [record.content, ...(record.facts || []), ...(record.decisions || [])]
+        .filter(Boolean)
+        .join(" ");
+      docs.push({
+        id: record.id,
+        text,
+        _raw: { ...record, project: record.project || project },
+      });
+    }
+  }
+  return docs;
+}
+
+function validateFact(fact) {
+  if (!fact || typeof fact !== "object") return "fact must be an object";
+  if (!fact.content || typeof fact.content !== "string") return "fact.content (string) is required";
+  if (fact.content.length > 2000) return "fact.content must be under 2000 characters";
+  if (fact.scope && !VALID_SCOPES.has(fact.scope)) return `fact.scope must be one of ${Array.from(VALID_SCOPES).join(", ")}`;
+  if (fact.session_type && !VALID_TYPES.has(fact.session_type)) return `fact.session_type must be one of ${Array.from(VALID_TYPES).join(", ")}`;
+  if (fact.confidence != null && (typeof fact.confidence !== "number" || fact.confidence < 0 || fact.confidence > 1)) {
+    return "fact.confidence must be between 0 and 1";
+  }
+  return null;
+}
+
+function memory_boot({ agent_id: _agentId, project = "", cwd = "", top_k = 20 } = {}) {
+  const storeRoot = resolveStoreRoot();
+  const projectKey = detectProjectKey({ project, cwd });
+  const globalPath = path.join(storeRoot, "global.md");
+  const globalMd = fs.existsSync(globalPath) ? fs.readFileSync(globalPath, "utf8").trim() : "";
+  const facts = readProjectFacts(projectKey, { limit: Number(top_k) || 20, storeRoot });
+
+  return {
+    source: "memory_boot",
+    store_root: storeRoot,
+    default_store_root: DEFAULT_STORE_ROOT,
+    project: projectKey,
+    context_md: getContextPath(storeRoot),
+    global_exists: fs.existsSync(globalPath),
+    context_md_exists: fs.existsSync(getContextPath(storeRoot)),
+    fact_count: facts.length,
+    facts,
+    context: buildBootContext(globalMd, facts, projectKey),
+  };
+}
+
+function memory_search({ query = "", project = "", cwd = "", top_k = 10 } = {}) {
+  if (!query || !String(query).trim()) {
+    return { query: "", project: detectProjectKey({ project, cwd }), results: [], total_docs: 0, error: "query is required" };
+  }
+
+  const storeRoot = resolveStoreRoot();
+  const projectKey = project || cwd ? detectProjectKey({ project, cwd }) : "";
+  const docs = collectSearchDocuments(projectKey, storeRoot);
+  if (docs.length === 0) {
+    return { query, project: projectKey || null, results: [], total_docs: 0 };
+  }
+
+  const hits = bm25Search(docs, String(query), { topK: Number(top_k) || 10 });
+  const results = hits.map((hit) => {
+    const record = hit._raw || docs.find((doc) => doc.id === hit.id)?._raw || {};
     return {
-      results:    [],
+      id: hit.id,
+      score: Math.round(Number(hit.score || 0) * 1000) / 1000,
+      project: record.project || null,
+      date: String(record.t || "").slice(0, 10) || null,
+      content: record.content || "",
+      facts: Array.isArray(record.facts) ? record.facts : [],
+      decisions: Array.isArray(record.decisions) ? record.decisions : [],
+      session_type: record.session_type || "note",
+    };
+  });
+
+  return {
+    query,
+    project: projectKey || null,
+    total_docs: docs.length,
+    results,
+  };
+}
+
+function memory_query({ query = "", depth = "compact", project = "", cwd = "", top_k = 10 } = {}) {
+  const searchResult = memory_search({ query, project, cwd, top_k });
+  if (searchResult.error) {
+    return {
       query,
       depth,
-      project_key,
-      error:       "vault not found",
+      project_key: detectProjectKey({ project, cwd }),
+      results: [],
+      error: searchResult.error,
     };
   }
 
-  const INBOX_ROOT = path.join(vaultRoot, "00-System", "ai-memory", "inbox");
-  if (!fs.existsSync(INBOX_ROOT)) {
-    return { results: [], query, depth, project_key };
-  }
-
-  const linePattern = /^-\s+\[(?<timestamp>[^\]]+)\]\s+\[(?<project>[^\]]+)\]\s*(?<content>.+)$/;
-
-  // Simple token-based keyword match
-  const queryTokens = (query || "")
-    .toLowerCase()
-    .split(/\s+/)
-    .filter((t) => t.length >= 2);
-
-  /** @param {string} text @returns {boolean} */
-  const matches = (text) => {
-    if (!queryTokens.length) return true;
-    const lower = text.toLowerCase();
-    return queryTokens.every((t) => lower.includes(t));
+  const compact = String(depth || "compact") !== "full";
+  return {
+    query,
+    depth: compact ? "compact" : "full",
+    project_key: detectProjectKey({ project, cwd }),
+    results: searchResult.results.map((result) => {
+      if (!compact) {
+        return {
+          ...result,
+          content_hash: sha256(result.content),
+        };
+      }
+      const summary = result.content.length > 200 ? `${result.content.slice(0, 200)}...` : result.content;
+      return {
+        id: result.id,
+        timestamp: result.date,
+        project: result.project,
+        title: result.content.slice(0, 120).trim(),
+        summary,
+      };
+    }),
   };
-
-  const results = [];
-
-  for (const fileName of fs.readdirSync(INBOX_ROOT)) {
-    if (!fileName.endsWith(".md")) continue;
-    const filePath = path.join(INBOX_ROOT, fileName);
-    const tool = path.basename(fileName, ".md");
-
-    for (const line of readText(filePath).split(/\r?\n/)) {
-      const match = line.match(linePattern);
-      if (!match || !match.groups) continue;
-
-      const content = match.groups.content || "";
-      if (!matches(content)) continue;
-
-      // Project filter (same project_key logic as memory_boot)
-      if (project_key) {
-        const lineProject = (match.groups.project || "").trim().toLowerCase();
-        if (lineProject && lineProject !== project_key.toLowerCase()) continue;
-      }
-
-      const timestamp = match.groups.timestamp || "";
-      const title     = content.slice(0, 120).trim();
-
-      if (depth === "full") {
-        results.push({
-          tool,
-          timestamp,
-          project:     match.groups.project,
-          title,
-          content,
-          content_hash: sha256(content),
-        });
-      } else {
-        // compact: title + summary (~50 tokens per result)
-        const summary = content.length > 200 ? `${content.slice(0, 200)}…` : content;
-        results.push({ tool, timestamp, project: match.groups.project, title, summary });
-      }
-    }
-  }
-
-  return { results, query, depth, project_key };
 }
 
-// ---------------------------------------------------------------------------
-// Module exports
-// ---------------------------------------------------------------------------
+function memory_write({ project = "", cwd = "", facts = [] } = {}) {
+  if (!Array.isArray(facts) || facts.length === 0) {
+    return { ok: false, error: "facts[] is required" };
+  }
 
-module.exports = { memory_boot, memory_query };
+  for (const fact of facts) {
+    const error = validateFact(fact);
+    if (error) {
+      return { ok: false, error };
+    }
+  }
 
-// ---------------------------------------------------------------------------
-// CLI entry point
-// ---------------------------------------------------------------------------
+  const storeRoot = resolveStoreRoot();
+  const projectKey = detectProjectKey({ project, cwd });
+  const projectsRoot = getProjectsRoot(storeRoot);
+  const jsonlPath = path.join(projectsRoot, `${projectKey}.jsonl`);
+  fs.mkdirSync(projectsRoot, { recursive: true });
+
+  const written = [];
+  for (const fact of facts) {
+    const record = {
+      id: `rec_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      session_id: fact.session_id || `manual_${Date.now()}`,
+      project: projectKey,
+      scope: fact.scope || "project",
+      content: fact.content,
+      confidence: fact.confidence ?? 0.9,
+      facts: Array.isArray(fact.facts) ? fact.facts : [],
+      decisions: Array.isArray(fact.decisions) ? fact.decisions : [],
+      entities: Array.isArray(fact.entities) ? fact.entities : [],
+      session_type: fact.session_type || "note",
+      extraction_failed: false,
+      write_mode: "manual",
+      t: new Date().toISOString(),
+    };
+    fs.appendFileSync(jsonlPath, `${JSON.stringify(record)}\n`, "utf8");
+    written.push(record.id);
+  }
+
+  return {
+    ok: true,
+    project: projectKey,
+    path: jsonlPath,
+    written,
+  };
+}
+
+module.exports = { memory_boot, memory_search, memory_query, memory_write };
 
 if (require.main === module) {
-  const [,, cmd, ...args] = process.argv;
+  const [, , cmd, ...args] = process.argv;
 
-  /** Minimal argument parser: key=value or positional */
   function parseArgs(argList) {
-    const opts = {};
+    const options = {};
     for (const arg of argList) {
       if (arg.includes("=")) {
-        const [k, v] = arg.split("=", 2);
-        opts[k.trim()] = v.trim();
+        const [key, value] = arg.split("=", 2);
+        options[key.trim()] = value.trim();
       } else {
-        opts._ = opts._ || [];
-        opts._.push(arg);
+        options._ = options._ || [];
+        options._.push(arg);
       }
     }
-    return opts;
+    return options;
   }
 
   try {
+    const parsed = parseArgs(args);
     let result;
     switch (cmd) {
-      case "boot": {
-        const a   = parseArgs(args);
-        const cwd = a.cwd || a._[0] || process.cwd();
-        result = memory_boot({ cwd });
+      case "boot":
+        result = memory_boot({
+          project: parsed.project || parsed.p,
+          cwd: parsed.cwd || parsed._?.[0] || process.cwd(),
+          top_k: parsed.top_k || parsed.topK,
+        });
         break;
-      }
-      case "query": {
-        const a     = parseArgs(args);
-        const q     = a.query  || a.q     || (a._[0] || "");
-        const depth = a.depth  || a.d    || "compact";
-        const cwd   = a.cwd    || a._[1]  || "";
-        result = memory_query({ query: q, depth, cwd });
+      case "search":
+        result = memory_search({
+          query: parsed.query || parsed.q || parsed._?.[0] || "",
+          project: parsed.project || parsed.p,
+          cwd: parsed.cwd || "",
+          top_k: parsed.top_k || parsed.topK,
+        });
         break;
-      }
-      default: {
-        console.error(JSON.stringify({
-          ok:    false,
-          error: `Unknown command: ${cmd || "(none)"}. Use: boot | query`,
-        }));
-        process.exit(1);
-      }
+      case "query":
+        result = memory_query({
+          query: parsed.query || parsed.q || parsed._?.[0] || "",
+          project: parsed.project || parsed.p,
+          cwd: parsed.cwd || "",
+          depth: parsed.depth || parsed.d || "compact",
+          top_k: parsed.top_k || parsed.topK,
+        });
+        break;
+      case "write":
+        result = memory_write({
+          project: parsed.project || parsed.p,
+          cwd: parsed.cwd || "",
+          facts: parsed.facts ? JSON.parse(parsed.facts) : [],
+        });
+        break;
+      default:
+        throw new Error(`Unknown command: ${cmd || "(none)"}. Use: boot | search | query | write`);
     }
-    console.log(JSON.stringify(result));
-  } catch (e) {
-    console.error(JSON.stringify({ ok: false, error: e.message }));
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  } catch (error) {
+    process.stderr.write(`${JSON.stringify({ ok: false, error: error.message }, null, 2)}\n`);
     process.exit(1);
   }
 }

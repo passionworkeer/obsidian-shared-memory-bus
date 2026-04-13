@@ -206,6 +206,21 @@ function getStructuredRoot(storeRoot) {
   return path.join(storeRoot || resolveStoreRoot(), "structured");
 }
 
+/** @returns {string} path/to/store/projects — LLM-extracted facts per project */
+function getProjectsRoot(storeRoot) {
+  return path.join(storeRoot || resolveStoreRoot(), "projects");
+}
+
+/** @returns {string} path/to/store/sessions — raw transcript archives */
+function getSessionsRoot(storeRoot) {
+  return path.join(storeRoot || resolveStoreRoot(), "sessions");
+}
+
+/** @returns {string} path/to/store/CONTEXT.md — auto-generated, for passive agents */
+function getContextPath(storeRoot) {
+  return path.join(storeRoot || resolveStoreRoot(), "CONTEXT.md");
+}
+
 module.exports = {
   DEFAULT_STORE_ROOT,
   resolveStoreRoot,
@@ -215,6 +230,9 @@ module.exports = {
   getKgRoot,
   getKgDbPath,
   getStructuredRoot,
+  getProjectsRoot,
+  getSessionsRoot,
+  getContextPath,
   detectBestDrive,
   MIN_FREE_SPACE_BYTES,
 };
