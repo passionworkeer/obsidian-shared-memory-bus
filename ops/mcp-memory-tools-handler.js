@@ -1,7 +1,7 @@
 /**
  * ops/mcp-memory-tools-handler.js
  * =================================
- * MCP tool handlers for memory_boot and memory_query.
+ * MCP tool handlers for lightweight memory boot/search/write flows.
  *
  * Loaded by omni-memory-server.js via createRequire(), so CommonJS
  * require() works from the MCP server context.
@@ -9,7 +9,12 @@
 
 "use strict";
 
-const { memory_boot: _boot, memory_query: _query } = require("./mcp-memory-tools.js");
+const {
+  memory_boot: _boot,
+  memory_search: _search,
+  memory_query: _query,
+  memory_write: _write,
+} = require("./mcp-memory-tools.js");
 
 /** Wrap a sync or async fn → MCP tool handler with error handling. */
 function toolHandler(fn) {
@@ -59,6 +64,8 @@ function toolHandler(fn) {
 module.exports = {
   handlers: {
     memory_boot: toolHandler((args = {}) => _boot(args)),
+    memory_search: toolHandler((args = {}) => _search(args)),
     memory_query: toolHandler((args = {}) => _query(args)),
+    memory_write: toolHandler((args = {}) => _write(args)),
   },
 };
