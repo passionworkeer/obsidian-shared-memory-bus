@@ -1,10 +1,10 @@
 ---
 name: obsidian-shared-memory-bus
-description: Unified shared memory bus for all AI agents, backed by Obsidian
-version: 1.1.0
+description: Unified shared memory bus for all AI agents
+version: 2.0.0
 ---
 
-# Obsidian Shared Memory Bus — Universal Skill
+# Shared Memory Bus — Universal Skill (v2)
 
 > Any AI agent that reads this file can onboard to the shared memory bus.
 > Clone the repo, read this file, follow the steps. That's it.
@@ -30,91 +30,94 @@ version: 1.1.0
 ```bash
 cd /path/to/obsidian-shared-memory-bus && \
   node -e "console.log('Platform:', require('./bus/platform/index.js').platform.name)" && \
-  node scripts/vault-detect.js && \
   node -e "console.log('Store:', require('./bus/store-root.js').resolveStoreRoot())" && \
-  node scripts/env-check.js && \
-  node scripts/cross-platform-test.js
+  node ops/generate-context.js
 ```
 
 **If any step fails: report the exact failure, do not proceed silently.**
 
 ---
 
-## Vault Path Resolution
+## Store Path Resolution
 
-`<obsidian-vault>` resolves in this order:
+Memory store resolves in this order:
 
 | Priority | Source | Windows Default | macOS/Linux Default |
 |----------|--------|-----------------|---------------------|
-| 1 | `AI_MEMORY_OBSIDIAN_VAULT` env var | Any path | Any path |
-| 2 | `OBSIDIAN_VAULT_ROOT` env var | Any path | Any path |
-| 3 | Obsidian app config | `%APPDATA%\obsidian\obsidian.json` | `~/Library/Application Support/obsidian/obsidian.json` |
-| 4 | Default fallback | `E:\desktop\Obsidian Vault` | `~/Obsidian Vault` |
+| 1 | `AI_MEMORY_STORE_ROOT` env var | Any path | Any path |
+| 2 | Default fallback | `E:\.ai-memory` | `~/.ai-memory` |
 
-**If you cannot resolve `<obsidian-vault>`:**
-- Write `"VAULT_RESOLUTION_FAILED"` to the first line of `inbox/<agent>.md`
-- Exit with a clear error message explaining which resolution methods failed
-- Agents without environment variable injection: use the MCP `obsidian` tool to dynamically discover the vault root path
-
-**Expected vault structure:**
+**Expected store structure:**
 ```
-<obsidian-vault>/
-  00-System/ai-memory/
-    inbox/          ← agent writeback
-    structured/     ← JSONL records
-    generated/      ← derived artifacts
-    embeddings/     ← BM25 + dense index
-    kg/             ← knowledge graph SQLite
-  02-KB/
-    OBSIDIAN.md
-    MEMORY.md
-    WORKING.md
+<store-root>\
+  global.md             ← Permanent user facts
+  CONTEXT.md            ← Auto-generated summary (read this)
+  projects\
+    {project}.jsonl     ← LLM-extracted facts (Stop Hook)
+  sessions\             ← Raw transcript archives
+  inbox\
+    {agent}.md          ← Manual writeback fallback
 ```
 
 ## 5-Step Quick Start
 
-1. **Read canonical vault order** (see Vault Path Resolution below):
-   `<obsidian-vault>/02-KB/OBSIDIAN.md` → `MEMORY.md` → `WORKING.md` → `GLOBAL-CONTEXT.md`
-2. **(Optional) Warm up fast**: Call `memory_wake_up` MCP on port 9338
-3. **Write durable memory**: `<obsidian-vault>/00-System/ai-memory/inbox/<agent>.md`
-4. **Track active tasks**: `<obsidian-vault>/02-KB/WORKING.md` (use `## Agent:<name>` blocks for safe concurrent writes)
-5. **Use shared MCP services**: `memory`(9338), `obsidian`(9335), `context7`(9331), `fetch`(9332), `time`(9333), `playwright`(9337, opt-in)
+1. **Read memory context**: `E:\.ai-memory\CONTEXT.md` (passive) or call `memory_boot` via MCP (port 9338)
+2. **Write durable memory**: Stop Hook auto-writes to `projects/{project}.jsonl`. Manual fallback: `inbox/<agent>.md`
+3. **Track active tasks**: `WORKING.md` in store root (use `## Agent:<name>` blocks for safe concurrent writes)
+4. **Search past facts**: `memory_search(query)` via MCP (port 9338)
+5. **Use shared MCP services**: `memory`(9338), `context7`(9331), `fetch`(9332), `time`(9333), `playwright`(9337, opt-in)
 
 ---
 
 ## Unified Memory Read Protocol
 
-### Canonical Read Order
-Resolve `<obsidian-vault>` first (see Vault Path Resolution below), then read in order:
+### Canonical Read Order (v2)
 
+**No Obsidian required.** Memory store: `E:\.ai-memory\` (Windows) or `~/.ai-memory/` (macOS/Linux).
+
+**Option A — MCP available (port 9338):**
 ```
-<obsidian-vault>/02-KB/OBSIDIAN.md
-  → <obsidian-vault>/02-KB/MEMORY.md
-    → <obsidian-vault>/02-KB/WORKING.md
-      → <obsidian-vault>/00-System/ai-memory/generated/GLOBAL-CONTEXT.md
+memory_boot(project="<your-project-name>")
+```
+Returns global user facts + top-20 recent project facts. Best for MCP-capable agents.
+
+**Option B — File fallback (any agent that can read files):**
+```
+Read: E:\.ai-memory\CONTEXT.md
+```
+Auto-generated summary of all project facts + global user info. Updated after each session.
+
+**Universal Rule**: Any agent that reads `CONTEXT.md` can answer "do you remember who I am?"
+
+### Memory Store Layout
+```
+E:\.ai-memory\              (Windows default; see store-root.js for other platforms)
+  global.md               ← Permanent user facts (hand-maintained, < 100 tokens)
+  CONTEXT.md              ← Auto-generated summary for passive agents
+  projects\
+    {project}.jsonl       ← LLM-extracted structured facts (populated by Stop Hook)
+  sessions\               ← Raw transcript archives (not indexed)
 ```
 
-### Fast Path: `memory_wake_up` MCP
-If the shared `memory` MCP is running on port 9338, call `memory_wake_up` instead of reading files:
+### MCP Tools (v2, port 9338)
 ```
-max_items: 3 (light), 5 (medium), 8 (heavy)
-include_recent_activity: true
-```
-
-### Generated Artifact Chain
-```
-GLOBAL-CONTEXT.md  (token-budgeted ~8000 chars, refreshed on session start)
-  └── AUTO-DREAM.md  (typed durable promotion queue, refreshed daily)
-        └── HANDOFF.md  (bounded resume packet, goal/done/next/blocked)
+memory_boot(project)      → startup context: global.md + top-20 project facts
+memory_search(query)      → BM25 search over project.jsonl
+memory_write(project, facts[]) → manual fact writing
+memory_status()           → health check
+memory_extract(...)       → manual LLM extraction (debug)
 ```
 
 ---
 
 ## Unified Memory Write Protocol
 
-### Cross-Project Durable (Shared Inbox)
+### Auto-Write (Stop Hook, Preferred)
+Stop Hook auto-extracts facts and writes to `projects/{project}.jsonl`. No manual write needed.
+
+### Manual Writeback (Fallback)
 ```
-<obsidian-vault>/00-System/ai-memory/inbox/<agent>.md
+E:\.ai-memory\inbox\<agent>.md
 ```
 Each agent writes to its own file. Write format:
 ```
@@ -123,36 +126,27 @@ Each agent writes to its own file. Write format:
 - [YYYY-MM-DD HH:mm:ss] content here
 ```
 
-### Active Task State (WORKING.md)
-```
-<obsidian-vault>/02-KB/WORKING.md
-```
-Format uses `## Agent:<name>` section blocks for safe concurrent writes:
-```
-## Agent: claude-code
-... task state for claude-code ...
-
-## Agent: codex
-... task state for codex ...
-```
-When updating, replace only your own agent block. Never overwrite other agent blocks.
-
-### Project-Specific Memory
-For project-level facts: write to a note at `<obsidian-vault>/<project>/MEMORY.md`.
+**Size Limits (enforced by every agent):**
+- Single entry: < 500 characters
+- File size: < 5000 tokens
+- **If limit exceeded**: archive to `inbox/archive/<agent>-YYYY-MM.md`, then rewrite a compact summary
 
 ### Rules
 - **Never write secrets, tokens, or credentials** to any memory file
-- **Always use `content_hash`** to prevent duplicate writes
-- **Prefer typed writeback**: include `scope`, `durable_type`, and `confidence` in frontmatter
-- **Deduplicate**: check `content_hash` before appending; skip if identical record written within 30s
+- **Deduplicate**: skip if identical record written within 30s
+- **Read ALL inbox files**: Every agent must read ALL files in `inbox/` — not just its own
+- **Size enforcement**: Archive when inbox file exceeds 5000 tokens
 
 ---
 
-## Vault Path Resolution Check
+## Store Path Check
 
-**Must resolve `<obsidian-vault>` before reading. If resolution fails, exit immediately with an error.**
+Memory store root: `E:\.ai-memory\` (Windows) / `~/.ai-memory/` (macOS/Linux).
 
-See the **Vault Path Resolution** reference box at the top of this file for the full resolution order, expected vault structure, and failure behavior.
+Verify with:
+```bash
+node -e "console.log(require('./bus/store-root.js').resolveStoreRoot())"
+```
 
 ---
 
@@ -180,9 +174,9 @@ Choose based on your session length and context window:
 
 | Agent Type | Session Length | Token Budget | Recommendation |
 |-----------|---------------|--------------|----------------|
-| **Light** (CLI, single-shot) | < 5 min | Skip `GLOBAL-CONTEXT.md` | Use `memory_wake_up max_items=3` only |
-| **Medium** (session-based) | 5–60 min | ~8,000 chars (`GLOBAL-CONTEXT.md`) | Read full canonical order + `memory_wake_up` |
-| **Heavy** (multi-hour) | 1+ hours | Full chain | `GLOBAL-CONTEXT.md` + `AUTO-DREAM.md` + `HANDOFF.md` |
+| **Light** (CLI, single-shot) | < 5 min | ~500 tokens | Read `E:\.ai-memory\CONTEXT.md` only |
+| **Medium** (session-based) | 5–60 min | ~2,000 tokens | `memory_boot` via MCP, or `CONTEXT.md` |
+| **Heavy** (multi-hour) | 1+ hours | ~3,000 tokens | `memory_boot` + `memory_search` |
 
 **Rule: Never let memory reading consume more than 15% of your available token budget.**
 

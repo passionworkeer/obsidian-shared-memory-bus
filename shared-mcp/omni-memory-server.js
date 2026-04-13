@@ -93,11 +93,6 @@ function loadStoreRootHelper() {
   return require(helperPath);
 }
 
-// Backward compat: still named loadVaultResolver but now loads store-root
-function loadVaultResolver() {
-  return loadStoreRootHelper();
-}
-
 function loadPythonRuntimeHelper() {
   const helperPath = resolveRuntimePath("python-runtime.js", path.join("bus", "python-runtime.js"));
   return require(helperPath);
