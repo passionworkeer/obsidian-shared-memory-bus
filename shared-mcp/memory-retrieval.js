@@ -15,6 +15,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { TOOLS } from "./memory-tools.js";
 
 const SEARCH_ROUTE_VALUES = new Set(["auto", "mixed", "durable", "task", "recent", "reference"]);
 
@@ -628,6 +629,19 @@ Only include records that are genuinely relevant. Return fewer than max_results 
   }
 
   return {
+    tools: TOOLS.filter((t) =>
+      t.name === "search_shared_memory" ||
+      t.name === "get_memory_records" ||
+      t.name === "refine_memory_selection" ||
+      t.name === "get_memory_timeline" ||
+      t.name === "clear_shared_memory_search_cache" ||
+      t.name === "get_entity_info" ||
+      t.name === "search_by_entity" ||
+      t.name === "get_kg_stats" ||
+      t.name === "query_kg" ||
+      t.name === "get_entities" ||
+      t.name === "get_relationships"
+    ),
     handlers: {
       search_shared_memory: handleSearchSharedMemory,
       get_memory_records: handleGetMemoryRecords,

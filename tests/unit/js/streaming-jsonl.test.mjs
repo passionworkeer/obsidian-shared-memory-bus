@@ -58,7 +58,7 @@ describe("createJsonlStream", () => {
     assert.equal(records.length, 100);
     assert.equal(records[0].id, "r0");
     assert.equal(records[99].id, "r99");
-    fs.rmSync(tmp, { recursive: true, force: true });
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
   });
 
   it("should skip malformed lines silently", async () => {
@@ -77,7 +77,7 @@ describe("createJsonlStream", () => {
     assert.equal(records.length, 2);
     assert.equal(records[0].id, "good1");
     assert.equal(records[1].id, "good2");
-    fs.rmSync(tmp, { recursive: true, force: true });
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
   });
 
   it("should handle empty files gracefully", async () => {
@@ -91,7 +91,7 @@ describe("createJsonlStream", () => {
     }
 
     assert.equal(records.length, 0);
-    fs.rmSync(tmp, { recursive: true, force: true });
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
   });
 
   it("should handle non-existent files gracefully (yields nothing)", async () => {
@@ -133,7 +133,7 @@ describe("createJsonlStream", () => {
       maxRecordSize < 2000,
       `Expected max record < 2 KB, got ${maxRecordSize}`
     );
-    fs.rmSync(tmp, { recursive: true, force: true });
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
   });
 
   it("should preserve record ordering", async () => {
@@ -155,7 +155,7 @@ describe("createJsonlStream", () => {
       assert.equal(read[i].idx, i);
       assert.equal(read[i].label, `record-${i}`);
     }
-    fs.rmSync(tmp, { recursive: true, force: true });
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
   });
 
   it("should handle CRLF line endings", async () => {
@@ -170,7 +170,7 @@ describe("createJsonlStream", () => {
     }
 
     assert.equal(records.length, 3);
-    fs.rmSync(tmp, { recursive: true, force: true });
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
   });
 
   it("should handle Unicode content correctly", async () => {
@@ -190,7 +190,7 @@ describe("createJsonlStream", () => {
     assert.equal(records.length, 3);
     assert.equal(records[0].text, "中文内容");
     assert.equal(records[1].text, "🎉🎊✨");
-    fs.rmSync(tmp, { recursive: true, force: true });
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
   });
 });
 
@@ -217,7 +217,7 @@ describe("createJsonlBatcher", () => {
     assert.equal(batches[2].length, 50);
     assert.equal(batches[2][0].i, 200);
     assert.equal(batches[2][49].i, 249);
-    fs.rmSync(tmp, { recursive: true, force: true });
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
   });
 
   it("should yield a single batch when file has fewer records than batchSize", async () => {
@@ -233,7 +233,7 @@ describe("createJsonlBatcher", () => {
 
     assert.equal(batches.length, 1);
     assert.equal(batches[0].length, 2);
-    fs.rmSync(tmp, { recursive: true, force: true });
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
   });
 
   it("should yield empty iterator for empty file", async () => {
@@ -247,7 +247,7 @@ describe("createJsonlBatcher", () => {
     }
 
     assert.equal(batches.length, 0);
-    fs.rmSync(tmp, { recursive: true, force: true });
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
   });
 
   it("should default batchSize to 100", async () => {
@@ -265,7 +265,7 @@ describe("createJsonlBatcher", () => {
     assert.equal(batches.length, 3);
     assert.equal(batches[0].length, 100);
     assert.equal(batches[2].length, 50);
-    fs.rmSync(tmp, { recursive: true, force: true });
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
   });
 
   it("should skip malformed lines in batched mode", async () => {
@@ -284,7 +284,7 @@ describe("createJsonlBatcher", () => {
     // 3 valid records (1 malformed skipped), batchSize=10 → 1 batch
     assert.equal(batches.length, 1);
     assert.equal(batches[0].length, 3);
-    fs.rmSync(tmp, { recursive: true, force: true });
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
   });
 
   it("should process each batch without holding all records in memory", async () => {
@@ -307,6 +307,6 @@ describe("createJsonlBatcher", () => {
 
     // 10 batches of 50
     assert.equal(maxBatchSize, 50);
-    fs.rmSync(tmp, { recursive: true, force: true });
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
   });
 });

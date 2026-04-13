@@ -7,21 +7,25 @@
     "type": "git",
     "url": "https://github.com/passionworkeer/obsidian-shared-memory-bus"
   },
+  "workspaces": [
+    "shared-mcp"
+  ],
   "scripts": {
     "lint": "npm run lint --prefix shared-mcp",
     "lint:fix": "npm run lint:fix --prefix shared-mcp",
     "validate": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/validate-layout.ps1",
     "check-integrity": "node ops/check-memory-integrity.js --strict",
+    "generate-context": "node ops/generate-context.js",
     "watchdog": "bash scripts/watchdog.sh /tmp/memory-bus.pid 'node scripts/vault-detect.js'",
     "vault:detect": "node scripts/vault-detect.js",
     "env:check": "node scripts/env-check.js",
     "test:cross-platform": "node scripts/cross-platform-test.js",
     "test:smoke": "node scripts/cross-platform-test.js",
-    "test": "node --test tests/unit/js/*.test.js",
+    "test": "node --test --test-concurrency=1 --experimental-test-isolation=none tests/unit/js/*.test.js tests/unit/js/*.test.mjs",
     "test:py": "pytest tests/ -v",
-    "test:cross": "node --test tests/cross-language/",
-    "test:integration": "node --test tests/integration/js/*.test.mjs",
-    "test:all": "node --test tests/unit/js/ && pytest tests/unit/py/ tests/cross-language/ -v"
+    "test:cross": "node --test tests/cross-language/*.test.js",
+    "test:integration": "node --test --test-concurrency=1 --experimental-test-isolation=none tests/integration/js/*.test.mjs",
+    "test:all": "node --test --test-concurrency=1 --experimental-test-isolation=none tests/unit/js/*.test.js tests/unit/js/*.test.mjs && node --test --test-concurrency=1 --experimental-test-isolation=none tests/integration/js/*.test.mjs && pytest tests/unit/py/ tests/cross-language/ -v"
   },
   "keywords": [
     "obsidian",
@@ -38,5 +42,8 @@
   "engines": {
     "node": ">=18",
     "powershell": ">=7"
+  },
+  "dependencies": {
+    "eslint": "^10.2.0"
   }
 }
