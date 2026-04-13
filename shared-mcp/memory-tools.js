@@ -442,32 +442,74 @@ export const TOOLS = [
   {
     name: "memory_boot",
     description:
-      "Load L0 (fixed project constraints) and L1 (current project KG facts) memory layers. Call this at the start of every session to bootstrap context. Returns the project key, L0 content (~100 tokens), and L1 facts (~500 tokens) from the knowledge graph.",
+      "Load startup context from the local .ai-memory store. Returns global user facts plus recent structured facts for the selected project.",
     inputSchema: {
       type: "object",
       properties: {
+        project: {
+          type: "string",
+          description:
+            "Optional project key such as obsidian-shared-memory-bus. If omitted, derived from cwd.",
+        },
         cwd: {
           type: "string",
           description:
-            "Project working directory. Used to derive the project key and filter KG facts. Defaults to process.cwd() if omitted.",
+            "Optional working directory. Used to derive the project key when project is omitted.",
         },
         agent_id: {
           type: "string",
           description: "Optional agent identifier for MCP compatibility (unused).",
         },
+        top_k: {
+          type: "number",
+          default: 20,
+          description: "Maximum number of recent project facts to include.",
+        },
       },
     },
   },
   {
-    name: "memory_query",
+    name: "memory_search",
     description:
-      "Search the shared memory inbox by keyword. Returns inbox records matching the query from all projects or a specific project. Use this to retrieve persistent memories, user preferences, and project context that were written by previous sessions.",
+      "Search project facts stored in projects/*.jsonl using local BM25 matching. Returns recent structured records for one project or all projects.",
     inputSchema: {
       type: "object",
       properties: {
         query: {
           type: "string",
-          description: "Search keyword. Matches against inbox record content using token-based keyword search.",
+          description: "Search query (Chinese and English both supported).",
+        },
+        project: {
+          type: "string",
+          description: "Optional project key to limit the search.",
+        },
+        cwd: {
+          type: "string",
+          description: "Optional working directory used to derive the project key.",
+        },
+        top_k: {
+          type: "number",
+          default: 10,
+          description: "Maximum number of search results to return.",
+        },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "memory_query",
+    description:
+      "Compatibility alias for memory_search. Returns compact or full search results from the local .ai-memory project store.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Search keyword or phrase.",
+        },
+        project: {
+          type: "string",
+          description: "Optional project key to limit the search.",
         },
         depth: {
           type: "string",
@@ -480,8 +522,48 @@ export const TOOLS = [
           description:
             "Optional project working directory. If provided, results are filtered to the matching project key.",
         },
+        top_k: {
+          type: "number",
+          default: 10,
+          description: "Maximum number of search results to return.",
+        },
       },
       required: ["query"],
+    },
+  },
+  {
+    name: "memory_write",
+    description:
+      "Append one or more structured facts to projects/{project}.jsonl. Useful for manual durable writeback when auto extraction is not enough.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project: {
+          type: "string",
+          description: "Optional project key. If omitted, derived from cwd.",
+        },
+        cwd: {
+          type: "string",
+          description: "Optional working directory used to derive the project key.",
+        },
+        facts: {
+          type: "array",
+          description: "Fact objects to append to the project memory store.",
+          items: {
+            type: "object",
+            required: ["content"],
+            properties: {
+              content: { type: "string" },
+              scope: { type: "string", enum: ["user", "project", "feedback", "reference"] },
+              session_type: { type: "string", enum: ["bugfix", "feature", "refactor", "discovery", "docs", "chore", "note"] },
+              confidence: { type: "number" },
+              facts: { type: "array", items: { type: "string" } },
+              decisions: { type: "array", items: { type: "string" } },
+            },
+          },
+        },
+      },
+      required: ["facts"],
     },
   },
 ];

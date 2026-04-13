@@ -1,52 +1,47 @@
 ---
-name: openclaw-shared-memory
-description: OpenClaw optimized integration for the Obsidian shared memory bus
+name: openclaw-shared-memory-v2
+description: OpenClaw optimized integration for the v2 shared memory bus
 agent: openclaw
-version: 1.0.0
-generated-from: SKILL.md
+version: 2.0.0
+generated-from: SKILL.md v2
 ---
 
-# OpenClaw — Shared Memory Bus Integration
+# OpenClaw — Shared Memory Bus Integration (v2)
 
-This file extends `SKILL.md` (repo root) with OpenClaw-specific configuration.
-Read `SKILL.md` first, then apply the specifics below.
+Canonical store: `E:\.ai-memory\` (Windows) / `~/.ai-memory/` (macOS/Linux).
+No Obsidian dependency.
 
-## OpenClaw Skill Metadata
+## Session Start
 
-```yaml
-name: openclaw-shared-memory
-agent: openclaw
-mcp_server: memory (port 9338)
-mcp_server: obsidian (port 9335)
-mcp_server: context7 (port 9331)
-mcp_server: fetch (port 9332)
-mcp_server: time (port 9333)
-mcp_server: sequential-thinking (port 9334)
+**If MCP available** (port 9338):
+```
+Tool: memory_boot
+project: obsidian-shared-memory-bus
 ```
 
----
+**Fallback** (no MCP):
+```
+Read: E:\.ai-memory\CONTEXT.md
+```
 
-## Vault Path Resolution
+OpenClaw's native task layer (`blackboard`) remains the primary task memory source.
 
-**Resolution order:**
-1. `AI_MEMORY_OBSIDIAN_VAULT` environment variable
-2. `OBSIDIAN_VAULT_ROOT` environment variable
-3. Obsidian app config detection
-4. Default fallback
+## Memory Write
 
+Stop Hook auto-writes extracted facts — no manual write needed.
 
-**If resolution fails:** Write `"VAULT_RESOLUTION_FAILED"` to first line of `inbox/openclaw.md` and exit with error.
+Manual fallback:
+```
+E:\.ai-memory\inbox\openclaw.md
+```
 
----
+## Token Budget
 
-## Startup Behavior
-
-At session start:
-1. Read `memory_wake_up max_items=5` for cross-agent context
-2. For cron job handoffs: also read `AUTO-DREAM.md` for durable promotion queue
-3. OpenClaw's native task layer (`blackboard`) remains the primary task memory source
-
----
+| Session Type | Memory Action | Est. Tokens |
+|---|---|---|
+| Quick session | CONTEXT.md only | ~500 |
+| Standard session | memory_boot | ~2000 |
+| Cron job handoff | memory_boot + memory_search | ~3000 |
 
 ## MCP Configuration
 
@@ -56,10 +51,6 @@ At session start:
     "memory": {
       "transport": "http",
       "url": "http://127.0.0.1:9338/mcp"
-    },
-    "obsidian": {
-      "transport": "http",
-      "url": "http://127.0.0.1:9335/mcp"
     },
     "context7": {
       "transport": "http",
@@ -80,44 +71,3 @@ At session start:
   }
 }
 ```
-
----
-
-## Rule File Setup
-
-
-
----
-
-## Memory Write Targets
-
-### Cross-Project Durable (Shared Inbox)
-```
-<obsidian-vault>/00-System/ai-memory/inbox/openclaw.md
-```
-
-### Active Task State
-```
-<obsidian-vault>/02-KB/WORKING.md
-```
-Write within your `## Agent: openclaw` block.
-
----
-
-## Token Budget
-
-- **Quick session**: `memory_wake_up max_items=5`
-- **Cron job handoff**: Full chain — `GLOBAL-CONTEXT.md` + `AUTO-DREAM.md` + `HANDOFF.md`
-- OpenClaw sessions can be very long; use full context for cross-agent handoffs
-
----
-
-## Vault Path Resolution Check
-
-**Verification command:**
-```bash
-echo $AI_MEMORY_OBSIDIAN_VAULT
-echo $OBSIDIAN_VAULT_ROOT
-```
-
-If both are empty and Obsidian config is not found, write `"VAULT_RESOLUTION_FAILED"` to first line of `inbox/openclaw.md`.
