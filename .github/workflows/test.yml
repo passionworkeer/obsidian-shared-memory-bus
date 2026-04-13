@@ -4,6 +4,7 @@ on:
   push:
     branches: [main, codex/**]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -28,7 +29,7 @@ jobs:
         run: npm ci
 
       - name: Run JS unit tests
-        run: node --test tests/unit/js/*.test.js
+        run: node --test tests/unit/js/*.test.{js,mjs}
 
   # ---------------------------------------------------------------------------
   # Unit tests — macOS (Node.js 20)
@@ -48,7 +49,7 @@ jobs:
         run: npm ci
 
       - name: Run JS unit tests
-        run: node --test tests/unit/js/*.test.js
+        run: node --test tests/unit/js/*.test.{js,mjs}
 
   # ---------------------------------------------------------------------------
   # Unit tests — Windows (Node.js 20)
@@ -68,7 +69,8 @@ jobs:
         run: npm ci
 
       - name: Run JS unit tests
-        run: node --test tests/unit/js/*.test.js
+        run: node --test tests/unit/js/*.test.{js,mjs}
+        shell: bash
 
   # ---------------------------------------------------------------------------
   # Python unit tests (Linux)
@@ -76,6 +78,9 @@ jobs:
   python-unit-tests:
     runs-on: ubuntu-latest
     steps:
+      - name: Set vault env
+        run: echo "AI_MEMORY_OBSIDIAN_VAULT=$RUNNER_TEMP/vault-smoke" >> $GITHUB_ENV
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -83,6 +88,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      - name: Create smoke vault
+        run: mkdir -p "$AI_MEMORY_OBSIDIAN_VAULT"
+        shell: bash
 
       - name: Install pytest
         run: pip install pytest>=8.0.0
@@ -96,6 +105,9 @@ jobs:
   cross-language-tests:
     runs-on: ubuntu-latest
     steps:
+      - name: Set vault env
+        run: echo "AI_MEMORY_OBSIDIAN_VAULT=$RUNNER_TEMP/vault-smoke" >> $GITHUB_ENV
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -108,6 +120,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      - name: Create smoke vault
+        run: mkdir -p "$AI_MEMORY_OBSIDIAN_VAULT"
+        shell: bash
 
       - name: Install dependencies
         run: npm ci && pip install pytest>=8.0.0
@@ -133,7 +149,7 @@ jobs:
         run: npm ci
 
       - name: Run integration tests
-        run: node --test "tests/integration/js/*.test.mjs"
+        run: node --test tests/integration/js/*.test.mjs
 
   # ---------------------------------------------------------------------------
   # Cross-platform smoke test (Node.js platform detection)
@@ -156,7 +172,7 @@ jobs:
         run: npm ci
 
       - name: Platform smoke test
-        run: node -e "import('./bus/platform/index.js').then(m => console.log('Platform:', m.platform.name, '| Path sep:', m.platform.path.sep))"
+        run: node -e "import('./bus/platform/index.js').then(m => console.log('Platform:', m.platform.name, '| Path sep:', m.platform.pathSep))"
 
   # ---------------------------------------------------------------------------
   # Lint (Linux only)

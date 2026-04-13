@@ -29,7 +29,7 @@ const AI_MEMORY_ROOT = process.env.AI_MEMORY_ROOT || path.resolve(__dirname, "..
 // memory_boot and memory_query — resolves via resolveProjectPath so it works
 // whether AI_MEMORY_ROOT points to the project dir or to a separate data dir.
 const { handlers: mcpMemoryHandlers } = require(
-  resolveProjectPath("ops", "mcp-memory-tools-handler.cjs")
+  resolveProjectPath("ops", "mcp-memory-tools-handler.js")
 );
 const WINDOWS_ENV_CACHE = new Map();
 const RUNTIME_ENV_NAMES = [
@@ -91,11 +91,6 @@ function resolveProjectPath(...parts) {
 function loadStoreRootHelper() {
   const helperPath = resolveRuntimePath("store-root.js", path.join("bus", "store-root.js"));
   return require(helperPath);
-}
-
-// Backward compat: still named loadVaultResolver but now loads store-root
-function loadVaultResolver() {
-  return loadStoreRootHelper();
 }
 
 function loadPythonRuntimeHelper() {

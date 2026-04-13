@@ -539,7 +539,11 @@ function classifyEntity(name, frequency, scores) {
     type: "uncertain",
     confidence: 0.3,
     frequency,
-    signals: [...scores.person_signals, ...scores.project_signals, ...scores.concept_signals].slice(0, 3),
+    signals: [
+      ...(scores.person_signals || []),
+      ...(scores.project_signals || []),
+      ...(scores.concept_signals || []),
+    ].slice(0, 3),
   };
 }
 
@@ -717,6 +721,7 @@ function extractEntities(text) {
  * @returns {object} - record augmented with `entities`, `facts`, `concepts`
  */
 function extractFromRecord(record) {
+  if (!record) return { entities: [], facts: [], concepts: [] };
   const content = (record.content || record.text || "") + " " + (record.title || "");
   const { entities, facts, concepts } = extractEntities(content);
 
