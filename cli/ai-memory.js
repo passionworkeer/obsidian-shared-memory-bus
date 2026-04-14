@@ -505,6 +505,7 @@ function spawnNode(scriptPath, extraArgs, flags, vaultRoot) {
       child = spawn(process.execPath, [scriptAbs, ...allArgs], {
         stdio: ["ignore", "pipe", "pipe"],
         shell: false,
+        windowsHide: true,
         env: childEnv,
         cwd: path.dirname(scriptAbs),
       });

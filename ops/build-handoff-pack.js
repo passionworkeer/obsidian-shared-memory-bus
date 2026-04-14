@@ -294,4 +294,16 @@ function main() {
   );
 }
 
-main();
+// Only run main() when executed directly (not when required as a module in tests).
+// Guard against E:\ drive not existing on CI runners.
+if (require.main === module) {
+  try {
+    main();
+  } catch (err) {
+    if (err.code === "ENOENT" && err.message.includes("E:\\")) {
+      // E:\.ai-memory\ does not exist on this CI runner — skip silently.
+      process.exit(0);
+    }
+    throw err;
+  }
+}
