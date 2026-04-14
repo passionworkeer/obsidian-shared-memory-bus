@@ -27,8 +27,8 @@ This document maps the complete data flow from agent activity to shared memory r
 │  generate-embeddings.js    ← generates embeddings index                     │
 │  build-memory-layers.js    ← builds MEMORY-LAYERS.json from structured/     │
 │  build-handoff-pack.js     ← builds HANDOFF.json for next agent             │
-│  sync-openclaw-to-obsidian.js ← ingests OpenClaw sessions/runs/blackboard  │
-│  obsidian-blackboard-daemon.js ← watches vault and detects note changes     │
+│  sync-openclaw-to-memory.js   ← ingests OpenClaw sessions/runs/blackboard  │
+│  vault-blackboard-daemon.js   ← watches store and detects note changes     │
 │  memory-bus.ps1 (spawned) ← runs SyncAll to refresh structured/ JSONL      │
 └──────┬──────────────────────────────────────────────┬──────────────────────┘
        │ PowerShell spawns                             │ Node.js calls
@@ -211,8 +211,8 @@ Agent query
 | Structured sync | `memory-bus.ps1` | JS helpers | — |
 | Memory layers | watchdog triggers | `build-memory-layers.js` | — |
 | Dream consolidation | `run-memory-dream.ps1` | `build-handoff-pack.js` | — |
-| OpenClaw sync | watchdog triggers | `sync-openclaw-to-obsidian.js` | — |
-| Blackboard watch | — | `obsidian-blackboard-daemon.js` | — |
+| OpenClaw sync | watchdog triggers | `sync-openclaw-to-memory.js` | — |
+| Blackboard watch | — | `vault-blackboard-daemon.js` | — |
 
 **Contract rule**: PowerShell only orchestrates. Node.js handles business logic and IPC. Python owns retrieval. No layer calls "down" past the layer below it.
 

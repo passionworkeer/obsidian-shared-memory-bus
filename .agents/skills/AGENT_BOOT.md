@@ -30,42 +30,43 @@ If Node.js < 18 or not installed → **stop and report** to user.
 
 ---
 
-## Step 1: Resolve the Obsidian Vault
+## Step 1: Resolve the Memory Store
 
-The vault is the **source of truth** for identity, context, and memory writeback.
+The `.ai-memory` store is the **source of truth** for identity, context, and memory writeback. No Obsidian dependency.
 
 ```bash
 # Method A: Environment variable (highest priority)
-node -e "console.log(process.env.OBSIDIAN_VAULT_ROOT || process.env.AI_MEMORY_OBSIDIAN_VAULT || '')"
+node -e "console.log(process.env.AI_MEMORY_STORE || process.env.AI_MEMORY_STORE_ROOT || '')"
 
-# Method B: Run vault-detect script (cross-platform, no deps)
-node scripts/vault-detect.js
-# Exits 0 with vault path on stdout, or 1 with error message
+# Method B: Run store-root resolution (cross-platform, auto-detects best drive)
+node -e "console.log(require('./bus/store-root.js').resolveStoreRoot())"
 ```
 
-**Vault resolution priority:**
-1. `AI_MEMORY_OBSIDIAN_VAULT` env var
-2. `OBSIDIAN_VAULT_ROOT` env var
-3. Obsidian app config (platform-specific config file)
-4. Default candidates (platform-specific)
+**Store resolution priority:**
+1. `AI_MEMORY_STORE` or `AI_MEMORY_STORE_ROOT` env var
+2. `AI_MEMORY_ROOT/.ai-memory` (if AI_MEMORY_ROOT is set)
+3. Auto-detect best available drive (Windows: D-Z scan for most free space, min 2GB)
+4. Platform default:
+   - Windows: `E:\.ai-memory`
+   - macOS: `~/Library/Application Support/.ai-memory`
+   - Linux: `XDG_DATA_HOME/.ai-memory` or `~/.local/share/.ai-memory`
 
-**If vault not found:**
-- Create a minimal vault structure at `<home>/Obsidian Vault/` or `E:\Obsidian Vault\`
-- OR write `inbox/<agent-name>.md` with `VAULT_RESOLUTION_FAILED: true`
+**If store not found:**
+- The store structure will be created automatically on first write
+- OR write `inbox/<agent-name>.md` with `STORE_RESOLUTION_FAILED: true`
 
-**Required vault subdirectories** (create if missing):
+**Required store subdirectories** (auto-created if missing):
 ```
-<vault>/
-  00-System/ai-memory/
-    inbox/        ← agent writeback (one .md per agent)
-    structured/  ← JSONL records (sessions, tasks, entities)
-    generated/    ← derived artifacts (GLOBAL-CONTEXT.md, AUTO-DREAM.md)
-    embeddings/  ← search index (BM25 + dense)
-    kg/          ← knowledge graph SQLite
-  02-KB/
-    OBSIDIAN.md  ← project overview
-    MEMORY.md    ← cross-agent memory index
-    WORKING.md   ← active task tracker
+<store-root>/
+  inbox/        ← agent writeback (one .md per agent)
+  structured/  ← JSONL records (sessions, tasks, entities)
+  generated/    ← derived artifacts (GLOBAL-CONTEXT.md, AUTO-DREAM.md)
+  embeddings/  ← search index (BM25 + dense)
+  kg/          ← knowledge graph SQLite
+  projects/    ← project-specific structured facts
+  sessions/    ← raw session transcripts
+  global.md    ← permanent user facts
+  CONTEXT.md   ← auto-generated summary
 ```
 
 ---
@@ -169,19 +170,17 @@ python tests/integration/py/search-flow.test.py
 
 ## Step 7: Read Canonical Context
 
-Once vault is resolved and MCP is up:
+Once store is resolved and MCP is up:
 
 ```
 Read order (lightweight first):
-  1. <vault>/02-KB/OBSIDIAN.md
-  2. <vault>/02-KB/MEMORY.md
-  3. <vault>/02-KB/WORKING.md
+  1. <store-root>/CONTEXT.md (auto-generated summary)
 
 Fast path (if memory MCP is up):
-  → memory_wake_up(max_items=5)
+  → memory_boot(project="<project-name>")
 
 Full context (heavy session):
-  → <vault>/00-System/ai-memory/generated/GLOBAL-CONTEXT.md
+  → memory_boot(project="<project-name>") + memory_search()
 ```
 
 ---
@@ -191,7 +190,7 @@ Full context (heavy session):
 After each significant session milestone, **write to inbox**:
 
 ```
-<vault>/00-System/ai-memory/inbox/<agent-name>.md
+<store-root>/inbox/<agent-name>.md
 ```
 
 Format:
@@ -213,32 +212,27 @@ Format:
 - <bullet>
 ```
 
-**Active task tracking** (append to, safe for concurrent writes):
-```
-<vault>/02-KB/WORKING.md
-```
-Add under `## Agent:<name>` section.
+**Stop Hook**: Auto-extraction is preferred — the Stop Hook auto-writes extracted facts to `<store-root>/projects/<project>.jsonl`.
+
+**Manual fallback**: Write directly to `<store-root>/inbox/<agent>.md`.
 
 ---
 
 ## Platform-Specific Notes
 
 ### Windows
-- Store root: `E:\.ai-memory` (auto-detects best drive if E: full)
+- Store root: `E:\.ai-memory` (auto-detects best drive if E: full or unavailable)
 - Watchdog: VBS (`scripts/watchdog.ps1`) or PowerShell
-- Obsidian vault: `%APPDATA%\obsidian\obsidian.json`
 - Node.js: `node.exe` must be in PATH
 
 ### macOS
 - Store root: `~/Library/Application Support/.ai-memory`
 - Watchdog: bash (`scripts/watchdog.sh`)
-- Obsidian vault: `~/Library/Application Support/obsidian/obsidian.json`
 - Python: `python3` (no py launcher needed)
 
 ### Linux
 - Store root: `XDG_DATA_HOME/.ai-memory` or `~/.local/share/.ai-memory`
 - Watchdog: bash (`scripts/watchdog.sh`)
-- Obsidian vault: `~/.config/obsidian/obsidian.json`
 - Python: `python3`
 - Optional: PowerShell (`pwsh`) for Windows-compatible scripts
 
@@ -248,7 +242,7 @@ Add under `## Agent:<name>` section.
 
 | Problem | Diagnosis | Fix |
 |---------|-----------|-----|
-| Vault not found | Run `node scripts/vault-detect.js` | Set env var or create vault |
+| Store not found | Run `node -e "console.log(require('./bus/store-root.js').resolveStoreRoot())"` | Set `AI_MEMORY_STORE` env var |
 | MCP server down | `curl http://127.0.0.1:9338/health` | Restart via launcher script |
 | Store root not writable | Check directory permissions | Set `AI_MEMORY_STORE` to writable path |
 | Python not found | `python3 --version` fails | Install Python >= 3.9 |

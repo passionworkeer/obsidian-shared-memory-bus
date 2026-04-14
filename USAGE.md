@@ -1,6 +1,6 @@
-# Obsidian Shared Memory Bus — Usage Guide
+# AI Memory Bus — Usage Guide
 
-Shared memory layer for AI coding tools, backed by an Obsidian vault. Multiple agents (Codex, Claude, OpenCode, Cursor, Copilot, Trae, OpenClaw) share one retrieval endpoint instead of each launching their own stateless MCPs.
+Shared memory layer for AI coding tools, backed by a `.ai-memory` store (no Obsidian dependency). Multiple agents (Codex, Claude, OpenCode, Cursor, Copilot, Trae, OpenClaw) share one retrieval endpoint instead of each launching their own stateless MCPs.
 
 ## Install and Start
 
@@ -68,7 +68,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File shared-mcp/start-default-sha
 | 9332 | fetch | HTTP fetch |
 | 9333 | time | Timezone conversion |
 | 9334 | sequential-thinking | Reasoning |
-| 9335 | obsidian | Vault access |
+| 9335 | obsidian | Vault access (optional) |
 | 9336 | MiniMax | Coding plan (optional) |
 | 9337 | playwright | Browser automation (optional) |
 | 9338 | memory | Unified retrieval |
