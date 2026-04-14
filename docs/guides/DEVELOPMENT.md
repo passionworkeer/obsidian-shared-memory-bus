@@ -130,9 +130,6 @@ uv pip install rank-bm25 jieba --system
 # Use the repo itself as the runtime (no install needed for dev)
 export AI_MEMORY_ROOT="$(pwd)"
 
-# Point at your Obsidian vault
-export AI_MEMORY_OBSIDIAN_VAULT="$HOME/path/to/your/vault"
-
 # Store root (use a temp dir for dev to avoid touching prod data)
 export AI_MEMORY_STORE="/tmp/.ai-memory-dev"
 

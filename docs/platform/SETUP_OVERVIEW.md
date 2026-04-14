@@ -29,7 +29,6 @@ Before installing on any platform, verify the following:
 | Node.js 18+ | [nodejs.org](https://nodejs.org) | `brew install node` | System package manager or [nvm](https://github.com/nvm-sh/nvm) |
 | Python 3.10+ | `python --version` | `python3 --version` | `python3 --version` |
 | PowerShell 7+ | `powershell.exe` (built-in) | `pwsh --version` (`brew install powershell`) | `pwsh --version` (`snap install powershell` or [Microsoft repo](https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-linux)) |
-| Obsidian vault | Any location | Any location | Any location |
 | Ports 9331–9338 | Available | Available | Available |
 
 ### Verify Prerequisites / 验证前提条件
@@ -98,7 +97,6 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shar
 | Variable | Description | Windows | macOS / Linux |
 |----------|-------------|---------|---------------|
 | `AI_MEMORY_STORE` | Store root path | `E:\.ai-memory` | `~/.ai-memory` |
-| `AI_MEMORY_OBSIDIAN_VAULT` | Obsidian vault path | Auto-detected | Auto-detected |
 | `AI_MEMORY_PYTHON` | Python interpreter | `python` | `python3` |
 | `AI_MEMORY_PWSH` | PowerShell 7 path | N/A | `pwsh` |
 | `AI_MEMORY_ROOT` | Installed runtime root | `~/.ai-memory` | `~/.ai-memory` |
@@ -127,7 +125,7 @@ For a complete list see `docs/ENVIRONMENT.md`.
 
 - `pwsh` is required. Install from the [Microsoft package repository](https://learn.microsoft.com/powershell/sowershell-support-lifecycle) for your distro.
 - Startup registration prefers `systemd --user` units. Falls back to XDG autostart when `systemctl --user` is unavailable.
-- If running under WSL2, treat it as a Linux environment. Ensure the Obsidian vault path is accessible from WSL.
+- If running under WSL2, treat it as a Linux environment. Ensure the store root path is accessible from WSL.
 - The `AI_MEMORY_STORE` default on Linux is `~/.ai-memory`. If your home directory is on a small SSD, set `AI_MEMORY_STORE` to a path on a larger drive.
 
 ---

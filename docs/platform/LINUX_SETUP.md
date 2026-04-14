@@ -211,18 +211,20 @@ Expected: All shared MCP services show `running: true` or `skipped: ...`.
 
 ## Configuration / 配置
 
-### Obsidian Vault Path / Obsidian 保险库路径
+### Store Root / 存储根目录
+
+The store root defaults to `~/.ai-memory`. Override with:
 
 ```bash
 # ~/.bashrc
-export AI_MEMORY_OBSIDIAN_VAULT="$HOME/path/to/your/vault"
+export AI_MEMORY_STORE="$HOME/path/to/custom/store"
 ```
 
-If the vault is on a Windows partition mounted in WSL2, use the WSL path:
+If the store is on a Windows partition mounted in WSL2, use the WSL path:
 
 ```bash
 # WSL2 example — mount Windows E: drive at /mnt/e
-export AI_MEMORY_OBSIDIAN_VAULT="/mnt/e/Obsidian Vault"
+export AI_MEMORY_STORE="/mnt/e/.ai-memory"
 ```
 
 ### Store Root on Large Drive / 将存储根目录放在大硬盘上

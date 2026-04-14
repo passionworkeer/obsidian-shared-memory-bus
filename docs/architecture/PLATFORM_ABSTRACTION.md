@@ -1,6 +1,6 @@
 ---
 title: Platform Abstraction Architecture
-description: Cross-platform abstraction design — vault resolution, store roots, Python spawning, and watchdog generation for Windows, macOS, and Linux.
+description: Cross-platform abstraction design — store resolution, Python spawning, and watchdog generation for Windows, macOS, and Linux.
 platform: cross-platform
 ---
 
@@ -13,12 +13,11 @@ platform: cross-platform
 
 The platform abstraction layer lives in `bus/platform/`. It provides a unified JavaScript interface for operations that differ per OS:
 
-- **Vault root resolution** — finding the Obsidian vault from env vars, app config, or standard fallbacks
-- **Store root resolution** — choosing the `.ai-memory` data directory
+- **Store root resolution** — choosing the `.ai-memory` data directory from env vars or standard fallbacks
 - **Python process spawning** — launching the retrieval worker with the right interpreter and UTF-8 env
 - **Watchdog script generation** — producing a recovery script in the platform's native language (VBS on Windows, bash on macOS/Linux)
 
-The three adapters share a common interface (`resolveVaultRoot`, `resolveStoreRoot`, `spawnPython`, `makeWatchdogScript`) while handling OS-specific details internally.
+The three adapters share a common interface (`resolveStoreRoot`, `spawnPython`, `makeWatchdogScript`) while handling OS-specific details internally.
 
 平台抽象层位于 `bus/platform/`，为各操作系统不同的操作提供统一的 JavaScript 接口。
 
@@ -53,7 +52,7 @@ Detection is based on Node.js's `process.platform`. The adapter is cached after 
 
 ---
 
-## Vault Root Resolution / 保险库根目录解析
+## Store Root Resolution / 存储根目录解析
 
 ### Resolution Order / 解析顺序
 
@@ -61,45 +60,19 @@ All three adapters follow the same priority order:
 
 | Priority | Source | Description |
 |----------|--------|-------------|
-| 1 | `AI_MEMORY_STORE` | Override for store root; also checked as vault candidate |
+| 1 | `AI_MEMORY_STORE` | Override for store root |
 | 2 | `AI_MEMORY_STORE_ROOT` | Alias for store root |
-| 3 | `AI_MEMORY_OBSIDIAN_VAULT` | Explicit vault path |
-| 4 | `OBSIDIAN_VAULT_ROOT` | Standard env var |
-| 5 | App config | OS-specific Obsidian config file |
-| 6 | Standard fallbacks | Platform-specific default paths |
-
-### Windows Config Path / Windows 配置路径
-
-```powershell
-# First checks (in order):
-$env:APPDATA\obsidian\obsidian.json
-$env:LOCALAPPDATA\obsidian\obsidian.json
-%USERPROFILE%\AppData\Roaming\obsidian\obsidian.json
-```
-
-### macOS Config Path / macOS 配置路径
-
-```bash
-~/Library/Application Support/obsidian/obsidian.json
-~/.config/obsidian/obsidian.json
-```
-
-### Linux Config Path / Linux 配置路径
-
-```bash
-~/.config/obsidian/obsidian.json
-/etc/xdg/obsidian/obsidian.json
-```
+| 3 | Standard fallbacks | Platform-specific default paths |
 
 ### Standard Fallbacks / 标准回退路径
 
-| Platform | Default vault candidates |
-|----------|--------------------------|
-| Windows | `E:\Obsidian Vault`, `D:\Obsidian Vault`, `%USERPROFILE%\Obsidian Vault` |
-| macOS | `~/Obsidian Vault`, `~/Documents/Obsidian Vault`, `~/Desktop/Obsidian Vault` |
-| Linux | `~/Obsidian Vault`, `~/Documents/Obsidian Vault`, `~/Desktop/Obsidian Vault` |
+| Platform | Default store root |
+|----------|---------------------|
+| Windows | `E:\.ai-memory` |
+| macOS | `~/.ai-memory` |
+| Linux | `~/.ai-memory` |
 
-If none of the above resolve, the adapter throws `no-obsidian-vault`.
+If none of the above resolve, the adapter throws `no-store-root`.
 
 ---
 
@@ -236,7 +209,6 @@ interface PlatformAdapter {
 
   makeWatchdogScript(pidPath: string, callbackScript: string): string;
   spawnPython(args: string[], options?: object): ChildProcess;
-  resolveVaultRoot(options?: { refresh?: boolean }): string;
   resolveStoreRoot(options?: { refresh?: boolean }): string;
   getInboxRoot(storeRoot?: string): string;
   getGeneratedRoot(storeRoot?: string): string;
@@ -255,7 +227,6 @@ interface PlatformAdapter {
 | Watchdog language | VBScript | Bash | Bash |
 | PowerShell | `powershell.exe` | `pwsh` | `pwsh` |
 | Watchdog script location | `%APPDATA%\...\Startup\AI Memory Watchdog.vbs` | `~/.ai-memory/watchdog-darwin.sh` | `~/.ai-memory/watchdog-linux.sh` |
-| Obsidian config | `%APPDATA%\obsidian\obsidian.json` | `~/Library/Application Support/obsidian/obsidian.json` | `~/.config/obsidian/obsidian.json` |
 | Startup registration | Startup folder | LaunchAgent | systemd `--user` or XDG autostart |
 | Drive detection | Yes (scans C–Z) | N/A | N/A |
 
@@ -266,8 +237,7 @@ interface PlatformAdapter {
 To add support for a new OS (e.g., FreeBSD):
 
 1. **Create `bus/platform/freebsd.js`** — implement the full `PlatformAdapter` interface:
-   - `resolveVaultRoot()` — resolve vault path for FreeBSD config location
-   - `resolveStoreRoot()` — default store path
+   - `resolveStoreRoot()` — default store path for FreeBSD
    - `spawnPython()` — `python3` on FreeBSD
    - `makeWatchdogScript()` — generate a shell script for FreeBSD (or use POSIX bash)
    - `executables.powershell` — set to `null` if PowerShell is unavailable, or to `pwsh` if installed via package
