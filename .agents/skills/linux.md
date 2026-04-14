@@ -31,21 +31,17 @@ cat /etc/os-release | grep "^ID="  # debian, ubuntu, fedora, arch, etc.
 
 ---
 
-## Linux-Specific Vault Detection
+## Linux-Specific Store Resolution
 
 **Priority order:**
-1. `AI_MEMORY_OBSIDIAN_VAULT` or `OBSIDIAN_VAULT_ROOT` env var
-2. `~/.config/obsidian/obsidian.json` (XDG_CONFIG_HOME)
-3. `~/.config/obsidian/obsidian.json` (fallback)
-4. Default candidates:
-   - `~/Obsidian Vault`
-   - `~/Documents/Obsidian Vault`
-   - `~/Desktop/Obsidian Vault`
+1. `AI_MEMORY_STORE` or `AI_MEMORY_STORE_ROOT` env var
+2. `AI_MEMORY_ROOT/.ai-memory` (if AI_MEMORY_ROOT is set)
+3. Auto-detect best available mount point
+4. Platform default: `XDG_DATA_HOME/.ai-memory` or `~/.local/share/.ai-memory`
 
 ```bash
-# Direct vault config read:
-cat "${XDG_CONFIG_HOME:-$HOME/.config}/obsidian/obsidian.json" 2>/dev/null | \
-  python3 -c "import sys,json; v=json.load(sys.stdin); print(list(v.get('vaults',{}).values())[0]['path'] if v.get('vaults') else 'NOT_FOUND')"
+# Resolve store root (auto-detects if AI_MEMORY_STORE is set)
+node -e "console.log(require('./bus/store-root.js').resolveStoreRoot())"
 ```
 
 ---
@@ -71,9 +67,9 @@ echo "XDG_CONFIG_HOME: ${XDG_CONFIG_HOME:-$HOME/.config}"
 # Memory Bus MCP — Node.js HTTP server
 node shared-mcp/omni-memory-server.js --port 9338 &
 
-# Obsidian MCP — Linux URI scheme:
+# Optional: Obsidian MCP (port 9335) — requires obsidian plugin
 # obsidian://open?vault=<vault-name>
-# Requires obsidian-commander plugin or webdav bridge
+# Note: No Obsidian dependency required for core memory bus functionality
 
 # Verify:
 curl -s http://127.0.0.1:9338/health | python3 -m json.tool
@@ -146,7 +142,6 @@ sudo systemctl start memory-bus
 ```bash
 cd /path/to/obsidian-shared-memory-bus && \
   node -e "console.log('Platform:', require('./bus/platform/index.js').platform.name)" && \
-  node scripts/vault-detect.js && \
   node -e "console.log('Store:', require('./bus/store-root.js').resolveStoreRoot())" && \
   node scripts/env-check.js && \
   echo "Linux bootstrap complete"

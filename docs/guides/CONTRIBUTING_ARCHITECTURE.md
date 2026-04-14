@@ -33,7 +33,6 @@ platform: cross-platform
 
 The shared memory bus must run on Windows, macOS, and Linux. Several behaviours differ per OS in ways that affect core functionality:
 
-- **Vault config path**: Windows uses `%APPDATA%\obsidian\obsidian.json`; macOS uses `~/Library/Application Support/obsidian/obsidian.json`; Linux uses `~/.config/obsidian/obsidian.json`
 - **Store default path**: Windows defaults to `E:\.ai-memory`; macOS/Linux default to `~/.ai-memory`
 - **Python binary name**: `python` on Windows, `python3` on macOS/Linux
 - **Watchdog recovery**: VBScript on Windows (for hidden Startup folder launch), Bash on macOS/Linux
@@ -89,7 +88,7 @@ All business logic imports from `bus/platform/index.js` and calls adapter method
 
 **Neutral**:
 - Windows adapter is the most complex because it handles drive detection and registry environment variable reads
-- POSIX adapters (macOS/Linux) are nearly identical — the only differences are Obsidian config paths and startup registration details
+- POSIX adapters (macOS/Linux) are nearly identical — the only differences are startup registration details
 
 ### Implementation Notes / 实现笔记
 
