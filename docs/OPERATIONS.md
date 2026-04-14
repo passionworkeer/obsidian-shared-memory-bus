@@ -198,7 +198,7 @@ Specialized or migration scripts no longer needed in the active pipeline live in
 | `mcp-server` | `omni-memory-server.js` | MCP tool calls, HTTP requests, retrieval dispatch |
 | `semantic-search` | `semantic-search.py` | BM25, dense, hybrid search, cache hits/misses |
 | `embeddings` | `generate-embeddings.js` | Embedding generation, provider calls, index writes |
-| `blackboard-daemon` | `obsidian-blackboard-daemon.js` | Chokidar vault watch events |
+| `blackboard-daemon` | `vault-blackboard-daemon.js` | Chokidar store watch events |
 
 ### Key Metrics
 

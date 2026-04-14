@@ -31,21 +31,17 @@ which brew && brew --version
 
 ---
 
-## macOS-Specific Vault Detection
+## macOS-Specific Store Resolution
 
 **Priority order:**
-1. `AI_MEMORY_OBSIDIAN_VAULT` or `OBSIDIAN_VAULT_ROOT` env var
-2. `~/Library/Application Support/obsidian/obsidian.json` (vaults list)
-3. `~/.config/obsidian/obsidian.json`
-4. Default candidates:
-   - `~/Obsidian Vault`
-   - `~/Documents/Obsidian Vault`
-   - `~/Desktop/Obsidian Vault`
+1. `AI_MEMORY_STORE` or `AI_MEMORY_STORE_ROOT` env var
+2. `AI_MEMORY_ROOT/.ai-memory` (if AI_MEMORY_ROOT is set)
+3. Auto-detect best available volume
+4. Platform default: `~/Library/Application Support/.ai-memory`
 
 ```bash
-# Direct vault config read (no Node.js needed):
-cat ~/Library/Application\ Support/obsidian/obsidian.json 2>/dev/null | \
-  python3 -c "import sys,json; v=json.load(sys.stdin); print(list(v.get('vaults',{}).values())[0]['path'] if v.get('vaults') else 'NOT_FOUND')"
+# Resolve store root (auto-detects if AI_MEMORY_STORE is set)
+node -e "console.log(require('./bus/store-root.js').resolveStoreRoot())"
 ```
 
 ---
@@ -67,9 +63,9 @@ node -e "console.log(require('./bus/store-root.js').resolveStoreRoot())"
 # Memory Bus MCP — Node.js HTTP server
 node shared-mcp/omni-memory-server.js --port 9338 &
 
-# Obsidian MCP — must use macOS obsidian URI scheme:
+# Optional: Obsidian MCP (port 9335) — requires obsidian plugin
 # obsidian://open?vault=<vault-name>
-# Requires obsidian-commander plugin or similar
+# Note: No Obsidian dependency required for core memory bus functionality
 
 # Verify:
 curl -s http://127.0.0.1:9338/health | python3 -m json.tool
@@ -138,7 +134,6 @@ kill $(lsof -t -i :9338)
 ```bash
 cd /path/to/obsidian-shared-memory-bus && \
   node -e "console.log('Platform:', require('./bus/platform/index.js').platform.name)" && \
-  node scripts/vault-detect.js && \
   node -e "console.log('Store:', require('./bus/store-root.js').resolveStoreRoot())" && \
   node scripts/env-check.js && \
   echo "macOS bootstrap complete"

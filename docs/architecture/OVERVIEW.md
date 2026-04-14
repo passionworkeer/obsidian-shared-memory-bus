@@ -42,7 +42,7 @@ The system follows a **layered plane architecture** with four distinct planes:
 
 1. **Canonical data outranks transport** — the local `.ai-memory` store is the source of truth. MCP is a transport layer, not a database.
 2. **Safe-to-share vs. session-isolated** — services like `memory`, `context7`, `fetch` are shared; services like `playwright` share the process but isolate sessions per client.
-3. **Portable by default** — no hardcoded machine paths; vault and store roots are resolved at runtime from environment variables or standard fallbacks.
+3. **Portable by default** — no hardcoded machine paths; store roots are resolved at runtime from environment variables or standard fallbacks.
 4. **PII-safe** — the bridge plane handles redaction before durable writeback.
 5. **Field-level embeddings** — v2 architecture uses chunk-level embeddings with typed promotion metadata, not document-level.
 
@@ -150,7 +150,7 @@ omni-memory-server.js
   ├──► search_shared_memory   ──► Retrieval worker → ranked results
   ├──► memory_status          ──► Integrity + runtime state
   ├──► memory_boot / memory_query ──► KG query
-  ├──► obsidian_* tools       ──► Obsidian vault direct access
+  ├──► obsidian_* tools       ──► Obsidian MCP server access
   ├──► fetch / time           ──► Shared utility services
   └──► context7 / sequential-thinking ──► Reasoning augmentation
 ```
