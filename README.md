@@ -8,7 +8,7 @@
 [![Platform: macOS](https://img.shields.io/badge/Platform-macOS-brightgreen)](https://github.com/passionworkeer/obsidian-shared-memory-bus/tree/codex/windows-popup-fixes)
 [![Platform: Linux](https://img.shields.io/badge/Platform-Linux-brightgreen)](https://github.com/passionworkeer/obsidian-shared-memory-bus/tree/codex/windows-popup-fixes)
 
-> **What problem does this solve?** If you use multiple AI coding tools (like Claude Code, Codex, OpenCode, Cursor, or Copilot) on the same machine, each one has its own memory and doesn't know what the others remember. This tool gives all your AI tools a shared memory backed by your Obsidian vault — so you don't have to re-explain context to every tool.
+> **What problem does this solve?** If you use multiple AI coding tools (like Claude Code, Codex, OpenCode, Cursor, or Copilot) on the same machine, each one has its own memory and doesn't know what the others remember. This tool gives all your AI tools a shared memory backed by your local `.ai-memory` store — so you don't have to re-explain context to every tool.
 
 > **In plain English**: Your AI tools share one notebook for memory instead of each forgetting everything when you switch.
 
@@ -40,7 +40,7 @@ The 5-tier memory architecture is documented in `docs/MEMORY-TIERING.md`. Only T
 ## Before You Start
 
 Checklist — all must be checked before installing:
-- [ ] **Obsidian vault exists** — you already use Obsidian and know where your vault is
+- [ ] **AI_MEMORY_STORE configured** — you have a `.ai-memory` store at the default location or have set `AI_MEMORY_STORE`
 - [ ] **Node.js 18+ installed** — check with `node -v`
 - [ ] **PowerShell 7+** (for macOS/Linux) — check with `pwsh --version`; on Windows, `powershell.exe` works
 - [ ] **Python 3.10+** (optional, for better search) — check with `python --version`
@@ -48,13 +48,12 @@ Checklist — all must be checked before installing:
 
 Quick vault check — the installer creates this structure if missing:
 - `00-System/ai-memory/` — memory system root
-- `02-KB/OBSIDIAN.md` — canonical Obsidian guide
 - `02-KB/MEMORY.md` — memory system docs
 - `02-KB/WORKING.md` — active task state
 
-If your vault is on a different drive or non-standard location, set `AI_MEMORY_OBSIDIAN_VAULT` before installing:
+If your store is on a different drive or non-standard location, set `AI_MEMORY_STORE` before installing:
 ```powershell
-$env:AI_MEMORY_OBSIDIAN_VAULT = "D:\Your\Vault\Path"
+$env:AI_MEMORY_STORE = "E:\.ai-memory"
 ```
 
 ## Start Here — Pick Your Path
@@ -148,7 +147,7 @@ The installer auto-wires Claude Code, Codex, OpenCode, Cursor, VS Code/Copilot, 
 - Not a hosted SaaS
 - Not a single merged super-context for every agent
 - Not a guarantee that every MCP should or can be shared
-- Not a replacement for backup or sync hygiene in your Obsidian vault
+- Not a replacement for backup or sync hygiene for your `.ai-memory` store
 
 ## What This Gives You
 - One canonical long-term memory store in `.ai-memory`
@@ -169,7 +168,7 @@ The installer auto-wires Claude Code, Codex, OpenCode, Cursor, VS Code/Copilot, 
 - Installer-side Python runtime auto-detection, including uv-managed Python, so shared retrieval does not depend on `python` being on `PATH`
 - Installer-side bootstrap of lightweight retrieval dependencies (`rank-bm25`, `jieba`) so BM25 scoring and Chinese tokenization do not silently degrade on fresh machines
 - Shared `fetch` / `time` startup now prefers a managed Python 3.10+ runtime through `AI_MEMORY_MCP_PYTHON` instead of cold-starting `uvx` on every launch
-- Vault root auto-discovery from environment overrides, the Obsidian app config, or standard Desktop/Documents fallback paths
+- Store root auto-discovery from environment overrides or standard Desktop/Documents fallback paths
 - No native Node `sqlite3` dependency in the shared `memory` MCP or the OpenClaw blackboard daemon
 - A warm shared Python retrieval worker behind the `memory` MCP so BM25 state and model caches can be reused across requests
 - Shared retrieval worker cache introspection and cache-reset control through `memory_status` and `clear_shared_memory_search_cache`
@@ -182,7 +181,7 @@ The installer auto-wires Claude Code, Codex, OpenCode, Cursor, VS Code/Copilot, 
 
 ## Who This Is For
 - People running multiple local AI agents on one machine
-- Setups where Obsidian should be the durable source of truth
+- Setups where the `.ai-memory` store is the durable source of truth
 - Users who want shared retrieval without blindly sharing every tool process
 
 ## Who This Is Not For
@@ -215,7 +214,7 @@ flowchart LR
     end
 
     subgraph Vault["Canonical Store"]
-        ObsidianVault["Obsidian Vault"]
+        AiMemory[".ai-memory Store"]
         Structured["structured/*.jsonl"]
         Inbox["tool inboxes / generated context"]
     end
@@ -234,7 +233,7 @@ flowchart LR
 
 ## High-Level Flow
 1. Install the bundle into `~/.ai-memory`
-2. Point it at your Obsidian vault
+2. Configure the store root via `AI_MEMORY_STORE` (optional, defaults to `~/.ai-memory/.ai-memory`)
 3. Start the shared MCP stack
 4. Wire clients to shared HTTP MCP endpoints
 5. Let the watchdog keep shared memory fresh
@@ -282,14 +281,14 @@ Wire your agent to the shared MCP endpoints in `shared-mcp/manifest.json`. See [
 
 ### Configuration
 
-Set vault path before install if your vault is not in the default location:
+Set the store root before install if you want a non-default location:
 
 ```powershell
-$env:AI_MEMORY_OBSIDIAN_VAULT = "D:\Your\Vault\Path"
+$env:AI_MEMORY_STORE = "E:\.ai-memory"
 ```
 
 ```bash
-export AI_MEMORY_OBSIDIAN_VAULT="$HOME/Obsidian Vault"
+export AI_MEMORY_STORE="$HOME/.ai-memory"
 ```
 
 See [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) for all configuration variables.
@@ -307,7 +306,7 @@ Shared MCP deduplicates processes. It does not merge all agent state into one co
 ## Support Matrix
 | Target | Status | Notes |
 | --- | --- | --- |
-| Codex | First-class | Shared MCP and Obsidian workflow are validated |
+| Codex | First-class | Shared MCP and structured memory workflow are validated |
 | Claude Code | First-class | Shared MCP and claude-mem bridge are validated |
 | OpenCode | First-class | Shared MCP and memory recall are validated |
 | OpenClaw | Supported | Synced through structured memory and blackboard bridge |
@@ -409,16 +408,16 @@ See `docs/VALIDATION.md` for the current test story and reproduction flow.
 ## Portable Overlay Placeholders
 Tracked onboarding and overlay files in this repo intentionally use portable placeholders instead of workstation-specific absolute paths.
 
-- `<obsidian-vault>` means the root of the Obsidian vault that hosts `00-System/ai-memory/` and `02-KB/`
+- `<store-root>` means the root of the `.ai-memory` store (e.g. `~/.ai-memory/.ai-memory`)
 - `<repo-root>` means the checked-out repository root for this bundle or for the agent-specific project overlay
 - `~/.trae/user_rules.md` is shown as a user-home-relative example, not a hardcoded machine path
 
-At runtime, the Windows control plane resolves the vault from:
+At runtime, the bundle resolves the store from:
 
-1. `AI_MEMORY_OBSIDIAN_VAULT`
-2. `OBSIDIAN_VAULT_ROOT`
-3. the active or most recent vault in Obsidian's app config
-4. standard fallback locations such as Desktop or Documents when needed
+1. `AI_MEMORY_STORE`
+2. `AI_MEMORY_ROOT` + `/.ai-memory`
+3. auto-detect best available drive
+4. standard fallback: `~/.ai-memory/.ai-memory`
 
 Public docs and tracked overlay files should never be committed with private paths such as `C:\Users\name\...` or `E:\...`.
 
@@ -479,7 +478,7 @@ CI guardrails for that contract live in `.github/workflows/portable-core.yml` an
 
 > **What is `<your-project-root>`?** It is the repository or workspace root where you want the portable overlays written, for example `E:\repo\my-app`. The installer writes global user-level client config under each host's home directory when supported, and writes workspace overlays such as `.cursor/mcp.json`, `.vscode/mcp.json`, `.claude/rules/shared-memory.md`, and `opencode.json` under this repo root.
 
-> **Prerequisites**: An Obsidian vault already exists with at least the `00-System/ai-memory/` directory structure. If your vault is empty or on a different drive, set `AI_MEMORY_OBSIDIAN_VAULT` to its root path before running.
+> **Prerequisites**: A `.ai-memory` store directory structure exists at your configured store root. If your store is on a different drive, set `AI_MEMORY_STORE` to its path before running.
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -WorkspaceRoot <your-project-root>

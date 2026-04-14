@@ -8,6 +8,9 @@ generated-from: SKILL.md v2
 
 # Codex — Shared Memory Bus Integration (v2)
 
+Canonical store: `E:\.ai-memory\` (Windows) / `~/.ai-memory/` (macOS/Linux).
+No Obsidian dependency.
+
 This file extends `SKILL.md` (repo root) with Codex-specific configuration.
 Read `SKILL.md` first, then apply the specifics below.
 
@@ -35,10 +38,6 @@ Read `SKILL.md` first, then apply the specifics below.
     "sequential-thinking": {
       "transport": "http",
       "url": "http://127.0.0.1:9334/mcp"
-    },
-    "obsidian": {
-      "transport": "http",
-      "url": "http://127.0.0.1:9335/mcp"
     }
   }
 }
@@ -70,7 +69,10 @@ Canonical store: `E:\.ai-memory\` (Windows) / `~/.ai-memory/` (macOS/Linux)
 | `global.md` | Permanent user facts (~100 tokens) |
 | `projects/{project}.jsonl` | LLM-extracted structured facts |
 | `CONTEXT.md` | Auto-generated summary (passive agents read this) |
-| `inbox/codex.md` | Cross-session writeback (fallback) |
+| `inbox/codex.md` | Cross-session writeback (manual fallback) |
+
+**Preferred:** Stop Hook auto-extraction to `projects/<project>.jsonl`.
+**Manual fallback:** Write to `inbox/codex.md`.
 
 ---
 
