@@ -21,13 +21,16 @@ agent: {AGENT_NAME}
 
 ---
 
-## Vault Path Resolution
+## Store Path Resolution
 
 **Resolution order:**
-1. `AI_MEMORY_OBSIDIAN_VAULT` environment variable
-2. `OBSIDIAN_VAULT_ROOT` environment variable
-3. Obsidian app config detection
-4. Default fallback
+1. `AI_MEMORY_STORE` or `AI_MEMORY_STORE_ROOT` environment variable
+2. `AI_MEMORY_ROOT/.ai-memory` (if AI_MEMORY_ROOT is set)
+3. Auto-detect best available drive (Windows: D-Z scan, min 2GB free)
+4. Platform default:
+   - Windows: `E:\.ai-memory`
+   - macOS: `~/Library/Application Support/.ai-memory`
+   - Linux: `XDG_DATA_HOME/.ai-memory` or `~/.local/share/.ai-memory`
 {VAULT_NOTES}
 
 **If resolution fails:** Write `"VAULT_RESOLUTION_FAILED"` to first line of `inbox/{AGENT_NAME}.md` and exit with error.
@@ -58,14 +61,16 @@ agent: {AGENT_NAME}
 
 ### Cross-Project Durable (Shared Inbox)
 ```
-<obsidian-vault>/00-System/ai-memory/inbox/{AGENT_NAME}.md
+<store-root>/inbox/{AGENT_NAME}.md
 ```
 
-### Active Task State
+### Project Facts (via Stop Hook)
 ```
-<obsidian-vault>/02-KB/WORKING.md
+<store-root>/projects/<project-name>.jsonl
 ```
-Write within your `## Agent: {AGENT_NAME}` block.
+
+**Preferred:** Stop Hook auto-extraction — no manual write needed.
+**Manual fallback:** Write to `inbox/{AGENT_NAME}.md`.
 
 ---
 
@@ -75,12 +80,13 @@ Write within your `## Agent: {AGENT_NAME}` block.
 
 ---
 
-## Vault Path Resolution Check
+## Store Path Resolution Check
 
 **Verification command:**
 ```bash
-echo $AI_MEMORY_OBSIDIAN_VAULT
-echo $OBSIDIAN_VAULT_ROOT
+node -e "console.log(require('./bus/store-root.js').resolveStoreRoot())"
+echo $AI_MEMORY_STORE
+echo $AI_MEMORY_STORE_ROOT
 ```
 
 {VAULT_CHECK_NOTES}

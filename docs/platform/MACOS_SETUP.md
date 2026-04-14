@@ -117,13 +117,13 @@ Expected: All shared MCP services show `running: true` or `skipped: ...`.
 
 ## Configuration / 配置
 
-### Set Vault Path / 设置保险库路径
+### Set Store Root / 设置存储根目录
 
-If your Obsidian vault is not in a standard location, set the environment variable:
+The store root defaults to `~/.ai-memory`. Override with:
 
 ```bash
 # In your shell profile (~/.zshrc)
-export AI_MEMORY_OBSIDIAN_VAULT="$HOME/path/to/your/vault"
+export AI_MEMORY_STORE="$HOME/path/to/custom/store"
 ```
 
 Reload the profile:

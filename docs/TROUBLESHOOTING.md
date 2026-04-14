@@ -415,22 +415,22 @@ node .\ops\sync-openclaw-to-obsidian.js
 
 ## Obsidian MCP Does Not Start
 
-> **Note:** The shared `memory` MCP no longer requires Obsidian. If you still need the Obsidian MCP for reading/writing vault notes, configure it separately.
+> **Note:** The shared `memory` MCP no longer requires Obsidian. If you still need the Obsidian MCP for reading/writing vault notes, configure it separately as an optional service.
 
-`ops/run-obsidian-mcp.ps1` (if used) looks for the vault in this order:
-1. `AI_MEMORY_OBSIDIAN_VAULT`
-2. `OBSIDIAN_VAULT_ROOT`
-3. the active or most recent vault in Obsidian's app config (`%APPDATA%\obsidian\obsidian.json`, `~/Library/Application Support/obsidian/obsidian.json`, or `~/.config/obsidian/obsidian.json`)
-4. `~/Obsidian Vault`, `~/Desktop/Obsidian Vault`, or `~/Documents/Obsidian Vault`
+`ops/run-obsidian-mcp.ps1` (if used) resolves the store root in this order:
+1. `AI_MEMORY_STORE`
+2. `AI_MEMORY_ROOT/.ai-memory`
+3. auto-detect best available drive
+4. `~/.ai-memory/.ai-memory` fallback
 
 If auto-detection is wrong, set it explicitly:
 
 ```powershell
-[Environment]::SetEnvironmentVariable("AI_MEMORY_OBSIDIAN_VAULT", "D:\Your\Vault", "User")
+[Environment]::SetEnvironmentVariable("AI_MEMORY_STORE", "E:\.ai-memory", "User")
 ```
 
 ```bash
-export AI_MEMORY_OBSIDIAN_VAULT="$HOME/path/to/your/vault"
+export AI_MEMORY_STORE="$HOME/.ai-memory"
 ```
 
 ## MiniMax MCP Does Not Start

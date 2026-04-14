@@ -1,12 +1,15 @@
 ---
 name: cursor-shared-memory
-description: Cursor optimized integration for the Obsidian shared memory bus
+description: Cursor optimized integration for the v2 shared memory bus
 agent: cursor
-version: 1.0.0
-generated-from: SKILL.md
+version: 2.0.0
+generated-from: SKILL.md v2
 ---
 
-# Cursor — Shared Memory Bus Integration
+# Cursor — Shared Memory Bus Integration (v2)
+
+Canonical store: `E:\.ai-memory\` (Windows) / `~/.ai-memory/` (macOS/Linux).
+No Obsidian dependency.
 
 This file extends `SKILL.md` (repo root) with Cursor-specific configuration.
 Read `SKILL.md` first, then apply the specifics below.
@@ -17,7 +20,6 @@ Read `SKILL.md` first, then apply the specifics below.
 name: cursor-shared-memory
 agent: cursor
 mcp_server: memory (port 9338)
-mcp_server: obsidian (port 9335)
 mcp_server: context7 (port 9331)
 mcp_server: fetch (port 9332)
 mcp_server: time (port 9333)
@@ -26,28 +28,31 @@ mcp_server: sequential-thinking (port 9334)
 
 ---
 
-## Vault Path Resolution
+## Store Path Resolution
 
 **Resolution order:**
-1. `AI_MEMORY_OBSIDIAN_VAULT` environment variable
-2. `OBSIDIAN_VAULT_ROOT` environment variable
-3. Obsidian app config detection
-4. Default fallback
+1. `AI_MEMORY_STORE` or `AI_MEMORY_STORE_ROOT` environment variable
+2. `AI_MEMORY_ROOT/.ai-memory` (if AI_MEMORY_ROOT is set)
+3. Auto-detect best available drive (Windows: D-Z scan, min 2GB free)
+4. Platform default:
+   - Windows: `E:\.ai-memory`
+   - macOS: `~/Library/Application Support/.ai-memory`
+   - Linux: `XDG_DATA_HOME/.ai-memory` or `~/.local/share/.ai-memory`
 
 Cursor uses `.cursor/rules/` for project-specific rules.
 
-**If resolution fails:** Write `"VAULT_RESOLUTION_FAILED"` to first line of `inbox/cursor.md` and exit with error.
+**If resolution fails:** Write `"STORE_RESOLUTION_FAILED"` to first line of `inbox/cursor.md` and exit with error.
 
 ---
 
-## Startup Behavior
+## Session Start
 
 Cursor does not have a native session compaction system.
-At workspace open, read `GLOBAL-CONTEXT.md` or call `memory_wake_up`:
+At workspace open, read `CONTEXT.md` or call `memory_boot`:
 
 ```
-Tool: memory_wake_up
-max_items: 5
+Tool: memory_boot
+project: <current-project-name>
 route: project   (prioritize project-relevant memories)
 ```
 
@@ -63,10 +68,6 @@ Use `route=project` to surface memories relevant to the current workspace.
     "memory": {
       "transport": "http",
       "url": "http://127.0.0.1:9338/mcp"
-    },
-    "obsidian": {
-      "transport": "http",
-      "url": "http://127.0.0.1:9335/mcp"
     },
     "context7": {
       "transport": "http",
@@ -100,36 +101,33 @@ shared-memory.md  →  reference to <repo-root>/SKILL.md
 
 ---
 
-## Memory Write Targets
+## Memory Write
 
-### Cross-Project Durable (Shared Inbox)
+No native Stop Hook — write manually to the inbox fallback:
+
 ```
-<obsidian-vault>/00-System/ai-memory/inbox/cursor.md
+<store-root>/inbox/cursor.md
 ```
 
-### Active Task State
-```
-<obsidian-vault>/02-KB/WORKING.md
-```
-Write within your `## Agent: cursor` block.
+**Preferred:** Configure a Stop Hook for auto-extraction if available.
 
 ---
 
 ## Token Budget
 
-- **File-focused session**: `memory_wake_up max_items=3` (project context only)
-- **Deep session**: `memory_wake_up max_items=5` + `GLOBAL-CONTEXT.md`
+- **File-focused session**: `memory_boot` with `max_items=3` (project context only)
+- **Deep session**: `memory_boot` with `max_items=5`
 
 Cursor sessions are often file-focused. Use `route=project` to limit recall to relevant memories and avoid token waste.
 
 ---
 
-## Vault Path Resolution Check
+## Store Path Resolution Check
 
 **Verification command:**
 ```bash
-echo $AI_MEMORY_OBSIDIAN_VAULT
-echo $OBSIDIAN_VAULT_ROOT
+node -e "console.log(require('./bus/store-root.js').resolveStoreRoot())"
+echo $AI_MEMORY_STORE
 ```
 
-If both are empty and Obsidian config is not found, write `"VAULT_RESOLUTION_FAILED"` to first line of `inbox/cursor.md`.
+If resolution fails, write `"STORE_RESOLUTION_FAILED"` to first line of `inbox/cursor.md`.
