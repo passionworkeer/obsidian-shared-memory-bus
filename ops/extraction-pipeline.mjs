@@ -258,7 +258,10 @@ export async function runExtraction(opts) {
 // ---------------------------------------------------------------------------
 // CLI entry point
 // ---------------------------------------------------------------------------
-if (import.meta.url === `file://${process.argv[1]}`) {
+import { pathToFileURL } from "node:url";
+
+const isCLI = import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isCLI) {
   const [,, transcriptPath, project = ""] = process.argv;
   if (!transcriptPath) {
     console.error("Usage: node extraction-pipeline.mjs <transcript-path> [project]");

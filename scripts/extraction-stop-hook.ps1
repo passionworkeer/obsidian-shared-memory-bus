@@ -55,6 +55,16 @@ if (-not (Test-Path -LiteralPath $TranscriptPath)) {
     exit 1
 }
 
+# Bypass Claude Code's proxy for extraction pipeline LLM calls.
+# Claude Code injects env vars (incl. ANTHROPIC_BASE_URL proxy) into all child
+# processes. Unset HTTP_PROXY/HTTPS_PROXY so the pipeline reaches OpenAI directly.
+Remove-Item Env:\HTTP_PROXY -ErrorAction SilentlyContinue
+Remove-Item Env:\HTTPS_PROXY -ErrorAction SilentlyContinue
+Remove-Item Env:\http_proxy -ErrorAction SilentlyContinue
+Remove-Item Env:\https_proxy -ErrorAction SilentlyContinue
+Remove-Item Env:\ALL_PROXY -ErrorAction SilentlyContinue
+Remove-Item Env:\all_proxy -ErrorAction SilentlyContinue
+
 node "$ProjectRoot\ops\extraction-pipeline.mjs" $TranscriptPath $Project $SessionId
 
 $exitCode = $LASTEXITCODE
