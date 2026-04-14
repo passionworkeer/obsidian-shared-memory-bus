@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
+import process from "node:process";
 import { spawn, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -21,16 +22,18 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const require = createRequire(import.meta.url);
 
-// --- Derived constants ---
-const USER_HOME = process.env.USERPROFILE || process.env.HOME || "";
-const IS_WINDOWS = process.platform === "win32";
-const AI_MEMORY_ROOT = process.env.AI_MEMORY_ROOT || path.resolve(__dirname, "..");
 
 // memory_boot and memory_query — resolves via resolveProjectPath so it works
 // whether AI_MEMORY_ROOT points to the project dir or to a separate data dir.
 const { handlers: mcpMemoryHandlers } = require(
   resolveProjectPath("ops", "mcp-memory-tools-handler.js")
 );
+
+// --- Derived constants ---
+const USER_HOME = process.env.USERPROFILE || process.env.HOME || "";
+const IS_WINDOWS = process.platform === "win32";
+const AI_MEMORY_ROOT = process.env.AI_MEMORY_ROOT || path.resolve(__dirname, "..");
+
 const WINDOWS_ENV_CACHE = new Map();
 const RUNTIME_ENV_NAMES = [
   "AI_MEMORY_ROOT",
@@ -113,38 +116,61 @@ function loadMemoryContractHelper() {
   return require(helperPath);
 }
 
-function readWindowsEnvironmentVariable(name) {
-  if (!IS_WINDOWS) {
-    return "";
-  }
-  if (WINDOWS_ENV_CACHE.has(name)) {
-    return WINDOWS_ENV_CACHE.get(name);
+/**
+ * Batch-read multiple Windows registry environment variables in a single
+ * PowerShell call. Falls back to User scope, then Machine scope per variable.
+ * Returns a map of name -> value for vars that have values.
+ * One spawnSync call instead of N, drastically reducing startup time.
+ */
+function batchReadWindowsRegistryVars(names) {
+  if (!IS_WINDOWS || names.length === 0) {
+    return new Map();
   }
 
-  const escapedName = String(name || "").replace(/'/g, "''");
-  const command = [
-    `$value = [Environment]::GetEnvironmentVariable('${escapedName}', 'User')`,
-    "if ([string]::IsNullOrWhiteSpace($value)) {",
-    `  $value = [Environment]::GetEnvironmentVariable('${escapedName}', 'Machine')`,
-    "}",
-    "if (-not [string]::IsNullOrWhiteSpace($value)) { [Console]::Out.Write($value) }",
-  ].join(" ");
+  // PowerShell: build a JSON object from the name/value pairs
+  // Use plain strings + array join (avoids JS template-literal $/$-interpretation)
+  const psLines = ["$result = @{}"];
+  for (const name of names) {
+    const e = name.replace(/'/g, "''");
+    psLines.push(
+      "try { $v = [Environment]::GetEnvironmentVariable('" + e + "', 'User'); " +
+      "if ([string]::IsNullOrWhiteSpace($v)) { $v = [Environment]::GetEnvironmentVariable('" + e + "', 'Machine') }; " +
+      "if (-not [string]::IsNullOrWhiteSpace($v)) { $result['" + e + "'] = $v } } catch {}"
+    );
+  }
+  psLines.push("$result | ConvertTo-Json -Compress");
+  const psScript = psLines.join("\n");
 
-  let value = "";
+  let raw = "";
   try {
-    const result = spawnSync("powershell.exe", ["-NoProfile", "-Command", command], {
+    const result = spawnSync("powershell.exe", ["-NoProfile", "-Command", psScript], {
       encoding: "utf8",
       windowsHide: true,
+      timeout: 3000,
     });
     if (!result.error && result.status === 0) {
-      value = String(result.stdout || "").trim();
+      raw = String(result.stdout || "").trim();
     }
-  } catch (_error) {
-    value = "";
+  } catch (_e) {
+    return new Map();
   }
 
-  WINDOWS_ENV_CACHE.set(name, value);
-  return value;
+  // Parse JSON result
+  const results = new Map();
+  if (raw.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(raw);
+      for (const name of names) {
+        if (parsed[name]) {
+          results.set(name, String(parsed[name]).trim());
+          WINDOWS_ENV_CACHE.set(name, String(parsed[name]).trim());
+        }
+      }
+    } catch (_e) {
+      // JSON parse failed, fall through to empty results
+    }
+  }
+  return results;
 }
 
 function firstNonEmptyEnv(...names) {
@@ -154,25 +180,45 @@ function firstNonEmptyEnv(...names) {
       return value.trim();
     }
   }
-  for (const name of names) {
-    const value = readWindowsEnvironmentVariable(name);
-    if (value) {
-      return value;
+  // Batch-read all non-found names in one PowerShell call
+  const notFound = names.filter((n) => !WINDOWS_ENV_CACHE.has(n));
+  if (notFound.length > 0) {
+    const cached = batchReadWindowsRegistryVars(notFound);
+    for (const name of names) {
+      const cachedVal = WINDOWS_ENV_CACHE.get(name);
+      if (cachedVal) return cachedVal;
     }
+  }
+  for (const name of names) {
+    const cachedVal = WINDOWS_ENV_CACHE.get(name);
+    if (cachedVal) return cachedVal;
   }
   return "";
 }
 
 function buildMergedEnv(baseEnv = process.env, names = RUNTIME_ENV_NAMES) {
   const merged = { ...(baseEnv || {}) };
+  // Fast path: check process.env first
+  const missing = [];
+  for (const name of names) {
+    const current = merged[name];
+    if (typeof current !== "string" || !current.trim()) {
+      missing.push(name);
+    }
+  }
+  // Batch-fetch all missing in one PowerShell call
+  if (missing.length > 0) {
+    batchReadWindowsRegistryVars(missing);
+  }
+  // Merge resolved values
   for (const name of names) {
     const current = merged[name];
     if (typeof current === "string" && current.trim()) {
       continue;
     }
-    const resolved = firstNonEmptyEnv(name);
-    if (resolved) {
-      merged[name] = resolved;
+    const cached = WINDOWS_ENV_CACHE.get(name);
+    if (cached) {
+      merged[name] = cached;
     }
   }
   return merged;
@@ -214,6 +260,12 @@ function resolvePowerShellCommand() {
 const SEARCH_SCRIPT = resolveRuntimePath("semantic-search.py", path.join("retrieval", "semantic-search.py"));
 const EMBEDDINGS_SCRIPT = resolveRuntimePath("generate-embeddings.js", path.join("bus", "generate-embeddings.js"));
 const MEMORY_BUS_SCRIPT = resolveRuntimePath("memory-bus.ps1", path.join("bus", "memory-bus.ps1"));
+const { resolveStoreRoot } = loadStoreRootHelper();
+const { resolvePythonRuntime, withPythonArgs } = loadPythonRuntimeHelper();
+const { buildEmbeddingConfigHash } = loadEmbeddingProviderHelper();
+const { buildMemoryIntegrityReport } = loadMemoryContractHelper();
+const { buildEmbeddingRuntimeCatalog, resolveEmbeddingRuntime, updateEmbeddingRuntimeSelection } = loadRuntimeConfigHelper();
+const POWERSHELL_COMMAND = resolvePowerShellCommand();
 const WATCHDOG_STATE_PATH = path.join(AI_MEMORY_ROOT, "watchdog-state.json");
 const WATCHDOG_SUPERVISOR_VBS_PATH = IS_WINDOWS
   ? path.join(
@@ -234,12 +286,6 @@ const RUNTIME_ENV = buildMergedEnv();
 const OPENCLAW_HOME = firstNonEmptyEnv("OPENCLAW_HOME") || path.join(USER_HOME, ".openclaw");
 const BLACKBOARD_DB_PATH =
   firstNonEmptyEnv("OPENCLAW_BLACKBOARD_DB") || path.join(OPENCLAW_HOME, "workspace", "ai-shrimp", "blackboard", "tasks.db");
-const { resolveStoreRoot } = loadStoreRootHelper();
-const { resolvePythonRuntime, withPythonArgs } = loadPythonRuntimeHelper();
-const { buildEmbeddingConfigHash } = loadEmbeddingProviderHelper();
-const { buildMemoryIntegrityReport } = loadMemoryContractHelper();
-const { buildEmbeddingRuntimeCatalog, resolveEmbeddingRuntime, updateEmbeddingRuntimeSelection } = loadRuntimeConfigHelper();
-const POWERSHELL_COMMAND = resolvePowerShellCommand();
 const HASH_MODEL = "hashing-v1";
 const EMBEDDING_RUNTIME_DEFAULTS = {
   adapter: "hash",
@@ -1124,6 +1170,7 @@ const MEMORY_STORE_ROOT = STORE_ROOT;
 const STRUCTURED_ROOT = path.join(MEMORY_STORE_ROOT, "structured");
 const GENERATED_ROOT = path.join(MEMORY_STORE_ROOT, "generated");
 const EMBEDDINGS_INDEX_PATH = path.join(MEMORY_STORE_ROOT, "embeddings", "index.jsonl");
+const VAULT_ROOT = firstNonEmptyEnv("AI_MEMORY_OBSIDIAN_VAULT", "OBSIDIAN_VAULT_ROOT") || STORE_ROOT;
 const HANDOFF_PACK_JSON_PATH = path.join(GENERATED_ROOT, "HANDOFF.json");
 const MEMORY_LAYERS_JSON_PATH = path.join(GENERATED_ROOT, "MEMORY-LAYERS.json");
 const AUTO_DREAM_JSON_PATH = path.join(GENERATED_ROOT, "AUTO-DREAM.json");
@@ -1137,6 +1184,7 @@ const sharedParams = {
   firstNonEmptyEnv,
   withPythonArgs,
   STORE_ROOT,
+  VAULT_ROOT,
   MEMORY_STORE_ROOT,
   STRUCTURED_ROOT,
   GENERATED_ROOT,
@@ -1310,7 +1358,7 @@ function startMetricsServer() {
 const transport = new StdioServerTransport();
 await server.connect(transport);
 
-// Start metrics refresh interval and HTTP server immediately.
+// Start metrics refresh interval and HTTP server.
 setInterval(refreshMetricsFromFiles, 60_000);
 refreshMetricsFromFiles();
 startMetricsServer();
