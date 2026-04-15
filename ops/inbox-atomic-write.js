@@ -75,15 +75,43 @@ function appendLineAtomic(filePath, line, opts = {}) {
     // File does not exist — use temp-rename so the target file
     // appears fully formed (no zero-length read window for callers
     // that poll for file existence).
-    const tmp = `${filePath}.tmp.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}`;
-    fs.writeFileSync(tmp, content, "utf8");
-    if (fsync) {
-      const fd = fs.openSync(tmp, "r+");
-      fs.fsyncSync(fd);
-      fs.closeSync(fd);
+    // Retry loop handles the race where another process wins the
+    // first-rename, causing EEXIST on subsequent attempts.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const tmp =
+        filePath +
+        ".tmp." +
+        process.pid +
+        "." +
+        Date.now() +
+        "." +
+        Math.random().toString(36).slice(2);
+      fs.writeFileSync(tmp, content, "utf8");
+      if (fsync) {
+        const fd = fs.openSync(tmp, "r+");
+        fs.fsyncSync(fd);
+        fs.closeSync(fd);
+      }
+      try {
+        fs.renameSync(tmp, filePath);
+        return;
+      } catch (err) {
+        // Clean up our temp file and retry if another process won.
+        try {
+          fs.unlinkSync(tmp);
+        } catch (_) {
+          /* ignore */
+        }
+        if (err.code !== "EEXIST") {
+          throw err;
+        }
+        // Another process just created the file — fall through to
+        // the O_APPEND path below instead of retrying the race.
+        break;
+      }
     }
-    fs.renameSync(tmp, filePath);
-    return;
+    // File now exists (another process created it) — fall through to
+    // O_APPEND append, which is safe for concurrent use.
   }
 
   // File exists — use O_APPEND (via flag 'a') so the OS atomically seeks
