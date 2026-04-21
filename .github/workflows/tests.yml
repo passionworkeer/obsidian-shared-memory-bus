@@ -139,16 +139,12 @@ jobs:
         run: pip install pytest>=8.0.0
 
       - name: Run JS unit tests
-        run: |
-          Write-Host "PWD: $(Get-Location)"
-          node --test tests/unit/js/*.test.js
-        shell: pwsh
+        run: node --test tests/unit/js/*.test.js
+        shell: bash
 
       - name: Run Python unit tests
         run: pytest tests/unit/py/ -v --tb=short
 
       - name: Run integration tests
-        run: |
-          Write-Host "PWD: $(Get-Location)"
-          node --test tests/integration/js/*.test.js tests/integration/js/*.test.mjs
-        shell: pwsh
+        run: node --test tests/integration/js/*.test.js tests/integration/js/*.test.mjs
+        shell: bash
