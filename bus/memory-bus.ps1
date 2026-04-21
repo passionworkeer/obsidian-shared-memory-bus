@@ -60,7 +60,15 @@ function Resolve-BusScriptPath {
 
 $Script:LegacyVaultRoot = Join-SharedPath @($Script:UserHome, "Documents", "Obsidian Vault")
 $Script:VaultRoot = Resolve-ObsidianVaultRoot -FallbackPath $Script:LegacyVaultRoot
-$Script:BusRoot = Join-SharedPath @($Script:VaultRoot, "00-System", "ai-memory")
+# 优先使用 Claude Code 实际写入的位置 (AI_MEMORY_ROOT/.ai-memory/)，与 Claude Code 一致
+$Script:ClaudeMemoryRoot = Join-SharedPath @($Script:BusHome, ".ai-memory")
+$Script:BusRoot = if ((Test-Path (Join-Path $Script:ClaudeMemoryRoot "structured"))) {
+    $Script:ClaudeMemoryRoot
+} elseif (Test-Path (Join-Path $Script:BusHome "structured")) {
+    $Script:BusHome
+} else {
+    Join-SharedPath @($Script:VaultRoot, "00-System", "ai-memory")
+}
 $Script:GeneratedRoot = Join-Path $Script:BusRoot "generated"
 $Script:StartupRoot = Join-Path $Script:GeneratedRoot "tool-startup"
 $Script:InboxRoot = Join-Path $Script:BusRoot "inbox"
