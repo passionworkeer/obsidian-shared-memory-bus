@@ -150,6 +150,7 @@ jobs:
 
       - name: Run integration tests
         run: node --test tests/integration/js/*.test.{js,mjs}
+        working-directory: ${{ github.workspace }}
 
   # ---------------------------------------------------------------------------
   # Cross-platform smoke test (Node.js platform detection)
