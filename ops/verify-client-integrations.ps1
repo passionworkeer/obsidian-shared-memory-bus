@@ -261,8 +261,7 @@ function Resolve-PreferredExecutable {
 }
 
 function New-TemporaryCapturePath {
-    $file = New-TemporaryFile
-    $path = $file.FullName
+    $path = [System.IO.Path]::GetTempFileName()
     Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
     return $path
 }
@@ -277,8 +276,8 @@ function Invoke-ExternalCommandWithTimeout {
 
     $stdoutPath = New-TemporaryCapturePath
     $stderrPath = New-TemporaryCapturePath
-    $invocationSpecPath = [System.IO.Path]::ChangeExtension((New-TemporaryFile).FullName, ".json")
-    $launcherScriptPath = [System.IO.Path]::ChangeExtension((New-TemporaryFile).FullName, ".ps1")
+    $invocationSpecPath = [System.IO.Path]::ChangeExtension(([System.IO.Path]::GetTempFileName()), ".json")
+    $launcherScriptPath = [System.IO.Path]::ChangeExtension(([System.IO.Path]::GetTempFileName()), ".ps1")
     $result = [ordered]@{
         exitCode = -1
         timedOut = $false
