@@ -98,6 +98,7 @@ jobs:
 
       - name: Run integration tests
         run: node --test "tests/integration/js/*.test.{js,mjs}"
+        working-directory: ${{ github.workspace }}
 
   # ---------------------------------------------------------------------------
   # Windows: JS unit tests + Python unit tests
@@ -131,9 +132,12 @@ jobs:
 
       - name: Run JS unit tests
         run: node --test tests/unit/js/*.test.js
+        working-directory: ${{ github.workspace }}
 
       - name: Run Python unit tests
         run: pytest tests/unit/py/ -v --tb=short
+        working-directory: ${{ github.workspace }}
 
       - name: Run integration tests
         run: node --test "tests/integration/js/*.test.{js,mjs}"
+        working-directory: ${{ github.workspace }}
