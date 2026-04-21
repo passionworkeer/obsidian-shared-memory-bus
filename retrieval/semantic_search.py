@@ -28,6 +28,11 @@ _RETRIEVAL_DIR = os.path.dirname(os.path.abspath(__file__))
 if _RETRIEVAL_DIR not in sys.path:
     sys.path.insert(0, _RETRIEVAL_DIR)
 
+# Also add the parent directory (AI_MEMORY_ROOT) to sys.path for flat runtime layout
+_PARENT_DIR = os.path.dirname(_RETRIEVAL_DIR)
+if _PARENT_DIR not in sys.path:
+    sys.path.insert(0, _PARENT_DIR)
+
 import argparse
 import datetime
 import json

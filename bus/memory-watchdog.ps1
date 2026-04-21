@@ -1,10 +1,13 @@
-﻿param(
+param(
     [switch]$Daemon,
     [switch]$Once,
     [switch]$KeepRunningState,
-    [int]$PollSeconds = 15,
+    [int]$PollSeconds = 60,  # 轻量化：默认 60 秒，Daemon 模式下使用
     [int]$StaleMinutes = 5
 )
+
+# 检查是否以事件驱动模式运行（无 Daemon 且无 -Once 时，行为同 -Once）
+$EventDrivenMode = -not $Daemon -and -not $Once
 
 $watchdogEnabled = [Environment]::GetEnvironmentVariable("AI_MEMORY_WATCHDOG_ENABLED")
 if ($null -ne $watchdogEnabled -and $watchdogEnabled -in @("0", "false", "no", "off")) {
@@ -85,6 +88,7 @@ $SharedMcpRoot = Join-Path $AiMemoryRoot "shared-mcp"
 $SharedMcpStartScript = Join-Path $SharedMcpRoot "start-default-shared-mcp.ps1"
 $SharedMcpStatusScript = Join-Path $SharedMcpRoot "status-shared-mcp.ps1"
 $VaultRoot = Resolve-SharedObsidianVaultRoot -FallbackPath (Join-SharedPath @($UserHome, "Documents", "Obsidian Vault"))
+$GeneratedRoot = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "generated")
 $GlobalContextPath = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "generated", "GLOBAL-CONTEXT.md")
 $MemoryLayersJsonPath = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "generated", "MEMORY-LAYERS.json")
 $HandoffPackJsonPath = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "generated", "HANDOFF.json")
@@ -1123,7 +1127,7 @@ function Invoke-GenerateHygieneReport {
 
 function Invoke-MemoryArchival {
     # Read hygiene report to check archival_needed flag (Q1 fix: do NOT self-trigger, only act on report)
-    $hygieneReportPath = Join-Path $GeneratedRoot "memory_hygiene_report.json"
+    $hygieneReportPath = Join-SharedPath @($GeneratedRoot, "memory_hygiene_report.json")
     $archivalNeeded = $false
     if (Test-Path -LiteralPath $hygieneReportPath -PathType Leaf) {
         try {
@@ -1564,6 +1568,12 @@ try {
     }
     if ($Once -and -not $Daemon) {
         Write-State -Running $true -LastReason "watchdog-once-complete" -ChangedSpecs @() -LastSyncAt $lastSyncAt -StructuredSignature $startupStructuredSignatureAfter -HeavySyncAt $script:lastHeavySyncAt
+        return
+    }
+
+    # 轻量化：事件驱动模式下只做一次检查，然后退出
+    if ($EventDrivenMode) {
+        Write-State -Running $true -LastReason "watchdog-event-driven-complete" -ChangedSpecs @() -LastSyncAt $lastSyncAt -StructuredSignature $startupStructuredSignatureAfter -HeavySyncAt $script:lastHeavySyncAt
         return
     }
 

@@ -669,7 +669,7 @@ function Start-SharedWindowsDetachedHiddenCommand {
         }
     }
 
-    $launcherPath = [System.IO.Path]::ChangeExtension((New-TemporaryFile).FullName, ".vbs")
+    $launcherPath = [System.IO.Path]::ChangeExtension(([System.IO.Path]::GetTempFileName()), ".vbs")
     try {
         $lines = New-Object System.Collections.Generic.List[string]
         $lines.Add('Set shell = CreateObject("Wscript.Shell")') | Out-Null
@@ -764,8 +764,8 @@ function Start-SharedWindowsDetachedProcess {
         }
     }
 
-    $specPath = [System.IO.Path]::ChangeExtension((New-TemporaryFile).FullName, ".json")
-    $launcherScriptPath = [System.IO.Path]::ChangeExtension((New-TemporaryFile).FullName, ".ps1")
+    $specPath = [System.IO.Path]::ChangeExtension(([System.IO.Path]::GetTempFileName()), ".json")
+    $launcherScriptPath = [System.IO.Path]::ChangeExtension(([System.IO.Path]::GetTempFileName()), ".ps1")
 
     try {
         $invocationSpec = @{
@@ -985,8 +985,8 @@ function Start-SharedBackgroundProcess {
             }
         }
 
-        $specPath = [System.IO.Path]::ChangeExtension((New-TemporaryFile).FullName, ".json")
-        $launcherScriptPath = [System.IO.Path]::ChangeExtension((New-TemporaryFile).FullName, ".ps1")
+        $specPath = [System.IO.Path]::ChangeExtension(([System.IO.Path]::GetTempFileName()), ".json")
+        $launcherScriptPath = [System.IO.Path]::ChangeExtension(([System.IO.Path]::GetTempFileName()), ".ps1")
 
         try {
             $invocationSpec = @{
