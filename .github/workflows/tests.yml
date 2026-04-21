@@ -102,9 +102,8 @@ jobs:
       - name: Run integration tests
         run: |
           echo "PWD: $(pwd)"
-          echo "GITHUB_WORKSPACE: ${{ github.workspace }}"
-          ls -la tests/integration/js/
-          node --test "tests/integration/js/*.test.{js,mjs}"
+          ls tests/integration/js/
+          node --test tests/integration/js/*.test.js tests/integration/js/*.test.mjs
 
   # ---------------------------------------------------------------------------
   # Windows: JS unit tests + Python unit tests
@@ -151,5 +150,5 @@ jobs:
       - name: Run integration tests
         run: |
           Write-Host "PWD: $(Get-Location)"
-          node --test "tests/integration/js/*.test.{js,mjs}"
+          node --test tests/integration/js/*.test.js tests/integration/js/*.test.mjs
         shell: pwsh
