@@ -697,7 +697,7 @@ function Start-ManagedHttpProcess {
 
     if (Test-SharedIsWindows) {
         $launchSpec = Resolve-WindowsCommandLaunchSpec -Command $Command -FallbackNodeExecutable $nodeExecutable
-        return Start-SharedWindowsHeadlessProcess -FilePath ([string]$launchSpec.filePath) -ArgumentList @($launchSpec.argumentList) -Environment $Environment -WorkingDirectory $root
+        return Start-SharedBackgroundProcess -FilePath ([string]$launchSpec.filePath) -ArgumentList @($launchSpec.argumentList) -Environment $Environment -WorkingDirectory $root -StdoutPath $StdoutPath -StderrPath $StderrPath
     }
 
     return Start-SharedShellProcess -Command $Command -Environment $Environment -WorkingDirectory $root -StdoutPath $StdoutPath -StderrPath $StderrPath
@@ -713,11 +713,13 @@ function Start-ProxyProcess {
     )
 
     if (Test-SharedIsWindows) {
-        return Start-SharedWindowsHeadlessProcess `
+        return Start-SharedBackgroundProcess `
             -FilePath $NodeExecutable `
             -ArgumentList $ArgumentList `
             -Environment $Environment `
-            -WorkingDirectory $root
+            -WorkingDirectory $root `
+            -StdoutPath $StdoutPath `
+            -StderrPath $StderrPath
     }
 
     return Start-SharedShellProcess `
