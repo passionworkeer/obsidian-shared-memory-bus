@@ -75,7 +75,9 @@ function Get-LayoutEntries {
 $layoutEntries = @()
 $cliFiles = if ($layout.ContainsKey("CliFiles")) { @($layout.CliFiles) } else { @() }
 foreach ($sourceDir in @($layout.FlatRuntimeFiles.Keys | Sort-Object)) {
-    $layoutEntries += Get-LayoutEntries -Section ("runtime:{0}" -f $sourceDir) -SourceDir $sourceDir -Names @($layout.FlatRuntimeFiles[$sourceDir])
+    # For subdirectory keys like "ops/build", use the key as both source and install prefix
+    $installPrefix = if ($sourceDir -match "/") { $sourceDir } else { $null }
+    $layoutEntries += Get-LayoutEntries -Section ("runtime:{0}" -f $sourceDir) -SourceDir $sourceDir -InstallPrefix $installPrefix -Names @($layout.FlatRuntimeFiles[$sourceDir])
 }
 $layoutEntries += Get-LayoutEntries -Section "shared-mcp" -SourceDir "shared-mcp" -InstallPrefix "shared-mcp" -Names @($layout.SharedMcpFiles)
 $layoutEntries += Get-LayoutEntries -Section "templates" -SourceDir "templates" -Names @($layout.TemplateFiles)
