@@ -97,7 +97,7 @@ jobs:
           node-version: "20"
 
       - name: Run integration tests
-        run: node --test "tests/integration/js/*.test.mjs"
+        run: node --test "tests/integration/js/*.test.{js,mjs}"
 
   # ---------------------------------------------------------------------------
   # Windows: JS unit tests + Python unit tests
@@ -106,7 +106,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Set vault env
-        run: Add-Content -FilePath $env:GITHUB_ENV -Value "AI_MEMORY_OBSIDIAN_VAULT=$env:RUNNER_TEMP\vault-smoke"
+        run: Add-Content -Path $env:GITHUB_ENV -Value "AI_MEMORY_OBSIDIAN_VAULT=$env:RUNNER_TEMP\vault-smoke"
         shell: pwsh
 
       - name: Checkout
@@ -136,4 +136,4 @@ jobs:
         run: pytest tests/unit/py/ -v --tb=short
 
       - name: Run integration tests
-        run: node --test "tests/integration/js/*.test.mjs"
+        run: node --test "tests/integration/js/*.test.{js,mjs}"
