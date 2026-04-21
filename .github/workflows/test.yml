@@ -149,7 +149,7 @@ jobs:
         run: npm ci
 
       - name: Run integration tests
-        run: node --test tests/integration/js/*.test.mjs
+        run: node --test tests/integration/js/*.test.{js,mjs}
 
   # ---------------------------------------------------------------------------
   # Cross-platform smoke test (Node.js platform detection)
