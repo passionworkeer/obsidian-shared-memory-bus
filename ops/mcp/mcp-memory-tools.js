@@ -16,6 +16,7 @@ const crypto = require("node:crypto");
 
 function loadHelper(relativeParts) {
   const candidates = [
+    path.join(__dirname, "..", "..", ...relativeParts),
     path.join(__dirname, "..", ...relativeParts),
     path.join(__dirname, ...relativeParts),
   ];

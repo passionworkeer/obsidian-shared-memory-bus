@@ -13,7 +13,7 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 
 // Load the JS implementation directly
-const { validateStructuredRecord, validatePromotionMetadata } = require("../../ops/memory-contract.js");
+const { validateStructuredRecord, validatePromotionMetadata } = require("../../ops/memory/memory-contract.js");
 
 // Resolve retrieval module path relative to test file (portable)
 const PROJECT_ROOT = path.resolve(__dirname, "../..");

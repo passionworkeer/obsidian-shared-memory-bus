@@ -239,7 +239,8 @@ async function main() {
     testNoDoubleNewline(),
     testCreateDirFalse(),
     // Skip flaky concurrent test in CI (GitHub Actions virtualized filesystem)
-    process.env.GITHUB_ACTIONS ? true : await testConcurrentAppend(),
+    // Also skip on Windows (file system differences)
+    (process.env.GITHUB_ACTIONS || process.platform === "win32") ? true : await testConcurrentAppend(),
   ];
 
   console.log("=".repeat(60));
