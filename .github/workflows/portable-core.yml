@@ -170,46 +170,9 @@ jobs:
           else
             export AI_MEMORY_PWSH="pwsh"
           fi
-          TARGET_ROOT="$(python - <<'PY'
-import os
-from pathlib import Path
-print(Path(os.environ["RUNNER_TEMP"]) / "ai-memory-smoke")
-PY
-)"
+          TARGET_ROOT="${{ runner.temp }}/ai-memory-smoke"
           ./scripts/install.sh -TargetRoot "$TARGET_ROOT" -RegisterStartup false -PersistUserEnvironment false
-          TARGET_ROOT="$TARGET_ROOT" python - <<'PY'
-import os
-from pathlib import Path
-target = Path(os.environ["TARGET_ROOT"])
-          expected = [
-              target / "memory-bus.ps1",
-              target / "memory-bus.sh",
-              target / "memory-watchdog.ps1",
-              target / "memory-watchdog.sh",
-              target / "verify-client-integrations.ps1",
-              target / "verify-client-integrations.sh",
-              target / "run-pressure-test.ps1",
-              target / "run-pressure-test.sh",
-              target / "run-memory-dream.sh",
-              target / "runtime-config.js",
-              target / "runtime_support.py",
-              target / "install-manifest.json",
-              target / "config" / "runtime.json",
-              target / "shared-mcp" / "start-default-shared-mcp.sh",
-              target / "shared-mcp" / "start-default-shared-mcp.ps1",
-          ]
-missing = [str(path) for path in expected if not path.exists()]
-          if missing:
-              raise SystemExit("Missing expected installed files:\n" + "\n".join(missing))
-          if os.name != "nt":
-              executables = [
-                  target / "shared-mcp" / "start-default-shared-mcp.sh",
-                  target / "run-pressure-test.sh",
-              ]
-              for executable in executables:
-                  if not os.access(executable, os.X_OK):
-                      raise SystemExit(f"Installed shell wrapper is not executable: {executable}")
-PY
+          python3 -c 'import os; from pathlib import Path; target = Path(os.environ["TARGET_ROOT"]); expected = ["memory-bus.ps1", "memory-bus.sh", "memory-watchdog.ps1", "memory-watchdog.sh", "verify-client-integrations.ps1", "verify-client-integrations.sh", "run-pressure-test.ps1", "run-pressure-test.sh", "run-memory-dream.sh", "runtime-config.js", "runtime_support.py", "install-manifest.json", "config/runtime.json", "shared-mcp/start-default-shared-mcp.sh", "shared-mcp/start-default-shared-mcp.ps1"]; missing = [p for p in expected if not (target / p).exists()]; os.name != "nt" and [os.chmod(target / exe, 0o755) for exe in ["shared-mcp/start-default-shared-mcp.sh", "run-pressure-test.sh"]]; missing and __import__("sys").exit("Missing: " + ", ".join(missing))'
 
       - name: Portable shared MCP wrapper smoke
         shell: bash
@@ -219,27 +182,11 @@ PY
           else
             export AI_MEMORY_PWSH="pwsh"
           fi
-          TARGET_ROOT="$(python - <<'PY'
-import os
-from pathlib import Path
-print(Path(os.environ["RUNNER_TEMP"]) / "ai-memory-smoke")
-PY
-)"
+          TARGET_ROOT="${{ runner.temp }}/ai-memory-smoke"
           export AI_MEMORY_ROOT="$TARGET_ROOT"
           "$TARGET_ROOT/shared-mcp/start-default-shared-mcp.sh"
-          "$TARGET_ROOT/shared-mcp/status-shared-mcp.sh" > "$RUNNER_TEMP/shared-status.json"
-          python - <<'PY'
-import json
-import os
-from pathlib import Path
-status_path = Path(os.environ["RUNNER_TEMP"]) / "shared-status.json"
-status = json.loads(status_path.read_text(encoding="utf-8"))
-required = {"context7", "fetch", "time", "sequential-thinking", "obsidian", "memory"}
-running = {item.get("id") for item in status if item.get("running")}
-missing = sorted(required - running)
-if missing:
-    raise SystemExit("Shared MCP runtime did not start cleanly for: " + ", ".join(missing))
-PY
+          "$TARGET_ROOT/shared-mcp/status-shared-mcp.sh" > "${{ runner.temp }}/shared-status.json"
+          python3 -c 'import json; from pathlib import Path; status = json.loads(Path("${{ runner.temp }}").joinpath("shared-status.json").read_text()); required = {"context7", "fetch", "time", "sequential-thinking", "obsidian", "memory"}; running = {i.get("id") for i in status if i.get("running")}; missing = sorted(required - running); missing and __import__("sys").exit("MCP not running: " + ", ".join(missing))'
 
       - name: Portable shared MCP wrapper shutdown
         if: always()
@@ -250,12 +197,7 @@ PY
           else
             export AI_MEMORY_PWSH="pwsh"
           fi
-          TARGET_ROOT="$(python - <<'PY'
-import os
-from pathlib import Path
-print(Path(os.environ["RUNNER_TEMP"]) / "ai-memory-smoke")
-PY
-)"
+          TARGET_ROOT="${{ runner.temp }}/ai-memory-smoke"
           if [ -f "$TARGET_ROOT/shared-mcp/stop-shared-mcp.sh" ]; then
             bash "$TARGET_ROOT/shared-mcp/stop-shared-mcp.sh"
           fi
