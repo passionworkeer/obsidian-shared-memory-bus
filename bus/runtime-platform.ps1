@@ -18,24 +18,24 @@ function Join-SharedPath {
 }
 
 function Get-SharedPlatformInfo {
-    $isWindows = $false
-    $isMacOS = $false
-    $isLinux = $false
+    $isWin = $false
+    $isMac = $false
+    $isLin = $false
 
     try {
         $runtimeInfo = [System.Runtime.InteropServices.RuntimeInformation]
-        $isWindows = $runtimeInfo::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)
-        $isMacOS = $runtimeInfo::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::OSX)
-        $isLinux = $runtimeInfo::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Linux)
+        $isWin = $runtimeInfo::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)
+        $isMac = $runtimeInfo::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::OSX)
+        $isLin = $runtimeInfo::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Linux)
     } catch {
         $platform = [Environment]::OSVersion.Platform
-        $isWindows = $platform -eq [System.PlatformID]::Win32NT
+        $isWin = $platform -eq [System.PlatformID]::Win32NT
     }
 
     [pscustomobject]@{
-        IsWindows = [bool]$isWindows
-        IsMacOS = [bool]$isMacOS
-        IsLinux = [bool]$isLinux
+        IsWindows = [bool]$isWin
+        IsMacOS = [bool]$isMac
+        IsLinux = [bool]$isLin
     }
 }
 
