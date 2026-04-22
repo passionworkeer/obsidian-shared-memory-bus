@@ -16,73 +16,73 @@
             "runtime-config.js"
             "vault-root.js"
         )
-        ops/build = @(
+        "ops/build" = @(
             "build-handoff-pack.js"
             "build-l0-l1-bootstrap.js"
             "build-memory-layers.js"
         )
-        ops/check = @(
+        "ops/check" = @(
             "check-memory-integrity.js"
             "check-vbs.js"
         )
-        ops/cleanup = @(
+        "ops/cleanup" = @(
             "cleanup-inbox.ps1"
         )
-        ops/daemon = @(
+        "ops/daemon" = @(
             "obsidian-blackboard-daemon.js"
         )
-        ops/entity = @(
+        "ops/entity" = @(
             "entity-backfill.js"
             "entity-extractor.js"
         )
-        ops/generate = @(
+        "ops/generate" = @(
             "generate-context.js"
             "generate-memory-hygiene-report.js"
             "refresh-generated-artifacts.js"
         )
-        ops/inbox = @(
+        "ops/inbox" = @(
             "inbox-atomic-write.js"
         )
-        ops/knowledge = @(
+        "ops/knowledge" = @(
             "knowledge-graph.js"
         )
-        ops/mcp = @(
+        "ops/mcp" = @(
             "mcp-memory-tools.js"
             "mcp-memory-tools-handler.js"
         )
-        ops/memory = @(
+        "ops/memory" = @(
             "memory-archival.js"
             "memory-contract.js"
             "memory-layers-context.js"
             "memory-layers-dedup.js"
             "memory-layers-parse.js"
         )
-        ops/redact = @(
+        "ops/redact" = @(
             "redaction.py"
         )
-        ops/run = @(
+        "ops/run" = @(
             "run-memory-dream.ps1"
             "run-minimax-mcp.ps1"
             "run-obsidian-mcp.ps1"
             "run-pressure-test.ps1"
         )
-        ops/setup = @(
+        "ops/setup" = @(
             "install-client-integrations.ps1"
             "migrate-to-store.js"
             "setup-wizard.ps1"
         )
-        ops/stress = @(
+        "ops/stress" = @(
             "stress-test-concurrent.js"
         )
-        ops/sync = @(
+        "ops/sync" = @(
             "sync-claudemem-to-obsidian.ps1"
             "sync-openclaw-to-obsidian.js"
             "sync-shared-skills.ps1"
         )
-        ops/util = @(
+        "ops/util" = @(
             "jsonl-stream.js"
         )
-        ops/verify = @(
+        "ops/verify" = @(
             "verify-atomic-write.js"
             "verify-client-integrations.ps1"
             "verify-integrations.ps1"
