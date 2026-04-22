@@ -53,3 +53,4 @@ c8rc.json
 
 # Template .config (duplicate of config/, use config/ instead)
 templates/.memory/.config/
+SUPPORT.md
