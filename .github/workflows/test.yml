@@ -29,7 +29,7 @@ jobs:
         run: npm ci
 
       - name: Run JS unit tests
-        run: node --test tests/unit/js/*.test.{js,mjs}
+        run: node --test tests/unit/js/*.test.js tests/unit/js/*.test.mjs
 
   # ---------------------------------------------------------------------------
   # Unit tests — macOS (Node.js 20)
@@ -49,7 +49,7 @@ jobs:
         run: npm ci
 
       - name: Run JS unit tests
-        run: node --test tests/unit/js/*.test.{js,mjs}
+        run: node --test tests/unit/js/*.test.js tests/unit/js/*.test.mjs
 
   # ---------------------------------------------------------------------------
   # Unit tests — Windows (Node.js 20)
@@ -69,7 +69,7 @@ jobs:
         run: npm ci
 
       - name: Run JS unit tests
-        run: node --test tests/unit/js/*.test.{js,mjs}
+        run: node --test tests/unit/js/*.test.js tests/unit/js/*.test.mjs
         shell: bash
 
   # ---------------------------------------------------------------------------
@@ -149,7 +149,7 @@ jobs:
         run: npm ci
 
       - name: Run integration tests
-        run: node --test tests/integration/js/*.test.{js,mjs}
+        run: node --test tests/integration/js/*.test.js tests/integration/js/*.test.mjs
         working-directory: ${{ github.workspace }}
 
   # ---------------------------------------------------------------------------
