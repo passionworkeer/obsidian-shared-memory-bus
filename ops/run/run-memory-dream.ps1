@@ -16,7 +16,7 @@ $UnixEpochTicks = ([datetimeoffset]::Parse("1970-01-01T00:00:00+00:00", [System.
 
 $helperPath = @(
     (Join-Path $PSScriptRoot "runtime-platform.ps1"),
-    (Join-Path $PSScriptRoot "../bus/runtime-platform.ps1")
+    (Join-Path $PSScriptRoot "../../bus/runtime-platform.ps1")
 ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
 
 if (-not $helperPath) {
