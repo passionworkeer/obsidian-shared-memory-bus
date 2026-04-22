@@ -49,7 +49,7 @@ jobs:
       - name: Seed portable smoke vault
         shell: pwsh
         env:
-          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke
+          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke/00-System/ai-memory/00-System/ai-memory
         run: |
           $vault = $env:AI_MEMORY_STORE
           $paths = @(
@@ -97,7 +97,7 @@ jobs:
       - name: Build memory layers
         shell: pwsh
         env:
-          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke
+          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke/00-System/ai-memory
         run: |
           node ./ops/build/build-memory-layers.js | Out-Null
           if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_STORE '00-System/ai-memory/generated/MEMORY-LAYERS.md') -PathType Leaf)) {
@@ -107,7 +107,7 @@ jobs:
       - name: Build handoff pack
         shell: pwsh
         env:
-          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke
+          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke/00-System/ai-memory
         run: |
           node ./ops/build/build-handoff-pack.js | Out-Null
           if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_STORE '00-System/ai-memory/generated/HANDOFF.md') -PathType Leaf)) {
@@ -117,7 +117,7 @@ jobs:
       - name: Run auto dream consolidation
         shell: pwsh
         env:
-          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke
+          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke/00-System/ai-memory
         run: |
           ./ops/run/run-memory-dream.ps1 -Force | Out-Null
           if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_STORE '00-System/ai-memory/generated/AUTO-DREAM.md') -PathType Leaf)) {
@@ -127,14 +127,14 @@ jobs:
       - name: Validate memory integrity contract
         shell: pwsh
         env:
-          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke
+          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke/00-System/ai-memory
         run: |
           node ./ops/check/check-memory-integrity.js --strict --json | Out-Null
 
       - name: Build embeddings
         shell: pwsh
         env:
-          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke
+          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke/00-System/ai-memory
         run: |
           node ./bus/generate-embeddings.js | Out-Null
           if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_STORE '00-System/ai-memory/embeddings/index.jsonl') -PathType Leaf)) {
@@ -144,7 +144,7 @@ jobs:
       - name: Run hybrid retrieval smoke
         shell: pwsh
         env:
-          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke
+          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke/00-System/ai-memory
         run: |
           $json = node ./retrieval/semantic-search.js --json --mode hybrid --top-k 3 "openclaw blackboard portable task"
           $result = $json | ConvertFrom-Json
@@ -160,7 +160,7 @@ jobs:
       - name: Run OpenClaw routed retrieval smoke
         shell: pwsh
         env:
-          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke
+          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke/00-System/ai-memory
         run: |
           $json = node ./retrieval/semantic-search.js --json --mode hybrid --route task --tool openclaw --source-kind blackboard --top-k 3 "shrimp intel queue"
           $result = $json | ConvertFrom-Json
@@ -180,7 +180,7 @@ jobs:
       - name: Portable install wrapper smoke
         shell: bash
         env:
-          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke
+          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke/00-System/ai-memory
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
             export AI_MEMORY_PWSH="powershell.exe"
@@ -194,7 +194,7 @@ jobs:
       - name: Portable shared MCP wrapper smoke
         shell: bash
         env:
-          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke
+          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke/00-System/ai-memory
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
             export AI_MEMORY_PWSH="powershell.exe"
