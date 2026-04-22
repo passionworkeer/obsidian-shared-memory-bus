@@ -25,7 +25,7 @@ for p in [str(_project_root), str(_retrieval_dir)]:
 # Module import
 # ---------------------------------------------------------------------------
 try:
-    from retrieval.streaming_index import StreamingIndex, StreamingIndexReader
+    from retrieval.streaming_index import StreamingIndex, StreamingIndexReader, StreamingIndexWithIndex
 except ImportError as exc:
     pytest.fail(f"Failed to import streaming_index: {exc}")
 
@@ -325,3 +325,99 @@ class TestStreamingIndex:
         index = StreamingIndex(tmp_path / "does_not_exist.jsonl")
         records = list(index.scan())
         assert records == []
+
+
+# ---------------------------------------------------------------------------
+# StreamingIndexWithIndex tests
+# ---------------------------------------------------------------------------
+
+class TestStreamingIndexWithIndex:
+    """Test StreamingIndexWithIndex — hash index for O(1) record lookup."""
+
+    def test_get_returns_record(self, temp_index_file):
+        """get() should return the full record dict for a known ID."""
+        index = StreamingIndexWithIndex(temp_index_file)
+        assert index.is_indexed is True
+        record = index.get("rec-0050")
+        assert record is not None
+        assert record["id"] == "rec-0050"
+        assert isinstance(record["embedding"], list)
+
+    def test_get_returns_none_for_unknown_id(self, temp_index_file):
+        """get() should return None when the ID is not found."""
+        index = StreamingIndexWithIndex(temp_index_file)
+        record = index.get("nonexistent-id")
+        assert record is None
+
+    def test_get_embedding_returns_vector(self, temp_index_file):
+        """get_embedding() should return just the vector list."""
+        index = StreamingIndexWithIndex(temp_index_file)
+        emb = index.get_embedding("rec-0001")
+        assert emb is not None
+        assert isinstance(emb, list)
+        assert len(emb) == 384
+
+    def test_get_is_o1_lookup(self, temp_index_file):
+        """Multiple sequential gets should all succeed (hash index working)."""
+        index = StreamingIndexWithIndex(temp_index_file)
+        # Access 10 different records sequentially
+        for i in range(10):
+            record = index.get(f"rec-{i:04d}")
+            assert record is not None
+            assert record["id"] == f"rec-{i:04d}"
+
+    def test_scan_returns_generator(self, temp_index_file):
+        """scan() should return a generator."""
+        index = StreamingIndexWithIndex(temp_index_file)
+        result = index.scan()
+        assert isinstance(result, types.GeneratorType)
+
+    def test_scan_full_iteration(self, temp_index_file):
+        """scan() should iterate over all records."""
+        index = StreamingIndexWithIndex(temp_index_file)
+        all_records = list(index.scan())
+        assert len(all_records) == 1000
+
+    def test_fallback_to_streaming_for_large_file(self, tmp_path):
+        """Files larger than max_index_size should fall back to StreamingIndex."""
+        file_path = tmp_path / "large_index.jsonl"
+        # Create a small file but set max_index_size to 1 byte to force fallback
+        records = [
+            json.dumps({"id": f"r-{i}", "embedding": [0.1] * 10})
+            for i in range(5)
+        ]
+        file_path.write_text("\n".join(records) + "\n", encoding="utf-8")
+
+        index = StreamingIndexWithIndex(file_path, max_index_size=1)
+        # Should fall back to streaming
+        assert index._fallback_to_streaming is True
+        assert index.is_indexed is False
+        # get() should still work via fallback
+        record = index.get("r-0")
+        assert record is not None
+        assert record["id"] == "r-0"
+
+    def test_nonexistent_file_falls_back(self, tmp_path):
+        """Nonexistent files should gracefully fall back."""
+        index = StreamingIndexWithIndex(tmp_path / "does_not_exist.jsonl")
+        assert index._fallback_to_streaming is True
+        record = index.get("any-id")
+        assert record is None
+
+    def test_stats_reports_index_status(self, temp_index_file):
+        """stats() should report index status."""
+        index = StreamingIndexWithIndex(temp_index_file)
+        stats = index.stats()
+        assert "is_indexed" in stats
+        assert "indexed_entries" in stats
+        assert stats["is_indexed"] is True
+        assert stats["indexed_entries"] == 1000
+
+    def test_stats_fallback_mode(self, tmp_path):
+        """stats() should report fallback mode correctly."""
+        file_path = tmp_path / "small.jsonl"
+        file_path.write_text('{"id": "a", "embedding": [0.1]}\n', encoding="utf-8")
+
+        index = StreamingIndexWithIndex(file_path, max_index_size=1)
+        stats = index.stats()
+        assert stats["fallback_to_streaming"] is True
