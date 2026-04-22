@@ -10,8 +10,6 @@ on:
 jobs:
   validate:
     runs-on: windows-latest
-    env:
-      AI_MEMORY_OBSIDIAN_VAULT: ${{ runner.temp }}\vault-smoke
 
     steps:
       - name: Checkout
