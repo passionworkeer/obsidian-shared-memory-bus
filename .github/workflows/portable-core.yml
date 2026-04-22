@@ -17,7 +17,6 @@ jobs:
           - windows-latest
           - ubuntu-latest
           - macos-latest
-    env: {}
 
     steps:
       - name: Checkout
