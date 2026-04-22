@@ -46,6 +46,8 @@ reports/
 .vscode/
 cursor/
 cursor
+.agents/
+.trae/
 
 # Machine-specific client configs (contain user/environment-specific settings)
 opencode.json
@@ -53,3 +55,4 @@ c8rc.json
 
 # Template .config (duplicate of config/, use config/ instead)
 templates/.memory/.config/
+SUPPORT.md

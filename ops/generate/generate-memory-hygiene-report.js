@@ -26,7 +26,7 @@ const { resolveVaultRoot } = loadVaultRootHelper();
 let STRUCTURED_LAYER_DEFINITIONS;
 let isExpectedDerivedDuplicate;
 try {
-  ({ STRUCTURED_LAYER_DEFINITIONS, isExpectedDerivedDuplicate } = require("./memory-contract.js"));
+  ({ STRUCTURED_LAYER_DEFINITIONS, isExpectedDerivedDuplicate } = require("../memory/memory-contract.js"));
 } catch (_err) {
   // Inline fallback — used only when memory-contract.js is unavailable
   STRUCTURED_LAYER_DEFINITIONS = [

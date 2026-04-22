@@ -7,7 +7,7 @@
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
-const { createJsonlStream } = require("./jsonl-stream.js");
+const { createJsonlStream } = require("../util/jsonl-stream.js");
 const {
   buildGeneratedArtifactMetadata,
   MEMORY_RECORD_SCHEMA_VERSION,
@@ -20,6 +20,7 @@ const {
 function loadStoreRootHelper() {
   const candidates = [
     path.join(__dirname, "store-root.js"),
+    path.join(__dirname, "..", "..", "bus", "store-root.js"),
     path.join(__dirname, "..", "bus", "store-root.js"),
     path.join(__dirname, "bus", "store-root.js"),
   ];
@@ -339,7 +340,7 @@ function resolveIncludes(content, baseDir, maxDepth = 5, currentDepth = 0) {
 /** @returns {{ extractFromRecord: (r: object) => object } | null} */
 function loadEntityExtractor() {
   try {
-    return require("./entity-extractor.js");
+    return require("../entity/entity-extractor.js");
   } catch {
     return { extractFromRecord: (r) => r };  // passthrough when module unavailable
   }
@@ -348,7 +349,7 @@ function loadEntityExtractor() {
 /** @returns {{ ingestRecord: (r: object) => void, close: () => void } | null} */
 function loadKnowledgeGraph() {
   try {
-    const { KnowledgeGraph } = require("./knowledge-graph.js");
+    const { KnowledgeGraph } = require("../knowledge/knowledge-graph.js");
     return new KnowledgeGraph({ storeRoot: STORE_ROOT });
   } catch {
     return {
