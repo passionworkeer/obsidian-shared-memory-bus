@@ -47,7 +47,7 @@ const {
   MIN_PROMOTION_CONFIDENCE,
   DURABLE_SCOPES,
   NON_PROMOTABLE_PROMOTION_TYPES,
-} = require("./memory-layers-parse.js");
+} = require("./memory/memory-layers-parse.js");
 
 const {
   // Context module — global context generation, summaries
@@ -97,7 +97,7 @@ const { resolveStoreRoot } = loadStoreRootHelper();
 const {
   buildGeneratedArtifactMetadata,
   MEMORY_RECORD_SCHEMA_VERSION,
-} = require("./memory-contract.js");
+} = require("./memory/memory-contract.js");
 
 // ---------------------------------------------------------------------------
 // Main

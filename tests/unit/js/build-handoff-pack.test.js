@@ -51,13 +51,13 @@ delete require.cache[HANDOFF_MODULE_PATH];
 // Stub memory-contract
 // ---------------------------------------------------------------------------
 
-const mcPath = require.resolve("../../../ops/memory-contract.js");
+const mcPath = require.resolve("../../../ops/memory/memory-contract.js");
 delete require.cache[mcPath];
 require.cache[mcPath] = {
   id: mcPath,
   filename: mcPath,
   loaded: true,
-  exports: require("../../../ops/memory-contract.js"),
+  exports: require("../../../ops/memory/memory-contract.js"),
 };
 
 // ---------------------------------------------------------------------------

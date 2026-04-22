@@ -24,7 +24,7 @@ function loadVaultRootHelper() {
 }
 
 const { resolveVaultRoot } = loadVaultRootHelper();
-const { buildMemoryIntegrityReport } = require("./memory-contract.js");
+const { buildMemoryIntegrityReport } = require("./memory/memory-contract.js");
 
 function parseArgs(argv) {
   return {
