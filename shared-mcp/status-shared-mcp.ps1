@@ -165,7 +165,7 @@ function Get-Uptime {
     }
 }
 
-# ANSI colour codes — compatible with Windows Terminal, modern shells.
+# ANSI colour codes -- compatible with Windows Terminal, modern shells.
 $ESC = [char]27
 $CLR_RESET   = "${ESC}[0m"
 $CLR_RED     = "${ESC}[91m"
@@ -442,7 +442,7 @@ $summary = if ($allHealthy) {
     "${CLR_GREEN}All servers healthy${CLR_RESET}"
 } else {
     $unhealthyCount = @($rows | Where-Object { $_.Status -ne "healthy" }).Count
-    "${CLR_YELLOW}${unhealthyCount} server(s) not healthy — see table above${CLR_RESET}"
+    "${CLR_YELLOW}${unhealthyCount} server(s) not healthy -- see table above${CLR_RESET}"
 }
 Write-Output "  $summary"
 Write-Output ""
