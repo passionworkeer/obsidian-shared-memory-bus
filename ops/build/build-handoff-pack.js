@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const {
   buildGeneratedArtifactMetadata,
-} = require("./memory/memory-contract.js");
+} = require("../memory/memory-contract.js");
 
 function loadStoreRootHelper() {
   const candidates = [
