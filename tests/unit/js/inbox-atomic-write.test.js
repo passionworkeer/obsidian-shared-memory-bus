@@ -19,7 +19,7 @@ const fs   = require("node:fs");
 const path = require("node:path");
 const os   = require("node:os");
 
-const { appendLineAtomic } = require("../../../ops/inbox-atomic-write.js");
+const { appendLineAtomic } = require("../../../ops/inbox/inbox-atomic-write.js");
 
 // ---------------------------------------------------------------------------
 // Setup / Teardown

@@ -180,7 +180,7 @@ function Get-OnboardingSharedMcpUrl {
 }
 
 function Build-OnboardingObsidianStdioConfigJson {
-    $obsidianMcpScript = ((Resolve-BusScriptPath -Candidates @("run-obsidian-mcp.ps1", "ops/run-obsidian-mcp.ps1")) -replace "\\", "/")
+    $obsidianMcpScript = ((Resolve-BusScriptPath -Candidates @("run-obsidian-mcp.ps1", "ops/run/run-obsidian-mcp.ps1")) -replace "\\", "/")
     $payload = [ordered]@{
         mcpServers = [ordered]@{
             obsidian = [ordered]@{

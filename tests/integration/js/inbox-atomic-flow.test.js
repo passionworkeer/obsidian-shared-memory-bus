@@ -66,7 +66,7 @@ describe("inbox atomic flow integration", () => {
   // Scenario 1: Single appendLineAtomic succeeds
   // -------------------------------------------------------------------------
   test("single appendLineAtomic writes exactly one valid JSON line", () => {
-    const { appendLineAtomic } = require("../../../ops/inbox-atomic-write.js");
+    const { appendLineAtomic } = require("../../../ops/inbox/inbox-atomic-write.js");
 
     const file = path.join(testDir, "single.jsonl");
     const record = { id: "single-001", msg: "hello atomic world", seq: 1 };
@@ -87,7 +87,7 @@ describe("inbox atomic flow integration", () => {
     const file = path.join(testDir, "concurrent-20.jsonl");
     const N = 20;
 
-    const scriptPath = path.join(__dirname, "../../../ops/inbox-atomic-write.js");
+    const scriptPath = path.join(__dirname, "../../../ops/inbox/inbox-atomic-write.js");
     const promises = Array.from({ length: N }, (_, i) =>
       new Promise((resolve) => {
         const child = spawn(
@@ -148,7 +148,7 @@ describe("inbox atomic flow integration", () => {
   // Scenario 3: Directory auto-creation when parent directory does not exist
   // -------------------------------------------------------------------------
   test("appendLineAtomic auto-creates the parent directory if it is missing", () => {
-    const { appendLineAtomic } = require("../../../ops/inbox-atomic-write.js");
+    const { appendLineAtomic } = require("../../../ops/inbox/inbox-atomic-write.js");
 
     // Deep path where no directory exists
     const deepFile = path.join(testDir, "deeply", "nested", "atomic", "auto.jsonl");
@@ -173,7 +173,7 @@ describe("inbox atomic flow integration", () => {
   // Stress: interleaved sequential + concurrent writes
   // -------------------------------------------------------------------------
   test("mixed sequential and concurrent writes — all records present, no corruption", async () => {
-    const { appendLineAtomic } = require("../../../ops/inbox-atomic-write.js");
+    const { appendLineAtomic } = require("../../../ops/inbox/inbox-atomic-write.js");
     const file = path.join(testDir, "mixed.jsonl");
 
     // Pre-write 5 sequential lines
@@ -183,7 +183,7 @@ describe("inbox atomic flow integration", () => {
 
     // Concurrently append 15 more
     const N = 15;
-    const scriptPath = path.join(__dirname, "../../../ops/inbox-atomic-write.js");
+    const scriptPath = path.join(__dirname, "../../../ops/inbox/inbox-atomic-write.js");
     const promises = Array.from({ length: N }, (_, i) =>
       new Promise((resolve) => {
         spawn(
