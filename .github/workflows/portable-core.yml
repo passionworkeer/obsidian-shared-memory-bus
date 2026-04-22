@@ -189,6 +189,7 @@ jobs:
         env:
           AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke/00-System/ai-memory
         run: |
+          chmod +x ./scripts/install.sh
           if [ "$RUNNER_OS" = "Windows" ]; then
             export AI_MEMORY_PWSH="powershell.exe"
           else
