@@ -38,7 +38,7 @@ require.cache[stubVaultRootPath] = {
 };
 
 // Patch Module.prototype._compile to inject exports
-const MEMORY_LAYERS_DEDUP_PATH = require.resolve("../../../ops/memory-layers-dedup.js");
+const MEMORY_LAYERS_DEDUP_PATH = require.resolve("../../../ops/memory/memory-layers-dedup.js");
 const _originalCompile = Module.prototype._compile;
 Module.prototype._compile = function(code, filename) {
   if (filename === MEMORY_LAYERS_DEDUP_PATH) {
@@ -76,7 +76,7 @@ const {
   sha256,
   getFreshness,
   shouldSkipAsRecentDuplicate,
-} = require("../../../ops/memory-layers-dedup.js");
+} = require("../../../ops/memory/memory-layers-dedup.js");
 
 const test = require("node:test");
 const assert = require("node:assert/strict");

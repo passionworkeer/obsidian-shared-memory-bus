@@ -457,7 +457,7 @@ Only include records that are genuinely relevant. Return fewer than max_results 
 
   function loadKnowledgeGraph() {
     try {
-      const { KnowledgeGraph } = require("../../ops/knowledge-graph.js");
+      const { KnowledgeGraph } = require("../../ops/knowledge/knowledge-graph.js");
       return new KnowledgeGraph({ vaultRoot: params.VAULT_ROOT });
     } catch {
       return null;

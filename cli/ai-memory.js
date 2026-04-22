@@ -136,19 +136,19 @@ const COMMANDS = {
   "dream:run": {
     desc: "Consolidate memory into long-term summaries",
     category: "Dream",
-    ps: "ops/run-memory-dream.ps1",
+    ps: "ops/run/run-memory-dream.ps1",
     args: [],
   },
   "dream:dry-run": {
     desc: "Dry-run dream consolidation",
     category: "Dream",
-    ps: "ops/run-memory-dream.ps1",
+    ps: "ops/run/run-memory-dream.ps1",
     args: ["-DryRun"],
   },
   "dream:writeback": {
     desc: "Dream consolidation with writeback",
     category: "Dream",
-    ps: "ops/run-memory-dream.ps1",
+    ps: "ops/run/run-memory-dream.ps1",
     args: ["-Writeback"],
   },
 
@@ -162,7 +162,7 @@ const COMMANDS = {
   "embeddings:status": {
     desc: "Check if search index is healthy",
     category: "Embeddings",
-    js: "ops/check-memory-integrity.js",
+    js: "ops/check/check-memory-integrity.js",
     args: ["--json"],
   },
   "embeddings:force": {
@@ -176,7 +176,7 @@ const COMMANDS = {
   "layers:build": {
     desc: "Build memory layers",
     category: "Layers",
-    js: "ops/build-memory-layers.js",
+    js: "ops/build/build-memory-layers.js",
     args: [],
   },
 
@@ -184,7 +184,7 @@ const COMMANDS = {
   "handoff:build": {
     desc: "Build handoff pack",
     category: "Handoff",
-    js: "ops/build-handoff-pack.js",
+    js: "ops/build/build-handoff-pack.js",
     args: [],
   },
 
@@ -192,7 +192,7 @@ const COMMANDS = {
   "hygiene:report": {
     desc: "Generate memory hygiene report",
     category: "Hygiene",
-    js: "ops/generate-memory-hygiene-report.js",
+    js: "ops/generate/generate-memory-hygiene-report.js",
     args: ["--json"],
   },
 
@@ -228,7 +228,7 @@ const COMMANDS = {
   "check": {
     desc: "Validate memory integrity",
     category: "Integrity",
-    js: "ops/check-memory-integrity.js",
+    js: "ops/check/check-memory-integrity.js",
     args: [],
   },
 
@@ -242,7 +242,7 @@ const COMMANDS = {
   "setup": {
     desc: "Interactive setup wizard (checks prerequisites, creates vault structure)",
     category: "Diagnose",
-    ps: "ops/setup-wizard.ps1",
+    ps: "ops/setup/setup-wizard.ps1",
     args: [],
   },
 

@@ -104,7 +104,7 @@
             "semantic-search-cli.js"
             "semantic-search-cli.test.js"
             "semantic-search.js"
-            "semantic-search.py"
+            "semantic_search.py"
         )
     }
     SharedMcpFiles = @(

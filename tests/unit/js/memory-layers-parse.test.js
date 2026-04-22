@@ -38,7 +38,7 @@ require.cache[stubVaultRootPath] = {
 };
 
 // Patch Module.prototype._compile to inject exports
-const MEMORY_LAYERS_PARSE_PATH = require.resolve("../../../ops/memory-layers-parse.js");
+const MEMORY_LAYERS_PARSE_PATH = require.resolve("../../../ops/memory/memory-layers-parse.js");
 const _originalCompile = Module.prototype._compile;
 Module.prototype._compile = function(code, filename) {
   if (filename === MEMORY_LAYERS_PARSE_PATH) {
@@ -81,7 +81,7 @@ const {
   shouldSkipAsRecentDuplicate, getFreshness, tokenize,
   NON_PROMOTABLE_PROMOTION_TYPES,
   loadStructuredRecords,
-} = require("../../../ops/memory-layers-parse.js");
+} = require("../../../ops/memory/memory-layers-parse.js");
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
