@@ -574,10 +574,12 @@ function Resolve-CommandTemplate {
         "{{python}}" = (ConvertTo-ShellLiteral (Resolve-SharedPythonExecutable))
         "{{obsidianRunner}}" = (ConvertTo-ShellLiteral (Resolve-ManagedRuntimeFile -RelativeCandidates @(
                     "run-obsidian-mcp.ps1",
+                    (Join-Path "ops" (Join-Path "run" "run-obsidian-mcp.ps1")),
                     (Join-Path "ops" "run-obsidian-mcp.ps1")
                 )))
         "{{minimaxRunner}}" = (ConvertTo-ShellLiteral (Resolve-ManagedRuntimeFile -RelativeCandidates @(
                     "run-minimax-mcp.ps1",
+                    (Join-Path "ops" (Join-Path "run" "run-minimax-mcp.ps1")),
                     (Join-Path "ops" "run-minimax-mcp.ps1")
                 )))
         "{{omniMemoryServer}}" = (ConvertTo-ShellLiteral (Resolve-ManagedRuntimeFile -RelativeCandidates @(
@@ -787,7 +789,7 @@ function Clean-StateFile {
         }
 
         if (Test-PidAlive -ProcessId $recordedPid) {
-            # PID is alive — nothing to do.
+            # PID is alive -- nothing to do.
             continue
         }
 
@@ -816,12 +818,12 @@ function Clean-StateFile {
                 $record["pid"] = $freshPid
                 $record["status"] = "adopted"
                 $record["notes"] = "PID $recordedPid was dead at startup, adopted fresh PID $freshPid on port $port"
-                Write-Output "[shared-mcp] State cleanup: $serverId — dead PID $recordedPid replaced with live PID $freshPid"
+                Write-Output "[shared-mcp] State cleanup: $serverId -- dead PID $recordedPid replaced with live PID $freshPid"
             } else {
-                Write-Output "[shared-mcp] State cleanup: $serverId — dead PID $recordedPid recorded, port $port is free"
+                Write-Output "[shared-mcp] State cleanup: $serverId -- dead PID $recordedPid recorded, port $port is free"
             }
         } else {
-            Write-Output "[shared-mcp] State cleanup: $serverId — dead PID $recordedPid recorded, no port to re-probe"
+            Write-Output "[shared-mcp] State cleanup: $serverId -- dead PID $recordedPid recorded, no port to re-probe"
         }
     }
 
