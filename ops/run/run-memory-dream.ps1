@@ -212,7 +212,11 @@ function Get-RecordTimestampUtc {
 }
 
 function New-KeyRecordMap {
-    param([Parameter(Mandatory = $true)][object[]]$Records)
+    param([object[]]$Records = @())
+
+    if ($null -eq $Records -or @($Records).Count -eq 0) {
+        return @{}
+    }
 
     $map = @{}
     foreach ($record in @($Records | Sort-Object { [string]$_.t } -Descending)) {
@@ -234,10 +238,14 @@ function New-KeyRecordMap {
 
 function Select-NovelRecordsAgainstBaseline {
     param(
-        [Parameter(Mandatory = $true)][object[]]$CandidateRecords,
+        [object[]]$CandidateRecords = @(),
         [Parameter(Mandatory = $true)][hashtable]$BaselineMap,
         [int]$MaxItems = 8
     )
+
+    if ($null -eq $CandidateRecords -or @($CandidateRecords).Count -eq 0) {
+        return @()
+    }
 
     $selected = New-Object System.Collections.Generic.List[object]
     $seen = @{}
@@ -259,10 +267,14 @@ function Select-NovelRecordsAgainstBaseline {
 
 function Select-RefreshTargets {
     param(
-        [Parameter(Mandatory = $true)][object[]]$CandidateRecords,
+        [object[]]$CandidateRecords = @(),
         [Parameter(Mandatory = $true)][hashtable]$BaselineMap,
         [int]$MaxItems = 8
     )
+
+    if ($null -eq $CandidateRecords -or @($CandidateRecords).Count -eq 0) {
+        return @()
+    }
 
     $selected = New-Object System.Collections.Generic.List[object]
     $seen = @{}
@@ -291,9 +303,13 @@ function Select-RefreshTargets {
 
 function Select-RecentUniqueRecords {
     param(
-        [Parameter(Mandatory = $true)][object[]]$Records,
+        [object[]]$Records = @(),
         [int]$MaxItems = 8
     )
+
+    if ($null -eq $Records -or @($Records).Count -eq 0) {
+        return @()
+    }
 
     $seen = @{}
     $selected = New-Object System.Collections.Generic.List[object]
@@ -531,7 +547,7 @@ function Get-PromotionReason {
 
 function New-TypedDurableQueueItems {
     param(
-        [Parameter(Mandatory = $true)][object[]]$CandidateRecords,
+        [object[]]$CandidateRecords = @(),
         [Parameter(Mandatory = $true)][hashtable]$BaselineMap,
         [Parameter(Mandatory = $false)][hashtable]$ExistingByKey = @{},
         [Parameter(Mandatory = $false)][System.Collections.Generic.HashSet[string]]$DurableContentHashSet,
@@ -540,6 +556,10 @@ function New-TypedDurableQueueItems {
         $PromoteMaxPerScope = @{},
         $RefreshMaxPerScope = @{}
     )
+
+    if ($null -eq $CandidateRecords -or @($CandidateRecords).Count -eq 0) {
+        return @{ promotions = @(); refresh = @(); collisions = @() }
+    }
 
     $promotions = New-Object System.Collections.Generic.List[object]
     $refresh = New-Object System.Collections.Generic.List[object]
@@ -927,10 +947,14 @@ function Write-TypedDurableJsonl {
 
 function Merge-DurableMemoryIndex {
     param(
-        [Parameter(Mandatory = $true)][object[]]$WriteResults,
+        [object[]]$WriteResults = @(),
         [Parameter(Mandatory = $true)][string]$IndexPath,
         [switch]$DryRun
     )
+
+    if ($null -eq $WriteResults -or @($WriteResults).Count -eq 0) {
+        return @{ appended = 0; skipped = 0 }
+    }
 
     $entries = New-Object System.Collections.Generic.List[string]
     $appended = 0
@@ -962,8 +986,12 @@ function Merge-DurableMemoryIndex {
 
 function Build-AllRecordsByPath {
     param(
-        [Parameter(Mandatory = $true)][object[]]$SourceFiles
+        [object[]]$SourceFiles = @()
     )
+
+    if ($null -eq $SourceFiles -or @($SourceFiles).Count -eq 0) {
+        return @{}
+    }
 
     $byPath = @{}
     foreach ($filePath in $SourceFiles) {
