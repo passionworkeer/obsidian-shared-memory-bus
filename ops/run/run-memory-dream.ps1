@@ -295,6 +295,10 @@ function Select-RecentUniqueRecords {
         [int]$MaxItems = 8
     )
 
+    if ($null -eq $Records -or $Records.Count -eq 0) {
+        return @()
+    }
+
     $seen = @{}
     $selected = New-Object System.Collections.Generic.List[object]
     foreach ($record in @($Records | Sort-Object { [string]$_.t } -Descending)) {
