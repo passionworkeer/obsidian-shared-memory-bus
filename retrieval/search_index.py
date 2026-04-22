@@ -26,7 +26,7 @@ from search_ranking import (
 )
 
 try:
-    from ops.redaction import REDACTION_CONFIG, redact_sensitive
+    from ops.redact.redaction import REDACTION_CONFIG, redact_sensitive
 except ModuleNotFoundError:
     from redaction import REDACTION_CONFIG, redact_sensitive
 

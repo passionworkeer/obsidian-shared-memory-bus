@@ -8,8 +8,8 @@ Run with: pytest tests/unit/py/test_redaction.py -v
 import sys
 from pathlib import Path
 
-# Add project root to Python path so 'ops.redaction' resolves
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "ops"))
+# Add ops/redact to Python path so 'redaction' resolves
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "ops" / "redact"))
 
 from redaction import (
     API_KEY,
