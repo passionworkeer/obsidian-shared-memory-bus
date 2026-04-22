@@ -104,7 +104,7 @@ jobs:
       - name: Build handoff pack
         shell: pwsh
         run: |
-          node ./ops/build-handoff-pack.js | Out-Null
+          node ./ops/build/build-handoff-pack.js | Out-Null
           if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_OBSIDIAN_VAULT '00-System/ai-memory/generated/HANDOFF.md') -PathType Leaf)) {
             throw 'HANDOFF.md was not generated'
           }
@@ -112,7 +112,7 @@ jobs:
       - name: Run auto dream consolidation
         shell: pwsh
         run: |
-          ./ops/run-memory-dream.ps1 -Force | Out-Null
+          ./ops/run/run-memory-dream.ps1 -Force | Out-Null
           if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_OBSIDIAN_VAULT '00-System/ai-memory/generated/AUTO-DREAM.md') -PathType Leaf)) {
             throw 'AUTO-DREAM.md was not generated'
           }
@@ -120,7 +120,7 @@ jobs:
       - name: Validate memory integrity contract
         shell: pwsh
         run: |
-          node ./ops/check-memory-integrity.js --strict --json | Out-Null
+          node ./ops/check/check-memory-integrity.js --strict --json | Out-Null
 
       - name: Build embeddings
         shell: pwsh
