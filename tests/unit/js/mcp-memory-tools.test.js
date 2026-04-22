@@ -11,7 +11,7 @@ const {
   memory_query,
   memory_search,
   memory_write,
-} = require("../../../ops/mcp-memory-tools.js");
+} = require("../../../ops/mcp/mcp-memory-tools.js");
 
 describe("mcp-memory-tools", () => {
   let tempRoot;

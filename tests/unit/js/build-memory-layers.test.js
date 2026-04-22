@@ -56,22 +56,22 @@ Module.prototype._compile = function(code, filename) {
 
 test("build-memory-layers.js loads without errors", () => {
   // If the module loads, all requires (including submodules) succeeded
-  const mod = require("../../../ops/build-memory-layers.js");
+  const mod = require("../../../ops/build/build-memory-layers.js");
   assert.ok(mod !== null && typeof mod === "object");
 });
 
 test("loadStoreRootHelper is a function", () => {
-  const { loadStoreRootHelper } = require("../../../ops/build-memory-layers.js");
+  const { loadStoreRootHelper } = require("../../../ops/build/build-memory-layers.js");
   assert.equal(typeof loadStoreRootHelper, "function");
 });
 
 test("normalizeSpaces imported from parse module", () => {
-  const { normalizeSpaces } = require("../../../ops/build-memory-layers.js");
+  const { normalizeSpaces } = require("../../../ops/build/build-memory-layers.js");
   assert.equal(normalizeSpaces("  hello   world  "), "hello world");
 });
 
 test("getFreshness imported from parse module", () => {
-  const { getFreshness } = require("../../../ops/build-memory-layers.js");
+  const { getFreshness } = require("../../../ops/build/build-memory-layers.js");
   // 2024 date is "cold" in 2026 (well beyond 7-day warm threshold)
   assert.equal(getFreshness("2024-01-01T00:00:00.000Z"), "cold");
   // null/undefined timestamp → "unknown"
@@ -81,14 +81,14 @@ test("getFreshness imported from parse module", () => {
 });
 
 test("buildPromotionKey imported from parse module", () => {
-  const { buildPromotionKey } = require("../../../ops/build-memory-layers.js");
+  const { buildPromotionKey } = require("../../../ops/build/build-memory-layers.js");
   const k1 = buildPromotionKey({ durableType: "project", project: "app", title: "T", content: "C" });
   const k2 = buildPromotionKey({ durableType: "project", project: "app", title: "T", content: "C" });
   assert.equal(k1, k2);
 });
 
 test("withFileLock imported from parse module", () => {
-  const { withFileLock } = require("../../../ops/build-memory-layers.js");
+  const { withFileLock } = require("../../../ops/build/build-memory-layers.js");
   assert.equal(typeof withFileLock, "function");
   const tmpFile = path.join(os.tmpdir(), `bml-test-lock-${Date.now()}.jsonl`);
   try {
@@ -102,7 +102,7 @@ test("withFileLock imported from parse module", () => {
 });
 
 test("deduplicateSharedInbox imported from dedup module", () => {
-  const { deduplicateSharedInbox } = require("../../../ops/build-memory-layers.js");
+  const { deduplicateSharedInbox } = require("../../../ops/build/build-memory-layers.js");
   assert.equal(typeof deduplicateSharedInbox, "function");
   const nowMs = Date.now();
   const result = deduplicateSharedInbox([], [], new Map(), nowMs);
@@ -110,7 +110,7 @@ test("deduplicateSharedInbox imported from dedup module", () => {
 });
 
 test("MEMORY_RECORD_SCHEMA_VERSION is imported from memory-contract", () => {
-  const { MEMORY_RECORD_SCHEMA_VERSION } = require("../../../ops/build-memory-layers.js");
+  const { MEMORY_RECORD_SCHEMA_VERSION } = require("../../../ops/build/build-memory-layers.js");
   assert.equal(typeof MEMORY_RECORD_SCHEMA_VERSION, "number");
   assert.ok(MEMORY_RECORD_SCHEMA_VERSION > 0);
 });

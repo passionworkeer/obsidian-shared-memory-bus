@@ -94,15 +94,15 @@ $MemoryLayersJsonPath = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", 
 $HandoffPackJsonPath = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "generated", "HANDOFF.json")
 $AutoDreamJsonPath = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "generated", "AUTO-DREAM.json")
 $StructuredRoot = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "structured")
-$BlackboardDaemonScript = Resolve-BusPath -Candidates @("obsidian-blackboard-daemon.js", "ops/obsidian-blackboard-daemon.js")
+$BlackboardDaemonScript = Resolve-BusPath -Candidates @("obsidian-blackboard-daemon.js", "ops/daemon/obsidian-blackboard-daemon.js")
 $MD_PATH = Join-Path $VaultRoot "02-KB\WORKING.md"
-$OpenClawSyncScript = Resolve-BusPath -Candidates @("sync-openclaw-to-obsidian.js", "ops/sync-openclaw-to-obsidian.js")
-$BuildHandoffPackScript = Resolve-BusPath -Candidates @("build-handoff-pack.js", "ops/build-handoff-pack.js")
-$BuildMemoryLayersScript = Resolve-BusPath -Candidates @("build-memory-layers.js", "ops/build-memory-layers.js")
-$GenerateHygieneScript = Resolve-BusPath -Candidates @("generate-memory-hygiene-report.js", "ops/generate-memory-hygiene-report.js")
-$MemoryDreamScript = Resolve-BusPath -Candidates @("run-memory-dream.ps1", "ops/run-memory-dream.ps1")
-$MemoryArchivalScript = Resolve-BusPath -Candidates @("memory-archival.js", "ops/memory-archival.js")
-$BackgroundExtractionScript = Resolve-BusPath -Candidates @("run-background-extraction.ps1", "ops/run-background-extraction.ps1")
+$OpenClawSyncScript = Resolve-BusPath -Candidates @("sync-openclaw-to-obsidian.js", "ops/sync/sync-openclaw-to-obsidian.js")
+$BuildHandoffPackScript = Resolve-BusPath -Candidates @("build-handoff-pack.js", "ops/build/build-handoff-pack.js")
+$BuildMemoryLayersScript = Resolve-BusPath -Candidates @("build-memory-layers.js", "ops/build/build-memory-layers.js")
+$GenerateHygieneScript = Resolve-BusPath -Candidates @("generate-memory-hygiene-report.js", "ops/generate/generate-memory-hygiene-report.js")
+$MemoryDreamScript = Resolve-BusPath -Candidates @("run-memory-dream.ps1", "ops/run/run-memory-dream.ps1")
+$MemoryArchivalScript = Resolve-BusPath -Candidates @("memory-archival.js", "ops/memory/memory-archival.js")
+$BackgroundExtractionScript = Resolve-BusPath -Candidates @("run-background-extraction.ps1", "ops/run/run-background-extraction.ps1")
 $EmbeddingsScript = Resolve-BusPath -Candidates @("generate-embeddings.js", "bus/generate-embeddings.js")
 $EmbeddingsIndexPath = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "embeddings", "index.jsonl")
 $EmbeddingsCooldownSeconds = 180
@@ -877,7 +877,7 @@ function Invoke-BusSync {
     }
     $script:ClaudeMemCounter++
     if ($script:ClaudeMemCounter % 5 -eq 0) {
-        $syncScript = Resolve-BusPath -Candidates @("sync-claudemem-to-obsidian.ps1", "ops/sync-claudemem-to-obsidian.ps1")
+        $syncScript = Resolve-BusPath -Candidates @("sync-claudemem-to-obsidian.ps1", "ops/sync/sync-claudemem-to-obsidian.ps1")
         if (Test-Path $syncScript) {
             try {
                 if (-not (Test-PowerShellScriptRunning -ScriptPath $syncScript)) {

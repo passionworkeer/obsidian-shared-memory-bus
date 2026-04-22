@@ -16,7 +16,7 @@ const {
   classifyEntity,
   extractRelationships,
   extractCandidates,
-} = require("../../../ops/entity-extractor.js");
+} = require("../../../ops/entity/entity-extractor.js");
 
 // ---------------------------------------------------------------------------
 // Test suite
