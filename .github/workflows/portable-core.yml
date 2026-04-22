@@ -196,8 +196,9 @@ jobs:
             export AI_MEMORY_PWSH="pwsh"
           fi
           TARGET_ROOT="${{ runner.temp }}/ai-memory-smoke"
+          export TARGET_ROOT
           ./scripts/install.sh -TargetRoot "$TARGET_ROOT" -RegisterStartup false -PersistUserEnvironment false
-          python3 -c 'import os; from pathlib import Path; target = Path(os.environ["TARGET_ROOT"]); expected = ["memory-bus.ps1", "memory-bus.sh", "memory-watchdog.ps1", "memory-watchdog.sh", "verify-client-integrations.ps1", "verify-client-integrations.sh", "run-pressure-test.ps1", "run-pressure-test.sh", "run-memory-dream.sh", "runtime-config.js", "runtime_support.py", "install-manifest.json", "config/runtime.json", "shared-mcp/start-default-shared-mcp.sh", "shared-mcp/start-default-shared-mcp.ps1"]; missing = [p for p in expected if not (target / p).exists()]; os.name != "nt" and [os.chmod(target / exe, 0o755) for exe in ["shared-mcp/start-default-shared-mcp.sh", "run-pressure-test.sh"]]; missing and __import__("sys").exit("Missing: " + ", ".join(missing))'
+          python3 -c "import os; from pathlib import Path; target = Path(os.environ['TARGET_ROOT']); expected = ['memory-bus.ps1', 'memory-bus.sh', 'memory-watchdog.ps1', 'memory-watchdog.sh', 'verify-client-integrations.ps1', 'verify-client-integrations.sh', 'run-pressure-test.ps1', 'run-pressure-test.sh', 'run-memory-dream.sh', 'runtime-config.js', 'runtime_support.py', 'install-manifest.json', 'config/runtime.json', 'shared-mcp/start-default-shared-mcp.sh', 'shared-mcp/start-default-shared-mcp.ps1']; missing = [p for p in expected if not (target / p).exists()]; os.name != 'nt' and [os.chmod(target / exe, 0o755) for exe in ['shared-mcp/start-default-shared-mcp.sh', 'run-pressure-test.sh']]; missing and __import__('sys').exit('Missing: ' + ', '.join(missing))"
 
       - name: Portable shared MCP wrapper smoke
         shell: bash
