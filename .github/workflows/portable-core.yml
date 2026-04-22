@@ -96,6 +96,7 @@ jobs:
       - name: Build memory layers
         shell: pwsh
         run: |
+          $env:AI_MEMORY_OBSIDIAN_VAULT = Join-Path $env:RUNNER_TEMP 'vault-smoke'
           node ./ops/build/build-memory-layers.js | Out-Null
           if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_OBSIDIAN_VAULT '00-System/ai-memory/generated/MEMORY-LAYERS.md') -PathType Leaf)) {
             throw 'MEMORY-LAYERS.md was not generated'
@@ -104,6 +105,7 @@ jobs:
       - name: Build handoff pack
         shell: pwsh
         run: |
+          $env:AI_MEMORY_OBSIDIAN_VAULT = Join-Path $env:RUNNER_TEMP 'vault-smoke'
           node ./ops/build/build-handoff-pack.js | Out-Null
           if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_OBSIDIAN_VAULT '00-System/ai-memory/generated/HANDOFF.md') -PathType Leaf)) {
             throw 'HANDOFF.md was not generated'
@@ -112,6 +114,7 @@ jobs:
       - name: Run auto dream consolidation
         shell: pwsh
         run: |
+          $env:AI_MEMORY_OBSIDIAN_VAULT = Join-Path $env:RUNNER_TEMP 'vault-smoke'
           ./ops/run/run-memory-dream.ps1 -Force | Out-Null
           if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_OBSIDIAN_VAULT '00-System/ai-memory/generated/AUTO-DREAM.md') -PathType Leaf)) {
             throw 'AUTO-DREAM.md was not generated'
@@ -120,11 +123,13 @@ jobs:
       - name: Validate memory integrity contract
         shell: pwsh
         run: |
+          $env:AI_MEMORY_OBSIDIAN_VAULT = Join-Path $env:RUNNER_TEMP 'vault-smoke'
           node ./ops/check/check-memory-integrity.js --strict --json | Out-Null
 
       - name: Build embeddings
         shell: pwsh
         run: |
+          $env:AI_MEMORY_OBSIDIAN_VAULT = Join-Path $env:RUNNER_TEMP 'vault-smoke'
           node ./bus/generate-embeddings.js | Out-Null
           if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_OBSIDIAN_VAULT '00-System/ai-memory/embeddings/index.jsonl') -PathType Leaf)) {
             throw 'embeddings index was not generated'
@@ -133,6 +138,7 @@ jobs:
       - name: Run hybrid retrieval smoke
         shell: pwsh
         run: |
+          $env:AI_MEMORY_OBSIDIAN_VAULT = Join-Path $env:RUNNER_TEMP 'vault-smoke'
           $json = node ./retrieval/semantic-search.js --json --mode hybrid --top-k 3 "openclaw blackboard portable task"
           $result = $json | ConvertFrom-Json
           if ($result.entryCount -lt 1) {
@@ -147,6 +153,7 @@ jobs:
       - name: Run OpenClaw routed retrieval smoke
         shell: pwsh
         run: |
+          $env:AI_MEMORY_OBSIDIAN_VAULT = Join-Path $env:RUNNER_TEMP 'vault-smoke'
           $json = node ./retrieval/semantic-search.js --json --mode hybrid --route task --tool openclaw --source-kind blackboard --top-k 3 "shrimp intel queue"
           $result = $json | ConvertFrom-Json
           if ($result.results.Count -lt 1) {
