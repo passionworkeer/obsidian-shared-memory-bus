@@ -126,7 +126,7 @@ $requiredInstalledFiles = @(
     "benchmark-backends.py"
     "probe-models.py"
     "runtime_support.py"
-    "semantic-search.py"
+    "semantic_search.py"
     "cli/ai-memory.js"
     "cli/package.json"
     "shared-mcp/manifest.json"

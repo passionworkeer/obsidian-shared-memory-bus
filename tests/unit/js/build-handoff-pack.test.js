@@ -12,7 +12,7 @@ const assert = require("node:assert/strict");
 const Module = require("module");
 const path = require("path");
 
-const HANDOFF_MODULE_PATH = require.resolve("../../../ops/build-handoff-pack.js");
+const HANDOFF_MODULE_PATH = require.resolve("../../../ops/build/build-handoff-pack.js");
 
 // Map of filename -> exports-injection string
 const _compilePatches = new Map();
@@ -94,7 +94,7 @@ const {
   matchesAny,
   buildPack,
   renderMarkdown,
-} = require("../../../ops/build-handoff-pack.js");
+} = require("../../../ops/build/build-handoff-pack.js");
 
 // ---------------------------------------------------------------------------
 // normalizeSpaces

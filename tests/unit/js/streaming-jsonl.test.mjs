@@ -18,7 +18,7 @@ import path from "node:path";
 
 // ESM bridge: import CommonJS module via file URL (reliable relative resolution)
 const jsonlModule = await import(
-  new URL("../../../ops/jsonl-stream.js", import.meta.url).href
+  new URL("../../../ops/util/jsonl-stream.js", import.meta.url).href
 ).then((m) => m.default || m);
 const { createJsonlStream, createJsonlBatcher } = jsonlModule;
 
