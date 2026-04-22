@@ -46,6 +46,8 @@ reports/
 .vscode/
 cursor/
 cursor
+.agents/
+.trae/
 
 # Machine-specific client configs (contain user/environment-specific settings)
 opencode.json
