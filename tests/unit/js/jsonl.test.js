@@ -18,7 +18,7 @@ const { SAMPLE_MEMORY_RECORDS } = require("../../helpers/fixtures");
 // Patch Module.prototype._compile to inject exports from jsonl-stream.js
 // ---------------------------------------------------------------------------
 
-const JSONL_MODULE_PATH = require.resolve("../../../ops/jsonl-stream.js");
+const JSONL_MODULE_PATH = require.resolve("../../../ops/util/jsonl-stream.js");
 const _compilePatches = new Map();
 _compilePatches.set(JSONL_MODULE_PATH, `
 module.exports = {
@@ -39,7 +39,7 @@ Module.prototype._compile = function _patchedCompile(code, filename) {
 
 delete require.cache[JSONL_MODULE_PATH];
 
-const { createJsonlStream, readJsonlStream } = require("../../../ops/jsonl-stream.js");
+const { createJsonlStream, readJsonlStream } = require("../../../ops/util/jsonl-stream.js");
 
 // ---------------------------------------------------------------------------
 // Test suite

@@ -99,7 +99,7 @@ describe("memory layers flow integration", () => {
   test("build-memory-layers.js emits JSON to stdout with ok:true", async () => {
     seedInboxMarkdown(inboxDir, SAMPLE_INBOX_MD_ENTRIES);
 
-    const scriptPath = path.resolve(__dirname, "../../../ops/build-memory-layers.js");
+    const scriptPath = path.resolve(__dirname, "../../../ops/build/build-memory-layers.js");
     const env = {
       ...process.env,
       AI_MEMORY_STORE: tempStoreRoot,
@@ -142,7 +142,7 @@ describe("memory layers flow integration", () => {
     // Seed inbox .md files — parseInboxEntries() reads from inbox/ .md files
     seedInboxMarkdown(inboxDir, SAMPLE_INBOX_MD_ENTRIES);
 
-    const scriptPath = path.resolve(__dirname, "../../../ops/build-memory-layers.js");
+    const scriptPath = path.resolve(__dirname, "../../../ops/build/build-memory-layers.js");
     const env = { ...process.env, AI_MEMORY_STORE: tempStoreRoot };
 
     const exitCode = await new Promise(resolve => {
@@ -175,7 +175,7 @@ describe("memory layers flow integration", () => {
   test("GLOBAL-CONTEXT.md and GLOBAL-CONTEXT.body.md are created in generated/", async () => {
     seedInboxMarkdown(inboxDir, SAMPLE_INBOX_MD_ENTRIES);
 
-    const scriptPath = path.resolve(__dirname, "../../../ops/build-memory-layers.js");
+    const scriptPath = path.resolve(__dirname, "../../../ops/build/build-memory-layers.js");
     const env = { ...process.env, AI_MEMORY_STORE: tempStoreRoot };
 
     const exitCode = await new Promise(resolve => {
@@ -205,7 +205,7 @@ describe("memory layers flow integration", () => {
     // Seed inbox .md files so the script has data to process
     seedInboxMarkdown(inboxDir, SAMPLE_INBOX_MD_ENTRIES);
 
-    const scriptPath = path.resolve(__dirname, "../../../ops/build-memory-layers.js");
+    const scriptPath = path.resolve(__dirname, "../../../ops/build/build-memory-layers.js");
     const env = {
       ...process.env,
       AI_MEMORY_STORE: tempStoreRoot,

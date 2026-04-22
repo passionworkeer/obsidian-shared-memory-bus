@@ -10,7 +10,7 @@ const { resolvePythonRuntime, withPythonArgs } = require("./python-runtime.js");
 const { resolveEmbeddingRuntime } = require("./runtime-config.js");
 const { resolveVaultRoot } = require("./vault-root.js");
 const { VECTOR_SCHEMA_VERSION, fnv1a32, buildHashFeatures, buildHashEmbedding } = require("./lsh-hash.js");
-const { createJsonlStream } = require("../ops/jsonl-stream.js");
+const { createJsonlStream } = require("../ops/util/jsonl-stream.js");
 const WINDOWS_ENV_CACHE = new Map();
 
 hydrateProcessEnvFromWindows([

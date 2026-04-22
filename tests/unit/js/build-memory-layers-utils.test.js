@@ -48,7 +48,7 @@ Module.prototype._compile = function(code, filename) {
 // jsonl-stream.js tests (no dependencies on build-memory-layers.js)
 // ---------------------------------------------------------------------------
 
-const { createJsonlStream, readJsonlStream } = require("../../../ops/jsonl-stream.js");
+const { createJsonlStream, readJsonlStream } = require("../../../ops/util/jsonl-stream.js");
 
 test("createJsonlStream: yields parsed objects from a temp jsonl file", async () => {
   const tmpFile = path.join(os.tmpdir(), `jsonl-stream-test-${Date.now()}.jsonl`);
@@ -129,7 +129,7 @@ test("readJsonlStream: returns full array from stream", async () => {
 // normalizeSpaces BOM stripping
 // ---------------------------------------------------------------------------
 
-const { normalizeSpaces } = require("../../../ops/build-memory-layers.js");
+const { normalizeSpaces } = require("../../../ops/build/build-memory-layers.js");
 
 test("normalizeSpaces: strips UTF-8 BOM character", () => {
   const BOM = "\uFEFF";
@@ -155,7 +155,7 @@ test("normalizeSpaces: null becomes empty string", () => {
 // getFreshness NaN guard
 // ---------------------------------------------------------------------------
 
-const { getFreshness } = require("../../../ops/build-memory-layers.js");
+const { getFreshness } = require("../../../ops/build/build-memory-layers.js");
 
 test("getFreshness: NaN ageMs (invalid date) returns 'unknown'", () => {
   assert.equal(getFreshness("not-a-timestamp"), "unknown");
@@ -169,7 +169,7 @@ test("getFreshness: completely garbage string returns 'unknown'", () => {
 // buildPromotionKey id/t salt
 // ---------------------------------------------------------------------------
 
-const { buildPromotionKey } = require("../../../ops/build-memory-layers.js");
+const { buildPromotionKey } = require("../../../ops/build/build-memory-layers.js");
 
 test("buildPromotionKey: same content but different id produces different key", () => {
   const key1 = buildPromotionKey({
@@ -231,7 +231,7 @@ test("buildPromotionKey: id and t are optional (backwards compatible)", () => {
 // withFileLock
 // ---------------------------------------------------------------------------
 
-const { withFileLock } = require("../../../ops/build-memory-layers.js");
+const { withFileLock } = require("../../../ops/build/build-memory-layers.js");
 
 test("withFileLock: creates file and executes fn when file does not exist", () => {
   const tmpFile = path.join(os.tmpdir(), `withfilelock-test-${Date.now()}.jsonl`);
@@ -280,7 +280,7 @@ test("withFileLock: idempotent — same file can be locked twice sequentially", 
 // deduplicateSharedInbox: collision detection (uses console.warn — checked via mock)
 // ---------------------------------------------------------------------------
 
-const { deduplicateSharedInbox } = require("../../../ops/build-memory-layers.js");
+const { deduplicateSharedInbox } = require("../../../ops/build/build-memory-layers.js");
 
 test("deduplicateSharedInbox: different ids with same hash still both kept (id is primary key)", () => {
   const nowMs = Date.now();

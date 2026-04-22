@@ -38,7 +38,7 @@ require.cache[stubVaultRootPath] = {
 };
 
 // Patch Module.prototype._compile to inject exports
-const MEMORY_LAYERS_CONTEXT_PATH = require.resolve("../../../ops/memory-layers-context.js");
+const MEMORY_LAYERS_CONTEXT_PATH = require.resolve("../../../ops/memory/memory-layers-context.js");
 const _originalCompile = Module.prototype._compile;
 Module.prototype._compile = function(code, filename) {
   if (filename === MEMORY_LAYERS_CONTEXT_PATH) {
@@ -66,7 +66,7 @@ const {
   MEMORY_LAYERS_MD, MEMORY_LAYERS_JSON, GLOBAL_CONTEXT_MD, GLOBAL_CONTEXT_META_JSON, GLOBAL_CONTEXT_BODY_MD,
   resolveIncludes,
   DURABLE_SCOPES,
-} = require("../../../ops/memory-layers-context.js");
+} = require("../../../ops/memory/memory-layers-context.js");
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
