@@ -100,7 +100,7 @@ jobs:
           AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke/00-System/ai-memory
         run: |
           node ./ops/build/build-memory-layers.js | Out-Null
-          if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_STORE '00-System/ai-memory/generated/MEMORY-LAYERS.md') -PathType Leaf)) {
+          if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_STORE 'generated/MEMORY-LAYERS.md') -PathType Leaf)) {
             throw 'MEMORY-LAYERS.md was not generated'
           }
 
@@ -110,7 +110,7 @@ jobs:
           AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke/00-System/ai-memory
         run: |
           node ./ops/build/build-handoff-pack.js | Out-Null
-          if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_STORE '00-System/ai-memory/generated/HANDOFF.md') -PathType Leaf)) {
+          if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_STORE 'generated/HANDOFF.md') -PathType Leaf)) {
             throw 'HANDOFF.md was not generated'
           }
 
@@ -120,7 +120,7 @@ jobs:
           AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke/00-System/ai-memory
         run: |
           ./ops/run/run-memory-dream.ps1 -Force | Out-Null
-          if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_STORE '00-System/ai-memory/generated/AUTO-DREAM.md') -PathType Leaf)) {
+          if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_STORE 'generated/AUTO-DREAM.md') -PathType Leaf)) {
             throw 'AUTO-DREAM.md was not generated'
           }
 
@@ -137,7 +137,7 @@ jobs:
           AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke/00-System/ai-memory
         run: |
           node ./bus/generate-embeddings.js | Out-Null
-          if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_STORE '00-System/ai-memory/embeddings/index.jsonl') -PathType Leaf)) {
+          if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_STORE 'embeddings/index.jsonl') -PathType Leaf)) {
             throw 'embeddings index was not generated'
           }
 
