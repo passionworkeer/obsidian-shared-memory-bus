@@ -13,7 +13,7 @@ const {
   normalizeString,
   normalizeLower,
   sha1,
-} = require("../../../ops/memory-contract.js");
+} = require("../../../ops/memory/memory-contract.js");
 
 // ---------------------------------------------------------------------------
 // Constants

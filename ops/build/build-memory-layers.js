@@ -47,7 +47,7 @@ const {
   MIN_PROMOTION_CONFIDENCE,
   DURABLE_SCOPES,
   NON_PROMOTABLE_PROMOTION_TYPES,
-} = require("./memory-layers-parse.js");
+} = require("../memory/memory-layers-parse.js");
 
 const {
   // Context module — global context generation, summaries
@@ -57,7 +57,7 @@ const {
   GLOBAL_CONTEXT_MD: CTX_GLOBAL_CONTEXT_MD,
   GLOBAL_CONTEXT_META_JSON: CTX_GLOBAL_CONTEXT_META_JSON,
   GLOBAL_CONTEXT_BODY_MD: CTX_GLOBAL_CONTEXT_BODY_MD,
-} = require("./memory-layers-context.js");
+} = require("../memory/memory-layers-context.js");
 
 const {
   // Dedup module — deduplication, JSONL writing, daily logs
@@ -66,7 +66,7 @@ const {
   deduplicateSharedInbox,
   appendDailyLogs,
   DAILY_LOG_DIR,
-} = require("./memory-layers-dedup.js");
+} = require("../memory/memory-layers-dedup.js");
 
 // ---------------------------------------------------------------------------
 // Store root resolution (kept here — needed before any module loads)
@@ -75,6 +75,7 @@ const {
 function loadStoreRootHelper() {
   const candidates = [
     path.join(__dirname, "store-root.js"),
+    path.join(__dirname, "..", "..", "bus", "store-root.js"),
     path.join(__dirname, "..", "bus", "store-root.js"),
     path.join(__dirname, "bus", "store-root.js"),
   ];
@@ -97,7 +98,7 @@ const { resolveStoreRoot } = loadStoreRootHelper();
 const {
   buildGeneratedArtifactMetadata,
   MEMORY_RECORD_SCHEMA_VERSION,
-} = require("./memory-contract.js");
+} = require("../memory/memory-contract.js");
 
 // ---------------------------------------------------------------------------
 // Main
