@@ -129,7 +129,11 @@ $Script:PortableOpenCodeInboxPath = "{0}/00-System/ai-memory/inbox/opencode.md" 
 $Script:PortableCopilotInboxPath = "{0}/00-System/ai-memory/inbox/copilot.md" -f $Script:PortableVaultPlaceholder
 $Script:SharedSkillsSyncScript = Resolve-BusScriptPath -Candidates @("sync-shared-skills.ps1", "ops/sync/sync-shared-skills.ps1")
 $Script:RefreshGeneratedArtifactsScript = Resolve-BusScriptPath -Candidates @("refresh-generated-artifacts.js", "ops/generate/refresh-generated-artifacts.js")
-$Script:ClaudeMemApiBase = "http://127.0.0.1:37778/api"
+$Script:ClaudeMemApiBase = if ($env:CLAUDE_MEM_BASE) {
+    $env:CLAUDE_MEM_BASE -replace '/+$', '' -replace '$', '/api'
+} else {
+    "http://127.0.0.1:37778/api"
+}
 $Script:BusLockTimeoutMs = 180000
 $Script:StaleSyncSeconds = 20
 $Script:CacheRoot = Join-Path $Script:BusHome "cache"
