@@ -118,6 +118,7 @@ jobs:
         shell: pwsh
         env:
           AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke/00-System/ai-memory
+          AI_MEMORY_OBSIDIAN_VAULT: ${{ runner.temp }}/vault-smoke
         run: |
           ./ops/run/run-memory-dream.ps1 -Force | Out-Null
           if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_STORE 'generated/AUTO-DREAM.md') -PathType Leaf)) {
