@@ -395,7 +395,8 @@ function Update-CodexConfigToml {
 
     $existing = ""
     if (Test-Path -LiteralPath $Path -PathType Leaf) {
-        $existing = Get-Content -Raw -LiteralPath $Path -Encoding utf8
+        $raw = Get-Content -Raw -LiteralPath $Path -Encoding utf8
+        $existing = if ($null -eq $raw) { "" } else { $raw }
     }
 
     $managedIds = @($Servers | ForEach-Object { [string]$_.id })
