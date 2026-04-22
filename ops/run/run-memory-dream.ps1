@@ -16,7 +16,7 @@ $UnixEpochTicks = ([datetimeoffset]::Parse("1970-01-01T00:00:00+00:00", [System.
 
 $helperPath = @(
     (Join-Path $PSScriptRoot "runtime-platform.ps1"),
-    (Join-Path $PSScriptRoot "../bus/runtime-platform.ps1")
+    (Join-Path $PSScriptRoot "../../bus/runtime-platform.ps1")
 ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
 
 if (-not $helperPath) {
@@ -212,7 +212,11 @@ function Get-RecordTimestampUtc {
 }
 
 function New-KeyRecordMap {
-    param([Parameter(Mandatory = $true)][object[]]$Records)
+    param([object[]]$Records = @())
+
+    if ($null -eq $Records -or @($Records).Count -eq 0) {
+        return @{}
+    }
 
     $map = @{}
     foreach ($record in @($Records | Sort-Object { [string]$_.t } -Descending)) {
@@ -234,10 +238,14 @@ function New-KeyRecordMap {
 
 function Select-NovelRecordsAgainstBaseline {
     param(
-        [Parameter(Mandatory = $true)][object[]]$CandidateRecords,
+        [object[]]$CandidateRecords = @(),
         [Parameter(Mandatory = $true)][hashtable]$BaselineMap,
         [int]$MaxItems = 8
     )
+
+    if ($null -eq $CandidateRecords -or @($CandidateRecords).Count -eq 0) {
+        return @()
+    }
 
     $selected = New-Object System.Collections.Generic.List[object]
     $seen = @{}
@@ -259,10 +267,14 @@ function Select-NovelRecordsAgainstBaseline {
 
 function Select-RefreshTargets {
     param(
-        [Parameter(Mandatory = $true)][object[]]$CandidateRecords,
+        [object[]]$CandidateRecords = @(),
         [Parameter(Mandatory = $true)][hashtable]$BaselineMap,
         [int]$MaxItems = 8
     )
+
+    if ($null -eq $CandidateRecords -or @($CandidateRecords).Count -eq 0) {
+        return @()
+    }
 
     $selected = New-Object System.Collections.Generic.List[object]
     $seen = @{}
@@ -291,9 +303,13 @@ function Select-RefreshTargets {
 
 function Select-RecentUniqueRecords {
     param(
-        [Parameter(Mandatory = $true)][object[]]$Records,
+        [object[]]$Records = @(),
         [int]$MaxItems = 8
     )
+
+    if ($null -eq $Records -or @($Records).Count -eq 0) {
+        return @()
+    }
 
     $seen = @{}
     $selected = New-Object System.Collections.Generic.List[object]
@@ -531,7 +547,7 @@ function Get-PromotionReason {
 
 function New-TypedDurableQueueItems {
     param(
-        [Parameter(Mandatory = $true)][object[]]$CandidateRecords,
+        [object[]]$CandidateRecords = @(),
         [Parameter(Mandatory = $true)][hashtable]$BaselineMap,
         [Parameter(Mandatory = $false)][hashtable]$ExistingByKey = @{},
         [Parameter(Mandatory = $false)][System.Collections.Generic.HashSet[string]]$DurableContentHashSet,
@@ -540,6 +556,10 @@ function New-TypedDurableQueueItems {
         $PromoteMaxPerScope = @{},
         $RefreshMaxPerScope = @{}
     )
+
+    if ($null -eq $CandidateRecords -or @($CandidateRecords).Count -eq 0) {
+        return @{ promotions = @(); refresh = @(); collisions = @() }
+    }
 
     $promotions = New-Object System.Collections.Generic.List[object]
     $refresh = New-Object System.Collections.Generic.List[object]
@@ -927,10 +947,14 @@ function Write-TypedDurableJsonl {
 
 function Merge-DurableMemoryIndex {
     param(
-        [Parameter(Mandatory = $true)][object[]]$WriteResults,
+        [object[]]$WriteResults = @(),
         [Parameter(Mandatory = $true)][string]$IndexPath,
         [switch]$DryRun
     )
+
+    if ($null -eq $WriteResults -or @($WriteResults).Count -eq 0) {
+        return @{ appended = 0; skipped = 0 }
+    }
 
     $entries = New-Object System.Collections.Generic.List[string]
     $appended = 0
@@ -962,8 +986,12 @@ function Merge-DurableMemoryIndex {
 
 function Build-AllRecordsByPath {
     param(
-        [Parameter(Mandatory = $true)][object[]]$SourceFiles
+        [object[]]$SourceFiles = @()
     )
+
+    if ($null -eq $SourceFiles -or @($SourceFiles).Count -eq 0) {
+        return @{}
+    }
 
     $byPath = @{}
     foreach ($filePath in $SourceFiles) {
@@ -1143,10 +1171,10 @@ try {
             (Get-JsonLines -Path $OpenClawJournalPath)
         )
     }
-    $runRecords = @($taskMemoryRecords | Where-Object { [string]$_.source_kind -eq "run" })
-    $jobRecords = @($taskMemoryRecords | Where-Object { [string]$_.source_kind -eq "cron" })
-    $taskRecords = @($taskMemoryRecords | Where-Object { [string]$_.source_kind -eq "blackboard" -and [string]$_.scope -eq "task" })
-    $journalRecords = @($taskMemoryRecords | Where-Object { [string]$_.source -eq "openclaw-blackboard-journal" -or [string]$_.type -eq "task-journal" })
+    $runRecords = @($taskMemoryRecords | Where-Object { $_ -is [PSCustomObject] -and ($_.PSObject.Properties.Name -contains "source_kind") -and [string]$_.source_kind -eq "run" })
+    $jobRecords = @($taskMemoryRecords | Where-Object { $_ -is [PSCustomObject] -and ($_.PSObject.Properties.Name -contains "source_kind") -and [string]$_.source_kind -eq "cron" })
+    $taskRecords = @($taskMemoryRecords | Where-Object { $_ -is [PSCustomObject] -and ($_.PSObject.Properties.Name -contains "source_kind") -and [string]$_.source_kind -eq "blackboard" -and [string]$_.scope -eq "task" })
+    $journalRecords = @($taskMemoryRecords | Where-Object { $_ -is [PSCustomObject] -and ([string]$_.source -eq "openclaw-blackboard-journal" -or [string]$_.type -eq "task-journal") })
 
     $totalRecords = $durableRecords.Count + $sessionRecords.Count + $eventRecords.Count + $taskMemoryRecords.Count
     if (-not $Force -and $totalRecords -lt $MinRecords) {
@@ -1320,7 +1348,7 @@ try {
         $markdownLines.Add("## Promotion Key Collisions") | Out-Null
         $markdownLines.Add("") | Out-Null
         $markdownLines.Add("- $collisionCount record(s) share a promotion key with a higher-confidence candidate and were skipped.") | Out-Null
-        $markdownLines.Add("- Use `collidingWithId` in the JSON output to review which record won the key.") | Out-Null
+        $markdownLines.Add("- Use ``collidingWithId`` in the JSON output to review which record won the key.") | Out-Null
         foreach ($col in $collisions) {
             $wid = [string]$col.collidingWithId
             $cid = [string]$col.sourceRecordId
@@ -1338,10 +1366,10 @@ try {
     $markdownLines.Add("") | Out-Null
     $markdownLines.Add("## Observations") | Out-Null
     $markdownLines.Add("") | Out-Null
-    $markdownLines.Add("- Durable signals should usually come from `shared-inbox.jsonl` and be promoted carefully into human-edited notes.") | Out-Null
+    $markdownLines.Add("- Durable signals should usually come from ``shared-inbox.jsonl`` and be promoted carefully into human-edited notes.") | Out-Null
     $markdownLines.Add("- Session handoff combines session memory and recent bus events, so long-running work can restart with less context decay.") | Out-Null
     $markdownLines.Add("- OpenClaw task, run, job, and journal records are treated as first-class recall targets, not just prompt snippets.") | Out-Null
-    $markdownLines.Add("- Typed durable promotion only routes into `user`, `feedback`, `project`, and `reference`, so durable writeback targets stay auditable.") | Out-Null
+    $markdownLines.Add("- Typed durable promotion only routes into ``user``, ``feedback``, ``project``, and ``reference``, so durable writeback targets stay auditable.") | Out-Null
     $markdownLines.Add("- Typed promotion queue items now carry source layer, source scope, target scope, source type, source confidence, source record id, and a promotion reason for downstream writeback decisions.") | Out-Null
     $markdownLines.Add("- Typed refresh targets are newer task/session/event signals that overlap an older durable memory after target-scope routing and may deserve a writeback update.") | Out-Null
     if ($null -ne $writebackResults -and $writebackResults.Count -gt 0) {

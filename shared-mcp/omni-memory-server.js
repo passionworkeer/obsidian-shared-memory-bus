@@ -112,7 +112,7 @@ function loadEmbeddingProviderHelper() {
 }
 
 function loadMemoryContractHelper() {
-  const helperPath = resolveRuntimePath("memory-contract.js", path.join("ops", "memory-contract.js"));
+  const helperPath = resolveRuntimePath("memory/memory-contract.js", path.join("ops", "memory", "memory-contract.js"));
   return require(helperPath);
 }
 

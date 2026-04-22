@@ -11,6 +11,7 @@ const assert = require("node:assert/strict");
 
 const Module = require("module");
 const path = require("path");
+const fs = require("fs");
 
 const HANDOFF_MODULE_PATH = require.resolve("../../../ops/build/build-handoff-pack.js");
 
@@ -51,13 +52,13 @@ delete require.cache[HANDOFF_MODULE_PATH];
 // Stub memory-contract
 // ---------------------------------------------------------------------------
 
-const mcPath = require.resolve("../../../ops/memory-contract.js");
+const mcPath = require.resolve("../../../ops/memory/memory-contract.js");
 delete require.cache[mcPath];
 require.cache[mcPath] = {
   id: mcPath,
   filename: mcPath,
   loaded: true,
-  exports: require("../../../ops/memory-contract.js"),
+  exports: require("../../../ops/memory/memory-contract.js"),
 };
 
 // ---------------------------------------------------------------------------
@@ -76,6 +77,36 @@ require.cache[stubVaultRootPath] = {
     },
     getDefaultVaultCandidates() {
       return ["E:/desktop/Obsidian Vault"];
+    },
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Stub store-root at the path build-handoff-pack.js will find
+// build-handoff-pack.js is in ops/build/, so it looks in ops/bus/
+// ---------------------------------------------------------------------------
+
+const stubStoreRootPath = path.join(__dirname, "..", "..", "..", "ops", "bus", "store-root.js");
+if (!fs.existsSync(path.dirname(stubStoreRootPath))) {
+  fs.mkdirSync(path.dirname(stubStoreRootPath), { recursive: true });
+}
+if (!fs.existsSync(stubStoreRootPath)) {
+  fs.writeFileSync(stubStoreRootPath, `
+module.exports = {
+  resolveStoreRoot() {
+    return "E:/desktop/.ai-memory";
+  },
+};
+`, "utf8");
+}
+delete require.cache[stubStoreRootPath];
+require.cache[stubStoreRootPath] = {
+  id: stubStoreRootPath,
+  filename: stubStoreRootPath,
+  loaded: true,
+  exports: {
+    resolveStoreRoot() {
+      return "E:/desktop/.ai-memory";
     },
   },
 };

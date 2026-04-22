@@ -12,7 +12,7 @@ const assert = require("node:assert");
 const { spawnSync } = require("child_process");
 
 // Load the JS implementation directly
-const { validateStructuredRecord, validatePromotionMetadata } = require("../../ops/memory-contract.js");
+const { validateStructuredRecord, validatePromotionMetadata } = require("../../ops/memory/memory-contract.js");
 
 // Python retrieval module path (forward slashes for cross-platform compatibility)
 const PYTHON_MODULE_PATH = "E:/desktop/obsidian-shared-memory-bus/retrieval";

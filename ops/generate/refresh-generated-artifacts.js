@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
-const { buildMemoryIntegrityReport } = require("./memory-contract.js");
+const { buildMemoryIntegrityReport } = require("../memory/memory-contract.js");
 
 function loadVaultRootHelper() {
   const candidates = [

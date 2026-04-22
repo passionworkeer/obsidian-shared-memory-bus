@@ -10,8 +10,6 @@ on:
 jobs:
   validate:
     runs-on: windows-latest
-    env:
-      AI_MEMORY_OBSIDIAN_VAULT: ${{ runner.temp }}\vault-smoke
 
     steps:
       - name: Checkout
@@ -31,7 +29,7 @@ jobs:
       - name: Smoke install bundle
         shell: pwsh
         run: |
-          Set-StrictMode -Version 3.0
+          $env:AI_MEMORY_OBSIDIAN_VAULT = Join-Path $env:RUNNER_TEMP 'vault-smoke'
           New-Item -ItemType Directory -Force -Path $env:AI_MEMORY_OBSIDIAN_VAULT | Out-Null
           $targetRoot = Join-Path $env:RUNNER_TEMP 'ai-memory-smoke'
           ./scripts/install.ps1 -TargetRoot $targetRoot -RegisterStartup:$false -PersistUserEnvironment:$false

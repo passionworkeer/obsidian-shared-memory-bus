@@ -2,12 +2,12 @@ const fs = require("fs");
 const path = require("path");
 const {
   buildGeneratedArtifactMetadata,
-} = require("./memory-contract.js");
+} = require("../memory/memory-contract.js");
 
 function loadStoreRootHelper() {
   const candidates = [
-    // bus/ sibling (project layout)
-    path.join(__dirname, "..", "bus", "store-root.js"),
+    // bus/ sibling (project layout: ops/build -> ../../bus/)
+    path.join(__dirname, "..", "..", "bus", "store-root.js"),
     // ops/bus/ (legacy nested layout)
     path.join(__dirname, "bus", "store-root.js"),
     // Script-local (installed flat layout: ~/.ai-memory/ops/)
