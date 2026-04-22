@@ -291,11 +291,11 @@ function Select-RefreshTargets {
 
 function Select-RecentUniqueRecords {
     param(
-        [Parameter(Mandatory = $true)][object[]]$Records,
+        [object[]]$Records = @(),
         [int]$MaxItems = 8
     )
 
-    if ($null -eq $Records -or $Records.Count -eq 0) {
+    if ($null -eq $Records -or @($Records).Count -eq 0) {
         return @()
     }
 
