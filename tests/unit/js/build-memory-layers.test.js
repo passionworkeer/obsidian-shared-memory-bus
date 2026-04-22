@@ -30,6 +30,23 @@ if (!fs.existsSync(stubVaultRootPath)) {
 }
 
 // ---------------------------------------------------------------------------
+// Stub store-root so build-memory-layers.js can be loaded
+// ---------------------------------------------------------------------------
+
+const stubStoreRootPath = path.join(__dirname, "..", "..", "..", "bus", "store-root.js");
+const storeRootStub = `
+module.exports = {
+  resolveStoreRoot() {
+    return "E:/desktop/.ai-memory";
+  },
+};
+`;
+
+if (!fs.existsSync(stubStoreRootPath)) {
+  fs.writeFileSync(stubStoreRootPath, storeRootStub, "utf8");
+}
+
+// ---------------------------------------------------------------------------
 // Prevent main() from running and inject exports
 // ---------------------------------------------------------------------------
 const Module = require("module");

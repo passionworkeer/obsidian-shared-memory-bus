@@ -92,7 +92,7 @@ function parseJsonl(filePath) {
 
 // Lazy-load to avoid a hard require cycle during module parsing.
 function getAppendLineAtomic() {
-  return require("./inbox-atomic-write.js").appendLineAtomic;
+  return require("../inbox/inbox-atomic-write.js").appendLineAtomic;
 }
 
 /**
