@@ -17,8 +17,7 @@ jobs:
           - windows-latest
           - ubuntu-latest
           - macos-latest
-    env:
-      AI_MEMORY_OBSIDIAN_VAULT: ${{ runner.temp }}/vault-smoke
+    env: {}
 
     steps:
       - name: Checkout
@@ -97,7 +96,7 @@ jobs:
       - name: Build memory layers
         shell: pwsh
         run: |
-          node ./ops/build-memory-layers.js | Out-Null
+          node ./ops/build/build-memory-layers.js | Out-Null
           if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_OBSIDIAN_VAULT '00-System/ai-memory/generated/MEMORY-LAYERS.md') -PathType Leaf)) {
             throw 'MEMORY-LAYERS.md was not generated'
           }
