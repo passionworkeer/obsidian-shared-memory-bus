@@ -9,13 +9,13 @@ const os = require("os");
 // ---------------------------------------------------------------------------
 // Stub memory-contract and vault-root before the module is loaded
 // ---------------------------------------------------------------------------
-const mcPath = require.resolve("../../../ops/memory-contract.js");
+const mcPath = require.resolve("../../../ops/memory/memory-contract.js");
 delete require.cache[mcPath];
 require.cache[mcPath] = {
   id: mcPath,
   filename: mcPath,
   loaded: true,
-  exports: require("../../../ops/memory-contract.js"),
+  exports: require("../../../ops/memory/memory-contract.js"),
 };
 
 const stubVaultRootPath = path.join(__dirname, "..", "..", "..", "bus", "vault-root.js");
