@@ -22,7 +22,11 @@ $VBase = Join-SharedPath @((Resolve-SharedObsidianVaultRoot -ThrowIfMissing), "0
 $StructuredDir = Join-SharedPath @($VBase, "structured")
 $InboxFile = Join-SharedPath @($VBase, "inbox", "claude-code.md")
 $StructuredFile = Join-SharedPath @($StructuredDir, "claude-code.jsonl")
-$ClaudeMemApi = "http://127.0.0.1:37778/api"
+$ClaudeMemApi = if ($env:CLAUDE_MEM_BASE) {
+    $env:CLAUDE_MEM_BASE -replace '/+$', '' -replace '$', '/api'
+} else {
+    "http://127.0.0.1:37778/api"
+}
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 function Normalize-Space {

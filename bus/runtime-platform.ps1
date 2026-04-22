@@ -697,19 +697,23 @@ function Start-SharedWindowsDetachedHiddenCommand {
         $process.StartInfo = $startInfo
         [void]$process.Start()
 
-        $cleanupPath = $launcherPath
-        $cleanupAction = {
-            param($sender, $eventArgs)
+        # Avoid PowerShell scriptblock Exited handlers here: they can execute on a
+        # ThreadPool thread without an active Runspace and crash the host process.
+        # Do best-effort synchronous cleanup instead.
+        for ($attempt = 0; $attempt -lt 5; $attempt++) {
             try {
-                if (-not [string]::IsNullOrWhiteSpace($cleanupPath) -and (Test-Path -LiteralPath $cleanupPath -PathType Leaf)) {
-                    Remove-Item -LiteralPath $cleanupPath -Force -ErrorAction SilentlyContinue
+                if (-not [string]::IsNullOrWhiteSpace($launcherPath) -and (Test-Path -LiteralPath $launcherPath -PathType Leaf)) {
+                    Remove-Item -LiteralPath $launcherPath -Force -ErrorAction SilentlyContinue
                 }
             } catch {
             }
-        }.GetNewClosure()
-        $cleanupHandler = [System.EventHandler]$cleanupAction
-        $process.EnableRaisingEvents = $true
-        $process.add_Exited($cleanupHandler)
+
+            if (-not (Test-Path -LiteralPath $launcherPath -PathType Leaf)) {
+                break
+            }
+            Start-Sleep -Milliseconds 200
+        }
+
         return $process
     } catch {
         if (-not [string]::IsNullOrWhiteSpace($launcherPath) -and (Test-Path -LiteralPath $launcherPath -PathType Leaf)) {
@@ -1002,6 +1006,7 @@ function Start-SharedBackgroundProcess {
             $launcherTemplate = @'
 $ErrorActionPreference = 'Stop'
 $spec = Get-Content -Raw -LiteralPath '__SPEC_PATH__' -Encoding utf8 | ConvertFrom-Json
+$launcherPath = $MyInvocation.MyCommand.Path
 $arguments = @()
 foreach ($argument in @($spec.arguments)) {
     $arguments += [string]$argument
@@ -1012,16 +1017,34 @@ if (-not [string]::IsNullOrWhiteSpace([string]$spec.workingDirectory)) {
 
 $stdoutPath = [string]$spec.stdoutPath
 $stderrPath = [string]$spec.stderrPath
-if (-not [string]::IsNullOrWhiteSpace($stdoutPath) -and -not [string]::IsNullOrWhiteSpace($stderrPath)) {
-    & ([string]$spec.executable) @arguments 1> $stdoutPath 2> $stderrPath
-} elseif (-not [string]::IsNullOrWhiteSpace($stdoutPath)) {
-    & ([string]$spec.executable) @arguments 1> $stdoutPath
-} elseif (-not [string]::IsNullOrWhiteSpace($stderrPath)) {
-    & ([string]$spec.executable) @arguments 2> $stderrPath
-} else {
-    & ([string]$spec.executable) @arguments
+try {
+    if (Test-Path -LiteralPath '__SPEC_PATH__' -PathType Leaf) {
+        Remove-Item -LiteralPath '__SPEC_PATH__' -Force -ErrorAction SilentlyContinue
+    }
+} catch {
 }
-exit $LASTEXITCODE
+
+$exitCode = 0
+try {
+    if (-not [string]::IsNullOrWhiteSpace($stdoutPath) -and -not [string]::IsNullOrWhiteSpace($stderrPath)) {
+        & ([string]$spec.executable) @arguments 1> $stdoutPath 2> $stderrPath
+    } elseif (-not [string]::IsNullOrWhiteSpace($stdoutPath)) {
+        & ([string]$spec.executable) @arguments 1> $stdoutPath
+    } elseif (-not [string]::IsNullOrWhiteSpace($stderrPath)) {
+        & ([string]$spec.executable) @arguments 2> $stderrPath
+    } else {
+        & ([string]$spec.executable) @arguments
+    }
+    $exitCode = $LASTEXITCODE
+} finally {
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($launcherPath) -and (Test-Path -LiteralPath $launcherPath -PathType Leaf)) {
+            Remove-Item -LiteralPath $launcherPath -Force -ErrorAction SilentlyContinue
+        }
+    } catch {
+    }
+}
+exit $exitCode
 '@
             $launcherContent = $launcherTemplate.Replace('__SPEC_PATH__', $specLiteral)
             [System.IO.File]::WriteAllText($launcherScriptPath, $launcherContent, (New-Object System.Text.UTF8Encoding($false)))
@@ -1031,26 +1054,6 @@ exit $LASTEXITCODE
                 -ArgumentList (Get-SharedPowerShellFileArguments -ScriptPath $launcherScriptPath -ArgumentList @()) `
                 -Environment $Environment `
                 -WorkingDirectory $effectiveWorkingDirectory
-
-            $cleanupPaths = @($specPath, $launcherScriptPath)
-            $cleanupAction = {
-                param($sender, $eventArgs)
-                foreach ($path in @($cleanupPaths)) {
-                    if ([string]::IsNullOrWhiteSpace($path)) {
-                        continue
-                    }
-
-                    try {
-                        if (Test-Path -LiteralPath $path -PathType Leaf) {
-                            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
-                        }
-                    } catch {
-                    }
-                }
-            }.GetNewClosure()
-            $cleanupHandler = [System.EventHandler]$cleanupAction
-            $process.EnableRaisingEvents = $true
-            $process.add_Exited($cleanupHandler)
             return $process
         } catch {
             foreach ($tempPath in @($specPath, $launcherScriptPath)) {
