@@ -9,9 +9,9 @@ const path = require("node:path")
 function loadStoreRootHelper() {
   const candidates = [
     // bus/ sibling (project layout: ops/ and bus/ are siblings under project root)
-    path.join(__dirname, "..", "bus", "store-root.js"),
+    path.join(__dirname, "..", "..", "bus", "store-root.js"),
     // ops/bus/ (legacy nested layout)
-    path.join(__dirname, "bus", "store-root.js"),
+    path.join(__dirname, "..", "bus", "store-root.js"),
     // Script-local (installed flat layout: ~/.ai-memory/ops/)
     path.join(__dirname, "store-root.js"),
   ]

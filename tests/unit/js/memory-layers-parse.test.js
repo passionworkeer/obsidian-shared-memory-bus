@@ -9,7 +9,7 @@ const os = require("os");
 // ---------------------------------------------------------------------------
 // Stub memory-contract and vault-root before the module is loaded
 // ---------------------------------------------------------------------------
-  exports: require("../../../ops/memory/memory-contract.js"),
+const mcPath = require.resolve("../../../ops/memory/memory-contract.js");
 delete require.cache[mcPath];
 require.cache[mcPath] = {
   id: mcPath,
