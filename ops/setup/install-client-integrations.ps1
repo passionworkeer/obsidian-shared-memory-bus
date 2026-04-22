@@ -345,7 +345,7 @@ function New-ClaudeServerMap {
 }
 
 function Remove-MarkedCodexBlock {
-    param([Parameter(Mandatory = $true)][string]$Text)
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text)
 
     $pattern = '(?ms)^\# SHARED-MEMORY-BUS:START\r?\n.*?^\# SHARED-MEMORY-BUS:END\r?\n?'
     return ([regex]::Replace($Text, $pattern, ""))
@@ -353,10 +353,13 @@ function Remove-MarkedCodexBlock {
 
 function Remove-CodexManagedServerTables {
     param(
-        [Parameter(Mandatory = $true)][string]$Text,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text,
         [Parameter(Mandatory = $true)][string[]]$ServerIds
     )
 
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return ""
+    }
     if (@($ServerIds).Count -eq 0) {
         return $Text
     }
@@ -395,7 +398,8 @@ function Update-CodexConfigToml {
 
     $existing = ""
     if (Test-Path -LiteralPath $Path -PathType Leaf) {
-        $existing = Get-Content -Raw -LiteralPath $Path -Encoding utf8
+        $raw = Get-Content -Raw -LiteralPath $Path -Encoding utf8
+        $existing = if ($null -eq $raw) { "" } else { $raw }
     }
 
     $managedIds = @($Servers | ForEach-Object { [string]$_.id })
