@@ -1143,9 +1143,9 @@ try {
             (Get-JsonLines -Path $OpenClawJournalPath)
         )
     }
-    $runRecords = @($taskMemoryRecords | Where-Object { $_.PSObject.Properties.Name -contains "source_kind" -and [string]$_.source_kind -eq "run" })
-    $jobRecords = @($taskMemoryRecords | Where-Object { $_.PSObject.Properties.Name -contains "source_kind" -and [string]$_.source_kind -eq "cron" })
-    $taskRecords = @($taskMemoryRecords | Where-Object { $_.PSObject.Properties.Name -contains "source_kind" -and [string]$_.source_kind -eq "blackboard" -and [string]$_.scope -eq "task" })
+    $runRecords = @($taskMemoryRecords | Where-Object { $_ -is [PSCustomObject] -and ($_.PSObject.Properties.Name -contains "source_kind") -and [string]$_.source_kind -eq "run" })
+    $jobRecords = @($taskMemoryRecords | Where-Object { $_ -is [PSCustomObject] -and ($_.PSObject.Properties.Name -contains "source_kind") -and [string]$_.source_kind -eq "cron" })
+    $taskRecords = @($taskMemoryRecords | Where-Object { $_ -is [PSCustomObject] -and ($_.PSObject.Properties.Name -contains "source_kind") -and [string]$_.source_kind -eq "blackboard" -and [string]$_.scope -eq "task" })
     $journalRecords = @($taskMemoryRecords | Where-Object { [string]$_.source -eq "openclaw-blackboard-journal" -or [string]$_.type -eq "task-journal" })
 
     $totalRecords = $durableRecords.Count + $sessionRecords.Count + $eventRecords.Count + $taskMemoryRecords.Count
