@@ -31,8 +31,8 @@ if ($WorkspaceRoot -and $WorkspaceRoot -ne ".") {
     if (Test-Path $WorkspaceRoot) { $repoRoot = $WorkspaceRoot }
 }
 
-$hooksDir = Join-Path $repoRoot ".git\hooks"
-$opsDir   = Join-Path $repoRoot "ops"
+$hooksDir     = Join-Path $repoRoot ".git\hooks"
+$opsDir       = Join-Path $repoRoot "hooks"    # was "ops", hooks moved from ops/ to hooks/
 
 # Verify .git directory exists
 if (-not (Test-Path (Join-Path $repoRoot ".git"))) {
