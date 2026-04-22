@@ -1320,7 +1320,7 @@ try {
         $markdownLines.Add("## Promotion Key Collisions") | Out-Null
         $markdownLines.Add("") | Out-Null
         $markdownLines.Add("- $collisionCount record(s) share a promotion key with a higher-confidence candidate and were skipped.") | Out-Null
-        $markdownLines.Add("- Use `collidingWithId` in the JSON output to review which record won the key.") | Out-Null
+        $markdownLines.Add("- Use ``collidingWithId`` in the JSON output to review which record won the key.") | Out-Null
         foreach ($col in $collisions) {
             $wid = [string]$col.collidingWithId
             $cid = [string]$col.sourceRecordId
@@ -1338,10 +1338,10 @@ try {
     $markdownLines.Add("") | Out-Null
     $markdownLines.Add("## Observations") | Out-Null
     $markdownLines.Add("") | Out-Null
-    $markdownLines.Add("- Durable signals should usually come from `shared-inbox.jsonl` and be promoted carefully into human-edited notes.") | Out-Null
+    $markdownLines.Add("- Durable signals should usually come from ``shared-inbox.jsonl`` and be promoted carefully into human-edited notes.") | Out-Null
     $markdownLines.Add("- Session handoff combines session memory and recent bus events, so long-running work can restart with less context decay.") | Out-Null
     $markdownLines.Add("- OpenClaw task, run, job, and journal records are treated as first-class recall targets, not just prompt snippets.") | Out-Null
-    $markdownLines.Add("- Typed durable promotion only routes into `user`, `feedback`, `project`, and `reference`, so durable writeback targets stay auditable.") | Out-Null
+    $markdownLines.Add("- Typed durable promotion only routes into ``user``, ``feedback``, ``project``, and ``reference``, so durable writeback targets stay auditable.") | Out-Null
     $markdownLines.Add("- Typed promotion queue items now carry source layer, source scope, target scope, source type, source confidence, source record id, and a promotion reason for downstream writeback decisions.") | Out-Null
     $markdownLines.Add("- Typed refresh targets are newer task/session/event signals that overlap an older durable memory after target-scope routing and may deserve a writeback update.") | Out-Null
     if ($null -ne $writebackResults -and $writebackResults.Count -gt 0) {
