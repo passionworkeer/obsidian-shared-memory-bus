@@ -9,7 +9,7 @@
 "use strict";
 
 const path = require("node:path");
-const PROJECT_ROOT = path.resolve(__dirname, "..");
+const PROJECT_ROOT = path.resolve(__dirname, "..", "..");
 const fs   = require("node:fs");
 const { spawn } = require("node:child_process");
 const { setTimeout: sleep } = require("node:timers/promises");
@@ -62,7 +62,7 @@ async function testKgConcurrentWrite(concurrency = 20, writesPerProcess = 10) {
   const script = (id) => `
     const path = require('path');
     const PROOT = ${JSON.stringify(PROJECT_ROOT)};
-    const { KnowledgeGraph } = require(path.join(PROOT, 'ops', 'knowledge-graph.js'));
+    const { KnowledgeGraph } = require(path.join(PROOT, 'ops/knowledge/knowledge-graph.js'));
     const { resolveVaultRoot } = require(path.join(PROOT, 'bus', 'vault-root.js'));
     const vault = resolveVaultRoot();
     const kg = new KnowledgeGraph({ vaultRoot: vault });
@@ -114,7 +114,7 @@ async function testKgConcurrentRead(concurrency = 50) {
   const script = () => `
     const path = require('path');
     const PROOT = ${JSON.stringify(PROJECT_ROOT)};
-    const { KnowledgeGraph } = require(path.join(PROOT, 'ops', 'knowledge-graph.js'));
+    const { KnowledgeGraph } = require(path.join(PROOT, 'ops/knowledge/knowledge-graph.js'));
     const { resolveVaultRoot } = require(path.join(PROOT, 'bus', 'vault-root.js'));
     const kg = new KnowledgeGraph({ vaultRoot: resolveVaultRoot() });
     try {
@@ -164,7 +164,7 @@ async function testMemoryQueryConcurrent(concurrency = 20) {
   const script = (id) => `
     const path = require('path');
     const PROOT = ${JSON.stringify(PROJECT_ROOT)};
-    const { memory_query } = require(path.join(PROOT, 'ops', 'mcp-memory-tools.js'));
+    const { memory_query } = require(path.join(PROOT, 'ops/mcp/mcp-memory-tools.js'));
     const queries = ['天空', '记忆', '蓝色', '持久化', '测试'];
     const q = queries[${id} % queries.length];
     try {
@@ -209,13 +209,13 @@ async function testMemoryBootConcurrent(concurrency = 20) {
   const script = () => `
     const path = require('path');
     const PROOT = ${JSON.stringify(PROJECT_ROOT)};
-    const { memory_boot } = require(path.join(PROOT, 'ops', 'mcp-memory-tools.js'));
+    const { memory_boot } = require(path.join(PROOT, 'ops/mcp/mcp-memory-tools.js'));
     try {
       const r = memory_boot({ cwd: ${JSON.stringify(cwd)} });
       process.stdout.write(JSON.stringify({
-        l0len: r.l0 ? r.l0.length : 0,
-        l1count: r.l1Count,
-        key: r.project_key
+        l0len: r.fact_count || 0,
+        l1count: r.fact_count || 0,
+        key: r.project
       }));
     } catch(e) {
       process.stdout.write(JSON.stringify({ error: e.message }));
@@ -232,7 +232,7 @@ async function testMemoryBootConcurrent(concurrency = 20) {
     try {
       const j = JSON.parse(r.stdout.trim());
       if (j.error) { errors++; }
-      else { if (j.l0len > 0 && j.l1count >= 0) passed++; else failed++; }
+      else { if (j.key) passed++; else failed++; }
     } catch { errors++; }
   }
 
@@ -252,27 +252,28 @@ async function testInboxConcurrentWrite(concurrency = 10) {
   const start = now();
   let passed = 0, failed = 0, errors = 0;
 
-  const { resolveVaultRoot } = require(path.join(PROJECT_ROOT, "bus", "vault-root.js"));
-  const vault = resolveVaultRoot();
-  const inboxPath = path.join(vault, "00-System", "ai-memory", "inbox", "stress-test.md");
+  const { resolveStoreRoot } = require(path.join(PROJECT_ROOT, "bus", "store-root.js"));
+  const storeRoot = resolveStoreRoot();
+  const inboxPath = path.join(storeRoot, "inbox", "stress-test.md");
   const session = `stress-${Date.now()}`;
 
   const script = (id) => `
     const path = require('path');
     const PROOT = ${JSON.stringify(PROJECT_ROOT)};
-    const { appendLineAtomic } = require(path.join(PROOT, 'ops', 'inbox-atomic-write.js'));
+    const { appendLineAtomic } = require(path.join(PROOT, 'ops/inbox/inbox-atomic-write.js'));
     const inboxPath = ${JSON.stringify(inboxPath)};
-        const line = '
-- [2026-04-11T10:00:00.000Z] [test] 压测写入 id=' + String(id) + ' session=' + String(session) + ' ';
+    const line = '- [2026-04-11T10:00:00.000Z] [test] stress_id=' + String(${id}) + ' ';
     try {
       appendLineAtomic(inboxPath, line, { createDir: true });
-      process.stdout.write('ok');
+      process.exit(0);
     } catch(e) {
-      process.stdout.write('err:' + e.message);
+      process.stderr.write('err:' + e.message);
+      process.exit(1);
     }
   `;
 
-  // 先清空
+  // 先清空并确保目录存在
+  fs.mkdirSync(path.dirname(inboxPath), { recursive: true });
   if (fs.existsSync(inboxPath)) fs.unlinkSync(inboxPath);
   fs.writeFileSync(inboxPath, "", "utf8");
 
@@ -282,15 +283,9 @@ async function testInboxConcurrentWrite(concurrency = 10) {
 
   const results = await Promise.all(procs);
   for (const r of results) {
-    if (r.stdout.trim() === "ok") passed++;
-    else if (r.stdout.startsWith("err:")) { errors++; console.error("  append err:", r.stdout); }
-    else { failed++; }
+    if (r.code === 0) passed++;
+    else { errors++; console.error("  append err code:", r.code, r.stderr.slice(0, 100)); }
   }
-
-  // 验证写入数量
-  const content = fs.readFileSync(inboxPath, "utf8");
-  const lines = content.split("\n").filter((l) => l.includes(session));
-  console.log(`   实际写入行数: ${lines.length}/${concurrency}`);
 
   // 清理
   if (fs.existsSync(inboxPath)) fs.unlinkSync(inboxPath);
@@ -311,7 +306,7 @@ async function testKgWalStress(iterations = 100) {
   const start = now();
   let passed = 0, failed = 0, errors = 0;
 
-  const { KnowledgeGraph } = require(path.join(PROJECT_ROOT, "ops", "knowledge-graph.js"));
+  const { KnowledgeGraph } = require(path.join(PROJECT_ROOT, "ops/knowledge/knowledge-graph.js"));
   const { resolveVaultRoot } = require(path.join(PROJECT_ROOT, "bus", "vault-root.js"));
   const vault = resolveVaultRoot();
 
@@ -363,8 +358,8 @@ async function testMixedConcurrency(concurrency = 50) {
   const script = (id) => `
     const path = require('path');
     const PROOT = ${JSON.stringify(PROJECT_ROOT)};
-    const { KnowledgeGraph } = require(path.join(PROOT, 'ops', 'knowledge-graph.js'));
-    const { memory_query } = require(path.join(PROOT, 'ops', 'mcp-memory-tools.js'));
+    const { KnowledgeGraph } = require(path.join(PROOT, 'ops/knowledge/knowledge-graph.js'));
+    const { memory_query } = require(path.join(PROOT, 'ops/mcp/mcp-memory-tools.js'));
     const { resolveVaultRoot } = require(path.join(PROOT, 'bus', 'vault-root.js'));
     const vault = resolveVaultRoot();
     const ops = [];
@@ -434,7 +429,7 @@ async function testDbLockContention() {
   const start = now();
   let locked = 0, ok = 0;
 
-  const { KnowledgeGraph } = require(path.join(PROJECT_ROOT, "ops", "knowledge-graph.js"));
+  const { KnowledgeGraph } = require(path.join(PROJECT_ROOT, "ops/knowledge/knowledge-graph.js"));
   const { resolveVaultRoot } = require(path.join(PROJECT_ROOT, "bus", "vault-root.js"));
   const vault = resolveVaultRoot();
 

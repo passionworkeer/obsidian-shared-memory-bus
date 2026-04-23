@@ -58,9 +58,15 @@ function resolveStoreHelpers() {
 const {
   DEFAULT_STORE_ROOT,
   resolveStoreRoot,
-  getProjectsRoot,
-  getContextPath,
 } = resolveStoreHelpers();
+
+function getProjectsRoot(storeRoot) {
+  return path.join(storeRoot || resolveStoreRoot(), "projects");
+}
+
+function getContextPath(storeRoot) {
+  return path.join(storeRoot || resolveStoreRoot(), "CONTEXT.md");
+}
 const { search: bm25Search } = loadBm25Helper() || {
   search() {
     return [];

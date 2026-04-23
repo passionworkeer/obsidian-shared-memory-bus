@@ -51,15 +51,26 @@ if (!fs.existsSync(stubStoreRootPath)) {
 // Prevent main() from running and inject exports
 // ---------------------------------------------------------------------------
 const Module = require("module");
-const originalCompile = Module.prototype._compile;
-Module.prototype._compile = function(code, filename) {
-  if (filename.includes("build-memory-layers")) {
-    code =
-      code.replace(/^main\(\);$/m, "// main() stubbed by test")
-      + "\nmodule.exports = {\n  normalizeSpaces,\n  getFreshness,\n  buildPromotionKey,\n  withFileLock,\n  deduplicateSharedInbox,\n};\n";
+const _origCompile = Module.prototype._compile;
+const BML_PATH = require.resolve("../../../ops/build/build-memory-layers.js");
+
+Module.prototype._compile = function _patchedCompile(code, filename) {
+  if (filename === BML_PATH) {
+    code = code
+      .replace(/\bmain\(\)\.catch\([\s\S]*?\);?/g, "// main() async stubbed by test")
+      .replace(/\bmain\(\);/g, "// main() sync stubbed by test");
+    code = code + "\nmodule.exports = {\n" +
+      "normalizeSpaces,getFreshness,buildPromotionKey,withFileLock," +
+      "deduplicateSharedInbox," +
+      "loadStoreRootHelper,resolveStoreRoot," +
+      "MEMORY_RECORD_SCHEMA_VERSION," +
+      "};\n";
   }
-  return originalCompile.call(this, code, filename);
-}
+  return _origCompile.call(this, code, filename);
+};
+
+// Force fresh load so our _compile hook takes effect
+delete require.cache[BML_PATH];
 
 // ---------------------------------------------------------------------------
 // jsonl-stream.js tests (no dependencies on build-memory-layers.js)
