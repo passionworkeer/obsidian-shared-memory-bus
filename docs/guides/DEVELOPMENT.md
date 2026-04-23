@@ -315,4 +315,4 @@ If the chain breaks:
 
 ## Releasing / 发布
 
-See [`docs/RELEASING.md`](../RELEASING.md) for the full release process.
+See [`CHANGELOG.md`](../CHANGELOG.md) for the full release process.
