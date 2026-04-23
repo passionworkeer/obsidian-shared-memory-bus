@@ -26,11 +26,9 @@
 
 ## Architecture Decisions
 - [adr/ADR-002-unified-memory-architecture-v2.md](./adr/ADR-002-unified-memory-architecture-v2.md) — ADR-002: unified memory v2 (SQLite chunks, BM25, typed promotion, MMR, temporal decay)
-- [guides/CONTRIBUTING_ARCHITECTURE.md](./guides/CONTRIBUTING_ARCHITECTURE.md) — ADR-003 (cross-platform abstraction) and ADR-004 (WAL concurrency) + ADR writing guide
 
 ## External References
-- [MEMPALACE-ARCHITECTURE.md](./MEMPALACE-ARCHITECTURE.md) — MemPalace memory framework deep-dive
-- [claude-mem-architecture.md](./claude-mem-architecture.md) — claude-mem architecture analysis
+- [docs/guides/DEVELOPMENT.md](./guides/DEVELOPMENT.md) — Development guide and architecture overview
 
 ## Environment
 - [ENVIRONMENT.md](./ENVIRONMENT.md) — All environment variables reference

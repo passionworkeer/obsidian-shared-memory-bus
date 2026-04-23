@@ -66,10 +66,10 @@ $env:AI_MEMORY_STORE = "E:\.ai-memory"
 3. Done! The shared memory bus is running.
 
 **I want to add another AI tool to the shared memory:**
-→ See [docs/ADDING-CLIENT.md](docs/ADDING-CLIENT.md)
+→ See [docs/INDEX.md](docs/INDEX.md) and `docs/guides/DEVELOPMENT.md`
 
 **I want to understand what this is:**
-→ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/FAQ.md](docs/FAQ.md)
+→ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/guides/TROUBLESHOOTING.md](docs/guides/TROUBLESHOOTING.md)
 
 **Something is broken:**
 → See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
@@ -277,7 +277,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\run-
 
 ### 4. Start using shared memory
 
-Wire your agent to the shared MCP endpoints in `shared-mcp/manifest.json`. See [`docs/NEW-AGENT-INTEGRATION.md`](docs/NEW-AGENT-INTEGRATION.md) for step-by-step instructions per agent.
+Wire your agent to the shared MCP endpoints in `shared-mcp/manifest.json`. See [`docs/INDEX.md`](docs/INDEX.md) and [`docs/guides/DEVELOPMENT.md`](docs/guides/DEVELOPMENT.md) for step-by-step instructions per agent.
 
 ### Configuration
 
@@ -313,7 +313,7 @@ Shared MCP deduplicates processes. It does not merge all agent state into one co
 | Cursor | Supported | MCP config wiring supported |
 | VS Code / GitHub Copilot | Supported | Config wiring and snapshot import supported |
 | Trae | Portable target | Use the new-agent integration guide |
-| Other MCP-capable agents | Portable target | Prefer the onboarding flow in `docs/NEW-AGENT-INTEGRATION.md` |
+| Other MCP-capable agents | Portable target | Prefer the onboarding flow in `docs/INDEX.md` |
 | Portable core on macOS/Linux | Supported | `pwsh` + `.sh` entrypoints ship for install/start/status/stop flows; Windows still has the deepest live acceptance coverage |
 
 ## Included
@@ -403,7 +403,7 @@ If you want a repo-local starter instead of generated output, copy the reusable 
 - The POSIX wrapper layer was smoke-checked through Git Bash using `scripts/validate-layout.sh` and `shared-mcp/status-shared-mcp.sh`
 - The shared `memory` MCP now keeps a persistent Python retrieval worker and only falls back to one-shot search if the worker is unavailable
 
-See `docs/VALIDATION.md` for the current test story and reproduction flow.
+See `docs/guides/DEVELOPMENT.md` for the current test story and reproduction flow.
 
 ## Portable Overlay Placeholders
 Tracked onboarding and overlay files in this repo intentionally use portable placeholders instead of workstation-specific absolute paths.
@@ -515,7 +515,7 @@ By default, client wiring applies every server whose manifest `mode` is `shared`
 
 `verify-integrations.ps1` and `verify-integrations.sh` are compatibility aliases that now forward into `install-client-integrations`. They are side-effecting apply commands, not validation gates.
 
-**What to expect**: The pressure test runs 5 mixed waves of shared MCP health checks, direct `memory` tool calls, and real client task probes. "passed" means every wave returned the expected responses with no crashes, duplicate listeners, or PID churn. If you see failures, see [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) or the operational FAQ in [`docs/FAQ.md`](docs/FAQ.md).
+**What to expect**: The pressure test runs 5 mixed waves of shared MCP health checks, direct `memory` tool calls, and real client task probes. "passed" means every wave returned the expected responses with no crashes, duplicate listeners, or PID churn. If you see failures, see [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).
 
 ## Optional Remote Embeddings
 The default dense retrieval backend is offline `hashing-v1`.
@@ -605,13 +605,12 @@ Use the included probe and benchmark scripts before doing any full reindex.
 - [Platform Abstraction](docs/architecture/PLATFORM_ABSTRACTION.md)
 - [Data Flow](docs/reference/DATA-FLOW.md)
 - [MCP Tools Reference](docs/guides/API_REFERENCE.md)
-- [Architecture Decision Records](docs/guides/CONTRIBUTING_ARCHITECTURE.md)
+- [Architecture Decision Records](docs/adr/ADR-002-unified-memory-architecture-v2.md)
 - [Development Guide](docs/guides/DEVELOPMENT.md)
 - [Installation Guide](docs/INSTALL.md)
 - [Operations Runbook](docs/OPERATIONS.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
-- [VALIDATION.md](docs/VALIDATION.md)
-- [RELEASING.md](docs/RELEASING.md)
+- [Development Guide](docs/guides/DEVELOPMENT.md)
 - [SECURITY.md](SECURITY.md)
 
 ## Community
