@@ -37,35 +37,48 @@ const stubStoreRootPath = path.join(__dirname, "..", "..", "..", "bus", "store-r
 const storeRootStub = `
 module.exports = {
   resolveStoreRoot() {
-    return "E:/desktop/.ai-memory";
+    // Always read env at call time so test beforeEach can override the store root
+    return process.env.AI_MEMORY_STORE ||
+      process.env.AI_MEMORY_STORE_ROOT ||
+      "E:/desktop/.ai-memory";
   },
 };
 `;
 
-if (!fs.existsSync(stubStoreRootPath)) {
-  fs.writeFileSync(stubStoreRootPath, storeRootStub, "utf8");
-}
+// Always write the stub so it gets updated (the file may have been created by a
+// previous run with stale content that ignored AI_MEMORY_STORE)
+fs.writeFileSync(stubStoreRootPath, storeRootStub, "utf8");
 
 // ---------------------------------------------------------------------------
 // Prevent main() from running and inject exports
 // ---------------------------------------------------------------------------
 const Module = require("module");
 const originalCompile = Module.prototype._compile;
-Module.prototype._compile = function(code, filename) {
-  if (filename.includes("build-memory-layers")) {
-    // Replace async main() call (main().catch(...)) with a no-op to prevent
-    // side-effects during module load. Also handles legacy synchronous main();.
-    code =
-      code.replace(/^main\(\)(\.catch\(.*\))?;$/m, "// main() stubbed by test")
-      + "\nmodule.exports = {\n" +
+const BML_FILE = "build-memory-layers";
+const BML_PATH = require.resolve("../../../ops/build/build-memory-layers.js");
+
+const _origCompile = Module.prototype._compile;
+Module.prototype._compile = function _patchedCompile(code, filename) {
+  if (filename === BML_PATH) {
+    // Stub both async main().catch(...) and synchronous main() calls
+    code = code
+      .replace(/\bmain\(\)\.catch\([\s\S]*?\);?/g, "// main() async stubbed by test")
+      .replace(/\bmain\(\);/g, "// main() sync stubbed by test");
+    // Append exports AFTER the patched code so they override any real module.exports
+    code = code + "\nmodule.exports = {\n" +
       "normalizeSpaces,getFreshness,buildPromotionKey,withFileLock," +
       "deduplicateSharedInbox," +
       "loadStoreRootHelper,resolveStoreRoot," +
       "MEMORY_RECORD_SCHEMA_VERSION," +
       "};\n";
   }
-  return originalCompile.call(this, code, filename);
+  return _origCompile.call(this, code, filename);
 };
+
+// ---------------------------------------------------------------------------
+// Force fresh load: clear require cache so the _compile hook applies
+// ---------------------------------------------------------------------------
+delete require.cache[BML_PATH];
 
 // ---------------------------------------------------------------------------
 // Tests
