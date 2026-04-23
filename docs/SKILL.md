@@ -185,7 +185,7 @@ Choose based on your session length and context window:
 ## Git Hook Integration
 
 Git hooks can automate agent registration and memory refresh. See:
-→ `docs/GIT-HOOKS-INTEGRATION.md`
+→ `hooks/` directory and `docs/guides/DEVELOPMENT.md`
 
 Hooks are non-blocking (always exit 0) and work on Windows/macOS/Linux.
 
@@ -224,8 +224,8 @@ The retrieval system adapts its behavior based on recall quality:
 
 **Cold start**: For the first 100 retrievals, the system defaults to Exploitation mode (no unnecessary candidate expansion) to avoid token waste before enough recall data is accumulated.
 
-For full recommendation tier documentation:
-→ `docs/RECOMMENDATION-TIER.md`
+For full retrieval configuration, see:
+→ `docs/guides/ENVIRONMENT.md`
 
 ---
 
@@ -261,9 +261,7 @@ Default endpoint: `http://127.0.0.1:PORT/mcp`
 | `docs/platform/LINUX_SETUP.md` | Linux detailed setup guide (bilingual) |
 | `docs/adr/ADR-002-unified-memory-architecture-v2.md` | Canonical memory schema v2, KG, consolidation |
 | `docs/MEMORY-TIERING.md` | Formal 5-tier specification with transition rules |
-| `docs/RECOMMENDATION-TIER.md` | Recall quality metrics and adaptive modes |
-| `docs/GIT-HOOKS-INTEGRATION.md` | Git hooks for agent registration and sync |
-| `docs/NEW-AGENT-INTEGRATION.md` | How to add a new agent type |
+| `docs/INDEX.md` | Full docs index and navigation |
 | `scripts/validate-layout.ps1` | Validate install/runtime layout |
 | `ops/check-memory-integrity.js --strict` | Validate memory contract integrity |
 | `.github/workflows/test.yml` | CI: 3×3 matrix (ubuntu/macos/windows × node 18/20/22) |
