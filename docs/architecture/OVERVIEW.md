@@ -95,9 +95,7 @@ obsidian-shared-memory-bus/
 │   ├── ARCHITECTURE.md      # Detailed architecture doc
 │   ├── INSTALL.md           # Installation guide
 │   ├── OPERATIONS.md        # Operational runbook
-│   ├── FAQ.md
 │   ├── TROUBLESHOOTING.md
-│   ├── RELEASING.md
 │   └── reference/
 ├── tests/                   # Test suite
 │   ├── unit/js/
