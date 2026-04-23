@@ -17,7 +17,15 @@
 
 const fs   = require("node:fs");
 const path = require("node:path");
-const { resolveStoreRoot, getProjectsRoot, getContextPath } = require("../bus/store-root.js");
+const { resolveStoreRoot } = require("../bus/store-root.js");
+
+function getProjectsRoot(storeRoot) {
+  return path.join(storeRoot || resolveStoreRoot(), "projects");
+}
+
+function getContextPath(storeRoot) {
+  return path.join(storeRoot || resolveStoreRoot(), "CONTEXT.md");
+}
 
 const TOP_PER_PROJECT = 10;
 const MAX_CONTENT_CHARS = 200;  // truncate long fact content
