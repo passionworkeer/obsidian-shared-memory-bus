@@ -1,39 +1,47 @@
+"use strict";
+
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 
-const MEMORY_RECORD_SCHEMA_VERSION = 2;
-const MEMORY_INTEGRITY_CONTRACT_VERSION = 2;
+// ---------------------------------------------------------------------------
+// Schema constants — prefer generated schema, fall back to inline definitions.
+// Generated file is produced by ops/adapters/generate-schemas.js from
+// ops/adapters/schema-registry.json (the canonical source of truth).
+// ---------------------------------------------------------------------------
+
+let _genSchema;
+try {
+  _genSchema = require("../adapters/generated/memory-contract-schema.js");
+} catch {
+  _genSchema = null;
+}
+
+const MEMORY_RECORD_SCHEMA_VERSION = _genSchema
+  ? _genSchema.MEMORY_RECORD_SCHEMA_VERSION
+  : 2;
+const MEMORY_INTEGRITY_CONTRACT_VERSION = _genSchema
+  ? _genSchema.MEMORY_INTEGRITY_CONTRACT_VERSION
+  : 2;
+const REQUIRED_RECORD_FIELDS = _genSchema
+  ? _genSchema.REQUIRED_RECORD_FIELDS
+  : ["schemaVersion", "id", "tool", "type", "title", "source", "scope", "memory_level"];
+const ALLOWED_SCOPES = _genSchema ? _genSchema.ALLOWED_SCOPES
+  : new Set(["user", "feedback", "project", "reference", "summary", "task", "run"]);
+const ALLOWED_VISIBILITY = _genSchema ? _genSchema.ALLOWED_VISIBILITY
+  : new Set(["shared", "private"]);
+const ALLOWED_SOURCE_KINDS = _genSchema ? _genSchema.ALLOWED_SOURCE_KINDS
+  : new Set(["writeback", "hook", "session", "event", "blackboard", "run", "cron", "task"]);
+const ALLOWED_MEMORY_LEVELS = _genSchema ? _genSchema.ALLOWED_MEMORY_LEVELS
+  : new Set(["durable", "session", "event", "task"]);
+const ALLOWED_DURABLE_TYPES = _genSchema ? _genSchema.ALLOWED_DURABLE_TYPES
+  : new Set(["user", "feedback", "project", "reference"]);
+const ALLOWED_TIERS = _genSchema ? _genSchema.ALLOWED_TIERS
+  : new Set([1, 2, 3, 4, 5]);
+
 // Optional additional fields (not required for validation, pass-through):
 //   name         — optional string, alternate title/identifier
 //   description  — optional string, one-line semantic summary (buildMemoryDescription)
-const ALLOWED_SCOPES = new Set(["user", "feedback", "project", "reference", "summary", "task", "run"]);
-const ALLOWED_VISIBILITY = new Set(["shared", "private"]);
-const ALLOWED_SOURCE_KINDS = new Set(["writeback", "hook", "session", "event", "blackboard", "run", "cron", "task"]);
-const ALLOWED_MEMORY_LEVELS = new Set(["durable", "session", "event", "task"]);
-const ALLOWED_DURABLE_TYPES = new Set(["user", "feedback", "project", "reference"]);
-
-// 5-tier system (ADR-002 v2)
-// Tier 1 = Event/Working (1d TTL, no embedding)
-// Tier 2 = Session Durable (session+7d, no embedding)
-// Tier 3 = Project Durable (project+30d, embedding=yes, recommend=yes)
-// Tier 4 = Shared Durable (user=never/feedback=90d/reference=180d, embedding=yes, recommend=yes)
-// Tier 5 = Archive (manual, no embedding, archive-manifest.jsonl instead of tombstone)
-const ALLOWED_TIERS = new Set([1, 2, 3, 4, 5]);
-
-// Tombstone strategy REMOVED in v2 — replaced by archive-manifest.jsonl
-// to prevent embedding index pollution. See docs/MEMORY-TIERING.md.
-// Mirrors REQUIRED_FIELDS in retrieval/schema_validation.py
-const REQUIRED_RECORD_FIELDS = [
-  "schemaVersion",
-  "id",
-  "tool",
-  "type",
-  "title",
-  "source",
-  "scope",
-  "memory_level",
-];
 
 const STRUCTURED_LAYER_DEFINITIONS = [
   {
@@ -611,6 +619,235 @@ function buildMemoryIntegrityReport(options = {}) {
   };
 }
 
+/**
+ * Export current schema constants in the canonical registry JSON format.
+ * This enables runtime schema introspection and CI-level drift detection.
+ *
+ * @returns {object} Schema manifest matching the structure of schema-registry.json
+ */
+function exportSchemaAsJson() {
+  return {
+    schemas: {
+      "memory-record-v2": {
+        version: MEMORY_RECORD_SCHEMA_VERSION,
+        description: "Standard memory record stored in structured/*.jsonl",
+        required: Array.isArray(REQUIRED_RECORD_FIELDS) ? REQUIRED_RECORD_FIELDS : [],
+        enums: {
+          scope: { allowed: Array.from(ALLOWED_SCOPES) },
+          visibility: { allowed: Array.from(ALLOWED_VISIBILITY) },
+          sourceKind: { allowed: Array.from(ALLOWED_SOURCE_KINDS) },
+          memory_level: { allowed: Array.from(ALLOWED_MEMORY_LEVELS) },
+          tier: { allowed: Array.from(ALLOWED_TIERS) },
+        },
+      },
+      "promotion-metadata-v1": {
+        version: 1,
+        description: "Promotion metadata for durable tier transitions",
+        required: ["version", "key", "reason", "source_record_id"],
+        enums: {
+          durable_type: { allowed: Array.from(ALLOWED_DURABLE_TYPES) },
+        },
+      },
+      "integrity-contract-v2": {
+        version: MEMORY_INTEGRITY_CONTRACT_VERSION,
+        description: "Integrity contract for generated artifacts",
+      },
+    },
+    exportedAt: new Date().toISOString(),
+    exportedFrom: "ops/memory/memory-contract.js",
+  };
+}
+
+/**
+ * Compare exported schema against schema-registry.json.
+ * Returns {ok: boolean, issues: string[]}.
+ * Exits with code 0 when in sync, code 1 when drift is detected.
+ */
+function validateSchemaConsistency(registryPath) {
+  const issues = [];
+
+  // Load registry
+  let registry;
+  try {
+    registry = JSON.parse(fs.readFileSync(registryPath || path.join(__dirname, "../adapters/schema-registry.json"), "utf8"));
+  } catch (err) {
+    return { ok: false, issues: [`registry-unreadable: ${err.message}`] };
+  }
+
+  const exported = exportSchemaAsJson();
+
+  // Check memory-record-v2 version
+  const regRecordVersion = registry.schemas?.["memory-record-v2"]?.version;
+  if (regRecordVersion !== exported.schemas["memory-record-v2"].version) {
+    issues.push(`memory-record-v2 version mismatch: registry=${regRecordVersion}, current=${exported.schemas["memory-record-v2"].version}`);
+  }
+
+  // Check required fields
+  const regRequired = registry.schemas?.["memory-record-v2"]?.required || [];
+  const expRequired = exported.schemas["memory-record-v2"].required;
+  if (JSON.stringify(regRequired.sort()) !== JSON.stringify(expRequired.sort())) {
+    issues.push(`required fields drift: registry=${JSON.stringify(regRequired)}, current=${JSON.stringify(expRequired)}`);
+  }
+
+  // Check enums
+  const regScopes = registry.schemas?.["memory-record-v2"]?.enums?.scope?.allowed || [];
+  const expScopes = exported.schemas["memory-record-v2"].enums.scope.allowed;
+  if (JSON.stringify(regScopes.sort()) !== JSON.stringify(expScopes.sort())) {
+    issues.push(`scope enum drift: registry=${JSON.stringify(regScopes)}, current=${JSON.stringify(expScopes)}`);
+  }
+
+  // Check integrity contract version
+  const regIntegrityVersion = registry.schemas?.["integrity-contract-v2"]?.version;
+  if (regIntegrityVersion !== exported.schemas["integrity-contract-v2"].version) {
+    issues.push(`integrity-contract-v2 version mismatch: registry=${regIntegrityVersion}, current=${exported.schemas["integrity-contract-v2"].version}`);
+  }
+
+  return { ok: issues.length === 0, issues };
+}
+
+// ── Scoring helpers (used by memory-promotion-scorer.js) ──────────────────────
+
+/**
+ * Token-based fingerprint for conflict/overlap detection.
+ * Mirrors the tokenisation used in buildPromotionKey().
+ * Returns a sorted array of lowercase tokens (length 3+, capped at 18).
+ */
+function buildRecordFingerprint(record) {
+  const text = normalizeString([
+    record.title   || "",
+    record.content || "",
+    record.key     || "",
+  ].filter(Boolean).join(" ")).toLowerCase();
+
+  return text
+    .split(/[\s\-_.,;:!?()[\]{}'"#@$%^&*+=|\\\/~`]+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 3)
+    .slice(0, 18);
+}
+
+/**
+ * Compute Jaccard overlap between two token sets.
+ * Returns 0.0 – 1.0.
+ */
+function computeFingerprintOverlap(tokensA, tokensB) {
+  if (!tokensA.length || !tokensB.length) return 0.0;
+  const setA = new Set(tokensA);
+  const setB = new Set(tokensB);
+  let intersection = 0;
+  for (const t of setA) {
+    if (setB.has(t)) intersection++;
+  }
+  const union = setA.size + setB.size - intersection;
+  return union === 0 ? 0.0 : intersection / union;
+}
+
+/**
+ * Score a single promotion candidate.
+ * Returns the weighted sum of recency, confidence, cross-session hits,
+ * and source quality components.  This function lives in the contract
+ * module so it can be unit-tested and used by validation tooling.
+ *
+ * @param {object} record - structured memory record
+ * @param {object} [options]
+ * @param {number} [options.recencyWeight=0.30]
+ * @param {number} [options.confidenceWeight=0.35]
+ * @param {number} [options.crossSessionWeight=0.25]
+ * @param {number} [options.sourceQualityWeight=0.10]
+ * @param {number} [options.halfLifeDays=30]
+ * @returns {{score: number, components: object}}
+ */
+function scorePromotionCandidate(record, options = {}) {
+  const {
+    recencyWeight       = 0.30,
+    confidenceWeight    = 0.35,
+    crossSessionWeight  = 0.25,
+    sourceQualityWeight = 0.10,
+    halfLifeDays        = 30,
+  } = options;
+
+  const nowMs       = Date.now();
+  const lastAccessMs = record.lifecycle?.last_access_at
+    ? new Date(record.lifecycle.last_access_at).getTime()
+    : (record.t ? new Date(record.t).getTime() : nowMs);
+  const ageDays     = Math.max(0, (nowMs - lastAccessMs)) / (24 * 60 * 60 * 1000);
+  const recency     = Math.pow(2, -(ageDays / halfLifeDays));
+
+  const promo       = record.metadata?.promotion;
+  const confidence  = Math.max(0, Math.min(1,
+    typeof promo?.source_confidence === "number"
+      ? promo.source_confidence
+      : (typeof record.confidence === "number" ? record.confidence : 0.5)
+  ));
+
+  const refs         = promo?.cross_session_refs || [];
+  const accessCount  = record.lifecycle?.access_count || 0;
+  const crossSession = Math.min(1.0, (Array.isArray(refs) ? refs.length : 0) + accessCount) / 5;
+
+  const sourceQualityMap = {
+    writeback: 1.0, session: 0.9, hook: 0.7, blackboard: 0.6,
+    run: 0.5, cron: 0.5, task: 0.7, event: 0.5, heuristic: 0.4,
+  };
+  const sourceQuality = sourceQualityMap[
+    (record.source_kind || record.sourceKind || record.source || "").toLowerCase()
+  ] ?? 0.5;
+
+  const score = (
+    recency       * recencyWeight
+    + confidence  * confidenceWeight
+    + crossSession* crossSessionWeight
+    + sourceQuality* sourceQualityWeight
+  );
+
+  return {
+    score: Math.round(score * 10000) / 10000,
+    components: {
+      recency:         Math.round(recency        * 10000) / 10000,
+      confidence:      Math.round(confidence     * 10000) / 10000,
+      crossSessionHits: Math.round(crossSession * 10000) / 10000,
+      sourceQuality:   Math.round(sourceQuality * 10000) / 10000,
+    },
+  };
+}
+
+/**
+ * Detect conflicts among scored records using Jaccard token overlap.
+ * Two records with overlap >= overlapThreshold (default 0.70) are flagged as conflicts.
+ *
+ * @param {{id: string}[]} records - records to check for conflicts
+ * @param {object} [options]
+ * @param {number} [options.overlapThreshold=0.70]
+ * @returns {{id: string, conflicts: {otherId: string, overlap: number}[]}[]}
+ */
+function detectConflicts(records, options = {}) {
+  const { overlapThreshold = 0.70 } = options;
+
+  // Build fingerprints
+  const fingerprints = new Map();
+  for (const rec of records) {
+    fingerprints.set(rec.id, buildRecordFingerprint(rec));
+  }
+
+  return records.map((rec) => {
+    const myFp = fingerprints.get(rec.id) || [];
+    const conflicts = [];
+
+    for (const other of records) {
+      if (other.id === rec.id) continue;
+      const otherFp = fingerprints.get(other.id) || [];
+      const overlap = computeFingerprintOverlap(myFp, otherFp);
+      if (overlap >= overlapThreshold) {
+        conflicts.push({
+          otherId: other.id,
+          overlap: Math.round(overlap * 10000) / 10000,
+        });
+      }
+    }
+
+    return { id: rec.id, conflicts };
+  });
+}
+
 module.exports = {
   ALLOWED_DURABLE_TYPES,
   ALLOWED_MEMORY_LEVELS,
@@ -625,11 +862,17 @@ module.exports = {
   STRUCTURED_LAYER_DEFINITIONS,
   buildGeneratedArtifactMetadata,
   buildMemoryIntegrityReport,
+  buildRecordFingerprint,
   buildStructuredSignature,
+  computeFingerprintOverlap,
+  detectConflicts,
   isExpectedDerivedDuplicate,
   normalizeLower,
   normalizeString,
+  scorePromotionCandidate,
   sha1,
   validatePromotionMetadata,
+  validateSchemaConsistency,
   validateStructuredRecord,
+  exportSchemaAsJson,
 };

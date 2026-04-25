@@ -1,0 +1,34 @@
+{"query": "我上次做的项目配置", "route": "project", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — project config query, durable layer target"}
+{"query": "当前项目的整体架构是什么", "route": "durable", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — architecture overview, durable/reference layer"}
+{"query": "最近发生了什么memory hook事件", "route": "recent", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — event capture, recent layer"}
+{"query": "我的代码风格偏好有哪些", "route": "durable", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — user preferences, durable layer"}
+{"query": "项目里有没有待解决的bug", "route": "task", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — task/todo query, task layer"}
+{"query": "最近一次claude-code会话的主题是什么", "route": "recent", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — session memory, recent layer"}
+{"query": "obsidian shared memory bus的promotion pipeline怎么工作", "route": "reference", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — design doc lookup, reference layer"}
+{"query": "我在工作区根目录下有哪些文件", "route": "mixed", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — mixed scope, cross-layer search"}
+{"query": "检索记忆中的邮箱地址和手机号", "route": "mixed", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — mixed scope, cross-layer search"}
+{"query": "用户偏好里设置了哪些键盘快捷键", "route": "durable", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — user preference, durable layer"}
+{"query": "cron任务最近一次运行是什么时候", "route": "task", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — task/cron query, task layer"}
+{"query": "这个仓库的长期目标和愿景是什么", "route": "durable", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — long-term goal, durable layer"}
+{"query": "openclaw blackboard上有什么临时信息", "route": "task", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — blackboard/task query, task layer"}
+{"query": "哪个文件定义了memory watchdog的行为", "route": "task", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — task/code lookup, task layer"}
+{"query": "最近触发了哪些memory hook事件", "route": "recent", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — event capture, recent layer"}
+{"query": "reference层有没有相关的RFC或设计文档", "route": "reference", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — reference doc lookup, reference layer"}
+{"query": "我之前告诉你的团队成员名字", "route": "durable", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — user fact, durable layer"}
+{"query": "session里有哪些待办任务", "route": "task", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — task query, task layer"}
+{"query": "今天发生了哪些事", "route": "recent", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — daily events, recent layer"}
+{"query": "上次重构的改动内容", "route": "recent", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — recent change, recent layer"}
+{"query": "我在这个项目里设置的变量或常量是什么", "route": "durable", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — user config, durable layer"}
+{"query": "哪些文档提到了这个API的设计决策", "route": "reference", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — reference doc, reference layer"}
+{"query": "最近30分钟写入的记忆内容", "route": "recent", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — hot memory, recent layer"}
+{"query": "这个项目的README在哪里", "route": "durable", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — project doc, durable layer"}
+{"query": "搜索所有包含架构图的内容", "route": "reference", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — media/reference search, reference layer"}
+{"query": "openclaw最近的运行记录", "route": "task", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — run history, task layer"}
+{"query": "我上次提到的密码是什么", "route": "reference", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — sensitive fact, reference layer"}
+{"query": "跨层搜索：用户反馈中提到的性能问题", "route": "mixed", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — cross-scope, mixed layer"}
+{"query": "模糊查询：关于缓存的设计", "route": "mixed", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — fuzzy query, mixed layer"}
+{"query": "session事件中是否有任何异常记录", "route": "recent", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — error events, recent layer"}
+{"query": "查找所有待promote的task memory", "route": "task", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — task promotion, task layer"}
+{"query": "这个项目的技术栈是什么", "route": "durable", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — project metadata, durable layer"}
+{"query": "全局记忆里有啥", "route": "mixed", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — broad overview, mixed layer"}
+{"query": "最近写入的feedback有哪些", "route": "recent", "relevant_ids": [], "relevance_scores": {}, "annotated_by": "seed", "date": "2026-04-25", "notes": "Seed judgment — feedback, recent layer"}
