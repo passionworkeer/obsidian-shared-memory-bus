@@ -32,6 +32,7 @@ shared-mcp/state.json
 # Reports and cache
 cache/
 reports/
+retrieval/eval/results.json
 
 # Backup fragments
 *.bak.*
