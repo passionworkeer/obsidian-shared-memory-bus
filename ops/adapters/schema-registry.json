@@ -1,0 +1,435 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "version": 1,
+  "description": "Canonical schema registry for the Obsidian Shared Memory Bus. Source of truth for all schema definitions used across Node.js and Python runtimes.",
+
+  "schemas": {
+    "memory-record-v2": {
+      "version": 2,
+      "description": "Standard memory record stored in structured/*.jsonl. Represents the canonical contract between Node.js producers and Python consumers.",
+      "sourceFile": {
+        "node": "ops/memory/memory-contract.js",
+        "python": "retrieval/schema_validation.py"
+      },
+      "required": [
+        "schemaVersion",
+        "id",
+        "tool",
+        "type",
+        "title",
+        "source",
+        "scope",
+        "memory_level"
+      ],
+      "enums": {
+        "schemaVersion": {
+          "allowed": [2],
+          "note": "Must match MEMORY_RECORD_SCHEMA_VERSION"
+        },
+        "scope": {
+          "allowed": ["user", "feedback", "project", "reference", "summary", "task", "run"],
+          "note": "ALLOWED_SCOPES"
+        },
+        "visibility": {
+          "allowed": ["shared", "private"]
+        },
+        "sourceKind": {
+          "allowed": ["writeback", "hook", "session", "event", "blackboard", "run", "cron", "task"],
+          "note": "Supports both camelCase (sourceKind) and snake_case (source_kind)"
+        },
+        "memory_level": {
+          "allowed": ["durable", "session", "event", "task"],
+          "note": "Supports both snake_case (memory_level) and camelCase (memoryLevel)"
+        },
+        "tier": {
+          "allowed": [1, 2, 3, 4, 5],
+          "note": "5-tier system (ADR-002 v2): Tier 1=Event/Working, Tier 2=Session Durable, Tier 3=Project Durable, Tier 4=Shared Durable, Tier 5=Archive"
+        }
+      },
+      "fields": {
+        "schemaVersion": {
+          "type": "integer",
+          "required": true,
+          "description": "Schema version, must be 2"
+        },
+        "id": {
+          "type": "string",
+          "required": true,
+          "description": "Unique record identifier"
+        },
+        "tool": {
+          "type": "string",
+          "required": true,
+          "description": "Source tool / agent name"
+        },
+        "type": {
+          "type": "string",
+          "required": true,
+          "description": "Record type classification"
+        },
+        "title": {
+          "type": "string",
+          "required": true,
+          "description": "Record title / heading"
+        },
+        "source": {
+          "type": "string",
+          "required": true,
+          "description": "Source file or context identifier"
+        },
+        "scope": {
+          "type": "string",
+          "required": true,
+          "enum": ["user", "feedback", "project", "reference", "summary", "task", "run"]
+        },
+        "memory_level": {
+          "type": "string",
+          "required": true,
+          "enum": ["durable", "session", "event", "task"]
+        },
+        "visibility": {
+          "type": "string",
+          "enum": ["shared", "private"]
+        },
+        "sourceKind": {
+          "type": "string",
+          "enum": ["writeback", "hook", "session", "event", "blackboard", "run", "cron", "task"]
+        },
+        "tier": {
+          "type": "integer",
+          "enum": [1, 2, 3, 4, 5]
+        },
+        "t": {
+          "type": "string",
+          "description": "ISO timestamp, e.g. 2026-04-25T12:00:00.000Z"
+        },
+        "content": {
+          "type": "string",
+          "description": "Main record content / body"
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "SHA-256 hash of content, lowercase hex, 64 characters"
+        },
+        "name": {
+          "type": "string",
+          "description": "Optional alternate title / identifier"
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional one-line semantic summary"
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Optional container for auxiliary metadata"
+        },
+        "lifecycle": {
+          "type": "object",
+          "description": "Lifecycle state; v2 replaces tombstone with archive-manifest.jsonl"
+        },
+        "lifecycle.archived": {
+          "type": "boolean"
+        },
+        "entities": {
+          "type": "array",
+          "description": "Extracted named entities"
+        },
+        "concepts": {
+          "type": "array",
+          "description": "Extracted concepts"
+        },
+        "facts": {
+          "type": "array",
+          "description": "Extracted factual assertions"
+        },
+        "tags": {
+          "type": "array",
+          "description": "User-provided or auto-tagged labels"
+        },
+        "embedding": {
+          "type": "object",
+          "description": "Embedding vector with model metadata"
+        },
+        "embedding.vector": {
+          "type": "array",
+          "description": "Float array of embedding dimensions"
+        },
+        "embedding.model": {
+          "type": "string",
+          "description": "Embedding model identifier"
+        }
+      },
+      "lifecycle": {
+        "archived": {
+          "type": "boolean",
+          "description": "True means record is archived and not active"
+        }
+      },
+      "validation": {
+        "unknownScope": "unknown-scope:{value}",
+        "unknownVisibility": "unknown-visibility:{value}",
+        "unknownSourceKind": "unknown-source-kind:{value}",
+        "unknownMemoryLevel": "unknown-memory-level:{value}",
+        "invalidTier": "invalid-tier:{value} (must be integer 1-5)",
+        "invalidContentHash": "invalid-content-hash:{value}",
+        "unexpectedSchemaVersion": "unexpected-schema-version:{value}",
+        "missingFields": "missing-fields:{comma-separated-field-names}",
+        "invalidNameType": "invalid-name-type",
+        "invalidDescriptionType": "invalid-description-type",
+        "invalidLifecycleType": "invalid-lifecycle-type",
+        "recordNotObject": "record-not-object"
+      }
+    },
+
+    "embedding-vector-v1": {
+      "version": 1,
+      "description": "Stored embedding vector with metadata, produced by entity extraction and semantic indexing pipelines.",
+      "fields": {
+        "vector": {
+          "type": "array",
+          "itemType": "float",
+          "description": "Dense embedding vector values"
+        },
+        "model": {
+          "type": "string",
+          "description": "Model used to generate the embedding"
+        },
+        "dimensions": {
+          "type": "integer",
+          "description": "Vector dimension count (should match len(vector))"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp of embedding generation"
+        }
+      },
+      "required": ["vector", "model", "dimensions"]
+    },
+
+    "promotion-metadata-v1": {
+      "version": 1,
+      "description": "Promotion metadata for durable tier transitions. Attached as record.metadata.promotion when a record is promoted between memory levels.",
+      "sourceFile": {
+        "node": "ops/memory/memory-contract.js (validatePromotionMetadata)",
+        "python": "retrieval/schema_validation.py (validate_promotion_metadata)"
+      },
+      "required": ["version", "key", "reason", "source_record_id"],
+      "requiredIfRefresh": ["refresh_of_id", "refresh_of_t"],
+      "enums": {
+        "version": {
+          "allowed": [1],
+          "note": "Must be exactly 1"
+        },
+        "durable_type": {
+          "allowed": ["user", "feedback", "project", "reference"],
+          "note": "ALLOWED_DURABLE_TYPES"
+        }
+      },
+      "fields": {
+        "version": {
+          "type": "integer",
+          "required": true,
+          "description": "Promotion schema version, must be 1"
+        },
+        "key": {
+          "type": "string",
+          "required": true,
+          "description": "Unique promotion key / identifier"
+        },
+        "reason": {
+          "type": "string",
+          "required": true,
+          "description": "Human-readable reason for promotion"
+        },
+        "source_record_id": {
+          "type": "string",
+          "required": true,
+          "description": "ID of the source record being promoted"
+        },
+        "durable_type": {
+          "type": "string",
+          "enum": ["user", "feedback", "project", "reference"]
+        },
+        "is_refresh": {
+          "type": "boolean",
+          "description": "True if this is a refresh of an existing promotion"
+        },
+        "refresh_of_id": {
+          "type": "string",
+          "description": "ID of the record being refreshed (required when is_refresh=true)"
+        },
+        "refresh_of_t": {
+          "type": "string",
+          "description": "Timestamp of the original record being refreshed (required when is_refresh=true)"
+        },
+        "conflict_with": {
+          "type": "array",
+          "itemType": "string",
+          "description": "IDs of records that conflicted and were superseded by this promotion"
+        }
+      },
+      "validation": {
+        "unknownPromotionVersion": "unknown-promotion-version:{version}",
+        "unknownPromotionDurableType": "unknown-promotion-durable-type:{value}",
+        "missingPromotionKey": "missing-promotion-key",
+        "missingPromotionReason": "missing-promotion-reason",
+        "missingPromotionSourceRecordId": "missing-promotion-source-record-id",
+        "invalidPromotionIsRefreshType": "invalid-promotion-is-refresh-type",
+        "invalidPromotionConflictWith": "invalid-promotion-conflict-with",
+        "missingPromotionRefreshOfId": "missing-promotion-refresh-of-id",
+        "missingPromotionRefreshOfT": "missing-promotion-refresh-of-t"
+      }
+    },
+
+    "integrity-contract-v2": {
+      "version": 2,
+      "description": "Integrity contract version for generated artifacts (MEMORY-LAYERS.json, HANDOFF.json, AUTO-DREAM.json). Tracks contract version, record schema version, and source structured signature.",
+      "fields": {
+        "generatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of artifact generation"
+        },
+        "contractVersion": {
+          "type": "integer",
+          "description": "Integrity contract version, must be 2"
+        },
+        "recordSchemaVersion": {
+          "type": "integer",
+          "description": "Memory record schema version used, must be 2"
+        },
+        "sourceStructuredSignature": {
+          "type": "object",
+          "description": "Hash of source structured layer files at generation time"
+        },
+        "sourceStructuredSignature.raw": {
+          "type": "string",
+          "description": "Raw concatenated file stamps"
+        },
+        "sourceStructuredSignature.hash": {
+          "type": "string",
+          "description": "SHA-1 hash of raw signature (16 hex chars)"
+        }
+      }
+    }
+  },
+
+  "migrationPaths": {
+    "memory-record-v1→v2": {
+      "description": "Migration from v1 to v2 schema. Key changes: tombstone field removed, lifecycle.archived added, schemaVersion bumped to 2.",
+      "fromVersion": 1,
+      "toVersion": 2,
+      "transformations": [
+        {
+          "field": "tombstone",
+          "action": "remove",
+          "note": "v2 removes tombstone — replaced by archive-manifest.jsonl"
+        },
+        {
+          "field": "schemaVersion",
+          "action": "set",
+          "value": 2
+        },
+        {
+          "field": "lifecycle",
+          "action": "add",
+          "value": {}
+        },
+        {
+          "field": "lifecycle.archived",
+          "action": "add_from_tombstone",
+          "note": "lifecycle.archived = tombstone (if present)"
+        }
+      ]
+    },
+    "embedding-vector-v0→v1": {
+      "description": "Migration from v0 to v1 embedding schema. Adds model and dimensions fields.",
+      "fromVersion": 0,
+      "toVersion": 1,
+      "transformations": [
+        {
+          "field": "version",
+          "action": "set",
+          "value": 1
+        },
+        {
+          "field": "dimensions",
+          "action": "compute",
+          "from": "vector",
+          "note": "dimensions = len(vector)"
+        },
+        {
+          "field": "createdAt",
+          "action": "add",
+          "value": "auto"
+        }
+      ]
+    }
+  },
+
+  "structuredLayerFiles": {
+    "description": "Structured JSONL layer files and their required fields",
+    "layers": [
+      {
+        "key": "sharedInbox",
+        "file": "shared-inbox.jsonl",
+        "label": "durable shared inbox",
+        "requiredFields": ["schemaVersion", "id", "tool", "type", "title", "source", "scope", "memory_level"]
+      },
+      {
+        "key": "sessionMemory",
+        "file": "session-memory.jsonl",
+        "label": "session memory",
+        "requiredFields": ["schemaVersion", "id", "tool", "type", "title", "source", "scope", "memory_level"]
+      },
+      {
+        "key": "sharedEvents",
+        "file": "shared-events.jsonl",
+        "label": "shared events",
+        "requiredFields": ["schemaVersion", "id", "tool", "type", "title", "source", "scope", "memory_level"]
+      },
+      {
+        "key": "taskMemory",
+        "file": "task-memory.jsonl",
+        "label": "task memory",
+        "requiredFields": ["schemaVersion", "id", "tool", "type", "title", "source", "scope", "memory_level"]
+      },
+      {
+        "key": "claudeCodeImported",
+        "file": "claude-code.jsonl",
+        "label": "Claude Code imported memory",
+        "requiredFields": ["schemaVersion", "id", "tool", "type", "title", "source", "scope", "memory_level"]
+      },
+      {
+        "key": "openclawSessions",
+        "file": "openclaw.jsonl",
+        "label": "OpenClaw imported sessions",
+        "requiredFields": ["schemaVersion", "id", "tool", "type", "title", "source", "scope", "memory_level"]
+      },
+      {
+        "key": "openclawBlackboard",
+        "file": "openclaw-blackboard.jsonl",
+        "label": "OpenClaw blackboard",
+        "requiredFields": ["schemaVersion", "id", "tool", "type", "title", "source", "scope", "memory_level"]
+      },
+      {
+        "key": "openclawRuns",
+        "file": "openclaw-runs.jsonl",
+        "label": "OpenClaw runs",
+        "requiredFields": ["schemaVersion", "id", "tool", "type", "title", "source", "scope", "memory_level"]
+      },
+      {
+        "key": "openclawJobs",
+        "file": "openclaw-jobs.jsonl",
+        "label": "OpenClaw jobs",
+        "requiredFields": ["schemaVersion", "id", "tool", "type", "title", "source", "scope", "memory_level"]
+      },
+      {
+        "key": "openclawJournal",
+        "file": "openclaw-journal.jsonl",
+        "label": "OpenClaw journal",
+        "requiredFields": ["schemaVersion", "id", "tool", "type", "title", "source", "scope", "memory_level"]
+      }
+    ]
+  }
+}

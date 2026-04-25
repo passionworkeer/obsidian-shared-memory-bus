@@ -11,6 +11,7 @@ import json
 import math
 import os
 import sys
+import time as _time_module
 from typing import Dict, List
 
 from search_ranking import (
@@ -43,6 +44,30 @@ try:
     _SCHEMA_VALIDATION_AVAILABLE = True
 except ImportError:
     _SCHEMA_VALIDATION_AVAILABLE = False
+
+# ---------------------------------------------------------------------------
+# Structured observability (metrics exporter on port 9091)
+# ---------------------------------------------------------------------------
+
+try:
+    from metrics_exporter import (
+        start_metrics_exporter,
+        record_search_latency,
+        increment_cache_hits,
+        increment_cache_misses,
+        increment_active_requests,
+    )
+    _METRICS_AVAILABLE = True
+except ImportError:
+    _METRICS_AVAILABLE = False
+    def record_search_latency(_s): pass
+    def increment_cache_hits(_n=1): pass
+    def increment_cache_misses(_n=1): pass
+    def increment_active_requests(_d): pass
+    def start_metrics_exporter():
+        return None
+
+_METRICS_SERVER = None
 
 
 # ---------------------------------------------------------------------------
@@ -254,10 +279,28 @@ def handle_search(request_id: str, payload: Dict[str, object], workspace_root: s
     # Deferred import to avoid circular dependency with semantic_search.py
     from semantic_search import normalize_request_payload, execute_search
 
-    response = execute_search(normalize_request_payload(payload), workspace_root=workspace_root)
-    if request_id:
-        response["id"] = request_id
-    return response
+    started_at = _time_module.monotonic()
+    if _METRICS_AVAILABLE:
+        increment_active_requests(1)
+
+    try:
+        response = execute_search(normalize_request_payload(payload), workspace_root=workspace_root)
+
+        # Record cache hit / miss based on the response metadata
+        cache_hit = response.get("cacheHit") or response.get("cache_hit")
+        if cache_hit:
+            increment_cache_hits(1)
+        else:
+            increment_cache_misses(1)
+
+        if request_id:
+            response["id"] = request_id
+        return response
+    finally:
+        elapsed = _time_module.monotonic() - started_at
+        if _METRICS_AVAILABLE:
+            record_search_latency(elapsed)
+            increment_active_requests(-1)
 
 
 # ---------------------------------------------------------------------------
@@ -265,7 +308,11 @@ def handle_search(request_id: str, payload: Dict[str, object], workspace_root: s
 # ---------------------------------------------------------------------------
 
 def run_server() -> None:
+    global _METRICS_SERVER
     from runtime_support import normalize_bool, normalize_int
+
+    # Start the Prometheus metrics exporter (port 9091) — non-blocking, daemon thread.
+    _METRICS_SERVER = start_metrics_exporter()
 
     for raw_line in sys.stdin:
         line = raw_line.strip()

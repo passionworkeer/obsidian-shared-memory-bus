@@ -16,6 +16,12 @@ import { createMemoryBridge } from "./memory-bridge.js";
 import { createMemoryStatus } from "./memory-status.js";
 import { createMemoryEmbeddings } from "./memory-embeddings.js";
 import { TOOLS } from "./memory-tools.js";
+import { IPC_ACTIONS, IPC_ERROR_CODES, buildError, parseResponse, validateRequest } from "./ipc-protocol.js";
+import { isProcessAlive, probeHttp, waitForHealthy } from "./health-check.js";
+
+// Structured observability imports
+import { createStructuredLogger, generateTraceId, withTrace, getCurrentTraceId } from "./metrics/structured-logger.js";
+import { runWithTraceId } from "./metrics/trace-manager.js";
 
 // --- ESM globals (must be defined before any code that uses them) ---
 const __filename = fileURLToPath(import.meta.url);
@@ -344,9 +350,15 @@ const METRICS = {
   search_worker_backpressure_rejected: 0,
   dream_lock_held_seconds: [],   // circular buffer, last 20 values
   mcp_requests_total: {},       // {tool: count}
+  // Phase 1A new metrics
+  cache_hits_total: 0,
+  cache_misses_total: 0,
 };
 // Metrics collection helpers
 // ---------------------------------------------------------------------------
+
+// Structured logger for the server component
+const log = createStructuredLogger("omni-memory-server");
 
 function collectMetrics() {
   const lines = [];
@@ -372,6 +384,10 @@ function collectMetrics() {
   lines.push(`memory_promotion_queue_size_promotion ${METRICS.promotion_queue_size.promotion}`);
   lines.push(`memory_promotion_queue_size_refresh ${METRICS.promotion_queue_size.refresh}`);
 
+  // Phase 1A new metrics — Python-side cache metrics merged in
+  lines.push(`memory_cache_hits_total ${METRICS.cache_hits_total}`);
+  lines.push(`memory_cache_misses_total ${METRICS.cache_misses_total}`);
+
   if (METRICS.search_latency_seconds.length > 0) {
     const sorted = METRICS.search_latency_seconds.slice().sort((a, b) => a - b);
     const avg = sorted.reduce((a, b) => a + b, 0) / sorted.length;
@@ -386,6 +402,36 @@ function collectMetrics() {
   }
 
   return lines.join("\n");
+}
+
+/**
+ * Build a comprehensive metrics snapshot (JSON object) that merges:
+ *   - The Node.js METRICS object
+ *   - Cache hit / miss counts (updated by polling Python's metrics-exporter at 9091)
+ *   - Worker health snapshot
+ *
+ * @returns {object}
+ */
+function buildMetricsSnapshot() {
+  return {
+    timestamp: new Date().toISOString(),
+    pid: process.pid,
+    uptimeSeconds: process.uptime(),
+    memory: process.memoryUsage(),
+    nodeMetrics: { ...METRICS },
+    searchWorker: getSearchWorkerSnapshot(),
+    embeddingRuntime: readEmbeddingRuntimeSummary(),
+    embeddingsIndex: {
+      indexAgeSeconds: METRICS.embeddings_index_age_seconds,
+      indexSize: METRICS.embeddings_index_size,
+      path: EMBEDDINGS_INDEX_PATH,
+    },
+    structuredFiles: { ...METRICS.structured_files_total },
+    promotionQueue: { ...METRICS.promotion_queue_size },
+    // Note: Python-side metrics (9091) should be fetched separately and merged
+    // by the caller if a unified snapshot is needed.
+    pythonMetricsUrl: "http://127.0.0.1:9091/metrics",
+  };
 }
 
 function refreshEmbeddingMetricsFromSummary(summary = null) {
@@ -593,7 +639,7 @@ function readEmbeddingsSummary() {
         configHashes[record.configHash] = (configHashes[record.configHash] || 0) + 1;
       }
     } catch (err) {
-      console.error(`[omni-memory-server] JSON parse error in embeddings index (skipping line): ${err.message}`);
+      log.warn("embeddings-index-json-parse-error", { error: err.message, path: EMBEDDINGS_INDEX_PATH });
     }
   }
 
@@ -806,19 +852,20 @@ function buildEmbeddingRuntimeRestartSignature(runtimeSummary = {}) {
 // ---------------------------------------------------------------------------
 
 function isSearchWorkerRunning() {
-  return Boolean(searchWorker && !searchWorker.killed && searchWorker.exitCode === null);
+  return isProcessAlive(searchWorker);
 }
 
 function getSearchWorkerSnapshot() {
   return {
     enabled: true,
-    running: isSearchWorkerRunning(),
+    running: isProcessAlive(searchWorker),
     pid: searchWorker?.pid || null,
     startedAt: searchWorkerStartedAt || null,
     pendingRequests: searchWorkerPending.size,
     restartCount: searchWorkerRestartCount,
     lastError: searchWorkerLastError || "",
-    mode: "persistent-jsonl-with-oneshot-fallback",
+    mode: "isolated-subprocess",
+    isolation: "separate-nodejs-process-with-stdio-ipc",
     circuitBreaker: {
       circuitOpen: searchWorkerCircuitOpen,
       restartCount: searchWorkerRestartCount,
@@ -874,7 +921,7 @@ function handleSearchWorkerStdout(chunk) {
     searchWorkerPending.delete(requestId);
     clearTimeout(pending.timeout);
     if (payload?.ok === false) {
-      pending.reject(new Error(String(payload.error || "search-worker-error")));
+      pending.reject(Object.assign(new Error(String(payload.error || "search-worker-error")), { code: IPC_ERROR_CODES.INTERNAL_ERROR }));
       continue;
     }
     pending.resolve(payload);
@@ -911,9 +958,10 @@ function handleSearchWorkerExit(code, signal) {
   const now = Date.now();
   if (checkSearchWorkerCircuit()) {
     searchWorkerCircuitOpen = true;
-    console.error(
-      `[omni-memory] FATAL: Search worker circuit breaker open after ${searchWorkerRestartCount} failures, manual restart required`
-    );
+    log.error("search-worker-circuit-open", {
+      restartCount: searchWorkerRestartCount,
+      circuitWindowMs: SEARCH_WORKER_CIRCUIT_WINDOW_MS,
+    });
     resetSearchWorkerState(reason);
     return;
   }
@@ -929,7 +977,7 @@ function handleSearchWorkerExit(code, signal) {
     try {
       await ensureSearchWorker();
     } catch (error) {
-      console.error(`[omni-memory] Search worker scheduled restart failed: ${error.message}`);
+      log.error("search-worker-scheduled-restart-failed", { error: error.message, backoffMs });
     }
   }, backoffMs);
 }
@@ -1066,7 +1114,8 @@ async function ensureSearchWorker() {
         const text = chunk.toString("utf8").trim();
         if (text) {
           searchWorkerLastError = text;
-          console.error(`[search-worker] ${text}`);
+          // Log at warn level — stderr from the worker may be benign
+          log.warn("search-worker-stderr", { text });
         }
       });
       child.on("exit", handleSearchWorkerExit);
@@ -1101,12 +1150,12 @@ async function ensureSearchWorker() {
 
 async function requestSearchWorker(payload, timeoutMs = 120000) {
   if (checkSearchWorkerCircuit()) {
-    throw Object.assign(new Error("Search worker circuit breaker open, manual restart required"), { code: 503 });
+    throw Object.assign(new Error("Search worker circuit breaker open, manual restart required"), { code: IPC_ERROR_CODES.CIRCUIT_OPEN });
   }
   if (searchWorkerPending.size >= SEARCH_BACKPRESSURE_LIMIT) {
     searchWorkerBackpressureRejected += 1;
     METRICS.search_worker_backpressure_rejected = searchWorkerBackpressureRejected;
-    throw Object.assign(new Error("Search worker overloaded, try again later"), { code: 503 });
+    throw Object.assign(new Error("Search worker overloaded, try again later"), { code: IPC_ERROR_CODES.BACKPRESSURE });
   }
 
   const child = await ensureSearchWorker();
@@ -1272,11 +1321,11 @@ const server = new Server(
 );
 
 process.on("uncaughtException", (err) => {
-  console.error("[omni-memory] uncaughtException:", err.message);
+  log.error("uncaught-exception", { error: err.message, stack: err.stack });
   process.exit(1);
 });
 process.on("unhandledRejection", (reason) => {
-  console.error("[omni-memory] unhandledRejection:", reason);
+  log.error("unhandled-rejection", { reason: String(reason) });
 });
 process.on("exit", () => {
   try {
@@ -1300,19 +1349,28 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }))
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name } = request.params;
   const args = request.params.arguments || {};
+  const traceId = generateTraceId();
 
-  METRICS.mcp_requests_total[name] = (METRICS.mcp_requests_total[name] || 0) + 1;
+  // Wrap handler execution inside a trace context so all nested async calls
+  // have the same traceId visible to structured logging and metrics.
+  return await withTrace(traceId, async () => {
+    METRICS.mcp_requests_total[name] = (METRICS.mcp_requests_total[name] || 0) + 1;
 
-  const handler = ALL_HANDLERS[name];
-  if (!handler) {
-    return errorResult(`tool-not-found: ${name}`);
-  }
+    const handler = ALL_HANDLERS[name];
+    if (!handler) {
+      log.warn("mcp-tool-not-found", { tool: name, traceId });
+      return errorResult(`tool-not-found: ${name}`);
+    }
 
-  try {
-    return await handler(args);
-  } catch (error) {
-    return errorResult(error instanceof Error ? error.message : String(error));
-  }
+    try {
+      const result = await handler(args);
+      log.debug("mcp-request-completed", { tool: name, traceId });
+      return result;
+    } catch (error) {
+      log.error("mcp-request-error", { tool: name, traceId, error: error instanceof Error ? error.message : String(error) });
+      return errorResult(error instanceof Error ? error.message : String(error));
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1332,6 +1390,8 @@ function startMetricsServer() {
         uptime: process.uptime(),
         memory: process.memoryUsage(),
         searchWorker: searchWorker ? { alive: !searchWorker.killed } : null,
+        // Phase 1A: full metrics snapshot at /health
+        snapshot: buildMetricsSnapshot(),
       }));
       return;
     }
@@ -1349,16 +1409,45 @@ function startMetricsServer() {
       res.end(collectMetrics());
       return;
     }
+    // Phase 1A: proxy Python-side metrics from the search worker exporter (9091)
+    if (req.method === "GET" && req.url === "/python-metrics") {
+      const pythonPort = Number(firstNonEmptyEnv("AI_MEMORY_PY_METRICS_PORT") || "9091");
+      const pythonReq = http.get(
+        { hostname: "127.0.0.1", port: pythonPort, path: "/metrics", timeout: 3000 },
+        (pythonRes) => {
+          res.writeHead(pythonRes.statusCode || 200, { "Content-Type": "text/plain; version=0.0.4" });
+          pythonRes.pipe(res);
+        },
+      );
+      pythonReq.on("error", () => {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "python-metrics-unavailable" }));
+      });
+      pythonReq.on("timeout", () => {
+        pythonReq.destroy();
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "python-metrics-timeout" }));
+      });
+      return;
+    }
     res.writeHead(404, { "Content-Type": "text/plain" });
     res.end("Not Found");
   });
-  metricsServer.on("error", (err) => { console.error(`[omni-memory] metrics server error: ${err.message}`); });
-  metricsServer.listen(port, () => { console.error(`[omni-memory] metrics server listening on :${port}`); });
+  metricsServer.on("error", (err) => { log.error("metrics-server-error", { port, error: err.message }); });
+  metricsServer.listen(port, () => { log.info("metrics-server-started", { port }); });
 }
 
 // ---------------------------------------------------------------------------
 // Bootstrap
 // ---------------------------------------------------------------------------
+
+log.info("omni-memory-server-starting", {
+  pid:      process.pid,
+  version:  "3.1.0",
+  storeRoot: STORE_ROOT,
+  vaultRoot: VAULT_ROOT,
+  nodeVersion: process.version,
+});
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
