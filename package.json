@@ -13,7 +13,7 @@
   "scripts": {
     "lint": "npm run lint --prefix shared-mcp",
     "lint:fix": "npm run lint:fix --prefix shared-mcp",
-    "validate": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/validate-layout.ps1",
+    "validate": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/validate-layout.ps1",
     "check-integrity": "node ops/check-memory-integrity.js --strict",
     "generate-context": "node ops/generate-context.js",
     "watchdog": "bash scripts/watchdog.sh /tmp/memory-bus.pid 'node scripts/vault-detect.js'",
