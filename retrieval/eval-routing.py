@@ -114,15 +114,15 @@ def load_semantic_search() -> Any:
 
     import importlib.util
 
-    search_path = os.path.join(_SCRIPT_DIR, "semantic-search.py")
+    search_path = os.path.join(_SCRIPT_DIR, "semantic_search.py")
     spec = importlib.util.spec_from_file_location("semantic_search", search_path)
     if spec is None or spec.loader is None:
-        sys.exit("[eval-routing] error: could not create module spec for semantic-search.py")
+        sys.exit("[eval-routing] error: could not create module spec for semantic_search.py")
     module = importlib.util.module_from_spec(spec)
     try:
         spec.loader.exec_module(module)
     except Exception as exc:
-        sys.exit(f"[eval-routing] error loading semantic-search.py: {exc}")
+        sys.exit(f"[eval-routing] error loading semantic_search.py: {exc}")
     _semantic_search_module = module
     return module
 
