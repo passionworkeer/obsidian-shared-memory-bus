@@ -1,0 +1,89 @@
+name: Query Routing Evaluation
+
+on:
+  pull_request:
+    paths:
+      - "retrieval/**"
+      - ".github/workflows/eval-routing.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "retrieval/**"
+      - ".github/workflows/eval-routing.yml"
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  eval:
+    name: Query Routing Eval
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Install any runtime dependencies needed by semantic-search.py
+          # (Add packages here as the retrieval pipeline requires them)
+          pip show numpy > /dev/null 2>&1 || pip install numpy
+          pip show scipy > /dev/null 2>&1 || pip install scipy
+          pip show scikit-learn > /dev/null 2>&1 || pip install scikit-learn
+        shell: bash
+
+      - name: Check judgments file exists
+        run: |
+          if [ ! -f "retrieval/eval/judgments.jsonl" ]; then
+            echo "ERROR: retrieval/eval/judgments.jsonl not found"
+            exit 1
+          fi
+          echo "Found $(wc -l < retrieval/eval/judgments.jsonl) judgment entries"
+
+      - name: Run evaluation with CI regression checks
+        run: |
+          python retrieval/eval-routing.py \
+            --ci \
+            --judgments retrieval/eval/judgments.jsonl \
+            --top-k 10
+        shell: bash
+        continue-on-error: false
+
+      - name: Upload evaluation results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-results
+          path: retrieval/eval/results.json
+          retention-days: 30
+
+      - name: Show evaluation summary
+        run: |
+          if [ -f "retrieval/eval/results.json" ]; then
+            echo "=== Evaluation Results ==="
+            cat retrieval/eval/results.json | python -c "
+import sys, json
+data = json.load(sys.stdin)
+summary = data.get('summary', {})
+print(f\"Queries evaluated: {data.get('judgment_count', 'N/A')}\")
+print()
+print(f\"{'Route':<12} {'N@5':>6} {'M@5':>6} {'Recall':>7}\")
+print("-" * 36)
+for route in ['auto','mixed','durable','task','recent','reference']:
+    m = summary.get(route, {})
+    if 'error' in m:
+        print(f\"{route:<12}  ERROR\")
+    else:
+        print(f\"{route:<12} {m.get('ndcg@5', 0):>6.4f} {m.get('mrr@5', 0):>6.4f} {m.get('recall@10', 0):>7.4f}\")
+print()
+rec = data.get('recommendations', {}).get('best_overall', {})
+print(f\"Best overall route: {rec.get('route', 'N/A')} (score={rec.get('score', 0):.4f})\")
+"
+          fi
+        shell: bash

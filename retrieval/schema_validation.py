@@ -13,63 +13,97 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+# ---------------------------------------------------------------------------
+# Schema constants — prefer generated schema, fall back to inline definitions.
+# Generated file is produced by ops/adapters/generate-schemas.js from
+# ops/adapters/schema-registry.json (the canonical source of truth).
+# ---------------------------------------------------------------------------
+
+_gen_schema: Optional[Dict] = None
+_generated_path = Path(__file__).parent.parent / "ops" / "adapters" / "generated" / "schema-validation-py.py"
+if _generated_path.exists():
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("generated_schema", str(_generated_path))
+        if spec and spec.loader:
+            _generated_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(_generated_module)
+            _gen_schema = {
+                "MEMORY_RECORD_SCHEMA_VERSION": getattr(_generated_module, "MEMORY_RECORD_SCHEMA_VERSION", None),
+                "ALLOWED_SCOPES": getattr(_generated_module, "ALLOWED_SCOPES", None),
+                "ALLOWED_VISIBILITY": getattr(_generated_module, "ALLOWED_VISIBILITY", None),
+                "ALLOWED_SOURCE_KINDS": getattr(_generated_module, "ALLOWED_SOURCE_KINDS", None),
+                "ALLOWED_MEMORY_LEVELS": getattr(_generated_module, "ALLOWED_MEMORY_LEVELS", None),
+                "ALLOWED_DURABLE_TYPES": getattr(_generated_module, "ALLOWED_DURABLE_TYPES", None),
+                "REQUIRED_FIELDS": getattr(_generated_module, "REQUIRED_FIELDS", None),
+            }
+    except Exception:
+        pass  # Fall through to inline definitions
+
 # Schema version constant matching MEMORY_RECORD_SCHEMA_VERSION in memory-contract.js
-MEMORY_RECORD_SCHEMA_VERSION = 2
+MEMORY_RECORD_SCHEMA_VERSION: int = (
+    _gen_schema["MEMORY_RECORD_SCHEMA_VERSION"]
+    if _gen_schema and _gen_schema["MEMORY_RECORD_SCHEMA_VERSION"] is not None
+    else 2
+)
 
 # Allowed values matching the Node.js constants
-ALLOWED_SCOPES: set = {
-    "user",
-    "feedback",
-    "project",
-    "reference",
-    "summary",
-    "task",
-    "run",
-}
+ALLOWED_SCOPES: set = (
+    _gen_schema["ALLOWED_SCOPES"]
+    if _gen_schema and _gen_schema["ALLOWED_SCOPES"] is not None
+    else {"user", "feedback", "project", "reference", "summary", "task", "run"}
+)
 
-ALLOWED_VISIBILITY: set = {
-    "shared",
-    "private",
-}
+ALLOWED_VISIBILITY: set = (
+    _gen_schema["ALLOWED_VISIBILITY"]
+    if _gen_schema and _gen_schema["ALLOWED_VISIBILITY"] is not None
+    else {"shared", "private"}
+)
 
-ALLOWED_SOURCE_KINDS: set = {
-    "writeback",
-    "hook",
-    "session",
-    "event",
-    "blackboard",
-    "run",
-    "cron",
-    "task",
-}
+ALLOWED_SOURCE_KINDS: set = (
+    _gen_schema["ALLOWED_SOURCE_KINDS"]
+    if _gen_schema and _gen_schema["ALLOWED_SOURCE_KINDS"] is not None
+    else {"writeback", "hook", "session", "event", "blackboard", "run", "cron", "task"}
+)
 
-ALLOWED_MEMORY_LEVELS: set = {
-    "durable",
-    "session",
-    "event",
-    "task",
-}
+ALLOWED_MEMORY_LEVELS: set = (
+    _gen_schema["ALLOWED_MEMORY_LEVELS"]
+    if _gen_schema and _gen_schema["ALLOWED_MEMORY_LEVELS"] is not None
+    else {"durable", "session", "event", "task"}
+)
 
-ALLOWED_DURABLE_TYPES: set = {
-    "user",
-    "feedback",
-    "project",
-    "reference",
-}
+ALLOWED_DURABLE_TYPES: set = (
+    _gen_schema["ALLOWED_DURABLE_TYPES"]
+    if _gen_schema and _gen_schema["ALLOWED_DURABLE_TYPES"] is not None
+    else {"user", "feedback", "project", "reference"}
+)
 
 # Required fields for structured memory layers
-REQUIRED_FIELDS: list = [
-    "schemaVersion",
-    "id",
-    "tool",
-    "type",
-    "title",
-    "source",
-    "scope",
-    "memory_level",
-]
+REQUIRED_FIELDS: list = (
+    _gen_schema["REQUIRED_FIELDS"]
+    if _gen_schema and _gen_schema["REQUIRED_FIELDS"] is not None
+    else [
+        "schemaVersion",
+        "id",
+        "tool",
+        "type",
+        "title",
+        "source",
+        "scope",
+        "memory_level",
+    ]
+)
+
+# 5-tier system (ADR-002 v2): Tier 1=Event/Working, Tier 2=Session Durable,
+# Tier 3=Project Durable, Tier 4=Shared Durable, Tier 5=Archive
+ALLOWED_TIERS: list = (
+    list(_gen_schema["ALLOWED_TIERS"])
+    if _gen_schema and _gen_schema.get("ALLOWED_TIERS") is not None
+    else [1, 2, 3, 4, 5]
+)
 
 # Content hash pattern: 64-character hexadecimal string
 CONTENT_HASH_PATTERN = re.compile(r"^[a-f0-9]{64}$", re.IGNORECASE)
@@ -392,6 +426,68 @@ def validate_directory(structured_dir: str, detail_limit: int = 12) -> Dict[str,
         results[file_name] = validate_file(file_path, detail_limit)
 
     return results
+
+
+def validate_schema_consistency(registry_path: Optional[str] = None) -> Dict:
+    """
+    Compare current schema constants against schema-registry.json.
+
+    Args:
+        registry_path: Optional path to schema-registry.json.
+                        Defaults to ops/adapters/schema-registry.json.
+
+    Returns:
+        Dict with 'ok' (bool) and 'issues' (list of strings).
+        Prints to stdout and exits with code 0 when in sync, code 1 when drift detected.
+    """
+    if registry_path is None:
+        registry_path = str(
+            Path(__file__).parent.parent / "ops" / "adapters" / "schema-registry.json"
+        )
+
+    issues: List[str] = []
+
+    # Load registry
+    if not os.path.exists(registry_path):
+        return {"ok": False, "issues": [f"registry-not-found: {registry_path}"]}
+
+    try:
+        with open(registry_path, "r", encoding="utf-8") as f:
+            registry = json.load(f)
+    except Exception as e:
+        return {"ok": False, "issues": [f"registry-unreadable: {e}"]}
+
+    # Check memory-record-v2 version
+    reg_record_version = registry.get("schemas", {}).get("memory-record-v2", {}).get("version")
+    if reg_record_version != MEMORY_RECORD_SCHEMA_VERSION:
+        issues.append(
+            f"memory-record-v2 version mismatch: registry={reg_record_version}, "
+            f"current={MEMORY_RECORD_SCHEMA_VERSION}"
+        )
+
+    # Check required fields
+    reg_required = registry.get("schemas", {}).get("memory-record-v2", {}).get("required") or []
+    if sorted(reg_required) != sorted(REQUIRED_FIELDS):
+        issues.append(
+            f"required fields drift: registry={sorted(reg_required)}, "
+            f"current={sorted(REQUIRED_FIELDS)}"
+        )
+
+    # Check scope enum
+    reg_scopes = registry.get("schemas", {}).get("memory-record-v2", {}).get("enums", {}).get("scope", {}).get("allowed") or []
+    if sorted(reg_scopes) != sorted(list(ALLOWED_SCOPES)):
+        issues.append(
+            f"scope enum drift: registry={sorted(reg_scopes)}, current={sorted(list(ALLOWED_SCOPES))}"
+        )
+
+    # Check integrity contract version
+    reg_integrity_version = registry.get("schemas", {}).get("integrity-contract-v2", {}).get("version")
+    if reg_integrity_version != 2:
+        issues.append(
+            f"integrity-contract-v2 version mismatch: registry={reg_integrity_version}, current=2"
+        )
+
+    return {"ok": len(issues) == 0, "issues": issues}
 
 
 if __name__ == "__main__":
