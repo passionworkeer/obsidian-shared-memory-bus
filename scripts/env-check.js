@@ -27,8 +27,13 @@ function check(name, fn) {
   }
 }
 
-function exe(name, args) {
-  return execSync(`${name} ${args}`, { encoding: 'utf8', timeout: 5000 }).trim();
+function exe(name, args, extraEnv) {
+  return execSync(`${name} ${args}`, {
+    encoding: 'utf8',
+    timeout: 5000,
+    windowsHide: true,
+    env: { ...process.env, ...extraEnv },
+  }).trim();
 }
 
 const nodeExe = platform.executables?.node || 'node';
@@ -37,14 +42,18 @@ const pyExe = platform.executables?.python || (platform.name === 'win32' ? 'pyth
 // Node.js
 check('Node.js', () => exe(nodeExe, '--version'));
 
-// Python
+// Python — try multiple names since 'python' may not be in PATH on Windows
 check('Python', () => {
-  try {
-    return exe(pyExe, '--version');
-  } catch {
-    // fallback
-    return exe('python', '--version');
+  const candidates = [pyExe, 'python.exe', 'D:/python/python.exe', 'py', '-3'];
+  const tried = [];
+  for (const name of candidates) {
+    try {
+      return exe(name, '--version', { PYTHONIOENCODING: 'utf-8' });
+    } catch {
+      tried.push(name);
+    }
   }
+  throw new Error(`none of [${tried.join(', ')}] found`);
 });
 
 // Platform identity

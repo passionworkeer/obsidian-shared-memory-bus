@@ -17,7 +17,7 @@ from typing import Dict, List
 
 
 ROOT = Path(os.environ.get("AI_MEMORY_ROOT", Path(__file__).resolve().parent))
-SEARCH_SCRIPT = ROOT / "semantic-search.py"
+SEARCH_SCRIPT = ROOT / "semantic_search.py"
 PYTHON = os.environ.get("AI_MEMORY_PYTHON") or sys.executable or "python"
 
 try:
