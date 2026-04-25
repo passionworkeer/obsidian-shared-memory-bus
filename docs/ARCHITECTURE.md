@@ -317,11 +317,24 @@ See [`docs/DEPLOYMENT-MATRIX.md`](DEPLOYMENT-MATRIX.md) for recommended operatin
 
 ## Design Debt & Known Limitations
 
+> **Updated 2026-04-25**: Phases 1–4 of the design debt fix plan have been completed. Remaining items are documented below.
+
+### Design Debt Fix Status
+
+| Item | Status | Notes |
+|------|--------|-------|
+| Structured observability | **Done** | JSON structured logger, trace IDs, Python metrics exporter (port 9091), Prometheus metrics at 9090 |
+| Versioned adapter schema | **Done** | Canonical `schema-registry.json`, code generation, migration functions, CI sync check |
+| Persistent retrieval cache | **Done** | SQLite backing store (`E:\.ai-memory\cache/search-results.sqlite`), cache warming, 7-day TTL |
+| Process isolation | **Partial** | IPC protocol + health checks in place; search worker still spawns as child but mode field updated |
+| Promotion scoring | **Done** | `memory-promotion-scorer.js` + `memory-promotion-resolver.js` with conflict detection |
+| Evaluation harness | **Done** | 34 judgments, `eval-routing.py --ci`, GitHub Actions workflow |
+
 ### God Server
-`omni-memory-server.js` is split into focused modules, but still routes all traffic through one process. A crash in one module still affects the server.
+`omni-memory-server.js` is split into focused modules (retrieval/generation/bridge/status/embeddings), but still routes all traffic through one process. A crash in one module still affects the server. The `isolatedSubprocess` field in `manifest.json` documents the intent — search worker isolation is architecturally described but the worker still runs as a child of the main MCP process.
 
 ### Three-Language Runtime
-PowerShell, Node.js, and Python each own meaningful pieces. Some logic is duplicated (hash embedding in both `generate-embeddings.js` and `semantic-search.py`). This creates drift risk.
+PowerShell, Node.js, and Python each own meaningful pieces. Some logic is duplicated (hash embedding in both `generate-embeddings.js` and `semantic-search.py`). This creates drift risk. Schema registry (`ops/adapters/schema-registry.json`) helps but does not eliminate the duplication.
 
 ### Embedding Providers — Not True Hot Swap
 Query side switches immediately on config change, but stored vectors do not change. A rebuild is still required for clean dense match after changing adapter/model/URL.

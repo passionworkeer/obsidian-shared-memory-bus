@@ -33,6 +33,75 @@ from search_index import (
 
 
 # ---------------------------------------------------------------------------
+# SQLite persistent cache (lazy-initialized)
+# ---------------------------------------------------------------------------
+
+_SQLITE_CACHE = None  # type: Optional["SqliteSearchCache"]
+_SQLITE_CACHE_INIT = False
+
+
+def _get_sqlite_cache():
+    """
+    Lazily initialize the SQLite persistent cache.
+    Returns None if the cache cannot be created (permissions, missing dirs, etc.)
+    so that the system degrades gracefully to in-memory only.
+    """
+    global _SQLITE_CACHE, _SQLITE_CACHE_INIT
+    if _SQLITE_CACHE_INIT:
+        return _SQLITE_CACHE
+    _SQLITE_CACHE_INIT = True
+
+    # Resolve cache directory: AI_MEMORY_STORE/cache
+    import os
+    store_root = os.environ.get(
+        "AI_MEMORY_STORE",
+        os.environ.get("AI_MEMORY_STORE_ROOT", "E:/desktop/.ai-memory"),
+    )
+    cache_dir = os.path.join(store_root, "cache")
+
+    try:
+        from cache.sqlite_cache import SqliteSearchCache
+    except ImportError:
+        # Also support direct execution from retrieval/ directory
+        try:
+            from retrieval.cache.sqlite_cache import SqliteSearchCache
+        except ImportError:
+            return None
+
+    try:
+        sqlite_cache = SqliteSearchCache(cache_dir)
+        # Cleanup expired entries on startup
+        removed = sqlite_cache.cleanup_expired()
+        if removed > 0:
+            import sys
+            sys.stderr.write(f"[search_cache] cleaned {removed} expired SQLite entries\n")
+        # Attempt warm — get_warm_queries reads from SQLite itself (no-op on cold DB)
+        try:
+            from retrieval.cache.warm_strategy import get_warm_queries, warm_cache
+            recent = get_warm_queries(cache_dir, max_queries=10)
+            if recent:
+                warm_cache(sqlite_cache, recent, timeout_seconds=10)
+        except Exception:
+            pass
+        _SQLITE_CACHE = sqlite_cache
+        return _SQLITE_CACHE
+    except Exception:
+        return None
+
+
+def close_sqlite_cache():
+    """Close the SQLite connection. Call on graceful server shutdown."""
+    global _SQLITE_CACHE, _SQLITE_CACHE_INIT
+    if _SQLITE_CACHE is not None:
+        try:
+            _SQLITE_CACHE.close()
+        except Exception:
+            pass
+    _SQLITE_CACHE = None
+    _SQLITE_CACHE_INIT = False
+
+
+# ---------------------------------------------------------------------------
 # Cache TTL / limit settings (override defaults from search_ranking)
 # ---------------------------------------------------------------------------
 
@@ -61,6 +130,14 @@ def build_cache_state(
     current_structured_signature = build_structured_signature()
     current_embeddings_signature = build_embeddings_signature()
 
+    sqlite_stats: Dict[str, object] = {}
+    sqlite_cache = _get_sqlite_cache()
+    if sqlite_cache is not None:
+        try:
+            sqlite_stats = sqlite_cache.stats()
+        except Exception:
+            sqlite_stats = {"available": False}
+
     return {
         "entryCacheVersion": int(_ENTRIES_CACHE.get("version", 0)),
         "structuredSignature": current_structured_signature,
@@ -73,6 +150,7 @@ def build_cache_state(
         "jiebaAvailable": jieba is not None,
         "queryEmbeddingCacheHit": bool(query_embedding_cache_hit),
         "searchResultCacheHit": bool(search_result_cache_hit),
+        "sqliteCache": sqlite_stats,
         "metrics": {
             "queryEmbeddingHits": int(_CACHE_METRICS["queryEmbeddingHits"]),
             "queryEmbeddingMisses": int(_CACHE_METRICS["queryEmbeddingMisses"]),
@@ -140,18 +218,57 @@ def build_search_result_cache_key(
 
 def get_cached_search_result(cache_key: str) -> Optional[Dict[str, object]]:
     prune_timed_cache(_SEARCH_RESULT_CACHE, _SEARCH_RESULT_CACHE_TTL, _SEARCH_RESULT_CACHE_MAX_ENTRIES)
+
+    # 1. Check in-memory cache first (fast path)
     cached = _SEARCH_RESULT_CACHE.get(cache_key)
-    if cached is None:
-        _CACHE_METRICS["searchResultMisses"] = int(_CACHE_METRICS["searchResultMisses"]) + 1
-        return None
+    if cached is not None:
+        _CACHE_METRICS["searchResultHits"] = int(_CACHE_METRICS["searchResultHits"]) + 1
+        return clone_json_payload(cached.get("response", {}))
 
-    _CACHE_METRICS["searchResultHits"] = int(_CACHE_METRICS["searchResultHits"]) + 1
-    return clone_json_payload(cached.get("response", {}))
+    # 2. Fall back to SQLite persistent cache
+    sqlite_cache = _get_sqlite_cache()
+    if sqlite_cache is not None:
+        result = sqlite_cache.get(cache_key)
+        if result is not None:
+            # Promote to in-memory cache
+            _SEARCH_RESULT_CACHE[cache_key] = {
+                "created_at": time_module.time(),
+                "response": clone_json_payload(result),
+            }
+            _CACHE_METRICS["searchResultHits"] = int(_CACHE_METRICS["searchResultHits"]) + 1
+            # Re-prune to enforce in-memory size limit
+            prune_timed_cache(_SEARCH_RESULT_CACHE, _SEARCH_RESULT_CACHE_TTL, _SEARCH_RESULT_CACHE_MAX_ENTRIES)
+            return result
+
+    _CACHE_METRICS["searchResultMisses"] = int(_CACHE_METRICS["searchResultMisses"]) + 1
+    return None
 
 
-def store_search_result(cache_key: str, payload: Dict[str, object]) -> None:
+def store_search_result(cache_key: str, payload: Dict[str, object], route: str = "") -> None:
+    """Store search result in both in-memory and SQLite caches."""
+    cloned = clone_json_payload(payload)
+    now = time_module.time()
+
+    # Store in in-memory cache
     _SEARCH_RESULT_CACHE[cache_key] = {
-        "created_at": time_module.time(),
-        "response": clone_json_payload(payload),
+        "created_at": now,
+        "response": cloned,
     }
     prune_timed_cache(_SEARCH_RESULT_CACHE, _SEARCH_RESULT_CACHE_TTL, _SEARCH_RESULT_CACHE_MAX_ENTRIES)
+
+    # Store in SQLite persistent cache (async-safe, non-blocking on errors)
+    sqlite_cache = _get_sqlite_cache()
+    if sqlite_cache is not None:
+        try:
+            # Compute a rough score from payload for the SQLite record
+            score = float(payload.get("totalScore", payload.get("score", 0.0)))
+            sqlite_cache.set(
+                cache_key=cache_key,
+                query=str(payload.get("query", "")),
+                route=route,
+                result=cloned,
+                score=score,
+                ttl_seconds=604800,  # 7 days for SQLite
+            )
+        except Exception:
+            pass
