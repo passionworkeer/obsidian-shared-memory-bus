@@ -525,7 +525,93 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=10,
         help="Number of results to retrieve per query (default: 10)",
     )
+    parser.add_argument(
+        "--ci",
+        action="store_true",
+        help=(
+            "CI mode: compare NDCG/MRR against last evaluation baseline in results.json. "
+            "Exit 1 if regression > 5%% (warning), exit 2 if regression > 10%% (hard failure). "
+            "Always writes results to retrieval/eval/results.json."
+        ),
+    )
     return parser
+
+
+def load_baseline_results(results_json_path: str) -> Optional[Dict[str, Any]]:
+    """Load previous evaluation results to compare against in CI mode."""
+    if not os.path.exists(results_json_path):
+        return None
+    try:
+        with open(results_json_path, encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return None
+
+
+def compute_regression(
+    current: Dict[str, Dict[str, Any]],
+    baseline: Dict[str, Dict[str, Any]],
+) -> Dict[str, float]:
+    """Compute NDCG@5 delta per route (current - baseline)."""
+    deltas: Dict[str, float] = {}
+    for route, metrics in current.items():
+        if "error" in metrics:
+            continue
+        base_metrics = baseline.get(route, {})
+        current_ndcg5 = metrics.get("ndcg@5", 0.0)
+        baseline_ndcg5 = base_metrics.get("ndcg@5", 0.0)
+        deltas[route] = round(current_ndcg5 - baseline_ndcg5, 6)
+    return deltas
+
+
+def check_ci_regression(
+    current_summary: Dict[str, Dict[str, Any]],
+    baseline_results: Dict[str, Any],
+) -> Tuple[int, List[str]]:
+    """
+    Check if current results regress from baseline.
+    Returns (exit_code, messages).
+    exit_code: 0 = no regression, 1 = warning (>5%), 2 = hard failure (>10%)
+    """
+    baseline_summary = baseline_results.get("summary", {})
+    deltas = compute_regression(current_summary, baseline_summary)
+
+    messages: List[str] = []
+    worst_delta = 0.0
+    worst_route = ""
+    has_regression = False
+    hard_failure = False
+
+    for route, delta in deltas.items():
+        if delta < worst_delta:
+            worst_delta = delta
+            worst_route = route
+        if delta < -0.05:
+            has_regression = True
+            messages.append(
+                f"  WARNING: {route} NDCG@5 regressed by {abs(delta):.4f} "
+                f"(baseline={baseline_summary.get(route, {}).get('ndcg@5', 0.0):.4f}, "
+                f"current={current_summary[route]['ndcg@5']:.4f})"
+            )
+        if delta < -0.10:
+            hard_failure = True
+            messages.append(
+                f"  FAILURE: {route} NDCG@5 regressed by {abs(delta):.4f} > 10% "
+                f"(baseline={baseline_summary.get(route, {}).get('ndcg@5', 0.0):.4f}, "
+                f"current={current_summary[route]['ndcg@5']:.4f})"
+            )
+
+    if hard_failure:
+        return 2, [
+            f"[eval-routing CI] Hard failure: regression > 10% detected on route '{worst_route}'",
+            *messages,
+        ]
+    if has_regression:
+        return 1, [
+            f"[eval-routing CI] Warning: regression > 5% detected (worst: {worst_route}={worst_delta:+.4f})",
+            *messages,
+        ]
+    return 0, [f"[eval-routing CI] No significant regression. Worst delta: {worst_route}={worst_delta:+.4f}"]
 
 
 def main() -> None:
@@ -562,6 +648,24 @@ def main() -> None:
 
     sys.stderr.write(f"\n[eval-routing] evaluation complete in {elapsed:.2f}s\n")
 
+    # CI regression check
+    ci_exit_code = 0
+    if args.ci:
+        baseline_path = os.path.join(_SCRIPT_DIR, "eval/results.json")
+        baseline_data = load_baseline_results(baseline_path)
+        if baseline_data:
+            ci_code, ci_messages = check_ci_regression(summary, baseline_data)
+            ci_exit_code = ci_code
+            for msg in ci_messages:
+                sys.stderr.write(msg + "\n")
+        else:
+            sys.stderr.write(
+                f"[eval-routing CI] No baseline results found at {baseline_path} — "
+                "skipping regression check (first run or file missing)\n"
+            )
+        # CI always writes to the canonical path
+        args.output = "eval/results.json"
+
     output: Dict[str, Any] = {
         "generated_at": _time_module.strftime("%Y-%m-%dT%H:%M:%SZ", _time_module.gmtime()),
         "elapsed_seconds": round(elapsed, 2),
@@ -590,6 +694,9 @@ def main() -> None:
         with open(default_out, "w", encoding="utf-8") as f:
             json.dump(output, f, ensure_ascii=False, indent=2)
         sys.stderr.write(f"[eval-routing] results written to {default_out}\n")
+
+    if args.ci and ci_exit_code > 0:
+        sys.exit(ci_exit_code)
 
 
 if __name__ == "__main__":
