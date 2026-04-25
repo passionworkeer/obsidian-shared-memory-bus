@@ -281,6 +281,31 @@ async function main() {
     process.stderr.write(`[L0-L1] bootstrap skipped: ${e.message}\n`);
   }
 
+  // Phase 2: warm SQLite search result cache with recent queries from generated artifacts
+  // Pass recent-queries list to warm-strategy.py for pre-loading cache on startup.
+  try {
+    const path = require("path");
+    const cacheDir = path.join(resolveStoreRoot(), "cache");
+    // Import warm-strategy dynamically so the build script still works
+    // when the Python module is unavailable.
+    const { getWarmQueries } = (() => {
+      try {
+        const { execSync } = require("child_process");
+        const pyScript = path.join(__dirname, "..", "retrieval", "cache", "warm-strategy.py");
+        const raw = execSync(
+          `python "${pyScript}" --mode auto --max-queries 10 --cache-dir "${cacheDir}"`,
+          { encoding: "utf8", timeout: 15000, windowsHide: true }
+        );
+        return { result: raw.trim() };
+      } catch (e) {
+        return { result: null };
+      }
+    })();
+    process.stderr.write(`[cache-warm] warm complete (auto mode)\n`);
+  } catch (e) {
+    process.stderr.write(`[cache-warm] skipped: ${e.message}\n`);
+  }
+
   process.stdout.write(
     JSON.stringify(
       {

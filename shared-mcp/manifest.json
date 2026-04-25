@@ -82,7 +82,17 @@
       "startupProbeAttempts": 45,
       "stdioCommandWindows": "{{node}} --experimental-default-type=module \"{{omniMemoryServer}}\"",
       "stdioCommandPosix": "{{node}} --experimental-default-type=module {{omniMemoryServer}}",
-      "notes": "Unified shared memory interface over canonical Obsidian structured memory with bm25/dense/hybrid retrieval, embeddings rebuild, claude-mem compatibility, and OpenClaw blackboard tools."
+      "notes": "Unified shared memory interface with isolated search worker subprocess. search_shared_memory and related tools are isolated — if the search worker crashes, the MCP server stays alive and returns SEARCH_WORKER_UNAVAILABLE with auto-recovery.",
+      "isolatedSubprocess": {
+        "id": "search-worker",
+        "description": "Python search worker process managed by the memory MCP server",
+        "managedBy": "memory",
+        "script": "{{searchWorkerService}}",
+        "isolation": "isolated-subprocess",
+        "restartPolicy": "always",
+        "maxRestarts": 5,
+        "circuitWindowMs": 300000
+      }
     },
     {
       "id": "playwright",
