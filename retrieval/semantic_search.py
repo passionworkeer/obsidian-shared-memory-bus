@@ -47,6 +47,8 @@ from typing import Dict, List, Optional, Tuple
 # Imports from submodules (split from this file)
 # ---------------------------------------------------------------------------
 
+from circuit_breaker import CircuitBreaker, CircuitOpen
+
 from search_ranking import (
     # Scoring
     bm25_scores,
@@ -248,6 +250,21 @@ except RuntimeError:
 AI_MEMORY_ROOT = os.path.join(VAULT_ROOT, "00-System", "ai-memory")
 STRUCTURED_DIR = os.path.join(AI_MEMORY_ROOT, "structured")
 EMBEDDINGS_INDEX = os.path.join(AI_MEMORY_ROOT, "embeddings", "index.jsonl")
+
+# ---------------------------------------------------------------------------
+# Resiliency infrastructure
+# ---------------------------------------------------------------------------
+
+# Circuit breaker for the dense scoring path (embedding lookups).
+# Trips after 5 consecutive failures, recovers after 30s, probes with 3 calls.
+_dense_circuit_breaker = CircuitBreaker(
+    name="dense-scoring",
+    failure_threshold=5,
+    recovery_timeout=30.0,
+    half_open_max_calls=3,
+    slow_call_threshold=5.0,
+    slow_call_ratio_threshold=0.5,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -791,11 +808,26 @@ def execute_search(parsed: Dict[str, object], workspace_root: Optional[str] = No
     dense_map: Dict[str, float] = {}
     dense_error: Optional[str] = None
     dense_meta: Dict[str, object] = {"queryEmbeddingCacheHit": False}
+
     if requested_mode in {"dense", "hybrid"}:
-        dense_map, dense_error, dense_meta = dense_scores(
+        # Circuit breaker: fail-fast if dense scoring is unhealthy
+        cb_result, cb_err = _dense_circuit_breaker.call(
+            dense_scores,
             entries_by_id, query, load_embeddings_index, EMBEDDING_RUNTIME,
             embeddings_index_path=EMBEDDINGS_INDEX,
         )
+        if isinstance(cb_result, CircuitOpen):
+            # Circuit is open — fall back to BM25 immediately
+            dense_map = {}
+            dense_error = f"circuit-breaker:{cb_result.name}:retry-after-{cb_result.retry_after:.1f}s"
+            dense_meta = {"queryEmbeddingCacheHit": False, "circuitBreakerOpen": True}
+        elif cb_err is not None:
+            dense_error = cb_err
+            dense_meta = {"queryEmbeddingCacheHit": False}
+        else:
+            dense_map, dense_error, dense_meta = cb_result
+            if dense_meta is None:
+                dense_meta = {"queryEmbeddingCacheHit": False}
 
     effective_mode = requested_mode
     fallback_reason = None
@@ -896,6 +928,10 @@ def execute_search(parsed: Dict[str, object], workspace_root: Optional[str] = No
             search_result_cache_hit=False,
             query_embedding_cache_hit=bool(dense_meta.get("queryEmbeddingCacheHit")),
         ),
+        "resiliencyStats": {
+            "denseCircuitBreaker": _dense_circuit_breaker.stats,
+            "denseCircuitBreakerOpen": bool(dense_meta.get("circuitBreakerOpen", False)),
+        },
         "results": format_results(
             ranked,
             entries_by_id,
