@@ -294,7 +294,15 @@ function resolveEmbeddingRuntime(options = {}) {
     normalizeString(getProcessEnvValue("AI_MEMORY_EMBED_API_KEY_ENV")) ||
     normalizeString(mergedConfig.apiKeyEnv) ||
     normalizeString(defaults.apiKeyEnv);
-  const directApiKey = usesApiKey ? normalizeString(getEnvValue("AI_MEMORY_EMBED_API_KEY")) : "";
+  // When AI_MEMORY_EMBED_API_KEY_ENV is explicitly set (via process env), respect the user's
+  // intent to use apiKeyEnv — do not let a stale AI_MEMORY_EMBED_API_KEY from the Windows
+  // registry override the named env var that the user configured.
+  const apiKeyEnvExplicitlySet = Boolean(
+    normalizeString(getProcessEnvValue("AI_MEMORY_EMBED_API_KEY_ENV"))
+  );
+  const directApiKey = usesApiKey && !apiKeyEnvExplicitlySet
+    ? normalizeString(getEnvValue("AI_MEMORY_EMBED_API_KEY"))
+    : "";
   const indirectApiKey = usesApiKey && apiKeyEnv ? normalizeString(getEnvValue(apiKeyEnv)) : "";
   const configuredApiKey = usesApiKey ? normalizeString(mergedConfig.apiKey) || normalizeString(defaults.apiKey) : "";
 
