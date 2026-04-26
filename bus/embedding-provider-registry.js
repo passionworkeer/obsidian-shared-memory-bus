@@ -217,11 +217,19 @@ json.dump([vector.tolist() for vector in vectors], sys.stdout)
     const script = `
 import json
 import sys
+import os
 import urllib.request
 model_id = "${model}"
 api_key = "${apiKey}"
 if not model_id.startswith("models/"):
     model_id = "models/" + model_id
+# Explicit proxy opener — urllib auto-detection from env vars is unreliable on Windows
+http_proxy = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy") or ""
+https_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or ""
+proxies = {}
+if http_proxy: proxies["http"] = http_proxy
+if https_proxy: proxies["https"] = https_proxy
+_opener = urllib.request.build_opener(urllib.request.ProxyHandler(proxies)) if proxies else urllib.request.build_opener()
 for line in sys.stdin:
     line = line.strip()
     if not line:
@@ -232,11 +240,14 @@ for line in sys.stdin:
     payload = json.dumps({"model": body_model, "content": {"parts": [{"text": text}]}}).encode("utf-8")
     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        with _opener.open(req, timeout=60) as resp:
             body = resp.read().decode("utf-8", errors="replace")
         parsed = json.loads(body)
-        embeddings = parsed.get("embeddings") or []
-        vals = embeddings[0].get("values") if embeddings else None
+        emb_list = parsed.get("embeddings") or []
+        vals = emb_list[0].get("values") if emb_list else None
+        if not vals:
+            emb_obj = parsed.get("embedding") or {}
+            vals = emb_obj.get("values") if isinstance(emb_obj, dict) else None
         if vals:
             print(json.dumps({"ok": True, "vec": vals}))
         else:
