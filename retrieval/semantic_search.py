@@ -581,6 +581,8 @@ def parse_args() -> Dict[str, object]:
     parser.add_argument("--include-verbatim", action="store_true")
     parser.add_argument("--snippet-window", type=int, default=220)
     parser.add_argument("--max-verbatim-per-result", type=int, default=1)
+    parser.add_argument("--mmr", action="store_true", help="Enable MMR diversity reranking")
+    parser.add_argument("--mmr-lambda", type=float, default=0.7, help="MMR lambda (relevance vs diversity balance, 0-1). Default: 0.7")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--server", action="store_true", help="Run persistent JSONL server mode.")
     args = parser.parse_args()
@@ -621,6 +623,8 @@ def parse_args() -> Dict[str, object]:
             "include_verbatim": bool(args.include_verbatim),
             "snippet_window": args.snippet_window,
             "max_verbatim_per_result": args.max_verbatim_per_result,
+            "mmr_enabled": bool(args.mmr),
+            "mmr_lambda": float(args.mmr_lambda) if args.mmr else 0.7,
         }
     )
 
@@ -873,6 +877,8 @@ def execute_search(parsed: Dict[str, object], workspace_root: Optional[str] = No
             "snippetWindow": parsed.get("snippet_window"),
             "maxVerbatimPerResult": parsed.get("max_verbatim_per_result"),
             "temporalDecay": parsed.get("temporal_decay"),
+            "mmrEnabled": bool(parsed.get("mmr_enabled", False)),
+            "mmrLambda": round(float(parsed.get("mmr_lambda", 0.7)), 3),
         },
         "entryCount": len(entries),
         "candidateCount": candidate_count,

@@ -68,6 +68,21 @@ Returns a comprehensive health snapshot of the entire shared memory stack in a s
     "pid": 12345,
     "health": { "ok": true, "status": "ready" }
   },
+  "searchWorkerCircuitBreaker": {
+    "circuitOpen": false,
+    "restartCount": 0,
+    "maxRestarts": 5,
+    "circuitWindowMs": 300000,
+    "backpressureRejected": 0
+  },
+  "embeddingPool": {
+    "healthyCount": 3,
+    "totalCount": 3,
+    "pendingRequests": 0,
+    "backpressureLimit": 50,
+    "poolSize": 3,
+    "workers": [...]
+  },
   "watchdog": {
     "running": true,
     "stale": false,
@@ -159,6 +174,8 @@ Primary search tool. Hybrid BM25 + dense retrieval with route-aware reranking, M
 | `includeVerbatim` | `boolean` | `false` | No | Return exact snippet windows |
 | `snippetWindow` | `number` | `220` | No | Snippet character window size |
 | `maxVerbatimPerResult` | `number` | `1` | No | Max verbatim windows per result |
+| `mmr` | `object` | `{}` | No | MMR diversity reranking: `{ enabled, lambda }`. `lambda` ∈ [0,1]: higher = more relevance, lower = more diversity. Default lambda=0.7 |
+| `temporalDecay` | `object` | `{}` | No | Temporal decay: `{ enabled, halfLifeDays }`. Scores decay by 50% per half-life. Default: disabled, halfLifeDays=30 |
 
 **Output**:
 
