@@ -287,6 +287,15 @@ export function createMemoryStatus(params) {
     const workerHealth = await getSearchWorkerHealth();
     const hygiene = readMemoryHygieneReport();
 
+    // Embedding worker pool status (lazy import, non-blocking)
+    let embeddingPoolStatus = null;
+    try {
+      const { getPoolStatus } = require("./embedding-worker-pool.cjs");
+      embeddingPoolStatus = getPoolStatus();
+    } catch {
+      embeddingPoolStatus = { note: "pool-status-unavailable" };
+    }
+
     return jsonResult({
       ok: true,
       generatedAt: new Date().toISOString(),
@@ -303,6 +312,7 @@ export function createMemoryStatus(params) {
         health: workerHealth,
       },
       searchWorkerCircuitBreaker: getSearchWorkerSnapshot().circuitBreaker,
+      embeddingPool: embeddingPoolStatus,
       watchdog: readWatchdogState(),
       memoryIntegrity,
       embeddingRuntime,
