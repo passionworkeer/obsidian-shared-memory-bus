@@ -159,6 +159,123 @@ json.dump([vector.tolist() for vector in vectors], sys.stdout)
     });
   }
 
+  const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
+
+  async function embedWithGemini(texts, runtime) {
+    if (!pythonRuntime.available) {
+      throw new Error(`python-runtime-unavailable: ${pythonRuntime.error || "unknown-error"}`);
+    }
+
+    const apiKey = normalizeString(runtime.apiKey);
+    const model = normalizeString(runtime.model || "gemini-embedding-2");
+    if (!apiKey) {
+      throw new Error("missing-gemini-api-key");
+    }
+
+    const pool = await getPool();
+    if (pool) {
+      try {
+        await pool.initPool(
+          pythonRuntime.command,
+          withPythonArgs(pythonRuntime, ["-c", pool.buildWorkerScript()]),
+          {
+            ...process.env,
+            TF_CPP_MIN_LOG_LEVEL: "3",
+            TF_ENABLE_ONEDNN_OPTS: "0",
+            PYTHONUTF8: "1",
+            PYTHONIOENCODING: "utf-8",
+          }
+        );
+        const vectors = await pool.embedWithPool({
+          texts,
+          model,
+          pythonCmd: pythonRuntime.command,
+          pythonArgs: withPythonArgs(pythonRuntime, ["-c", pool.buildWorkerScript()]),
+          env: {
+            ...process.env,
+            TF_CPP_MIN_LOG_LEVEL: "3",
+            TF_ENABLE_ONEDNN_OPTS: "0",
+            PYTHONUTF8: "1",
+            PYTHONIOENCODING: "utf-8",
+          },
+          msgType: "GEMINI_EMBED",
+          apiKey,
+          geminiModel: model.startsWith("models/") ? model : "models/" + model,
+        });
+        return {
+          backendName: "gemini",
+          modelName: model,
+          vectors,
+          providerHost: "generativelanguage.googleapis.com",
+        };
+      } catch (poolErr) {
+        console.error("[embedding-registry] gemini pool error, falling back:", poolErr.message);
+      }
+    }
+
+    // Fallback: per-call spawn
+    const script = `
+import json
+import sys
+import urllib.request
+model_id = "${model}"
+api_key = "${apiKey}"
+if not model_id.startswith("models/"):
+    model_id = "models/" + model_id
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    text = line
+    url = "https://generativelanguage.googleapis.com/v1beta/" + model_id + ":embedContent?key=" + api_key
+    body_model = model_id.replace("models/", "")
+    payload = json.dumps({"model": body_model, "content": {"parts": [{"text": text}]}}).encode("utf-8")
+    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+        parsed = json.loads(body)
+        embeddings = parsed.get("embeddings") or []
+        vals = embeddings[0].get("values") if embeddings else None
+        if vals:
+            print(json.dumps({"ok": True, "vec": vals}))
+        else:
+            print(json.dumps({"ok": False, "err": "empty"}))
+    except Exception as exc:
+        print(json.dumps({"ok": False, "err": str(exc)}))
+`;
+    const inputPayload = texts.join("\n") + "\n";
+    const { spawn } = require("child_process");
+    return new Promise((resolve, reject) => {
+      const child = spawn(pythonRuntime.command, withPythonArgs(pythonRuntime, ["-c", script]), {
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+        env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" },
+      });
+      let stdout = "";
+      child.stderr.on("data", (chunk) => {
+        const text = chunk.toString("utf8").trim();
+        if (text) console.error("[python-gemini-worker]", text);
+      });
+      child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
+      child.on("error", (err) => reject(new Error(`gemini-process-error: ${err.message}`)));
+      child.on("close", (code) => {
+        if (code !== 0) { reject(new Error(`gemini-process-exit-${code}`)); return; }
+        try {
+          const vectors = [];
+          for (const line of stdout.split("\n")) {
+            if (!line.trim()) continue;
+            const r = JSON.parse(line);
+            if (r.ok) vectors.push(r.vec.map((v) => Number(v)));
+          }
+          resolve({ backendName: "gemini", modelName: model, vectors, providerHost: "generativelanguage.googleapis.com" });
+        } catch (e) { reject(new Error(`gemini-parse-error: ${e.message}`)); }
+      });
+      child.stdin.write(inputPayload);
+      child.stdin.end();
+    });
+  }
+
   async function embedWithOpenAICompatible(texts, runtime) {
     const baseUrl = normalizeString(runtime.baseUrl).replace(/\/+$/, "");
     const apiKey = normalizeString(runtime.apiKey);
@@ -293,6 +410,15 @@ json.dump([vector.tolist() for vector in vectors], sys.stdout)
       },
       async embedBatch({ texts, runtime }) {
         return embedWithOpenAICompatible(texts, runtime);
+      },
+    },
+    gemini: {
+      name: "gemini",
+      defaultBatchSize() {
+        return 4;
+      },
+      async embedBatch({ texts, runtime }) {
+        return embedWithGemini(texts, runtime);
       },
     },
   };
