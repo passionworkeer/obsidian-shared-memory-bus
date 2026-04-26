@@ -462,6 +462,7 @@ function getPoolStatus() {
     healthyCount: pool.healthy.size,
     totalCount: pool.workers.length,
     pendingRequests: totalPending,
+    initialized: pool.initialized,
     backpressureLimit: BACKPRESSURE_LIMIT,
     failureThreshold: FAILURE_THRESHOLD,
     failureWindowMs: FAILURE_WINDOW_MS,
