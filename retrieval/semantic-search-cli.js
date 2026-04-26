@@ -11,6 +11,7 @@ const VALUE_OPTIONS = new Map([
   ["--workspace", "--workspace"],
   ["--task-state", "--task-state"],
   ["--taskState", "--task-state"],
+  ["--mmr-lambda", "--mmr-lambda"],
 ]);
 
 const BOOLEAN_OPTIONS = new Map([
@@ -18,13 +19,16 @@ const BOOLEAN_OPTIONS = new Map([
   ["--prefer-summaries", "--prefer-summaries"],
   ["--preferSummaries", "--prefer-summaries"],
   ["--server", "--server"],
+  ["--mmr", "--mmr"],
 ]);
 
 function parseCliArgs(argv) {
   const state = {
     jsonOnly: false,
     serverMode: false,
+    mmr: false,
     mode: "bm25",
+    modeExplicit: false,
     topK: 10,
     topKExplicit: false,
     forwardArgs: [],
@@ -41,6 +45,7 @@ function parseCliArgs(argv) {
         state.forwardArgs.push(valueOptionName, optionValue);
         if (valueOptionName === "--mode") {
           state.mode = optionValue;
+          state.modeExplicit = true;
         }
         if (valueOptionName === "--top-k") {
           state.topK = Number.parseInt(optionValue, 10) || 10;
@@ -59,6 +64,9 @@ function parseCliArgs(argv) {
         state.jsonOnly = true;
       } else if (booleanOptionName === "--server") {
         state.serverMode = true;
+      } else if (booleanOptionName === "--mmr") {
+        state.mmr = true;
+        state.forwardArgs.push(booleanOptionName);
       } else {
         state.forwardArgs.push(booleanOptionName);
       }
@@ -85,14 +93,22 @@ function parseCliArgs(argv) {
 }
 
 function buildUsage() {
-  return 'Usage: node semantic-search.js [--mode bm25|dense|hybrid] [--route task|mixed|durable|recent|reference|auto] [--tool name] [--source-kind kind] [--top-k N] [--json] "query"';
+  return 'Usage: node semantic-search.js [--mode bm25|dense|hybrid] [--route task|mixed|durable|recent|reference|auto] [--tool name] [--source-kind kind] [--top-k N] [--mmr] [--mmr-lambda 0.7] [--json] "query"';
 }
 
 function buildPythonSearchArgs({ scriptPath, parsed, query }) {
   if (parsed.serverMode) {
     return [scriptPath, ...parsed.forwardArgs];
   }
-  return [scriptPath, ...parsed.forwardArgs, "--json", query];
+  // Auto-upgrade to hybrid when MMR is requested — MMR needs both BM25 and dense scores
+  const args = [...parsed.forwardArgs];
+  if (parsed.mmr && !parsed.modeExplicit) {
+    // Remove any existing --mode so we can override it
+    const modeIdx = args.indexOf("--mode");
+    if (modeIdx >= 0) args.splice(modeIdx, 2);
+    args.unshift("--mode", "hybrid");
+  }
+  return [scriptPath, ...args, "--json", query];
 }
 
 function formatResult(result) {

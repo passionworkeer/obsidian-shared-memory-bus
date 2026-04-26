@@ -38,6 +38,22 @@ All notable changes to this project should be documented here.
 - Updated CONTRIBUTING.md with complete development setup, testing guide, platform support policy, and ADR references
 
 ## Unreleased
+
+### New
+- **MMR diversity reranking** (`--mmr`, `--mmr-lambda`): Exposed MMR reranking via CLI and MCP `search_shared_memory.mmr` parameter. `--mmr` automatically upgrades mode to `hybrid` (needs both BM25 + dense scores). Lambda defaults to 0.7 (higher = relevance-first, lower = diversity-first). Results now carry `mmrScore`, `filters.mmrEnabled`, and `filters.mmrLambda` metadata.
+- **Python embedding worker pool** (`shared-mcp/embedding-worker-pool.cjs`): Replaces per-call `spawn` for transformer embeddings with a persistent warm pool of 3 Python workers. Each worker loads `sentence-transformers` once and reuses cached models across requests — amortizing cold-start to near-zero. Supports circuit breaker per worker (5 failures / 30 s → retire + restart), backpressure (≥50 pending → reject), and round-robin load balancing. Falls back to legacy per-call spawn if pool init fails.
+- `embeddingPool` field in `memory_status` output: exposes healthy/total worker counts, per-worker pending load, circuit breaker state, and failure counts.
+
+### Changed
+- `search_shared_memory` now accepts `mmr: { enabled, lambda }` and `temporalDecay: { enabled, halfLifeDays }` parameters
+- `memory-status.js` lazy-imports the worker pool to avoid blocking on unavailable pool
+
+## 2026-04-26
+
+### Fixed
+- `semantic-search-cli.js`: `--mmr` flag now correctly parsed and forwarded to Python; `--mmr` without explicit `--mode` auto-upgrades to `hybrid`
+
+### New
 - **ADR-002 (Unified Memory Architecture v2)**: Complete redesign of memory architecture based on cross-system benchmarking (OpenClaw + Claude Code + claude-mem). Key additions: SQLite chunk schema with FTS5+BM25 Phase 1 content index, chunk-native session logs with hash tracking, typed promotion contract now enforced in frontmatter schema (not just documented), embedding cache table, MMR + temporal decay result reranking, Phase 3 consolidation lock, session-end compaction trigger. Supersedes ADR-001.
 - Hardened Windows background process launch so shared MCP and watchdog flows avoid foreground console windows more reliably
 - Removed shared proxy environment payloads from command-line arguments and moved them back into process environment propagation

@@ -30,11 +30,72 @@ function createEmbeddingProviderRegistry(options = {}) {
         };
   const hashModel = normalizeString(options.hashModel || "hashing-v1") || "hashing-v1";
 
+  // Lazy-import worker pool to avoid circular dependency and allow optional usage.
+  // Falls back to per-call spawn if pool init fails.
+  let _pool = null;
+
+  async function getPool() {
+    if (_pool) return _pool;
+    try {
+      _pool = require("../shared-mcp/embedding-worker-pool.cjs");
+    } catch {
+      return null;
+    }
+    return _pool;
+  }
+
   async function embedWithTransformer(texts, runtime) {
     if (!pythonRuntime.available) {
       throw new Error(`python-runtime-unavailable: ${pythonRuntime.error || "unknown-error"}`);
     }
 
+    const pool = await getPool();
+    if (pool) {
+      try {
+        // Warm pool: init if not already running, then use warm workers
+        await pool.initPool(
+          pythonRuntime.command,
+          withPythonArgs(pythonRuntime, ["-c", pool.buildWorkerScript()]),
+          {
+            ...process.env,
+            TF_CPP_MIN_LOG_LEVEL: "3",
+            TF_ENABLE_ONEDNN_OPTS: "0",
+            PYTHONUTF8: "1",
+            PYTHONIOENCODING: "utf-8",
+            ...(process.env.HTTP_PROXY ? { HTTP_PROXY: process.env.HTTP_PROXY } : {}),
+            ...(process.env.HTTPS_PROXY ? { HTTPS_PROXY: process.env.HTTPS_PROXY } : {}),
+            ...(process.env.http_proxy ? { http_proxy: process.env.http_proxy } : {}),
+            ...(process.env.https_proxy ? { https_proxy: process.env.https_proxy } : {}),
+          }
+        );
+        const result = await pool.embedWithPool({
+          texts,
+          model: normalizeString(runtime.model),
+          pythonCmd: pythonRuntime.command,
+          pythonArgs: withPythonArgs(pythonRuntime, ["-c", pool.buildWorkerScript()]),
+          env: {
+            ...process.env,
+            TF_CPP_MIN_LOG_LEVEL: "3",
+            TF_ENABLE_ONEDNN_OPTS: "0",
+            PYTHONUTF8: "1",
+            PYTHONIOENCODING: "utf-8",
+            ...(process.env.HTTP_PROXY ? { HTTP_PROXY: process.env.HTTP_PROXY } : {}),
+            ...(process.env.HTTPS_PROXY ? { HTTPS_PROXY: process.env.HTTPS_PROXY } : {}),
+          },
+        });
+        return {
+          backendName: "transformer",
+          modelName: normalizeString(runtime.model),
+          vectors: result,
+          providerHost: "",
+        };
+      } catch (poolErr) {
+        // Pool failed (backpressure, init error) — fall through to per-call spawn
+        console.error("[embedding-registry] pool error, falling back to spawn:", poolErr.message);
+      }
+    }
+
+    // Per-call spawn (legacy fallback when pool unavailable)
     const script = `
 import json
 import sys

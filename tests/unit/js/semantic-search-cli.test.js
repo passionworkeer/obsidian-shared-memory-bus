@@ -76,6 +76,37 @@ test("parseCliArgs still supports legacy positional top-k", () => {
   assert.deepEqual(parsed.queryParts, ["portable memory"]);
 });
 
+test("parseCliArgs tracks --mmr flag", () => {
+  const parsed = parseCliArgs(["--mmr", "--mmr-lambda", "0.5", "--top-k", "8", "test query"]);
+  assert.equal(parsed.mmr, true);
+  assert.equal(parsed.modeExplicit, false);
+  assert.equal(parsed.mode, "bm25");
+  assert.ok(parsed.forwardArgs.includes("--mmr"));
+  assert.ok(parsed.forwardArgs.includes("--mmr-lambda"));
+  assert.ok(parsed.forwardArgs.includes("0.5"));
+});
+
+test("buildPythonSearchArgs auto-upgrades --mmr to --mode hybrid when no explicit mode", () => {
+  const parsed = parseCliArgs(["--mmr", "--top-k", "5", "memory retrieval"]);
+  const args = buildPythonSearchArgs({ scriptPath: "search.py", parsed, query: "memory retrieval" });
+  // Should prepend --mode hybrid before --mmr
+  assert.ok(args.indexOf("--mode") < args.indexOf("--mmr"), "mode should appear before mmr");
+  assert.ok(args.includes("hybrid"), "should contain hybrid mode");
+  assert.ok(args.includes("--mmr"), "should still contain --mmr");
+  assert.ok(args.includes("--top-k"), "should contain top-k");
+  assert.ok(args.includes("5"), "should contain top-k value");
+});
+
+test("buildPythonSearchArgs preserves explicit --mode when --mmr is also set", () => {
+  const parsed = parseCliArgs(["--mmr", "--mode", "dense", "--top-k", "3", "test"]);
+  const args = buildPythonSearchArgs({ scriptPath: "search.py", parsed, query: "test" });
+  // Explicit --mode dense should NOT be overridden to hybrid
+  assert.ok(args.includes("--mode"), "should contain --mode");
+  const modeIdx = args.indexOf("--mode");
+  assert.equal(args[modeIdx + 1], "dense", "mode should be dense, not overridden");
+  assert.ok(args.includes("--mmr"), "should still contain --mmr");
+});
+
 test("buildPythonSearchArgs keeps server mode queryless and search mode json-wrapped", () => {
   const searchParsed = parseCliArgs(["--mode", "dense", "--tool", "openclaw", "queue full"]);
   assert.deepEqual(buildPythonSearchArgs({
