@@ -18,7 +18,7 @@ const EMBEDDING_CONFIG_META_KEYS = new Set([
   "enabled",
 ]);
 
-const KNOWN_ADAPTERS = new Set(["hash", "transformer", "openai-compatible", "huggingface"]);
+const KNOWN_ADAPTERS = new Set(["hash", "transformer", "openai-compatible", "huggingface", "gemini"]);
 const EMBEDDING_ADAPTER_ALIASES = {
   hash: "hash",
   hashing: "hash",
@@ -288,7 +288,7 @@ function resolveEmbeddingRuntime(options = {}) {
     normalizeEmbeddingAdapter(defaults.adapter) ||
     normalizeEmbeddingAdapter(defaults.backend) ||
     "hash";
-  const usesApiKey = adapter === "openai-compatible";
+  const usesApiKey = adapter === "openai-compatible" || adapter === "gemini";
 
   const apiKeyEnv =
     normalizeString(getProcessEnvValue("AI_MEMORY_EMBED_API_KEY_ENV")) ||

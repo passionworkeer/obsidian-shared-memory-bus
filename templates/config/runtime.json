@@ -23,6 +23,12 @@
         "baseUrl": "https://example.com/v1",
         "apiKeyEnv": "AI_MEMORY_EMBED_API_KEY",
         "description": "Any OpenAI-compatible embeddings endpoint"
+      },
+      "gemini-remote": {
+        "adapter": "gemini",
+        "model": "gemini-embedding-2",
+        "apiKeyEnv": "GEMINI_API_KEY",
+        "description": "Google Gemini text embeddings (gemini-embedding-2)"
       }
     },
     "profiles": {
@@ -36,6 +42,12 @@
         "provider": "openai-compatible-remote",
         "model": "text-embedding-3-small",
         "requestDelayMs": 1000,
+        "batchSize": 1
+      },
+      "gemini": {
+        "provider": "gemini-remote",
+        "model": "gemini-embedding-2",
+        "requestDelayMs": 200,
         "batchSize": 1
       }
     }

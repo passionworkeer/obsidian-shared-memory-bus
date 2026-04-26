@@ -59,6 +59,7 @@ EMBEDDING_ADAPTER_ALIASES = {
     "sentence-transformers": "transformer",
     "openai": "openai-compatible",
     "openai-compatible": "openai-compatible",
+    "gemini": "gemini",
 }
 
 
