@@ -153,10 +153,13 @@ def embed_query_gemini(query: str, runtime: Dict[str, object], model_name: str) 
 
     try:
         parsed = json.loads(body)
+        # Support new format {"embeddings":[{"values":[]}]} and legacy {"embedding":{"values":[]}}
         embeddings = parsed.get("embeddings") or []
-        if not embeddings:
-            return None, "gemini-empty-response"
-        values = embeddings[0].get("values")
+        if embeddings:
+            values = embeddings[0].get("values")
+        else:
+            emb_obj = parsed.get("embedding") or {}
+            values = emb_obj.get("values") if isinstance(emb_obj, dict) else None
         if not isinstance(values, list) or not values:
             return None, "gemini-empty-vector"
         return [float(v) for v in values], None
@@ -255,10 +258,12 @@ def _gemini_single_with_retries(
             with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
                 body = response.read().decode("utf-8", errors="replace")
             parsed = json.loads(body)
-            embeddings = parsed.get("embeddings") or []
-            if not embeddings:
-                return None, "gemini-empty-response"
-            values = embeddings[0].get("values")
+            emb_list = parsed.get("embeddings") or []
+            if emb_list:
+                values = emb_list[0].get("values")
+            else:
+                emb_obj = parsed.get("embedding") or {}
+                values = emb_obj.get("values") if isinstance(emb_obj, dict) else None
             if not isinstance(values, list) or not values:
                 return None, "gemini-empty-vector"
             return [float(v) for v in values], None
