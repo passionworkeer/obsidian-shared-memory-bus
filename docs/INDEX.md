@@ -20,7 +20,7 @@
 ## Reference
 - [reference/MCP-TOOLS.md](./reference/MCP-TOOLS.md) — All MCP tool definitions (visual dependency matrix)
 - [reference/MCP-TOOLS.schema.json](./reference/MCP-TOOLS.schema.json) — JSON Schema for MCP tools
-- [reference/DATA-FLOW.md](./reference/DATA-FLOW.md) — End-to-end data flow diagrams (ASCII art)
+- [architecture/DATA-FLOW.md](./architecture/DATA-FLOW.md) — End-to-end data flow diagrams (ASCII art)
 - [guides/API_REFERENCE.md](./guides/API_REFERENCE.md) — MCP tool parameter and output reference
 - [guides/DEVELOPMENT.md](./guides/DEVELOPMENT.md) — Dev environment, testing, code style, debugging
 

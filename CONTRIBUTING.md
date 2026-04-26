@@ -173,7 +173,7 @@ Update at minimum:
 
 ## Adding A New Agent Integration
 
-See [`docs/NEW-AGENT-INTEGRATION.md`](docs/NEW-AGENT-INTEGRATION.md).
+See [`templates/agents/`](./templates/agents/README.md) for per-agent integration templates.
 
 ## Secret And Path Hygiene
 
