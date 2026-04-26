@@ -41,7 +41,7 @@ AI_MEMORY_STORE > AI_MEMORY_STORE_ROOT > AI_MEMORY_ROOT/.ai-memory > auto-detect
 Archive 用 archive-manifest.jsonl 代替 tombstone，不污染向量空间。
 
 ## Git Hook Integration
-→ <repo-root>/docs/GIT-HOOKS-INTEGRATION.md
+→ See `hooks/` directory for pre-commit, post-merge, and post-checkout hooks.
 ```
 
 ## Read Order

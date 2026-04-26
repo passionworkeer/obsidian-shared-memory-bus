@@ -76,5 +76,5 @@ Per-tier record limits and eviction rules are defined in `<repo-root>/templates/
 
 ## Retrieval Modes
 
-Adaptive retrieval modes (cold-start, three-mode switching, recall signals) are documented in `<repo-root>/docs/RECOMMENDATION-TIER.md`.
+Adaptive retrieval modes (cold-start, three-mode switching, recall signals) are documented in `<repo-root>/docs/MEMORY-TIERING.md`.
 

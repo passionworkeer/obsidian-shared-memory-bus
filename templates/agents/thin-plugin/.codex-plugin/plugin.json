@@ -1,11 +1,11 @@
 {
   "name": "shared-memory-thin-plugin",
   "version": "0.0.1",
-  "description": "[TODO: thin host adapter for shared HTTP MCP + portable skill]",
-  "entrypoint": "[TODO: host-specific entrypoint]",
+  "description": "Thin host adapter for shared HTTP MCP + portable skill",
+  "entrypoint": "index.js",
   "interface": {
-    "displayName": "[TODO: Plugin Display Name]",
-    "shortDescription": "[TODO: One-line plugin purpose]",
+    "displayName": "Shared Memory Bus",
+    "shortDescription": "Connects the host AI tool to the shared HTTP MCP memory bus",
     "defaultPrompt": "Connect this host to the shared HTTP MCP endpoints, load the portable shared-memory skill/rule file, and keep host-native logic as thin glue only."
   }
 }
