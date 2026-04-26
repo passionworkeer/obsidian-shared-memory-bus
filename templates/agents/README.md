@@ -40,4 +40,4 @@ Keep it thin and point real behavior back to shared HTTP MCP plus the portable s
 2. Add the portable skill template when the host can consume instruction files.
 3. Add the thin plugin template only when the host truly needs native hooks or UI.
 
-See `docs/INTEGRATION-MODES.md` and `docs/NEW-AGENT-INTEGRATION.md` for the full rationale.
+See `docs/ARCHITECTURE.md` for the full integration rationale.
