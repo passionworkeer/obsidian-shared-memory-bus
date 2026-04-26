@@ -19,6 +19,7 @@ __pycache__/
 .venv/
 ops/__pycache__/
 retrieval/__pycache__/
+retrieval/cache/__pycache__/
 *.egg-info/
 .pytest_cache/
 
@@ -61,6 +62,10 @@ SUPPORT.md
 # Test artifacts
 .coverage
 coverage.json
+
+# Temp debug scripts
+_run_*.py
+_run_*.sh
 
 # Test-generated stubs
 ops/bus/
