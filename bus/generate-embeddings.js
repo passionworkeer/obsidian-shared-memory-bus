@@ -150,6 +150,8 @@ function resolveTimeoutMs() {
 }
 
 const VAULT_ROOT = resolveVaultRoot();
+console.error("[DEBUG] VAULT_ROOT:", VAULT_ROOT);
+console.error("[DEBUG] STRUCTURED_DIR:", path.join(VAULT_ROOT, "00-System", "ai-memory", "structured"));
 const SHARED_MEMORY_ROOT = path.join(VAULT_ROOT, "00-System", "ai-memory");
 const STRUCTURED_DIR = path.join(SHARED_MEMORY_ROOT, "structured");
 const EMBEDDINGS_DIR = path.join(SHARED_MEMORY_ROOT, "embeddings");
@@ -328,22 +330,23 @@ function collectDocuments() {
     return documents;
   }
 
-  // ADR-002 v2: --tier-filter defaults to Tier 3+4 (Project Durable + Shared Durable)
-  // Only these tiers participate in the embedding index.
+  // ADR-002 v2: --tier-filter defaults to Tier 2+3+4 (Session + Project Durable + Shared Durable)
+  // These tiers cover all legacy memory_level values found in existing structured records.
   const tierFilterArg = (() => {
     const idx = process.argv.indexOf("--tier-filter");
-    return idx >= 0 ? (process.argv[idx + 1] || "project+durable") : "project+durable";
+    return idx >= 0 ? (process.argv[idx + 1] || "session+project+durable") : "session+project+durable";
   })();
   const allowedTiers = new Set(
     tierFilterArg === "all"
       ? [1, 2, 3, 4, 5]
-      : tierFilterArg.split("+").map((t) => ({ project: 3, durable: 4, "3": 3, "4": 4 })[t.trim()] ?? 3)
+      : tierFilterArg.split("+").map((t) => ({ session: 2, ephemeral: 1, project: 3, durable: 4, "2": 2, "3": 3, "4": 4 })[t.trim()] ?? 3)
   );
 
   for (const fileName of fs.readdirSync(STRUCTURED_DIR).sort()) {
     if (!fileName.endsWith(".jsonl")) {
       continue;
     }
+    console.error("[DEBUG] Reading file:", fileName);
     const filePath = path.join(STRUCTURED_DIR, fileName);
     const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
     for (const line of lines) {
@@ -367,15 +370,37 @@ function collectDocuments() {
           continue;
         }
 
-        // ADR-002 v2: Tier filter — only embed Tier 3+4 by default
-        const recordTier = Number(entry.lifecycle?.tier ?? 2);
+        // ADR-002 v2: Tier filter — resolve record tier from lifecycle.tier (preferred)
+        // or from memory_level/scope/tier_from fields (legacy schema).
+        // Tier 1=Ephemeral, 2=Session, 3=Project Durable, 4=Shared Durable, 5=Archive
+        const TIER_MAP = {
+          session: 2, ephemeral: 1, project: 3, shared: 4, knowledge: 4, durable: 4, hot: 2, task: 2,
+        };
+        let recordTier = entry.lifecycle?.tier != null ? Number(entry.lifecycle.tier) : NaN;
+        if (!Number.isFinite(recordTier)) {
+          // Check tier_from (archive-manifest schema)
+          const tierFrom = entry.tier_from;
+          if (tierFrom != null) {
+            recordTier = Number(tierFrom);
+          }
+        }
+        if (!Number.isFinite(recordTier)) {
+          recordTier = TIER_MAP[String(entry.memory_level || "").toLowerCase()]
+            || TIER_MAP[String(entry.scope || "").toLowerCase()]
+            || 2;
+        }
         if (!allowedTiers.has(recordTier)) {
+          if (documents.size < 3) console.error("[DEBUG] filtered by tier:", recordTier, "allowed:", [...allowedTiers]);
           continue;
         }
         const { title, content, facts, concepts } = extractFieldTexts(entry);
         const rawText = [title, content].filter(Boolean).join(" ");
+        if (documents.size < 3) {
+          console.error("[DEBUG] first record - memory_level:", entry.memory_level, "scope:", entry.scope, "tier:", recordTier, "rawText len:", rawText.length, "title:", String(title).slice(0,30));
+        }
 
         if (isNoise(rawText)) {
+          if (documents.size < 3) console.error("[DEBUG] filtered by isNoise:", String(rawText).slice(0,50));
           continue;
         }
 

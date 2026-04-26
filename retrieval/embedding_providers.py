@@ -19,6 +19,8 @@ from runtime_support import normalize_embedding_adapter
 
 DEFAULT_MODEL = "all-MiniLM-L6-v2"
 HASH_MODEL = "hashing-v1"
+GEMINI_EMBED_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+GEMINI_DEFAULT_MODEL = "gemini-embedding-2"
 _TRANSFORMER_MODEL_CACHE: Dict[str, object] = {"name": "", "model": None}
 
 
@@ -118,6 +120,50 @@ def embed_query_transformer(query: str, model_name: str) -> Tuple[Optional[List[
         return None, f"query-embedding-failed: {exc}"
 
 
+def embed_query_gemini(query: str, runtime: Dict[str, object], model_name: str) -> Tuple[Optional[List[float]], Optional[str]]:
+    api_key = str(runtime.get("apiKey", "")).strip()
+    resolved_model = str(model_name or runtime.get("model", GEMINI_DEFAULT_MODEL) or GEMINI_DEFAULT_MODEL).strip()
+    timeout_seconds = int(runtime.get("timeoutSeconds", 120) or 120)
+
+    # Resolve model string: "gemini-embedding-2" → "models/gemini-embedding-2"
+    model_id = resolved_model if resolved_model.startswith("models/") else f"models/{resolved_model}"
+    url = f"{GEMINI_EMBED_BASE_URL}/{model_id}:embedContent?key={api_key}"
+
+    payload = json.dumps(
+        {
+            "model": resolved_model,
+            "content": {"parts": [{"text": query}]},
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            body = response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
+        return None, f"gemini-http-{exc.code}: {detail[:500]}"
+    except Exception as exc:
+        return None, f"gemini-query-embedding-failed: {exc}"
+
+    try:
+        parsed = json.loads(body)
+        embeddings = parsed.get("embeddings") or []
+        if not embeddings:
+            return None, "gemini-empty-response"
+        values = embeddings[0].get("values")
+        if not isinstance(values, list) or not values:
+            return None, "gemini-empty-vector"
+        return [float(v) for v in values], None
+    except Exception as exc:
+        return None, f"gemini-invalid-json: {exc}"
+
+
 def embed_query_with_runtime(
     query: str,
     runtime: Dict[str, object],
@@ -137,6 +183,9 @@ def embed_query_with_runtime(
     if adapter == "transformer":
         vector, error = embed_query_transformer(query, resolved_model)
         return vector, error, adapter, resolved_model
+    if adapter == "gemini":
+        vector, error = embed_query_gemini(query, runtime, resolved_model)
+        return vector, error, adapter, resolved_model
     return None, f"unsupported-embedding-adapter:{adapter}", adapter, resolved_model
 
 
@@ -151,6 +200,81 @@ def _chunked(items: List[str], size: int) -> List[List[str]]:
     """Yield successive ``size``-item chunks from ``items``."""
     for i in range(0, len(items), size):
         yield items[i : i + size]
+
+
+def batch_embed_gemini(
+    queries: List[str],
+    runtime: Dict[str, object],
+    model_name: str,
+) -> List[Tuple[Optional[List[float]], Optional[str]]]:
+    """
+    Calls the Google Gemini embeddings endpoint for each text sequentially.
+    Gemini's /embedContent endpoint does not support batch input, so we make
+    one request per item. Retries with exponential backoff on 429/5xx.
+    """
+    if not queries:
+        return []
+
+    api_key = str(runtime.get("apiKey", "")).strip()
+    resolved_model = str(model_name or runtime.get("model", GEMINI_DEFAULT_MODEL) or GEMINI_DEFAULT_MODEL).strip()
+    timeout_seconds = int(runtime.get("timeoutSeconds", 120) or 120)
+    max_attempts = int(runtime.get("maxRetries", 3) or 3)
+
+    if not api_key:
+        return [(None, "missing-gemini-api-key")] * len(queries)
+
+    model_id = resolved_model if resolved_model.startswith("models/") else f"models/{resolved_model}"
+    base_url = f"{GEMINI_EMBED_BASE_URL}/{model_id}:embedContent?key={api_key}"
+
+    results: List[Tuple[Optional[List[float]], Optional[str]]] = []
+    for query in queries:
+        result = _gemini_single_with_retries(query, base_url, model_id, timeout_seconds, max_attempts)
+        results.append(result)
+
+    return results
+
+
+def _gemini_single_with_retries(
+    query: str,
+    base_url: str,
+    model_id: str,
+    timeout_seconds: int,
+    max_attempts: int,
+) -> Tuple[Optional[List[float]], Optional[str]]:
+    """Make a single Gemini embedding request with retry logic."""
+    payload = json.dumps(
+        {"model": resolved_model, "content": {"parts": [{"text": query}]}}
+    ).encode("utf-8")
+    last_error = "unknown"
+
+    for attempt in range(max_attempts + 1):
+        request = urllib.request.Request(
+            base_url, data=payload, headers={"Content-Type": "application/json"}, method="POST"
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+                body = response.read().decode("utf-8", errors="replace")
+            parsed = json.loads(body)
+            embeddings = parsed.get("embeddings") or []
+            if not embeddings:
+                return None, "gemini-empty-response"
+            values = embeddings[0].get("values")
+            if not isinstance(values, list) or not values:
+                return None, "gemini-empty-vector"
+            return [float(v) for v in values], None
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
+            last_error = f"gemini-http-{exc.code}: {detail[:200]}"
+            if exc.code not in (429,) and not (500 <= exc.code < 600):
+                return None, last_error
+        except Exception as exc:
+            last_error = f"gemini-request-failed: {exc}"
+
+        if attempt < max_attempts:
+            sleep_s = min(0.5 * (2 ** attempt), 16.0)
+            time.sleep(sleep_s)
+
+    return None, last_error
 
 
 def batch_embed_openai_compatible(
@@ -330,6 +454,9 @@ def batch_embed_with_runtime(
     if adapter == "transformer":
         return _batch_dispatch_transformer(queries, resolved_model)
 
+    if adapter == "gemini":
+        return _batch_dispatch_gemini(queries, runtime, resolved_model)
+
     return [(None, f"unsupported-embedding-adapter:{adapter}", adapter, resolved_model)] * len(queries)
 
 
@@ -374,6 +501,16 @@ def _batch_dispatch_transformer(
         return [(row.tolist() if hasattr(row, "tolist") else list(row), None, "transformer", resolved_model) for row in encoded]
     except Exception as exc:
         return [(None, f"transformer-batch-embedding-failed: {exc}", "transformer", resolved_model)] * len(queries)
+
+
+def _batch_dispatch_gemini(
+    queries: List[str],
+    runtime: Dict[str, object],
+    resolved_model: str,
+) -> List[Tuple[Optional[List[float]], Optional[str], str, str]]:
+    """Dispatch Gemini embedding requests sequentially (no native batch support)."""
+    batch_results = batch_embed_gemini(queries, runtime, resolved_model)
+    return [(vector, error, "gemini", resolved_model) for vector, error in batch_results]
 
 
 # ---------------------------------------------------------------------------
