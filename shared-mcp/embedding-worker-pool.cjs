@@ -291,11 +291,12 @@ async function initPool(pythonCmd, pythonArgs, env) {
 /**
  * Execute an embedding request against the warm pool.
  *
- * @param {{ texts: string[], model: string, pythonCmd: string, pythonArgs: string[], env: object }} options
+ * @param {{ texts: string[], model: string, pythonCmd: string, pythonArgs: string[], env: object, msgType?: string, apiKey?: string, geminiModel?: string }} options
  * @returns {Promise<number[][]>}
  */
 async function embedWithPool(options) {
-  const { texts, model, pythonCmd, pythonArgs, env } = options;
+  const { texts, model, pythonCmd, pythonArgs, env, apiKey, geminiModel } = options;
+  const msgType = options.msgType || "EMBED";
 
   await initPool(pythonCmd, pythonArgs, env);
 
@@ -339,12 +340,13 @@ async function embedWithPool(options) {
       createdAt: Date.now(),
     });
 
-    const payload = JSON.stringify({
-      type: "EMBED",
-      id,
-      model,
-      texts,
-    });
+    const msgType = options.msgType || "EMBED";
+    const apiKey = options.apiKey || "";
+    const geminiModel = options.geminiModel || "gemini-embedding-2";
+    const payload = JSON.stringify(Object.assign(
+      { type: msgType, id, model, texts },
+      msgType === "GEMINI_EMBED" ? { apiKey, geminiModel } : {}
+    ));
 
     if (worker.proc && !worker.proc.killed && worker.proc.stdin.writable) {
       worker.proc.stdin.write(payload + "\n");
@@ -382,6 +384,7 @@ sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 # Warm up sentence-transformers — this is the expensive part we want to amortize
 _model_cache = {}
 _pending_pongs = []
+import urllib.request
 
 def get_model(name):
     if name not in _model_cache:
@@ -422,6 +425,41 @@ while True:
             result = json.dumps({"type": "RESULT", "id": msg["id"], "data": [v.tolist() for v in vectors]})
         except Exception as exc:
             result = json.dumps({"type": "ERROR", "id": msg["id"], "error": str(exc)})
+        sys.stdout.write(result + "\\n")
+        sys.stdout.flush()
+
+    elif msg_type == "GEMINI_EMBED":
+        api_key = msg.get("apiKey", "")
+        model_id = msg.get("geminiModel", "gemini-embedding-2")
+        texts = msg.get("texts", [])
+        results = []
+        for text in texts:
+            try:
+                url = "https://generativelanguage.googleapis.com/v1beta/" + model_id + ":embedContent?key=" + api_key
+                body_model = model_id.replace("models/", "")
+                payload = json.dumps({"model": body_model, "content": {"parts": [{"text": text}]}}).encode("utf-8")
+                sys.stderr.write("[gemini] url: " + url[:80] + " body: " + str(payload)[:100] + "\\n")
+                sys.stderr.flush()
+                req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    body = resp.read().decode("utf-8", errors="replace")
+                parsed = json.loads(body)
+                embeddings = parsed.get("embeddings") or []
+                if embeddings:
+                    vals = embeddings[0].get("values", [])
+                    results.append(vals)
+                else:
+                    results.append(None)
+            except Exception as exc:
+                err_detail = str(exc)
+                sys.stderr.write("[gemini] error: " + err_detail + "\\n")
+                sys.stderr.flush()
+                results.append(None)
+        ok_results = [r for r in results if r is not None]
+        if ok_results:
+            result = json.dumps({"type": "RESULT", "id": msg["id"], "data": results})
+        else:
+            result = json.dumps({"type": "ERROR", "id": msg["id"], "error": "gemini-embed-failed"})
         sys.stdout.write(result + "\\n")
         sys.stdout.flush()
 

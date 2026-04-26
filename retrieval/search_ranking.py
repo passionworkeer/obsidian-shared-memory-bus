@@ -13,7 +13,7 @@ import math
 import re
 import sys
 import time as time_module
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Literal, Optional, Tuple
 
 from embedding_providers import (
     DEFAULT_MODEL,
@@ -594,7 +594,11 @@ def score_entry(
     elif effective_mode == "dense":
         retrieval_score = dense_component
     else:
-        retrieval_score = (0.58 * bm25_component) + (0.42 * dense_component)
+        # 自适应混合权重：从 route 中读取，若不存在则使用默认值
+        adaptive_blend = route.get("adaptiveBlend", {})
+        bm25_w = float(adaptive_blend.get("bm25Weight", 0.55))
+        dense_w = float(adaptive_blend.get("denseWeight", 0.45))
+        retrieval_score = (bm25_w * bm25_component) + (dense_w * dense_component)
 
     if retrieval_score <= 0:
         return None
@@ -729,7 +733,10 @@ def rerank_entries(
         elif effective_mode == "dense":
             primary_v = dense_v
         else:
-            primary_v = 0.58 * bm25_v + 0.42 * dense_v
+            adaptive_blend = route.get("adaptiveBlend", {})
+            bw = float(adaptive_blend.get("bm25Weight", 0.55))
+            dw = float(adaptive_blend.get("denseWeight", 0.45))
+            primary_v = bw * bm25_v + dw * dense_v
 
         matched_field = field if primary_v > 0 else "content"
         meta["matchedField"] = matched_field
@@ -857,6 +864,150 @@ def ranked_pairs(scores: Dict[str, float], limit: int) -> List[Tuple[str, float]
 
 
 # ---------------------------------------------------------------------------
+# Adaptive query type analysis — dynamically adjusts BM25/Dense blend weights
+# ---------------------------------------------------------------------------
+
+# 技术名词模式（专业术语 → 关键词主导）
+TECHNICAL_TERM_PATTERN = re.compile(
+    r"\b("
+    r"python|javascript|typescript|java|cpp|golang|rust|sql|html|css|regex|api|cli|"
+    r"gui|orm|cli|devops|cli|json|yaml|toml|xml|markdown|markdown|markdown|"
+    r"useeffect|usememo|usestate|usecontext|useref|usecallback|"
+    r"context|reducer|middleware|websocket|restful|graphql|grpc|"
+    r"npm|pip|maven|gradle|docker|kubernetes|ansible|terraform|"
+    r"http|https|tcp|udp|dns|cache|redis|memcached|postgres|mysql|mongodb|"
+    r"async|await|promise|callback|closure|decorator|decorator|"
+    r"class|function|method|interface|type|enum|struct|trait|generic|"
+    r"inheritance|polymorphism|encapsulation|abstraction|"
+    r"monad|functor|lambda|closure|curry|higher.order|"
+    r"git|commit|push|pull|merge|rebase|branch|tag|diff|patch|"
+    r"ci|cd|pipeline|jenkins|github|gitlab|bitbucket|"
+    r"oop|fp|tdd|bdd|ddd|cqrs|event.sourcing|"
+    r"microservice|monolith|serverless|faas|paas|saas|"
+    r"jwt|oauth|ssl|tls|https|ssh|gpg|rsa|aes|"
+    r"kernel|thread|process|goroutine|channel|actor|"
+    r"virtual.dom|reconcile|scheduler|fiber|hook|effect|ref|"
+    r"mcp|protocol|schema|endpoint|route|handler|middleware|"
+    r"index|shard|partition|replica|leader|follower|splitbrain|"
+    r"llm|embedding|vector|token|rag|rerank|bm25|dense|"
+    r"crud|create|read|update|delete|upsert|patch|"
+    r"[a-z]{2,}[_][a-z]{2,}"  # snake_case identifiers
+    r")\b",
+    re.I,
+)
+
+# 英文词干模式（短词 → 可能是关键词）
+SHORT_TOKEN_PATTERN = re.compile(r"\b[a-z]{2,6}\b")
+
+# 语义描述模式（自然语言提问 → 语义主导）
+SEMANTIC_PATTERN = re.compile(
+    r"("
+    r"怎么|如何|为什么|什么|哪个|哪些|何时|哪里|怎样|多少|"
+    r"怎么实现|如何使用|如何处理|如何解决|如何优化|如何改进|"
+    r"why|how|what|which|when|where|can i|could i|should i|"
+    r"explain|describe|compare|contrast|difference between|"
+    r"的最佳实践|最佳方案|推荐|建议|思路|方案|"
+    r"告诉我|教我|帮我|给我|概念|原理|思路"
+    r")",
+    re.I,
+)
+
+# 专业符号模式（特殊字符 → 关键词主导）
+SPECIAL_CHAR_PATTERN = re.compile(r"[`\[\]{}()=+\-*/<>!&|^%$#@~`]")
+
+
+def analyze_query_type(query: str) -> Tuple[str, Dict[str, float]]:
+    """
+    分析查询类型，返回 (query_type, signal_scores)。
+
+    query_type:
+      - "keyword_heavy": 技术名词/专有词占比高 → BM25 权重高
+      - "semantic_heavy": 自然语言描述占比高 → Dense 权重高
+      - "balanced": 两者均衡
+
+    signal_scores 包含各个分析维度，供调试和扩展使用。
+    """
+    if not query or not query.strip():
+        return "balanced", {"keyword_score": 0.5, "semantic_score": 0.5}
+
+    q = query.strip()
+
+    # 1. 统计技术名词
+    tech_terms = TECHNICAL_TERM_PATTERN.findall(q)
+    keyword_density = len(tech_terms) / max(len(q.split()), 1)
+
+    # 2. 统计自然语言语义指标
+    has_semantic_markers = bool(SEMANTIC_PATTERN.search(q))
+    has_question_word = bool(re.search(r"[？?]", q))
+    is_long_description = len(q) > 30 and q.count(" ") > 5
+
+    # 3. 统计特殊符号（代码片段、文件路径等）
+    special_char_ratio = len(SPECIAL_CHAR_PATTERN.findall(q)) / max(len(q), 1)
+
+    # 4. 统计英文字母词干
+    short_tokens = SHORT_TOKEN_PATTERN.findall(q)
+    avg_token_len = sum(len(t) for t in short_tokens) / max(len(short_tokens), 1) if short_tokens else 0
+
+    # 计算信号强度
+    keyword_signals = [
+        keyword_density * 5,           # 技术名词密度
+        special_char_ratio * 3,         # 特殊字符（代码片段）
+        min(avg_token_len / 8.0, 1.0), # 短词干（可能是关键词）
+    ]
+
+    semantic_signals = [
+        1.5 if has_semantic_markers else 0.0,  # 语义疑问词
+        1.0 if has_question_word else 0.0,     # 问号
+        1.0 if is_long_description else 0.0,  # 长自然语言描述
+    ]
+
+    kw = sum(keyword_signals)
+    sem = sum(semantic_signals)
+
+    # 归一化到 [0, 1]
+    total = kw + sem
+    if total > 0:
+        kw_norm = kw / total
+        sem_norm = sem / total
+    else:
+        kw_norm = 0.5
+        sem_norm = 0.5
+
+    if kw_norm > 0.65:
+        qt = "keyword_heavy"
+    elif sem_norm > 0.65:
+        qt = "semantic_heavy"
+    else:
+        qt = "balanced"
+
+    return qt, {
+        "keyword_score": round(kw_norm, 4),
+        "semantic_score": round(sem_norm, 4),
+        "tech_term_count": len(tech_terms),
+        "has_semantic_markers": has_semantic_markers,
+        "has_question_word": has_question_word,
+        "special_char_ratio": round(special_char_ratio, 4),
+    }
+
+
+def compute_adaptive_blend_weights(query_type: str) -> Tuple[float, float]:
+    """
+    根据查询类型返回自适应混合权重 (bm25_weight, dense_weight)。
+
+    设计原则：
+      - keyword_heavy: BM25 对关键词匹配更精准 → 提高 BM25 权重
+      - semantic_heavy: Dense 对语义理解更强 → 提高 Dense 权重
+      - balanced: 两者均衡（接近原来的 0.58:0.42）
+    """
+    weights: Dict[str, Tuple[float, float]] = {
+        "keyword_heavy": (0.72, 0.28),   # 关键词精准优先
+        "semantic_heavy": (0.28, 0.72),  # 语义理解优先
+        "balanced": (0.55, 0.45),        # 均衡（微调后比原来的 0.58:0.42 更平衡）
+    }
+    return weights.get(query_type, (0.55, 0.45))
+
+
+# ---------------------------------------------------------------------------
 # classify_query_intent / build_query_route
 # ---------------------------------------------------------------------------
 
@@ -927,6 +1078,11 @@ def build_query_route(query: str, parsed: Dict[str, object]) -> Dict[str, object
         effective_scope_weights["summary"] = effective_scope_weights.get("summary", 1.0) + 0.08
         effective_layer_weights["session"] = effective_layer_weights.get("session", 1.0) + 0.04
 
+    # 自适应混合权重：根据查询类型动态调整 BM25/Dense 权重
+    query_text = normalize_spaces(query).lower()
+    qt, signal_scores = analyze_query_type(query_text)
+    bm25_w, dense_w = compute_adaptive_blend_weights(qt)
+
     return {
         "intent": intent,
         "explicitRoute": explicit_route,
@@ -934,4 +1090,11 @@ def build_query_route(query: str, parsed: Dict[str, object]) -> Dict[str, object
         "scopeWeights": effective_scope_weights,
         "sourceKindWeights": effective_source_kind_weights,
         "freshnessWeights": effective_freshness_weights,
+        # 自适应路由
+        "adaptiveBlend": {
+            "queryType": qt,
+            "bm25Weight": bm25_w,
+            "denseWeight": dense_w,
+            "signalScores": signal_scores,
+        },
     }
