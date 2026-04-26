@@ -69,3 +69,9 @@ _run_*.sh
 
 # Test-generated stubs
 ops/bus/
+
+# Debug/test scratch files
+_test_*.py
+_test_*.js
+shared-mcp/*.debugbak
+shared-mcp/*.disabled
