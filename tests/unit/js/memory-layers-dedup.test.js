@@ -7,6 +7,14 @@ const fs = require("fs");
 const os = require("os");
 
 // ---------------------------------------------------------------------------
+// Create temp directory for DAILY_LOG_DIR to avoid hardcoded path dependency
+// MUST be set before any module that uses AI_MEMORY_ROOT
+// ---------------------------------------------------------------------------
+const TEST_AI_MEMORY_ROOT = path.join(os.tmpdir(), `ai-memory-test-${Date.now()}`);
+fs.mkdirSync(TEST_AI_MEMORY_ROOT, { recursive: true });
+process.env.AI_MEMORY_ROOT = TEST_AI_MEMORY_ROOT;
+
+// ---------------------------------------------------------------------------
 // Stub memory-contract and vault-root before the module is loaded
 // ---------------------------------------------------------------------------
 const mcPath = require.resolve("../../../ops/memory/memory-contract.js");
@@ -323,18 +331,16 @@ test("appendDailyLogs: dryRun logs to stderr without writing", () => {
   assert.ok(stderrOutput.includes("[daily-log] dry-run"));
 });
 
-// Skip in CI - DAILY_LOG_DIR is hardcoded to E:\.ai-memory which doesn't exist in CI
-test.skip("appendDailyLogs: appends to today's log file", () => {
+test("appendDailyLogs: appends to today's log file", () => {
   const today = new Date().toISOString().substring(0, 10);
-  const records = [{ id: `today-${Date.now()}`, t: new Date().toISOString(), content: "Today entry", facts: [], concepts: [], metadata: {} }];
-  const tmpDir = path.join(os.tmpdir(), `append-daily-logs-${Date.now()}`);
+  const recordId = `today-${Date.now()}`;
+  const records = [{ id: recordId, t: new Date().toISOString(), content: "Today entry", facts: [], concepts: [], metadata: {} }];
   appendDailyLogs(records, false);
   const [year, month] = today.split("-");
   const logFile = path.join(DAILY_LOG_DIR, year, month, `${today}.jsonl`);
-  if (fs.existsSync(logFile)) {
-    const content = fs.readFileSync(logFile, "utf8");
-    assert.ok(content.includes(`"id":"${records[0].id}"`));
-  }
+  assert.ok(fs.existsSync(logFile), `Log file exists: ${logFile}`);
+  const content = fs.readFileSync(logFile, "utf8");
+  assert.ok(content.includes(`"id":"${recordId}"`), "Record written to log file");
 });
 
 test("appendDailyLogs: skips old dates (not today or yesterday)", () => {
