@@ -217,7 +217,8 @@ async function testAdapterRegistry() {
   assertTrue(adapters.includes("hash"), "hash adapter available");
   assertTrue(adapters.includes("transformer"), "transformer adapter available");
   assertTrue(adapters.includes("openai-compatible"), "openai-compatible adapter available");
-  assertEqual(adapters.length, 3, "Exactly 3 adapters registered");
+  assertTrue(adapters.includes("gemini"), "gemini adapter available");
+  assertEqual(adapters.length, 4, "Exactly 4 adapters registered");
 
   // Hash adapter is always available (no external dependency)
   const hashAdapter = adapter.get("hash");
