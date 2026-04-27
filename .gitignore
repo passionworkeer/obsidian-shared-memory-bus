@@ -61,11 +61,16 @@ SUPPORT.md
 
 # Test artifacts
 .coverage
+coverage/
 coverage.json
 
 # Temp debug scripts
 _run_*.py
 _run_*.sh
+
+# Misc
+$null
+interview/
 
 # Test-generated stubs
 ops/bus/
