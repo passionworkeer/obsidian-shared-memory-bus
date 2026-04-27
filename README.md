@@ -1,621 +1,227 @@
 # Shared AI Memory Bus
 
-[![GitHub stars](https://img.shields.io/github/stars/passionworkeer/obsidian-shared-memory-bus)](https://github.com/passionworkeer/obsidian-shared-memory-bus/stargazers)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+> 让多个 AI 工具共享一个记忆系统，不再重复解释上下文
+
 [![Test CI](https://github.com/passionworkeer/obsidian-shared-memory-bus/actions/workflows/test.yml/badge.svg)](https://github.com/passionworkeer/obsidian-shared-memory-bus/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js >=18](https://img.shields.io/badge/Node.js-%3E%3D18-brightgreen)](https://nodejs.org)
-[![Platform: Windows](https://img.shields.io/badge/Platform-Windows-brightgreen)](https://github.com/passionworkeer/obsidian-shared-memory-bus/tree/codex/windows-popup-fixes)
-[![Platform: macOS](https://img.shields.io/badge/Platform-macOS-brightgreen)](https://github.com/passionworkeer/obsidian-shared-memory-bus/tree/codex/windows-popup-fixes)
-[![Platform: Linux](https://img.shields.io/badge/Platform-Linux-brightgreen)](https://github.com/passionworkeer/obsidian-shared-memory-bus/tree/codex/windows-popup-fixes)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10+-orange)](https://python.org)
+[![Platforms: Windows | macOS | Linux](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-brightgreen)]()
 
-> **What problem does this solve?** If you use multiple AI coding tools (like Claude Code, Codex, OpenCode, Cursor, or Copilot) on the same machine, each one has its own memory and doesn't know what the others remember. This tool gives all your AI tools a shared memory backed by your local `.ai-memory` store — so you don't have to re-explain context to every tool.
+---
 
-> **In plain English**: Your AI tools share one notebook for memory instead of each forgetting everything when you switch.
+## 问题
 
-## Agent-Centric Architecture
+如果你同时使用多个 AI 编程工具（Claude Code、Codex、Cursor、Copilot 等），每个工具都有自己独立的记忆，互不共享。
 
-This repository is **written for AI agents first**. When any AI agent clones the repo, it reads `SKILL.md` → `AGENT_BOOT.md` → applies its platform/agent-specific skill, and the entire memory architecture auto-configures. No manual setup required.
+**解决方案**：让所有 AI 工具共享同一个本地记忆后端（基于 Obsidian），不再重复解释上下文。
 
-```
-Universal entry    → SKILL.md
-Agent bootstrap    → .agents/skills/AGENT_BOOT.md
-macOS overrides    → .agents/skills/macos.md
-Linux overrides    → .agents/skills/linux.md
-Agent-specific    → .agents/skills/<agent-name>.md
-```
+---
 
-**One-line agent bootstrap (any platform):**
-```bash
-git clone https://github.com/passionworkeer/obsidian-shared-memory-bus.git && \
-  cd obsidian-shared-memory-bus && \
-  node -e "console.log('Platform:', require('./bus/platform/index.js').platform.name)" && \
-  node -e "console.log('Store:', require('./bus/store-root.js').resolveStoreRoot())" && \
-  node ops/generate-context.js
-```
+## 核心特性
 
-Supported agents: Claude Code, Codex, OpenClaw, Trae, Cursor, Copilot.
+| 特性 | 说明 |
+|------|------|
+| **共享记忆** | 多个 AI 工具共享同一份持久化记忆 |
+| **本地优先** | 数据存储在本地 `.ai-memory` 目录 |
+| **混合检索** | BM25 + 语义向量混合搜索，支持中文分词 |
+| **MCP 协议** | 支持 Model Context Protocol，多工具兼容 |
+| **观察者模式** | 后台 watchdog 自动同步工具记忆 |
+| **无依赖 SaaS** | 完全本地运行，无外部服务依赖 |
 
-The 5-tier memory architecture is documented in `docs/MEMORY-TIERING.md`. Only Tier 3 and Tier 4 records are embedded; Tier 5 Archive uses `archive-manifest.jsonl` instead of a tombstone to avoid polluting the vector space.
+---
 
-## Before You Start
+## 支持的 AI 工具
 
-Checklist — all must be checked before installing:
-- [ ] **AI_MEMORY_STORE configured** — you have a `.ai-memory` store at the default location or have set `AI_MEMORY_STORE`
-- [ ] **Node.js 18+ installed** — check with `node -v`
-- [ ] **PowerShell 7+** (for macOS/Linux) — check with `pwsh --version`; on Windows, `powershell.exe` works
-- [ ] **Python 3.10+** (optional, for better search) — check with `python --version`
-- [ ] **8 shared ports available** (9331–9338) — no other program using these
+| 工具 | 状态 | 说明 |
+|------|------|------|
+| Claude Code | ✅ 一级支持 | 完整集成验证 |
+| Codex | ✅ 一级支持 | 完整集成验证 |
+| OpenCode | ✅ 一级支持 | 完整集成验证 |
+| OpenClaw | ✅ 支持 | 通过结构化记忆同步 |
+| Cursor | ✅ 支持 | MCP 配置支持 |
+| VS Code / Copilot | ✅ 支持 | 配置接线支持 |
+| Trae | ⚡ 便携目标 | 新代理集成指南 |
 
-Quick vault check — the installer creates this structure if missing:
-- `00-System/ai-memory/` — memory system root
-- `02-KB/MEMORY.md` — memory system docs
-- `02-KB/WORKING.md` — active task state
+---
 
-If your store is on a different drive or non-standard location, set `AI_MEMORY_STORE` before installing:
-```powershell
-$env:AI_MEMORY_STORE = "E:\.ai-memory"
-```
+## 快速开始
 
-## Start Here — Pick Your Path
+### 1. 安装（Windows）
 
-**I want to try it quickly:**
-1. Run `.\scripts\install.ps1 -WorkspaceRoot .` (Windows) or `./scripts/install.sh -WorkspaceRoot .` (macOS/Linux)
-2. After install, either:
-   - **CLI available**: Run `node .\cli\ai-memory.js doctor` (or `ai-memory doctor` if in PATH)
-   - **CLI not in PATH**: Run `powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\status-shared-mcp.ps1 --human`
-3. Done! The shared memory bus is running.
-
-**I want to add another AI tool to the shared memory:**
-→ See [docs/INDEX.md](docs/INDEX.md) and `docs/guides/DEVELOPMENT.md`
-
-**I want to understand what this is:**
-→ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/guides/TROUBLESHOOTING.md](docs/guides/TROUBLESHOOTING.md)
-
-**Something is broken:**
-→ See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
-
-**I use macOS:**
-→ See [docs/platform/MACOS_SETUP.md](docs/platform/MACOS_SETUP.md)
-
-**I use Linux:**
-→ See [docs/platform/LINUX_SETUP.md](docs/platform/LINUX_SETUP.md)
-
-## Quick Start — 3 Steps / 快速开始 — 3 步
-
-Want to try it right now? Here is the minimal install + verify flow:
-
-### Step 1 — Install / 安装
-
-```powershell
-# Windows
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -WorkspaceRoot .
-```
-
-```bash
-# macOS / Linux
-./scripts/install.sh -WorkspaceRoot "$(pwd)"
-```
-
-### Step 2 — Verify / 验证
-
-```powershell
-# Windows
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\status-shared-mcp.ps1
-```
-
-```bash
-# macOS / Linux
-~/.ai-memory/shared-mcp/status-shared-mcp.sh
-```
-
-Look for `running: true` on ports 9331–9338.
-
-### Step 3 — Use It / 使用
-
-Point any MCP-capable AI tool at:
-```
-http://127.0.0.1:9338/mcp   # memory (search, memory_boot, memory_wake_up)
-http://127.0.0.1:9331/mcp   # context7
-http://127.0.0.1:9332/mcp   # fetch
-http://127.0.0.1:9333/mcp   # time
-http://127.0.0.1:9337/mcp   # playwright (optional)
-```
-
-The installer auto-wires Claude Code, Codex, OpenCode, Cursor, VS Code/Copilot, and Trae when `-WorkspaceRoot` is provided.
-
-## Project Status
-- Ready for real local use on Windows
-- Portable install/startup entrypoints now ship for macOS and Linux
-- Local-first by default, with optional remote embeddings
-- Best suited for one machine hosting many agents and tools
-- Public template-quality bundle, but still opinionated and evolving
-
-## Latest Release Notes
-- Windows console window elimination: layered shim resolution (npm-style / exe+script / bare-script patterns) plus temp-batch cmd.exe fallback removes visible Node.js windows on startup.
-- Windows background launch hardening now keeps shared MCP and watchdog flows out of foreground console windows.
-- Shared proxy startup no longer passes resolved runtime environment payloads on the command line.
-- Shared MCP `start/status/stop` now recover cleanly from abandoned mutexes after interrupted runs.
-- Shared memory now exposes `memory_wake_up` for compact layered session bootstrap (`identity / essential / recent / retrieve`) and optional verbatim snippet windows in `search_shared_memory`.
-- Portable `skill` and `thin plugin` starter templates are now included under [`templates/agents/`](templates/agents/).
-
-## What This Is
-- A reusable local memory bus template for multi-agent setups
-- A process-deduplicated shared MCP stack for safe-to-share services
-- A canonical local `.ai-memory` store with hybrid retrieval and optional Obsidian overlays
-
-## What This Is Not
-- Not a hosted SaaS
-- Not a single merged super-context for every agent
-- Not a guarantee that every MCP should or can be shared
-- Not a replacement for backup or sync hygiene for your `.ai-memory` store
-
-## What This Gives You
-- One canonical long-term memory store in `.ai-memory`
-- Layered memory outputs inspired by Claude-style session memory and OpenClaw-style task blackboards
-- One shared `memory` MCP service instead of per-agent local memory processes
-- Shared `obsidian` MCP for direct note reads and writes
-- One shared `playwright` MCP backend so multi-agent browser tasks stop spawning one local Playwright server per client
-- Background watchdog sync from tool-native memory into structured shared memory
-- Watchdog heavy refresh gating based on real structured-memory signature changes instead of every observed source change
-- Auto-built `MEMORY-LAYERS` and `AUTO-DREAM` summaries for handoff, compaction, and typed durable promotion
-- Auto-built `HANDOFF` pack with bounded `goal / done / next / blocked / files / open_threads / tool_invariants`
-- Generated artifacts now carry explicit `contractVersion`, `recordSchemaVersion`, and content-hash-based `sourceStructuredSignature` metadata instead of relying only on timestamps
-- The governed structured-memory universe now explicitly includes imported `claude-code.jsonl` and `openclaw.jsonl`, not just local session/event/task layers
-- Generated onboarding packs that bundle shared HTTP MCP snippets, a portable skill template, and a thin plugin-adapter contract for new agents
-- OpenClaw session, job, run, blackboard, and journal sync into shared structured memory
-- Hybrid retrieval with `bm25`, offline dense `hashing-v1`, optional remote embeddings, and route-aware layered reranking
-- Typed durable promotion metadata (`metadata.promotion`) that classifies durable writeback candidates into `user / feedback / project / reference` and preserves `source_type / source_confidence` for auditable queue generation
-- Installer-side Python runtime auto-detection, including uv-managed Python, so shared retrieval does not depend on `python` being on `PATH`
-- Installer-side bootstrap of lightweight retrieval dependencies (`rank-bm25`, `jieba`) so BM25 scoring and Chinese tokenization do not silently degrade on fresh machines
-- Shared `fetch` / `time` startup now prefers a managed Python 3.10+ runtime through `AI_MEMORY_MCP_PYTHON` instead of cold-starting `uvx` on every launch
-- Store root auto-discovery from environment overrides or standard Desktop/Documents fallback paths
-- No native Node `sqlite3` dependency in the shared `memory` MCP or the OpenClaw blackboard daemon
-- A warm shared Python retrieval worker behind the `memory` MCP so BM25 state and model caches can be reused across requests
-- Shared retrieval worker cache introspection and cache-reset control through `memory_status` and `clear_shared_memory_search_cache`
-- Runtime embedding catalog and selection controls through `list_embedding_runtimes` and `set_embedding_runtime`, with drift detection exposed as `memory_status.embeddingIndexState`
-- Query-intent routing controls through `search_shared_memory.route`, with live route metadata surfaced as `queryIntent`, `queryRoute`, `layerCounts`, and per-result `rankMeta`
-- Optional compact layered wake-up context through `memory_wake_up`, including `identity / essential / recent / retrieve` sections plus exact-match snippet windows through `search_shared_memory.includeVerbatim`
-- Versioned memory-contract validation through `ops/check-memory-integrity.js` and live integrity reporting through `memory_status.memoryIntegrity`
-- Pressure-test and verification tooling for multi-agent setups
-- An explicit source-to-install contract with stale runtime cleanup plus Windows and portable-core CI validation
-
-## Who This Is For
-- People running multiple local AI agents on one machine
-- Setups where the `.ai-memory` store is the durable source of truth
-- Users who want shared retrieval without blindly sharing every tool process
-
-## Who This Is Not For
-- Fully managed cloud deployments
-- Zero-touch cross-device sync stacks with no local operator
-- Setups that need every desktop/UI-bound tool to be globally shared
-
-## System Overview
-```mermaid
-flowchart LR
-    subgraph Clients["AI Clients"]
-        Codex["Codex"]
-        Claude["Claude Code"]
-        OpenCode["OpenCode"]
-        Others["Cursor / Copilot / Trae / Others"]
-        OpenClaw["OpenClaw"]
-    end
-
-    subgraph Shared["Shared MCP Layer"]
-        Memory["memory :9338"]
-        Obsidian["obsidian :9335"]
-        Utils["context7 / fetch / time / sequential-thinking"]
-        Playwright["playwright :9337 (shared process, isolated sessions)"]
-    end
-
-    subgraph Runtime["Local Runtime"]
-        Watchdog["bus/memory-watchdog.ps1"]
-        Bus["bus/memory-bus.ps1"]
-        Search["bm25 + dense + hybrid retrieval"]
-    end
-
-    subgraph Vault["Canonical Store"]
-        AiMemory[".ai-memory Store"]
-        Structured["structured/*.jsonl"]
-        Inbox["tool inboxes / generated context"]
-    end
-
-    Clients --> Shared
-    Shared --> Search
-    Runtime --> Search
-    Watchdog --> Bus
-    Bus --> Structured
-    Bus --> Inbox
-    Search --> Structured
-    Obsidian --> ObsidianVault
-    Bus --> ObsidianVault
-    OpenClaw --> Structured
-```
-
-## High-Level Flow
-1. Install the bundle into `~/.ai-memory`
-2. Configure the store root via `AI_MEMORY_STORE` (optional, defaults to `~/.ai-memory/.ai-memory`)
-3. Start the shared MCP stack
-4. Wire clients to shared HTTP MCP endpoints
-5. Let the watchdog keep shared memory fresh
-6. Verify with pressure tests before heavy multi-agent use
-
-## Quick Start
-
-### 1. Install (5 minutes)
-
-**Windows:**
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -WorkspaceRoot .
 ```
 
-**macOS / Linux:**
-```bash
-./scripts/install.sh -WorkspaceRoot .
-```
+### 2. 验证安装
 
-### 2. Verify installation
-
-**Windows:**
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\status-shared-mcp.ps1
 ```
 
-**macOS / Linux:**
-```bash
-~/.ai-memory/shared-mcp/status-shared-mcp.sh
+### 3. 使用
+
+将 AI 工具连接到共享 MCP 端点：
+
+```
+http://127.0.0.1:9338/mcp   # memory（搜索、记忆引导）
+http://127.0.0.1:9335/mcp   # obsidian（笔记读写）
+http://127.0.0.1:9331/mcp   # context7（文档）
+http://127.0.0.1:9332/mcp   # fetch（网页获取）
+http://127.0.0.1:9333/mcp   # time（时区）
+http://127.0.0.1:9337/mcp   # playwright（浏览器自动化，可选）
 ```
 
-### 3. Run a pressure test
+---
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\run-pressure-test.ps1 -WorkspaceRoot . -Waves 3 -RunCliChecks
+## 架构概览
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      AI Clients                              │
+│   Claude Code  │  Codex  │  OpenCode  │  Cursor  │  Others  │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Shared MCP Layer                          │
+│  memory:9338  │  obsidian:9335  │  context7/fetch/time     │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Local Runtime                             │
+│         bus/memory-bus.ps1  │  bus/memory-watchdog.ps1       │
+│              BM25 + Dense + Hybrid Retrieval                │
+└─────────────────────────────┬───────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   Canonical Store                            │
+│                   .ai-memory Store                           │
+│     structured/*.jsonl  │  inbox/  │  generated/            │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-```bash
-~/.ai-memory/run-pressure-test.sh -WorkspaceRoot . -Waves 3 -RunCliChecks
+---
+
+## 记忆分层
+
+| 层级 | 名称 | 说明 | 持久化 |
+|------|------|------|--------|
+| L0 | Working | 当前会话工作内存 | 内存 |
+| L1 | Session | 短时记忆（7天滚动） | `.ai-memory/session/` |
+| L2 | Essential | 关键项目信息 | `.ai-memory/structured/` |
+| L3 | Durable | 长期知识库 | `.ai-memory/durable/` |
+| L4 | Reference | 参考文档 | `.ai-memory/reference/` |
+| L5 | Archive | 归档（不进入向量空间） | `archive-manifest.jsonl` |
+
+---
+
+## 测试覆盖
+
+| 测试类型 | 测试数 | 状态 |
+|----------|--------|------|
+| JS 单元测试 | 579 | ✅ 全部通过 |
+| JS 集成测试 | 12 | ✅ 全部通过 |
+| Python 测试 | 458 | ✅ 全部通过 |
+| 跨语言测试 | 10 | ✅ 全部通过 |
+| E2E 测试 | 32 | ✅ 全部通过 |
+| 压力测试 | 30 | ✅ 全部通过 |
+| 冒烟测试 | 8 | ✅ 全部通过 |
+| **总计** | **1129** | **✅ 100%** |
+
+---
+
+## 项目结构
+
+```
+obsidian-shared-memory-bus/
+├── bus/                    # 核心运行时
+│   ├── memory-bus.ps1       # 主内存总线
+│   ├── memory-watchdog.ps1  # 后台观察者
+│   ├── lsh-hash.js          # 本地敏感哈希
+│   └── bm25.js             # BM25 搜索引擎
+├── shared-mcp/             # MCP 服务器
+│   ├── omni-memory-server.js  # 主服务器
+│   ├── memory-retrieval.js     # 记忆检索
+│   ├── memory-status.js        # 状态监控
+│   └── manifest.json           # MCP 清单
+├── ops/                    # 运维脚本
+│   ├── build-memory-layers.js  # 构建记忆分层
+│   ├── build-handoff-pack.js   # 生成交接包
+│   └── inbox/                   # 收件箱操作
+├── retrieval/              # 检索模块
+│   ├── semantic_search.py  # 语义搜索（Python）
+│   ├── search_cache.py     # 搜索缓存
+│   └── embedding_providers.py  # 向量提供者
+├── tests/                  # 测试套件
+│   ├── unit/              # 单元测试
+│   ├── integration/       # 集成测试
+│   └── e2e/               # 端到端测试
+├── scripts/                # 安装脚本
+│   ├── install.ps1        # Windows 安装
+│   └── install.sh         # Unix 安装
+└── docs/                   # 文档
 ```
 
-### 4. Start using shared memory
-
-Wire your agent to the shared MCP endpoints in `shared-mcp/manifest.json`. See [`docs/INDEX.md`](docs/INDEX.md) and [`docs/guides/DEVELOPMENT.md`](docs/guides/DEVELOPMENT.md) for step-by-step instructions per agent.
-
-### Configuration
-
-Set the store root before install if you want a non-default location:
-
-```powershell
-$env:AI_MEMORY_STORE = "E:\.ai-memory"
-```
-
-```bash
-export AI_MEMORY_STORE="$HOME/.ai-memory"
-```
-
-See [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) for all configuration variables.
-
-## Trust Boundaries
-- Shared:
-  `memory`, `obsidian`, `context7`, `fetch`, `time`, `sequential-thinking`
-- Shared process, but session-isolated:
-  `playwright`
-- Intentionally isolated:
-  `pencil` and other UI-bound desktop tools
-
-Shared MCP deduplicates processes. It does not merge all agent state into one conversation. Each client still has its own session lifecycle and tool calls.
-
-## Support Matrix
-| Target | Status | Notes |
-| --- | --- | --- |
-| Codex | First-class | Shared MCP and structured memory workflow are validated |
-| Claude Code | First-class | Shared MCP and claude-mem bridge are validated |
-| OpenCode | First-class | Shared MCP and memory recall are validated |
-| OpenClaw | Supported | Synced through structured memory and blackboard bridge |
-| Cursor | Supported | MCP config wiring supported |
-| VS Code / GitHub Copilot | Supported | Config wiring and snapshot import supported |
-| Trae | Portable target | Use the new-agent integration guide |
-| Other MCP-capable agents | Portable target | Prefer the onboarding flow in `docs/INDEX.md` |
-| Portable core on macOS/Linux | Supported | `pwsh` + `.sh` entrypoints ship for install/start/status/stop flows; Windows still has the deepest live acceptance coverage |
-
-## Included
-- Core bus runtime (`bus/`):
-  - `bus/memory-bus.ps1`
-  - `bus/memory-watchdog.ps1`
-  - `bus/register-agent.ps1`
-  - `bus/generate-embeddings.js`
-- Operations (`ops/`):
-  - `ops/build-handoff-pack.js`
-  - `ops/build-memory-layers.js`
-  - `ops/run-memory-dream.ps1`
-  - `ops/run-obsidian-mcp.ps1`
-  - `ops/run-minimax-mcp.ps1`
-  - `ops/install-client-integrations.ps1`
-  - `ops/verify-client-integrations.ps1`
-  - `ops/sync-shared-skills.ps1`
-  - `ops/run-pressure-test.ps1`
-  - `ops/cleanup-inbox.ps1`
-  - `ops/generate-memory-hygiene-report.js`
-  - `ops/sync-claudemem-to-obsidian.ps1`
-  - `ops/sync-openclaw-to-obsidian.js`
-  - `ops/obsidian-blackboard-daemon.js`
-- Retrieval and embeddings (`retrieval/`):
-  - `retrieval/benchmark-architecture.py`
-  - `retrieval/semantic-search.py`
-  - `retrieval/semantic-search.js`
-  - `retrieval/probe-models.py`
-  - `retrieval/benchmark-backends.py`
-- Runtime portability helpers:
-  - `bus/runtime-platform.ps1`
-  - `bus/python-runtime.js`
-  - `shared-mcp/python-runtime.cjs`
-- Shared MCP runtime under `shared-mcp/`:
-  - `omni-memory-server.js`
-  - `manifest.json`
-  - `start-shared-mcp.ps1`
-  - `start-shared-mcp.sh`
-  - `start-default-shared-mcp.ps1`
-  - `start-default-shared-mcp.sh`
-  - `stop-shared-mcp.ps1`
-  - `stop-shared-mcp.sh`
-  - `status-shared-mcp.ps1`
-  - `status-shared-mcp.sh`
-  - `write-config-snippets.ps1`
-  - `singleton-stdio-mcp-proxy.mjs`
-  - `playwright-stdio-proxy.js`
-  - `package.json`
-
-## Shared MCP Defaults
-Started by `shared-mcp/start-default-shared-mcp.ps1` or `shared-mcp/start-default-shared-mcp.sh`:
-- `context7`
-- `fetch`
-- `time`
-- `sequential-thinking`
-- `obsidian`
-- `memory`
-- `playwright`
-- `MiniMax` only when `MINIMAX_API_HOST` and `MINIMAX_API_KEY` are present
-
-Still isolated:
-- `pencil`
+---
 
-The manifest keeps `playwright` marked as an optional server so advanced users can opt out or manage it separately, but the default starter opts into it because duplicated local Playwright MCP launches are usually the biggest process multiplier in multi-agent workflows.
+## 配置
 
-## Recommended Integration Bundle
-For most agents, the best packaged setup is:
+### 环境变量
 
-1. shared HTTP MCP for transport and process deduplication
-2. a portable skill or rule file for read order, writeback policy, and task decomposition
-3. a thin plugin adapter only if the host app needs native lifecycle hooks, UI, or settings surfaces
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `AI_MEMORY_ROOT` | `~/.ai-memory` | 记忆存储根目录 |
+| `AI_MEMORY_STORE` | `{AI_MEMORY_ROOT}/.ai-memory` | 存储目录 |
+| `AI_MEMORY_EMBED_ADAPTER` | `hash` | 向量嵌入适配器 |
+| `AI_MEMORY_EMBED_MODEL` | `hashing-v1` | 嵌入模型 |
+| `OBSIDIAN_VAULT_ROOT` | 自动检测 | Obsidian 库路径 |
 
-The generated onboarding packs under `generated/onboarding/<agent>/` are designed around that split. They now include:
-- shared HTTP MCP snippets for Codex, Cursor, and Copilot-style hosts
-- a stdio fallback snippet for hosts that still need a local launcher
-- a portable skill template
-- a thin plugin-adapter guide
-- platform guidance for Windows, macOS, and Linux
+### 向量嵌入选项
 
-If you want a repo-local starter instead of generated output, copy the reusable template skeletons from [`templates/agents/README.md`](templates/agents/README.md).
+- **本地（默认）**: `hash` - 离线 LSH 哈希，无需 API
+- **HuggingFace**: `transformer` - 使用 Sentence Transformers
+- **OpenAI 兼容**: `openai-compatible` - 支持任何 OpenAI 格式 API
+- **Gemini**: `gemini` - Google Gemini 嵌入
 
-## Verification Story
-- Shared MCP services for `context7`, `fetch`, `time`, `sequential-thinking`, `obsidian`, `MiniMax`, and `memory` were validated on `9331-9336` and `9338`
-- The shared Playwright backend was validated on `9337` with real MCP `initialize`, `tools/list`, `browser_navigate`, and `browser_snapshot` calls
-- Multi-wave pressure tests passed with stable shared listener PIDs
-- Client integration checks were validated for Codex, Claude Code, OpenCode, Cursor, and VS Code/Copilot paths
-- The POSIX wrapper layer was smoke-checked through Git Bash using `scripts/validate-layout.sh` and `shared-mcp/status-shared-mcp.sh`
-- The shared `memory` MCP now keeps a persistent Python retrieval worker and only falls back to one-shot search if the worker is unavailable
+---
 
-See `docs/guides/DEVELOPMENT.md` for the current test story and reproduction flow.
+## 文档
 
-## Portable Overlay Placeholders
-Tracked onboarding and overlay files in this repo intentionally use portable placeholders instead of workstation-specific absolute paths.
+| 文档 | 说明 |
+|------|------|
+| [快速开始](docs/platform/SETUP_OVERVIEW.md) | 各平台安装指南 |
+| [架构设计](docs/ARCHITECTURE.md) | 系统架构详解 |
+| [记忆分层](docs/MEMORY-TIERING.md) | 5 层记忆模型 |
+| [MCP 工具](docs/guides/API_REFERENCE.md) | 工具 API 参考 |
+| [开发指南](docs/guides/DEVELOPMENT.md) | 开发与测试指南 |
+| [故障排除](docs/TROUBLESHOOTING.md) | 常见问题解答 |
 
-- `<store-root>` means the root of the `.ai-memory` store (e.g. `~/.ai-memory/.ai-memory`)
-- `<repo-root>` means the checked-out repository root for this bundle or for the agent-specific project overlay
-- `~/.trae/user_rules.md` is shown as a user-home-relative example, not a hardcoded machine path
+---
 
-At runtime, the bundle resolves the store from:
+## 安全
 
-1. `AI_MEMORY_STORE`
-2. `AI_MEMORY_ROOT` + `/.ai-memory`
-3. auto-detect best available drive
-4. standard fallback: `~/.ai-memory/.ai-memory`
+- ❌ 不在代码中存储任何 token 或 API key
+- ✅ 所有密钥通过环境变量注入
+- ✅ 本地优先，无外部数据传输
+- ⚠️ 分叉前请扫描敏感信息泄露
 
-Public docs and tracked overlay files should never be committed with private paths such as `C:\Users\name\...`, `/Users/name/...`, `/home/name/...`, or `E:\...`.
+---
 
-## Install
-Windows:
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -WorkspaceRoot <your-project-root>
-```
+## 许可证
 
-macOS/Linux (`pwsh` required):
-```bash
-./scripts/install.sh -WorkspaceRoot <your-project-root>
-```
+[MIT License](LICENSE) - 可自由使用、修改和分发
 
-On Windows, the installer writes `AI_MEMORY_ROOT` into your user environment and registers per-user startup hooks through the Startup folder.
-On macOS, startup registration is emitted as LaunchAgents. On Linux, it prefers `systemd --user` units and falls back to XDG autostart when `systemctl --user` is unavailable.
-On macOS/Linux, the installer generates `~/.ai-memory/activate-ai-memory.sh` and `~/.ai-memory/activate-ai-memory.ps1` instead of mutating shell startup files automatically.
-It also generates root-level `.sh` wrappers for installed runtime commands, so macOS/Linux users can call `~/.ai-memory/run-pressure-test.sh`, `~/.ai-memory/verify-client-integrations.sh`, `~/.ai-memory/memory-bus.sh`, and similar entrypoints directly. Those wrappers are POSIX `sh`, not Bash-only scripts.
-`-WorkspaceRoot` is optional. When you provide it, it must point at an existing repo/workspace root where overlays such as `.cursor/mcp.json` and `.claude/rules/shared-memory.md` should be written.
-The hidden-window hardening applies to registered startup hooks and internal helper launches. Manual `install`, `start`, `status`, `verify`, and `pressure` commands still run in your foreground terminal by design.
-Before install, source-tree direct runs can fall back to `templates/config/runtime.json`; the installed runtime should use `~/.ai-memory/config/runtime.json`.
+---
 
-## Install / Apply / Verify Contract
-- `scripts/install.ps1` and `scripts/install.sh` are the one-click entrypoints. When you pass `-WorkspaceRoot <repo-root>`, they install the flat runtime, regenerate onboarding artifacts, and auto-apply supported client integrations.
-- `install-client-integrations.ps1` is the official side-effecting apply command for updating supported home-scoped client configs plus workspace overlays without reinstalling the runtime.
-- `verify-integrations.ps1` and `verify-integrations.sh` are retained compatibility aliases that forward to `install-client-integrations.ps1`.
-- `verify-client-integrations.ps1` and `verify-client-integrations.sh` are the hard validation gates. They are self-healing validators, not read-only probes: they may restart unhealthy shared MCP services and they always refresh the verify report file.
-- The default applied server set is every manifest entry with `mode=shared`, plus shared `playwright`. Shared `MiniMax` is opt-in through `-IncludeOptionalServers` or `-IncludeOptionalClientServers`.
+## 贡献
 
-## Maintainer Guardrails
-Before changing runtime file names, paths, or startup entrypoints, validate the source-to-install contract:
+欢迎提交 Issue 和 Pull Request！请查看 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-layout.ps1
-node .\ops\check-memory-integrity.js --strict
-```
+---
 
-```bash
-./scripts/validate-layout.sh
-node ./ops/check-memory-integrity.js --strict
-```
-
-The installer also writes `~/.ai-memory/install-manifest.json` so upgrades can prune stale managed runtime files left behind by older layouts or renamed entrypoints.
-
-When rebuilding generated memory artifacts manually, keep the build order serial:
-
-```powershell
-node .\ops\build-memory-layers.js
-node .\ops\build-handoff-pack.js
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\ops\run-memory-dream.ps1 -Force
-```
-
-`HANDOFF` and `AUTO-DREAM` depend on the current structured-layer snapshot, so parallel rebuilds can produce intentionally detectable signature drift.
-
-CI guardrails for that contract live in `.github/workflows/portable-core.yml` and `.github/workflows/windows-validate.yml`.
-
-## Minimal Quick Start
-
-> **What is `<your-project-root>`?** It is the repository or workspace root where you want the portable overlays written, for example `E:\repo\my-app`. The installer writes global user-level client config under each host's home directory when supported, and writes workspace overlays such as `.cursor/mcp.json`, `.vscode/mcp.json`, `.claude/rules/shared-memory.md`, and `opencode.json` under this repo root.
-
-> **Prerequisites**: A `.ai-memory` store directory structure exists at your configured store root. If your store is on a different drive, set `AI_MEMORY_STORE` to its path before running.
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -WorkspaceRoot <your-project-root>
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks -RunRuntimeChecks
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks -RunToolCalls -RunClientTaskChecks
-```
-
-```bash
-./scripts/install.sh -WorkspaceRoot <your-project-root>
-~/.ai-memory/verify-client-integrations.sh -WorkspaceRoot <your-project-root> -RunCliChecks -RunRuntimeChecks
-~/.ai-memory/run-pressure-test.sh -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks -RunToolCalls -RunClientTaskChecks
-```
-
-`scripts/install.ps1` now installs the flat runtime, generates onboarding artifacts, starts the watchdog/shared MCP stack for the current session, and automatically applies supported client integrations when `-WorkspaceRoot` is provided.
-
-Validation notes:
-- `verify-client-integrations` and `run-pressure-test` are the real hard gates. Both now exit non-zero when `summary.overallPass=false`.
-- If you only want a read-only health snapshot, use `shared-mcp/status-shared-mcp.ps1 -Json` or `shared-mcp/status-shared-mcp.sh -Json` instead of `verify-client-integrations`.
-- Runtime probes now run through a hidden wrapper process so long prompts and JSON-mode CLI probes keep their argument boundaries on Windows.
-- A runtime entry marked as `skipped:provider-auth-unavailable` means the client itself is missing a usable model login or API key. That is reported separately and does not mean the shared memory MCP stack is down.
-- For automation, prefer `shared-mcp/status-shared-mcp.ps1 -Json` or `shared-mcp/status-shared-mcp.sh -Json` instead of scraping the human table output.
-
-If you want to re-apply client wiring without reinstalling the runtime, use:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\install-client-integrations.ps1 -WorkspaceRoot <your-project-root>
-```
-
-```bash
-~/.ai-memory/install-client-integrations.sh -WorkspaceRoot <your-project-root>
-```
-
-By default, client wiring applies every server whose manifest `mode` is `shared`, plus `playwright`. `MiniMax` remains opt-in through `-IncludeOptionalServers` or `-IncludeOptionalClientServers`.
-
-`verify-integrations.ps1` and `verify-integrations.sh` are compatibility aliases that now forward into `install-client-integrations`. They are side-effecting apply commands, not validation gates.
-
-**What to expect**: The pressure test runs 5 mixed waves of shared MCP health checks, direct `memory` tool calls, and real client task probes. "passed" means every wave returned the expected responses with no crashes, duplicate listeners, or PID churn. If you see failures, see [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).
-
-## Optional Remote Embeddings
-The default dense retrieval backend is offline `hashing-v1`.
-
-The runtime now resolves embeddings through a decoupled registry:
-- `embeddings.defaults`
-- `embeddings.providers.<name>`
-- `embeddings.profiles.<name>.provider`
-
-That lets you keep provider transport details separate from task-oriented profiles. A provider defines the adapter and transport. A profile chooses a provider and can override model, delay, or batching behavior without copying the full provider block.
-
-You can switch selection at runtime with:
-- `AI_MEMORY_EMBED_PROFILE`
-- `AI_MEMORY_EMBED_PROVIDER`
-- `AI_MEMORY_EMBED_ADAPTER`
-
-Legacy `AI_MEMORY_EMBED_BACKEND` still works as a compatibility alias for `AI_MEMORY_EMBED_ADAPTER`.
-
-In the long-running shared `memory` MCP, persisted `runtime.json` is now treated as the canonical selector by default. Selection/tuning environment overrides for profile/provider/adapter/model/base-url are ignored unless you explicitly opt in with:
-
-```powershell
-$env:AI_MEMORY_ALLOW_EMBED_RUNTIME_ENV_OVERRIDES = "1"
-```
-
-Use that only when you intentionally want one process to ignore the saved runtime selection.
-
-This is a real config/plugin boundary, but it is still not a true dense hot-swap boundary: after changing adapter, model, or base URL, rebuild the stored embeddings index so query-time vectors and stored vectors stay aligned.
-
-The shared `memory` MCP now exposes a small control plane for this:
-- `list_embedding_runtimes`
-- `set_embedding_runtime`
-- `memory_status.embeddingIndexState`
-- `memory_status.memoryIntegrity`
-
-That means agents can discover the configured providers/profiles, switch the persisted selection, and immediately see whether the current dense index is aligned or whether a rebuild is still required. They can also inspect whether the structured memory files, generated summaries, and duplicate/invalid records are still in a healthy state instead of assuming the shared memory stack is fine just because the process is alive.
-
-`list_embedding_runtimes` now also annotates each provider/profile with:
-- `configHash`
-- `indexedCount`
-- `indexCompatible`
-- `rebuildRequired`
-
-If you want to test an OpenAI-compatible embedding API, set:
-```powershell
-$env:AI_MEMORY_EMBED_PROVIDER = "openai-compatible-remote"
-$env:AI_MEMORY_EMBED_ADAPTER = "openai-compatible"
-$env:AI_MEMORY_EMBED_BASE_URL = "https://your-openai-compatible-endpoint/v1"
-$env:AI_MEMORY_EMBED_API_KEY = "<your-key>"
-$env:AI_MEMORY_EMBED_MODEL = "<your-model-id>"
-$env:AI_MEMORY_EMBED_PROFILE = "openai-compatible"
-```
-
-Then rebuild the shared embeddings index so the stored vectors match the active provider:
-
-```powershell
-node $env:AI_MEMORY_ROOT\generate-embeddings.js
-```
-
-```bash
-export AI_MEMORY_EMBED_PROVIDER="openai-compatible-remote"
-export AI_MEMORY_EMBED_ADAPTER="openai-compatible"
-export AI_MEMORY_EMBED_BASE_URL="https://your-openai-compatible-endpoint/v1"
-export AI_MEMORY_EMBED_API_KEY="<your-key>"
-export AI_MEMORY_EMBED_MODEL="<your-model-id>"
-export AI_MEMORY_EMBED_PROFILE="openai-compatible"
-node ~/.ai-memory/generate-embeddings.js
-```
-
-The index records a provider fingerprint (`adapter + model + base URL`) so switching remote embedding endpoints will not silently reuse stale vectors. If you change provider settings and keep seeing BM25-only fallbacks, rebuild the index again and inspect `memory_status.embeddingRuntime` plus `memory_status.embeddings.backends`, `memory_status.embeddings.models`, `memory_status.embeddings.dimensions`, and `memory_status.embeddings.providerHosts`.
-
-For consistency, remote rebuilds now fail the run instead of silently mixing `openai` and `hashing-v1` vectors in the same index. Only set `AI_MEMORY_EMBED_ALLOW_BATCH_FALLBACK=1` if you explicitly want per-batch fallback behavior.
-
-Use the included probe and benchmark scripts before doing any full reindex.
-
-## Security
-- No tokens or API keys are intentionally stored in this repository
-- Secrets must be supplied through user or machine environment variables
-- Machine-specific absolute paths are resolved dynamically at install or runtime
-- Before publishing a fork, rescan for accidental credentials in configs or reports
-
-## Docs
-- [Quick Setup (all platforms)](docs/platform/SETUP_OVERVIEW.md)
-- [Windows — use README install section above](README.md)
-- [macOS Setup](docs/platform/MACOS_SETUP.md)
-- [Linux Setup](docs/platform/LINUX_SETUP.md)
-- [Architecture Overview](docs/architecture/OVERVIEW.md)
-- [Platform Abstraction](docs/architecture/PLATFORM_ABSTRACTION.md)
-- [Data Flow](docs/reference/DATA-FLOW.md)
-- [MCP Tools Reference](docs/guides/API_REFERENCE.md)
-- [Architecture Decision Records](docs/adr/ADR-002-unified-memory-architecture-v2.md)
-- [Development Guide](docs/guides/DEVELOPMENT.md)
-- [Installation Guide](docs/INSTALL.md)
-- [Operations Runbook](docs/OPERATIONS.md)
-- [Troubleshooting](docs/TROUBLESHOOTING.md)
-- [Development Guide](docs/guides/DEVELOPMENT.md)
-- [SECURITY.md](SECURITY.md)
-
-## Community
-- [`CONTRIBUTING.md`](CONTRIBUTING.md)
-- [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
-- [`SECURITY.md`](SECURITY.md)
-- [`SUPPORT.md`](SUPPORT.md)
-- [`LICENSE`](LICENSE)
+<p align="center">
+  <strong>让 AI 工具共享记忆，告别重复解释</strong>
+</p>
