@@ -47,19 +47,47 @@
 
 ## 快速开始
 
-### 1. 安装（Windows）
+### 一键启动（推荐）
+
+```powershell
+# 克隆后直接运行
+.\scripts\start-all.ps1
+```
+
+这将自动：
+1. 检查 Node.js、Python 依赖
+2. 安装必要的 npm 和 Python 包
+3. 启动所有 MCP 服务器（端口 9331-9338）
+4. 启动 Watchdog 观察者
+5. 验证服务状态
+
+### 手动分步安装
+
+#### 1. 安装依赖（Windows）
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -WorkspaceRoot .
 ```
 
-### 2. 验证安装
+#### 2. 一键启动所有服务
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\status-shared-mcp.ps1
+.\scripts\start-all.ps1
 ```
 
-### 3. 使用
+#### 3. 配置 Claude Code Hooks（可选，让会话结束时自动写入记忆）
+
+```powershell
+.\scripts\setup-hooks.ps1
+```
+
+#### 4. 验证安装
+
+```powershell
+.\shared-mcp\status-shared-mcp.ps1
+```
+
+### 使用
 
 将 AI 工具连接到共享 MCP 端点：
 
