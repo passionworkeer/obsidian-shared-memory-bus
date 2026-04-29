@@ -23,22 +23,40 @@ import { isProcessAlive, probeHttp, waitForHealthy } from "./health-check.js";
 import { createStructuredLogger, generateTraceId, withTrace, getCurrentTraceId } from "./metrics/structured-logger.js";
 import { runWithTraceId } from "./metrics/trace-manager.js";
 
-// --- ESM globals (must be defined before any code that uses them) ---
+// --- ESM globals and constants (must be defined before any code that uses them) ---
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const require = createRequire(import.meta.url);
 
+// Project root is always the parent of shared-mcp/
+// Use import.meta.url to reliably determine project root regardless of cwd
+const PROJECT_ROOT = path.resolve(fileURLToPath(new URL("../", import.meta.url)));
+
+// --- Derived constants (must be before resolveProjectPath) ---
+const USER_HOME = process.env.USERPROFILE || process.env.HOME || "";
+const IS_WINDOWS = process.platform === "win32";
+// Detect project root: if AI_MEMORY_ROOT is not set, default to the project root
+// (parent of shared-mcp/), not a separate .ai-memory data dir
+const AI_MEMORY_ROOT = process.env.AI_MEMORY_ROOT || path.resolve(__dirname, "..");
+
+// --- resolveProjectPath (must be after AI_MEMORY_ROOT and PROJECT_ROOT) ---
+// Used for files that live in the project dir (e.g. ops/), not the data dir
+function resolveProjectPath(relPath) {
+  for (const base of [process.cwd(), PROJECT_ROOT]) {
+    const candidate = path.join(base, relPath);
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  // Last resort: use PROJECT_ROOT
+  return path.join(PROJECT_ROOT, relPath);
+}
 
 // memory_boot and memory_query — resolves via resolveProjectPath so it works
 // whether AI_MEMORY_ROOT points to the project dir or to a separate data dir.
 const { handlers: mcpMemoryHandlers } = require(
-  resolveProjectPath("ops", "mcp-memory-tools-handler.js")
+  resolveProjectPath(path.join("ops", "mcp", "mcp-memory-tools-handler.js"))
 );
-
-// --- Derived constants ---
-const USER_HOME = process.env.USERPROFILE || process.env.HOME || "";
-const IS_WINDOWS = process.platform === "win32";
-const AI_MEMORY_ROOT = process.env.AI_MEMORY_ROOT || path.resolve(__dirname, "..");
 
 const WINDOWS_ENV_CACHE = new Map();
 const RUNTIME_ENV_NAMES = [
@@ -67,34 +85,16 @@ const RUNTIME_ENV_NAMES = [
 ];
 
 function resolveRuntimePath(...candidates) {
-  for (const relativePath of candidates) {
-    const fullPath = path.join(AI_MEMORY_ROOT, relativePath);
-    if (fs.existsSync(fullPath)) {
-      return fullPath;
+  // First try PROJECT_ROOT (project dir), then AI_MEMORY_ROOT (data dir)
+  for (const root of [PROJECT_ROOT, AI_MEMORY_ROOT]) {
+    for (const relativePath of candidates) {
+      const fullPath = path.join(root, relativePath);
+      if (fs.existsSync(fullPath)) {
+        return fullPath;
+      }
     }
   }
-  return path.join(AI_MEMORY_ROOT, candidates[0]);
-}
-
-/**
- * Resolve a module path that may live in the project directory (E:\desktop\obsidian-shared-memory-bus)
- * even when AI_MEMORY_ROOT points to a separate data dir (C:\Users\wang\.ai-memory).
- *
- * Checks:
- *   1. process.cwd() + relativePath  (project dir, where ops/ lives)
- *   2. path.resolve(__dirname, "..") + relativePath  (parent of shared-mcp/)
- *   3. AI_MEMORY_ROOT + relativePath  (canonical fallback)
- */
-function resolveProjectPath(...parts) {
-  const relPath = path.join(...parts);
-  for (const base of [process.cwd(), path.resolve(__dirname, "..")]) {
-    const candidate = path.join(base, relPath);
-    if (fs.existsSync(candidate)) {
-      return candidate;
-    }
-  }
-  // Last resort: use AI_MEMORY_ROOT even if it may not have the file
-  return path.join(AI_MEMORY_ROOT, relPath);
+  return path.join(PROJECT_ROOT, candidates[0]);
 }
 
 function loadStoreRootHelper() {
@@ -470,18 +470,6 @@ function refreshMetricsFromFiles() {
 // ---------------------------------------------------------------------------
 // Watchdog / process helpers
 // ---------------------------------------------------------------------------
-
-function isProcessAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) {
-    return false;
-  }
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (_error) {
-    return false;
-  }
-}
 
 function runWindowsPowerShellProbe(scriptLines = []) {
   if (!IS_WINDOWS || !Array.isArray(scriptLines) || scriptLines.length === 0) {
