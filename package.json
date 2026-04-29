@@ -2,6 +2,7 @@
   "name": "obsidian-shared-memory-bus",
   "version": "3.1.0",
   "description": "Portable local-first shared memory bus for multi-agent AI setups backed by Obsidian",
+  "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -11,6 +12,7 @@
     "shared-mcp"
   ],
   "scripts": {
+    "start": "node start.js",
     "lint": "npm run lint --prefix shared-mcp",
     "lint:fix": "npm run lint:fix --prefix shared-mcp",
     "validate": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/validate-layout.ps1",
