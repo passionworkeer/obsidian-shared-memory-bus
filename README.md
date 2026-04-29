@@ -47,19 +47,40 @@
 
 ## 快速开始
 
-### 1. 安装（Windows）
+### 一键启动
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -WorkspaceRoot .
+```bash
+# 克隆后直接运行
+node start.js
 ```
 
-### 2. 验证安装
+或双击 `start.bat`（Windows 用户）
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\status-shared-mcp.ps1
+这将自动启动所有 MCP 服务器：
+- Memory: http://127.0.0.1:9338
+- Obsidian: http://127.0.0.1:9335
+- Fetch: http://127.0.0.1:9332
+- Time: http://127.0.0.1:9333
+
+### 安装依赖（首次）
+
+```bash
+npm install
 ```
 
-### 3. 使用
+### 配置 Claude Code Hooks（可选）
+
+```bash
+.\scripts\setup-hooks.ps1
+```
+
+### 高级启动（PowerShell）
+
+```powershell
+.\scripts\start-all.ps1
+```
+
+### 使用
 
 将 AI 工具连接到共享 MCP 端点：
 
