@@ -47,44 +47,37 @@
 
 ## 快速开始
 
-### 一键启动（推荐）
+### 一键启动
 
-```powershell
+```bash
 # 克隆后直接运行
-.\scripts\start-all.ps1
+node start.js
 ```
 
-这将自动：
-1. 检查 Node.js、Python 依赖
-2. 安装必要的 npm 和 Python 包
-3. 启动所有 MCP 服务器（端口 9331-9338）
-4. 启动 Watchdog 观察者
-5. 验证服务状态
+或双击 `start.bat`（Windows 用户）
 
-### 手动分步安装
+这将自动启动所有 MCP 服务器：
+- Memory: http://127.0.0.1:9338
+- Obsidian: http://127.0.0.1:9335
+- Fetch: http://127.0.0.1:9332
+- Time: http://127.0.0.1:9333
 
-#### 1. 安装依赖（Windows）
+### 安装依赖（首次）
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -WorkspaceRoot .
+```bash
+npm install
 ```
 
-#### 2. 一键启动所有服务
+### 配置 Claude Code Hooks（可选）
 
-```powershell
-.\scripts\start-all.ps1
-```
-
-#### 3. 配置 Claude Code Hooks（可选，让会话结束时自动写入记忆）
-
-```powershell
+```bash
 .\scripts\setup-hooks.ps1
 ```
 
-#### 4. 验证安装
+### 高级启动（PowerShell）
 
 ```powershell
-.\shared-mcp\status-shared-mcp.ps1
+.\scripts\start-all.ps1
 ```
 
 ### 使用
