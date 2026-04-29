@@ -12,6 +12,7 @@
     "shared-mcp"
   ],
   "scripts": {
+    "start": "node start.js",
     "lint": "npm run lint --prefix shared-mcp",
     "lint:fix": "npm run lint:fix --prefix shared-mcp",
     "validate": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/validate-layout.ps1",
