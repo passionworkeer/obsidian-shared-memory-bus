@@ -1,5 +1,3 @@
-"use strict";
-
 // ---------------------------------------------------------------------------
 // Platform detection — done once at module load time
 // ---------------------------------------------------------------------------
@@ -10,9 +8,9 @@ const PLATFORM = process.platform;  // 'win32' | 'darwin' | 'linux'
 // Load platform-specific adapters (lazy — only the active one is fully used)
 // ---------------------------------------------------------------------------
 
-const { getWindowsAdapter } = require("./windows.js");
-const { getDarwinAdapter } = require("./darwin.js");
-const { getLinuxAdapter } = require("./linux.js");
+import { getWindowsAdapter } from "./windows.js";
+import { getDarwinAdapter } from "./darwin.js";
+import { getLinuxAdapter } from "./linux.js";
 
 // ---------------------------------------------------------------------------
 // Export the active platform adapter
@@ -41,7 +39,7 @@ const isLinux   = PLATFORM === "linux";
 // Re-export individual adapters for test / tooling use
 // ---------------------------------------------------------------------------
 
-module.exports = {
+export {
   // The active platform adapter (singleton per process)
   platform,
 

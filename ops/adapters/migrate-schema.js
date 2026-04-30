@@ -15,9 +15,13 @@
  *   listMigrationPaths()             — return available migration paths
  */
 
-"use strict";
+import path from "node:path";
+import fs from "node:fs";
+import { fileURLToPath } from "url";
 
-const REGISTRY_PATH = require("path").join(__dirname, "schema-registry.json");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const REGISTRY_PATH = path.join(__dirname, "schema-registry.json");
 
 // ---------------------------------------------------------------------------
 // Load registry
@@ -25,7 +29,6 @@ const REGISTRY_PATH = require("path").join(__dirname, "schema-registry.json");
 
 let registry;
 try {
-  const fs = require("fs");
   registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, "utf8"));
 } catch (err) {
   console.error(`Failed to load schema registry: ${err.message}`);
@@ -175,7 +178,7 @@ if (args.includes("--dry-run")) {
 // Read JSON from stdin and migrate
 let input;
 try {
-  input = JSON.parse(require("fs").readFileSync(0, "utf8").trim());
+  input = JSON.parse(fs.readFileSync(0, "utf8").trim());
 } catch (err) {
   console.error("Usage: echo '{...}' | node migrate-schema.js");
   console.error("Or:    node migrate-schema.js --dry-run");
@@ -200,7 +203,7 @@ console.log(JSON.stringify(migrated, null, 2));
 // Exports
 // ---------------------------------------------------------------------------
 
-module.exports = {
+export {
   migrateEmbeddingFromV0ToV1,
   migrateRecordFromV1ToV2,
   migrateRecordFromV2ToV3,

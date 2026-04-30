@@ -6,47 +6,26 @@
  * Run with: node --test tests/unit/js/jsonl.test.js
  */
 
-"use strict";
+import { test, describe, beforeEach, afterEach } from "node:test";
+import assert from "node:assert/strict";
+import path from "node:path";
+import fs from "node:fs";
+import { fileURLToPath, pathToFileURL } from "url";
 
-const Module = require("module");
-const path = require("path");
-const fs = require("fs");
-const { createTempDir, cleanupTempDir, createTempJsonl } = require("../../helpers/setup");
-const { SAMPLE_MEMORY_RECORDS } = require("../../helpers/fixtures");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const helpersPath = path.resolve(__dirname, "../../helpers/setup");
+const fixturesPath = path.resolve(__dirname, "../../helpers/fixtures");
 
-// ---------------------------------------------------------------------------
-// Patch Module.prototype._compile to inject exports from jsonl-stream.js
-// ---------------------------------------------------------------------------
-
-const JSONL_MODULE_PATH = require.resolve("../../../ops/util/jsonl-stream.js");
-const _compilePatches = new Map();
-_compilePatches.set(JSONL_MODULE_PATH, `
-module.exports = {
-  createJsonlStream,
-  readJsonlStream,
-};
-`);
-
-const _originalCompile = Module.prototype._compile;
-Module.prototype._compile = function _patchedCompile(code, filename) {
-  const patch = _compilePatches.get(filename);
-  if (patch) {
-    _compilePatches.delete(filename);
-    code = code + "\n" + patch;
-  }
-  return _originalCompile.call(this, code, filename);
-};
-
-delete require.cache[JSONL_MODULE_PATH];
-
-const { createJsonlStream, readJsonlStream } = require("../../../ops/util/jsonl-stream.js");
+const { createTempDir, cleanupTempDir, createTempJsonl } = await import(pathToFileURL(helpersPath + ".js"));
+const { SAMPLE_MEMORY_RECORDS } = await import(pathToFileURL(fixturesPath + ".js"));
 
 // ---------------------------------------------------------------------------
 // Test suite
 // ---------------------------------------------------------------------------
 
-const { test, describe, beforeEach, afterEach } = require("node:test");
-const assert = require("node:assert/strict");
+// Import jsonl-stream module
+const jsonlModule = await import(pathToFileURL(path.resolve(__dirname, "../../../ops/util/jsonl-stream.js")));
+const { createJsonlStream, readJsonlStream } = jsonlModule;
 
 let tempDir;
 

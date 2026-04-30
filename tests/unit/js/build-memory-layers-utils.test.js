@@ -1,21 +1,21 @@
-"use strict";
-// Standalone tests for new utilities — does NOT run main() side effects.
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import { fileURLToPath } from "url";
 
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ---------------------------------------------------------------------------
 // Stub vault-root so build-memory-layers.js can be loaded without side effects
 // ---------------------------------------------------------------------------
 
-const stubVaultRootPath = path.join(__dirname, "..", "..", "..", "bus", "vault-root.js");
+const stubVaultRootPath = path.resolve(__dirname, "..", "..", "..", "bus", "vault-root.js");
 
 // Ensure the bus/vault-root.js stub exists (copy the one used by the main test file)
 const vaultRootStub = `
-module.exports = {
+export default {
   resolveVaultRoot() {
     return "E:/desktop/Obsidian Vault";
   },
@@ -23,6 +23,8 @@ module.exports = {
     return ["E:/desktop/Obsidian Vault"];
   },
 };
+export const resolveVaultRoot = () => "E:/desktop/Obsidian Vault";
+export const getDefaultVaultCandidates = () => ["E:/desktop/Obsidian Vault"];
 `;
 
 if (!fs.existsSync(stubVaultRootPath)) {
@@ -34,49 +36,28 @@ if (!fs.existsSync(stubVaultRootPath)) {
 // Stub store-root so build-memory-layers.js can be loaded
 // ---------------------------------------------------------------------------
 
-const stubStoreRootPath = path.join(__dirname, "..", "..", "..", "bus", "store-root.js");
+const stubStoreRootPath = path.resolve(__dirname, "..", "..", "..", "bus", "store-root.js");
 const storeRootStub = `
-module.exports = {
+export default {
   resolveStoreRoot() {
     return "E:/desktop/.ai-memory";
   },
 };
+export const resolveStoreRoot = () => "E:/desktop/.ai-memory";
 `;
 
 if (!fs.existsSync(stubStoreRootPath)) {
   fs.writeFileSync(stubStoreRootPath, storeRootStub, "utf8");
 }
 
-// ---------------------------------------------------------------------------
-// Prevent main() from running and inject exports
-// ---------------------------------------------------------------------------
-const Module = require("module");
-const _origCompile = Module.prototype._compile;
-const BML_PATH = require.resolve("../../../ops/build/build-memory-layers.js");
-
-Module.prototype._compile = function _patchedCompile(code, filename) {
-  if (filename === BML_PATH) {
-    code = code
-      .replace(/\bmain\(\)\.catch\([\s\S]*?\);?/g, "// main() async stubbed by test")
-      .replace(/\bmain\(\);/g, "// main() sync stubbed by test");
-    code = code + "\nmodule.exports = {\n" +
-      "normalizeSpaces,getFreshness,buildPromotionKey,withFileLock," +
-      "deduplicateSharedInbox," +
-      "loadStoreRootHelper,resolveStoreRoot," +
-      "MEMORY_RECORD_SCHEMA_VERSION," +
-      "};\n";
-  }
-  return _origCompile.call(this, code, filename);
-};
-
-// Force fresh load so our _compile hook takes effect
-delete require.cache[BML_PATH];
+// ESM Note: Module.prototype._compile patching is not available in ESM
+// The module will be imported directly without patching
 
 // ---------------------------------------------------------------------------
 // jsonl-stream.js tests (no dependencies on build-memory-layers.js)
 // ---------------------------------------------------------------------------
 
-const { createJsonlStream, readJsonlStream } = require("../../../ops/util/jsonl-stream.js");
+const { createJsonlStream, readJsonlStream } = await import("../../../ops/util/jsonl-stream.js");
 
 test("createJsonlStream: yields parsed objects from a temp jsonl file", async () => {
   const tmpFile = path.join(os.tmpdir(), `jsonl-stream-test-${Date.now()}.jsonl`);
@@ -157,7 +138,7 @@ test("readJsonlStream: returns full array from stream", async () => {
 // normalizeSpaces BOM stripping
 // ---------------------------------------------------------------------------
 
-const { normalizeSpaces } = require("../../../ops/build/build-memory-layers.js");
+const { normalizeSpaces } = await import("../../../ops/build/build-memory-layers.js");
 
 test("normalizeSpaces: strips UTF-8 BOM character", () => {
   const BOM = "\uFEFF";
@@ -183,7 +164,7 @@ test("normalizeSpaces: null becomes empty string", () => {
 // getFreshness NaN guard
 // ---------------------------------------------------------------------------
 
-const { getFreshness } = require("../../../ops/build/build-memory-layers.js");
+const { getFreshness } = await import("../../../ops/build/build-memory-layers.js");
 
 test("getFreshness: NaN ageMs (invalid date) returns 'unknown'", () => {
   assert.equal(getFreshness("not-a-timestamp"), "unknown");
@@ -197,7 +178,7 @@ test("getFreshness: completely garbage string returns 'unknown'", () => {
 // buildPromotionKey id/t salt
 // ---------------------------------------------------------------------------
 
-const { buildPromotionKey } = require("../../../ops/build/build-memory-layers.js");
+const { buildPromotionKey } = await import("../../../ops/build/build-memory-layers.js");
 
 test("buildPromotionKey: same content but different id produces different key", () => {
   const key1 = buildPromotionKey({
@@ -259,7 +240,7 @@ test("buildPromotionKey: id and t are optional (backwards compatible)", () => {
 // withFileLock
 // ---------------------------------------------------------------------------
 
-const { withFileLock } = require("../../../ops/build/build-memory-layers.js");
+const { withFileLock } = await import("../../../ops/build/build-memory-layers.js");
 
 test("withFileLock: creates file and executes fn when file does not exist", () => {
   const tmpFile = path.join(os.tmpdir(), `withfilelock-test-${Date.now()}.jsonl`);
@@ -308,7 +289,7 @@ test("withFileLock: idempotent — same file can be locked twice sequentially", 
 // deduplicateSharedInbox: collision detection (uses console.warn — checked via mock)
 // ---------------------------------------------------------------------------
 
-const { deduplicateSharedInbox } = require("../../../ops/build/build-memory-layers.js");
+const { deduplicateSharedInbox } = await import("../../../ops/build/build-memory-layers.js");
 
 test("deduplicateSharedInbox: different ids with same hash still both kept (id is primary key)", () => {
   const nowMs = Date.now();

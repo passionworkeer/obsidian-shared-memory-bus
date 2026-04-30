@@ -24,10 +24,8 @@
  * The migration is incremental: files that already exist in the new store
  * are skipped (not overwritten) unless --force is passed.
  */
-"use strict";
-
-const fs = require("node:fs");
-const path = require("node:path");
+import fs from "node:fs";
+import path from "node:path";
 
 // ---------------------------------------------------------------------------
 // Store root resolution — must match bus/store-root.js
@@ -42,18 +40,21 @@ function loadStoreRootHelper() {
     path.join(__dirname, "store-root.js"),
   ];
   for (const c of candidates) {
-    if (fs.existsSync(c)) return require(c);
+    if (fs.existsSync(c)) return import(c);
   }
   return null;
 }
 
-function resolveStoreRoot() {
+async function resolveStoreRoot() {
   const helper = loadStoreRootHelper();
   if (helper) {
-    try { return helper.resolveStoreRoot(); } catch { /* fall through */ }
+    try {
+      const mod = await helper;
+      return mod.resolveStoreRoot();
+    } catch { /* fall through */ }
   }
   // Use DEFAULT_STORE_ROOT from store-root.js to avoid hardcoding
-  const { DEFAULT_STORE_ROOT } = require("./store-root.js");
+  const { DEFAULT_STORE_ROOT } = await import("./store-root.js");
   return process.env.AI_MEMORY_STORE || DEFAULT_STORE_ROOT;
 }
 
@@ -84,84 +85,90 @@ function resolveVaultRoot() {
   return "";
 }
 
-const STORE_ROOT = resolveStoreRoot();
 const VAULT_ROOT = resolveVaultRoot();
-const LEGACY_AI_MEMORY = VAULT_ROOT
-  ? path.join(VAULT_ROOT, "00-System", "ai-memory")
-  : "";
 
-// ---------------------------------------------------------------------------
-// CLI args
-// ---------------------------------------------------------------------------
-const DRY_RUN = process.argv.includes("--dry-run");
-const VERBOSE = process.argv.includes("--verbose") || DRY_RUN;
-const FORCE = process.argv.includes("--force");
+async function main() {
+  console.log("=".repeat(60));
+  console.log("Migrate ai-memory: Obsidian Vault → Local Store");
+  console.log("=".repeat(60));
+  console.log();
 
-function log(msg) { if (VERBOSE) console.log(msg); }
-function logDry(msg) { if (DRY_RUN) console.log("[DRY-RUN]", msg); }
+  const STORE_ROOT = await resolveStoreRoot();
+  const LEGACY_AI_MEMORY = VAULT_ROOT
+    ? path.join(VAULT_ROOT, "00-System", "ai-memory")
+    : "";
 
-function cp(src, dst, options = {}) {
-  if (!fs.existsSync(src)) {
-    log(`  skip  (not found): ${src}`);
-    return 0;
-  }
-  if (fs.existsSync(dst) && !FORCE) {
-    log(`  skip  (exists):    ${dst}`);
-    return 0;
-  }
-  if (DRY_RUN) {
-    logDry(`  copy: ${src} → ${dst}`);
+  // ---------------------------------------------------------------------------
+  // CLI args
+  // ---------------------------------------------------------------------------
+  const DRY_RUN = process.argv.includes("--dry-run");
+  const VERBOSE = process.argv.includes("--verbose") || DRY_RUN;
+  const FORCE = process.argv.includes("--force");
+
+  function log(msg) { if (VERBOSE) console.log(msg); }
+  function logDry(msg) { if (DRY_RUN) console.log("[DRY-RUN]", msg); }
+
+  function cp(src, dst, options = {}) {
+    if (!fs.existsSync(src)) {
+      log(`  skip  (not found): ${src}`);
+      return 0;
+    }
+    if (fs.existsSync(dst) && !FORCE) {
+      log(`  skip  (exists):    ${dst}`);
+      return 0;
+    }
+    if (DRY_RUN) {
+      logDry(`  copy: ${src} → ${dst}`);
+      return 1;
+    }
+    // Ensure parent dir exists
+    const parent = path.dirname(dst);
+    if (!fs.existsSync(parent)) fs.mkdirSync(parent, { recursive: true });
+    fs.copyFileSync(src, dst);
+    log(`  copied: ${path.basename(dst)}`);
     return 1;
   }
-  // Ensure parent dir exists
-  const parent = path.dirname(dst);
-  if (!fs.existsSync(parent)) fs.mkdirSync(parent, { recursive: true });
-  fs.copyFileSync(src, dst);
-  log(`  copied: ${path.basename(dst)}`);
-  return 1;
-}
 
-function copyDirRecursive(srcDir, dstDir, patterns = null) {
-  if (!fs.existsSync(srcDir)) {
-    log(`  skip  (not found): ${srcDir}`);
-    return 0;
-  }
-  let count = 0;
-  const entries = fs.readdirSync(srcDir, { withFileTypes: true });
-  for (const entry of entries) {
-    const srcPath = path.join(srcDir, entry.name);
-    const dstPath = path.join(dstDir, entry.name);
+  function copyDirRecursive(srcDir, dstDir, patterns = null) {
+    if (!fs.existsSync(srcDir)) {
+      log(`  skip  (not found): ${srcDir}`);
+      return 0;
+    }
+    let count = 0;
+    const entries = fs.readdirSync(srcDir, { withFileTypes: true });
+    for (const entry of entries) {
+      const srcPath = path.join(srcDir, entry.name);
+      const dstPath = path.join(dstDir, entry.name);
 
-    if (entry.isDirectory()) {
-      // Skip lock files and temp dirs
-      if (["node_modules", ".git", "logs"].includes(entry.name) && srcDir.includes("structured")) {
-        log(`  skip  (special dir): ${srcPath}`);
-        continue;
-      }
-      if (!fs.existsSync(dstPath)) fs.mkdirSync(dstPath, { recursive: true });
-      count += copyDirRecursive(srcPath, dstPath, patterns);
-    } else {
-      // Skip lock files
-      if (entry.name.endsWith(".lock")) {
-        log(`  skip  (lock file): ${srcPath}`);
-        continue;
-      }
-      // Filter by patterns if given
-      if (patterns && patterns.length > 0) {
-        const ext = path.extname(entry.name).toLowerCase();
-        const allowedExts = patterns.map(p => p.toLowerCase());
-        if (!allowedExts.includes(ext)) {
-          log(`  skip  (ext filter): ${srcPath}`);
+      if (entry.isDirectory()) {
+        // Skip lock files and temp dirs
+        if (["node_modules", ".git", "logs"].includes(entry.name) && srcDir.includes("structured")) {
+          log(`  skip  (special dir): ${srcPath}`);
           continue;
         }
+        if (!fs.existsSync(dstPath)) fs.mkdirSync(dstPath, { recursive: true });
+        count += copyDirRecursive(srcPath, dstPath, patterns);
+      } else {
+        // Skip lock files
+        if (entry.name.endsWith(".lock")) {
+          log(`  skip  (lock file): ${srcPath}`);
+          continue;
+        }
+        // Filter by patterns if given
+        if (patterns && patterns.length > 0) {
+          const ext = path.extname(entry.name).toLowerCase();
+          const allowedExts = patterns.map(p => p.toLowerCase());
+          if (!allowedExts.includes(ext)) {
+            log(`  skip  (ext filter): ${srcPath}`);
+            continue;
+          }
+        }
+        count += cp(srcPath, dstPath);
       }
-      count += cp(srcPath, dstPath);
     }
+    return count;
   }
-  return count;
-}
 
-function main() {
   console.log("=".repeat(60));
   console.log("Migrate ai-memory: Obsidian Vault → Local Store");
   console.log("=".repeat(60));
@@ -255,4 +262,7 @@ function main() {
   }, null, 2));
 }
 
-main();
+main().catch(err => {
+  console.error("Migration failed:", err);
+  process.exit(1);
+});

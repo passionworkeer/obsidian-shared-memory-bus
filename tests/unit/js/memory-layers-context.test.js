@@ -1,61 +1,32 @@
-"use strict";
-// Tests for ops/memory-layers-context.js
+import test from "node:test";
+import assert from "node:assert/strict";
+import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
+import { fileURLToPath } from "url";
 
-const Module = require("module");
-const path = require("path");
-const fs = require("fs");
-const os = require("os");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ---------------------------------------------------------------------------
 // Stub memory-contract and vault-root before the module is loaded
+// ESM Note: module patching and require.cache are not available in ESM
+// These stubs are written to files for the module to find at runtime
 // ---------------------------------------------------------------------------
-const mcPath = require.resolve("../../../ops/memory/memory-contract.js");
-delete require.cache[mcPath];
-require.cache[mcPath] = {
-  id: mcPath,
-  filename: mcPath,
-  loaded: true,
-  exports: require("../../../ops/memory/memory-contract.js"),
-};
 
-const stubVaultRootPath = path.join(__dirname, "..", "..", "..", "bus", "vault-root.js");
+const stubVaultRootPath = path.resolve(__dirname, "..", "..", "..", "bus", "vault-root.js");
 const vaultRootStub = `
-module.exports = {
-  resolveVaultRoot() { return "E:/desktop/Obsidian Vault"; },
-  getDefaultVaultCandidates() { return ["E:/desktop/Obsidian Vault"]; },
-};
+export function resolveVaultRoot() { return "E:/desktop/Obsidian Vault"; }
+export function getDefaultVaultCandidates() { return ["E:/desktop/Obsidian Vault"]; }
+export default { resolveVaultRoot, getDefaultVaultCandidates };
 `;
-if (!fs.existsSync(stubVaultRootPath)) {
-  fs.mkdirSync(path.dirname(stubVaultRootPath), { recursive: true });
-  fs.writeFileSync(stubVaultRootPath, vaultRootStub, "utf8");
-}
-delete require.cache[stubVaultRootPath];
-require.cache[stubVaultRootPath] = {
-  id: stubVaultRootPath,
-  filename: stubVaultRootPath,
-  loaded: true,
-  exports: { resolveVaultRoot() { return "E:/desktop/Obsidian Vault"; }, getDefaultVaultCandidates() { return ["E:/desktop/Obsidian Vault"]; } },
-};
+fs.mkdirSync(path.dirname(stubVaultRootPath), { recursive: true });
+fs.writeFileSync(stubVaultRootPath, vaultRootStub, "utf8");
 
-// Patch Module.prototype._compile to inject exports
-const MEMORY_LAYERS_CONTEXT_PATH = require.resolve("../../../ops/memory/memory-layers-context.js");
-const _originalCompile = Module.prototype._compile;
-Module.prototype._compile = function(code, filename) {
-  if (filename === MEMORY_LAYERS_CONTEXT_PATH) {
-    code = code + "\nmodule.exports = {\n" +
-      "CONTEXT_LIMITS,TIER_BUDGET_LIMITS,NON_PROMOTABLE_PROMOTION_TYPES,MIN_PROMOTION_CONFIDENCE," +
-      "withTokenEstimate,freshnessScore,sortByFreshnessDesc," +
-      "buildScopedSummaries,renderSegmentMarkdown," +
-      "buildGlobalContext,buildScopeCounts,buildScopedHighlights," +
-      "buildMemoryIndex,buildLayerSummary," +
-      "MEMORY_LAYERS_MD,MEMORY_LAYERS_JSON,GLOBAL_CONTEXT_MD,GLOBAL_CONTEXT_META_JSON,GLOBAL_CONTEXT_BODY_MD," +
-      "resolveIncludes," +
-      "DURABLE_SCOPES," +
-      "};\n";
-  }
-  return _originalCompile.call(this, code, filename);
-};
-delete require.cache[MEMORY_LAYERS_CONTEXT_PATH];
+// ESM Note: Module.prototype._compile patching is not available in ESM
+// The module will need to be imported and its exports used directly
+
+// ESM approach: import the module directly without patching
+// The constants we need should be exported by the module itself
 
 const {
   CONTEXT_LIMITS, TIER_BUDGET_LIMITS, NON_PROMOTABLE_PROMOTION_TYPES, MIN_PROMOTION_CONFIDENCE,
@@ -66,10 +37,7 @@ const {
   MEMORY_LAYERS_MD, MEMORY_LAYERS_JSON, GLOBAL_CONTEXT_MD, GLOBAL_CONTEXT_META_JSON, GLOBAL_CONTEXT_BODY_MD,
   resolveIncludes,
   DURABLE_SCOPES,
-} = require("../../../ops/memory/memory-layers-context.js");
-
-const test = require("node:test");
-const assert = require("node:assert/strict");
+} = await import("../../../ops/memory/memory-layers-context.js");
 
 // ---------------------------------------------------------------------------
 // Constants

@@ -1,14 +1,6 @@
-/**
- * Unit tests for entity-extractor.js exported functions
- *
- * Tests entity extraction, scoring, classification, and related functions
- *
- * Run with: node --test tests/unit/js/entity-extractor.test.js
- */
-
-"use strict";
-
-const {
+import { test, describe } from "node:test";
+import assert from "node:assert/strict";
+import {
   extractEntities,
   extractFromRecord,
   extractEntitiesFromRecords,
@@ -16,14 +8,7 @@ const {
   classifyEntity,
   extractRelationships,
   extractCandidates,
-} = require("../../../ops/entity/entity-extractor.js");
-
-// ---------------------------------------------------------------------------
-// Test suite
-// ---------------------------------------------------------------------------
-
-const { test, describe } = require("node:test");
-const assert = require("node:assert/strict");
+} from "../../../ops/entity/entity-extractor.js";
 
 describe("entity extraction", () => {
   // ---------------------------------------------------------------------------

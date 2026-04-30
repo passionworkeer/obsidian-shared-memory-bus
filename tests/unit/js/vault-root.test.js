@@ -1,21 +1,6 @@
-/**
- * Unit tests for vault-root.js exported functions
- *
- * Tests vault root resolution and config resolution
- *
- * Run with: node --test tests/unit/js/vault-root.test.js
- */
-
-"use strict";
-
-const { resolveVaultRoot, getDefaultVaultCandidates } = require("../../../bus/vault-root.js");
-
-// ---------------------------------------------------------------------------
-// Test suite
-// ---------------------------------------------------------------------------
-
-const { test, describe } = require("node:test");
-const assert = require("node:assert/strict");
+import { test, describe } from "node:test";
+import assert from "node:assert/strict";
+import { resolveVaultRoot, getDefaultVaultCandidates } from "../../../bus/vault-root.js";
 
 describe("vault root resolution", () => {
   // ---------------------------------------------------------------------------

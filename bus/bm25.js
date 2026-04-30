@@ -1,4 +1,3 @@
-"use strict";
 /**
  * bus/bm25.js
  * -----------
@@ -6,7 +5,7 @@
  * Handles both Latin and CJK text.
  *
  * Usage:
- *   const { search } = require('./bm25');
+ *   import { search } from './bm25.js';
  *   const results = search(docs, query, { topK: 10 });
  *   // docs: Array<{ id: string, text: string }>
  *   // results: Array<{ id: string, score: number }> sorted desc
@@ -92,4 +91,4 @@ function search(docs, query, opts = {}) {
     .slice(0, topK);
 }
 
-module.exports = { tokenize, search };
+export { tokenize, search };

@@ -1,15 +1,5 @@
-/**
- * Unit tests for shared-mcp/memory-status.js pure functions.
- *
- * Pure functions (clampText, compactUnique) are inlined for test isolation.
- * These match the source implementation at memory-status.js lines 59-88.
- *
- * Run with: node --test tests/unit/js/memory-status.test.js
- */
-"use strict";
-
-const { test, describe } = require("node:test");
-const assert = require("node:assert/strict");
+import { test, describe } from "node:test";
+import assert from "node:assert/strict";
 
 // ---------------------------------------------------------------------------
 // Pure function implementations (mirrored from memory-status.js)

@@ -1,7 +1,5 @@
-"use strict";
-
-const fs = require("fs");
-const readline = require("readline");
+import fs from "fs";
+import readline from "readline";
 
 /**
  * Async generator that yields parsed JSON objects from a JSONL file,
@@ -74,7 +72,7 @@ async function* createJsonlBatcher(filePath, opts = {}) {
   }
 }
 
-module.exports = {
+export {
   createJsonlStream,
   readJsonlStream,
   createJsonlBatcher,

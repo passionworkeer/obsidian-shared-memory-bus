@@ -1,115 +1,38 @@
-"use strict";
+import test from "node:test";
+import assert from "node:assert/strict";
+import path from "node:path";
+import fs from "node:fs";
+import { fileURLToPath } from "url";
 
-const test = require("node:test");
-const assert = require("node:assert/strict");
-
-// ---------------------------------------------------------------------------
-// Patch Module.prototype._compile BEFORE any require calls.
-// This lets us inject module.exports into build-handoff-pack.js so its
-// top-level functions become accessible without modifying production code.
-// ---------------------------------------------------------------------------
-
-const Module = require("module");
-const path = require("path");
-const fs = require("fs");
-
-const HANDOFF_MODULE_PATH = require.resolve("../../../ops/build/build-handoff-pack.js");
-
-// Map of filename -> exports-injection string
-const _compilePatches = new Map();
-_compilePatches.set(HANDOFF_MODULE_PATH, `
-module.exports = {
-  normalizeSpaces,
-  toTimestamp,
-  trimText,
-  isInteresting,
-  formatRecordLine,
-  selectUnique,
-  matchesAny,
-  buildPack,
-  renderMarkdown,
-};
-`);
-
-const _originalCompile = Module.prototype._compile;
-Module.prototype._compile = function _patchedCompile(code, filename) {
-  const patch = _compilePatches.get(filename);
-  if (patch) {
-    _compilePatches.delete(filename);
-    code = code + "\n" + patch;
-  }
-  return _originalCompile.call(this, code, filename);
-};
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ---------------------------------------------------------------------------
-// Remove any stale cached module (from a prior test run or parallel suite)
-// so our _compile patch fires on THIS run.
+// Stub memory-contract and vault-root before the module is loaded
+// ESM Note: require.cache and module patching not available in ESM
+// These stubs are written to files for the module to find at runtime
 // ---------------------------------------------------------------------------
 
-delete require.cache[HANDOFF_MODULE_PATH];
-
-// ---------------------------------------------------------------------------
-// Stub memory-contract
-// ---------------------------------------------------------------------------
-
-const mcPath = require.resolve("../../../ops/memory/memory-contract.js");
-delete require.cache[mcPath];
-require.cache[mcPath] = {
-  id: mcPath,
-  filename: mcPath,
-  loaded: true,
-  exports: require("../../../ops/memory/memory-contract.js"),
-};
-
-// ---------------------------------------------------------------------------
-// Stub vault-root at the path build-handoff-pack.js will find
-// ---------------------------------------------------------------------------
-
-const stubVaultRootPath = path.join(__dirname, "..", "..", "..", "bus", "vault-root.js");
-delete require.cache[stubVaultRootPath];
-require.cache[stubVaultRootPath] = {
-  id: stubVaultRootPath,
-  filename: stubVaultRootPath,
-  loaded: true,
-  exports: {
-    resolveVaultRoot() {
-      return "E:/desktop/Obsidian Vault";
-    },
-    getDefaultVaultCandidates() {
-      return ["E:/desktop/Obsidian Vault"];
-    },
-  },
-};
+const stubVaultRootPath = path.resolve(__dirname, "..", "..", "..", "bus", "vault-root.js");
+const vaultRootStub = `
+export function resolveVaultRoot() { return "E:/desktop/Obsidian Vault"; }
+export function getDefaultVaultCandidates() { return ["E:/desktop/Obsidian Vault"]; }
+export default { resolveVaultRoot, getDefaultVaultCandidates };
+`;
+fs.mkdirSync(path.dirname(stubVaultRootPath), { recursive: true });
+fs.writeFileSync(stubVaultRootPath, vaultRootStub, "utf8");
 
 // ---------------------------------------------------------------------------
 // Stub store-root at the path build-handoff-pack.js will find
 // build-handoff-pack.js is in ops/build/, so it looks in ops/bus/
 // ---------------------------------------------------------------------------
 
-const stubStoreRootPath = path.join(__dirname, "..", "..", "..", "ops", "bus", "store-root.js");
-if (!fs.existsSync(path.dirname(stubStoreRootPath))) {
-  fs.mkdirSync(path.dirname(stubStoreRootPath), { recursive: true });
-}
-if (!fs.existsSync(stubStoreRootPath)) {
-  fs.writeFileSync(stubStoreRootPath, `
-module.exports = {
-  resolveStoreRoot() {
-    return "E:/desktop/.ai-memory";
-  },
-};
-`, "utf8");
-}
-delete require.cache[stubStoreRootPath];
-require.cache[stubStoreRootPath] = {
-  id: stubStoreRootPath,
-  filename: stubStoreRootPath,
-  loaded: true,
-  exports: {
-    resolveStoreRoot() {
-      return "E:/desktop/.ai-memory";
-    },
-  },
-};
+const stubStoreRootPath = path.resolve(__dirname, "..", "..", "..", "ops", "bus", "store-root.js");
+fs.mkdirSync(path.dirname(stubStoreRootPath), { recursive: true });
+const storeRootStub = `
+export function resolveStoreRoot() { return "E:/desktop/.ai-memory"; }
+export default { resolveStoreRoot };
+`;
+fs.writeFileSync(stubStoreRootPath, storeRootStub, "utf8");
 
 // ---------------------------------------------------------------------------
 // Load the source under test
@@ -125,7 +48,7 @@ const {
   matchesAny,
   buildPack,
   renderMarkdown,
-} = require("../../../ops/build/build-handoff-pack.js");
+} = await import("../../../ops/build/build-handoff-pack.js");
 
 // ---------------------------------------------------------------------------
 // normalizeSpaces

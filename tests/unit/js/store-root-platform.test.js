@@ -1,7 +1,5 @@
-"use strict";
-
-const { resolveStoreRoot } = require("../../../bus/store-root.js");
-const path = require("node:path");
+import { resolveStoreRoot } from "../../../bus/store-root.js";
+import path from "node:path";
 
 // Test: resolveStoreRoot does not return empty string
 console.assert(resolveStoreRoot().length > 0, "resolveStoreRoot should not be empty");
