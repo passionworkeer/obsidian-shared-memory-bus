@@ -13,11 +13,9 @@
  *   node ops/generate-context.js --project obsidian-shared-memory-bus
  */
 
-"use strict";
-
-const fs   = require("node:fs");
-const path = require("node:path");
-const { resolveStoreRoot } = require("../bus/store-root.js");
+import fs from "node:fs";
+import path from "node:path";
+import { resolveStoreRoot } from "../bus/store-root.js";
 
 function getProjectsRoot(storeRoot) {
   return path.join(storeRoot || resolveStoreRoot(), "projects");
@@ -117,4 +115,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { generateContext };
+export { generateContext };

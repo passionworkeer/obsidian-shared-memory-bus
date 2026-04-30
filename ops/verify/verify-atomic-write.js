@@ -5,12 +5,11 @@
  * Writes a temp JS file and spawns children using that file path so that
  * backslashes in string literals are not subject to shell/eval escaping.
  */
-"use strict";
 
-const path   = require("path");
-const fs     = require("fs");
-const os     = require("os");
-const { spawn } = require("node:child_process");
+import path from "path";
+import fs from "fs";
+import os from "os";
+import { spawn } from "node:child_process";
 
 const PROJECT_ROOT = path.resolve(__dirname, "..");
 
@@ -45,9 +44,8 @@ const childScriptPath = path.join(os.tmpdir(), `atomic-write-child-${process.pid
 // Use JSON.stringify to safely embed the strings without any escaping risk.
 const childScriptContent = [
   "/* Auto-generated child entry — do not edit */",
-  "'use strict';",
-  "const path = require('path');",
-  "const { appendLineAtomic } = require(" + JSON.stringify(path.join(PROJECT_ROOT, "ops", "inbox-atomic-write.js")) + ");",
+  "import path from 'path';",
+  "import { appendLineAtomic } from " + JSON.stringify(path.join(PROJECT_ROOT, "ops", "inbox-atomic-write.js")) + ";",
   "const inboxPath = " + JSON.stringify(inboxPath) + ";",
   "const id = Number(process.argv[2] || '0');",
   "const session = " + JSON.stringify(session) + ";",

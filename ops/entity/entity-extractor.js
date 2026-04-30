@@ -18,10 +18,12 @@
  *   node entity-extractor.js extract-file <path-to-jsonl>
  *
  * Usage (as module):
- *   const { extractEntities, extractFromRecord, extractEntitiesFromRecords } = require('./ops/entity-extractor')
+ *   import { extractEntities, extractFromRecord, extractEntitiesFromRecords } from './entity-extractor.js';
  */
 
-"use strict";
+import { fileURLToPath } from "url";
+import path from "path";
+import fs from "fs";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -759,7 +761,6 @@ function cliExtract(text) {
  * @param {string} filePath
  */
 async function cliExtractFile(filePath) {
-  const fs = require("fs");
   if (!fs.existsSync(filePath)) {
     console.error(`File not found: ${filePath}`);
     process.exit(1);
@@ -782,7 +783,7 @@ async function cliExtractFile(filePath) {
 // Exports
 // ---------------------------------------------------------------------------
 
-module.exports = {
+export {
   extractEntities,
   extractFromRecord,
   extractEntitiesFromRecords,
@@ -796,7 +797,10 @@ module.exports = {
 // Entry point
 // ---------------------------------------------------------------------------
 
-if (require.main === module) {
+const __filename = fileURLToPath(import.meta.url);
+const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === __filename;
+
+if (isDirectRun) {
   const [,, action, ...args] = process.argv;
   if (action === "extract" && args.length > 0) {
     cliExtract(args.join(" "));

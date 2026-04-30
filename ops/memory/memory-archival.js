@@ -19,10 +19,10 @@
  *   (default) — detect caller from lock file trigger field
  */
 
-const fs = require("fs");
-const path = require("path");
-const crypto = require("crypto");
-const readline = require("readline");
+import fs from "fs";
+import path from "path";
+import crypto from "crypto";
+import readline from "readline";
 
 // ── CLI args ──────────────────────────────────────────────────────────────────
 
@@ -90,9 +90,10 @@ function parseJsonl(filePath) {
 
 // ── Atomic JSONL append ────────────────────────────────────────────────────────
 
-// Lazy-load to avoid a hard require cycle during module parsing.
-function getAppendLineAtomic() {
-  return require("../inbox/inbox-atomic-write.js").appendLineAtomic;
+// Lazy-load to avoid a hard import cycle during module parsing.
+async function getAppendLineAtomic() {
+  const mod = await import("../inbox/inbox-atomic-write.js");
+  return mod.appendLineAtomic;
 }
 
 /**
@@ -103,8 +104,9 @@ function getAppendLineAtomic() {
  * @param {string} filePath
  * @param {object} obj
  */
-function appendJsonl(filePath, obj) {
-  getAppendLineAtomic()(filePath, obj, { createDir: true });
+async function appendJsonl(filePath, obj) {
+  const appendLineAtomic = await getAppendLineAtomic();
+  appendLineAtomic(filePath, obj, { createDir: true });
 }
 
 function ensureDir(dir) {
@@ -179,7 +181,7 @@ function releaseLock() {
 
 // ── Manifest helpers ───────────────────────────────────────────────────────────
 
-function writeManifestEntry(record, reason, trigger) {
+async function writeManifestEntry(record, reason, trigger) {
   const entry = {
     id: record.id,
     tier_from: record.tier || record.lifecycle?.tier || 4,
@@ -192,7 +194,7 @@ function writeManifestEntry(record, reason, trigger) {
     content_hash: record.content_hash || sha256(JSON.stringify(record.content || "")),
     line_in_source: findRecordLine(record),
   };
-  appendJsonl(MANIFEST_FILE, entry);
+  await appendJsonl(MANIFEST_FILE, entry);
   return entry;
 }
 
@@ -232,7 +234,7 @@ function findRecordLine(record) {
  * Remove records from a JSONL file whose ids are in `toArchive`.
  * Writes to a temp file, then replaces the original (atomic-ish on Windows).
  */
-function archiveRecordsFromFile(filePath, toArchiveIds) {
+async function archiveRecordsFromFile(filePath, toArchiveIds) {
   if (!fs.existsSync(filePath)) return { processed: 0, archived: 0 };
 
   const set = new Set(toArchiveIds);
@@ -246,7 +248,7 @@ function archiveRecordsFromFile(filePath, toArchiveIds) {
       const r = JSON.parse(line);
       if (set.has(r.id)) {
         archived++;
-        writeManifestEntry(r, "budget_pressure", TRIGGER);
+        await writeManifestEntry(r, "budget_pressure", TRIGGER);
         set.delete(r.id); // don't double-archive
       } else {
         kept.push(line);
@@ -504,7 +506,7 @@ function simplifyMemory(filePath) {
 
 // ── Main ───────────────────────────────────────────────────────────────────────
 
-function main() {
+async function main() {
   info(`Starting memory-archival.js (trigger=${TRIGGER || "auto"}, dry_run=${DRY_RUN})`);
 
   if (!fs.existsSync(STRUCT_DIR)) {
@@ -538,9 +540,9 @@ function main() {
     const toArchive = scanForArchiveEligible();
     for (const [fname, ids] of toArchive.entries()) {
       const fpath = path.join(STRUCT_DIR, fname);
-      const { archived } = archiveRecordsFromFile(fpath, ids);
+      const { archived } = await archiveRecordsFromFile(fpath, ids);
       if (archived > 0 && !DRY_RUN) {
-        for (const id of ids) writeManifestEntry({ id, tier: 4 }, "ttl_expired", TRIGGER);
+        for (const id of ids) await writeManifestEntry({ id, tier: 4 }, "ttl_expired", TRIGGER);
       }
     }
     if (toArchive.size === 0) log("No TTL/cold-access archival candidates found.");
@@ -554,7 +556,7 @@ function main() {
         .filter(f => f.endsWith(".jsonl") && !f.startsWith("archive-"))
         .map(f => path.join(STRUCT_DIR, f));
       for (const fpath of structuredFiles) {
-        archiveRecordsFromFile(fpath, ids);
+        await archiveRecordsFromFile(fpath, ids);
       }
     }
     if (overBudget.size === 0) log("All tiers within budget limits.");

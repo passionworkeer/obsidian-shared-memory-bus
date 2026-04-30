@@ -1,41 +1,37 @@
-"use strict";
+import { afterEach, beforeEach, describe, test } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "url";
 
-const { afterEach, beforeEach, describe, test } = require("node:test");
-const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Ensure the store-root stub exists before mcp-memory-tools.js loads.
 // The stub must exist and use process.env (deferred evaluation) so that
 // beforeEach can override the store root before any test calls memory_*.
-const stubStoreRootPath = path.join(__dirname, "..", "..", "..", "bus", "store-root.js");
+const stubStoreRootPath = path.resolve(__dirname, "..", "..", "..", "bus", "store-root.js");
 const storeRootStub = `
-module.exports = {
-  resolveStoreRoot() {
-    return process.env.AI_MEMORY_STORE ||
-      process.env.AI_MEMORY_STORE_ROOT ||
-      "E:/desktop/.ai-memory";
-  },
-};
+export function resolveStoreRoot() {
+  return process.env.AI_MEMORY_STORE ||
+    process.env.AI_MEMORY_STORE_ROOT ||
+    "E:/desktop/.ai-memory";
+}
+export default { resolveStoreRoot };
 `;
 fs.writeFileSync(stubStoreRootPath, storeRootStub, "utf8");
 
 // Clear cached modules that capture resolveStoreRoot at load time so the stub
 // is re-evaluated with the correct deferred logic.
-const mcpToolsPath = require.resolve("../../../ops/mcp/mcp-memory-tools.js");
-for (const key of [...Object.keys(require.cache)]) {
-  if (key.includes("mcp-memory-tools") || key.includes("store-root")) {
-    delete require.cache[key];
-  }
-}
+// Note: require.cache is not available in ESM, so we rely on the stub file
+// being written before any dynamic import occurs.
 
 const {
   memory_boot,
   memory_query,
   memory_search,
   memory_write,
-} = require("../../../ops/mcp/mcp-memory-tools.js");
+} = await import("../../../ops/mcp/mcp-memory-tools.js");
 
 describe("mcp-memory-tools", () => {
   let tempRoot;

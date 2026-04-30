@@ -15,7 +15,7 @@
  *
  * API
  * ---
- *   const { appendLineAtomic } = require("./inbox-atomic-write");
+ *   import { appendLineAtomic } from "./inbox-atomic-write.js";
  *
  *   appendLineAtomic(filePath, line, opts?);
  *
@@ -35,10 +35,8 @@
  * The rename-over-target pattern is the canonical cross-platform fix.
  */
 
-"use strict";
-
-const fs   = require("node:fs");
-const path = require("node:path");
+import fs from "node:fs";
+import path from "node:path";
 
 /**
  * Atomically append a single line to a JSONL file.
@@ -129,4 +127,4 @@ function appendLineAtomic(filePath, line, opts = {}) {
 // Named export
 // ---------------------------------------------------------------------------
 
-module.exports = { appendLineAtomic };
+export { appendLineAtomic };

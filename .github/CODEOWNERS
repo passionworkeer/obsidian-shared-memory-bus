@@ -1,0 +1,10 @@
+# Code Owners
+# 每行格式: pattern owner1 owner2
+
+# 所有代码默认所有者
+* @Hermes
+
+# 特定目录
+# bus/ @owner-bus
+# ops/ @owner-ops
+# cli/ @owner-cli

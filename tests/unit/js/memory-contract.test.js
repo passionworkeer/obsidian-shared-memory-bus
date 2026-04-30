@@ -1,7 +1,5 @@
-"use strict";
-
-const test = require("node:test");
-const assert = require("node:assert/strict");
+import test from "node:test";
+import assert from "node:assert/strict";
 
 const {
   MEMORY_RECORD_SCHEMA_VERSION,
@@ -13,7 +11,7 @@ const {
   normalizeString,
   normalizeLower,
   sha1,
-} = require("../../../ops/memory/memory-contract.js");
+} = await import("../../../ops/memory/memory-contract.js");
 
 // ---------------------------------------------------------------------------
 // Constants

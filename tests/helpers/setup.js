@@ -2,16 +2,16 @@
  * Test setup utilities - mock file system helpers, temp directory creation
  */
 
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
+import fs from "fs";
+import path from "path";
+import os from "os";
 
 /**
  * Creates a temporary directory for tests
  * @param {string} prefix - Prefix for the directory name
  * @returns {string} Path to the created temporary directory
  */
-function createTempDir(prefix = "test-") {
+export function createTempDir(prefix = "test-") {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   return tmpDir;
 }
@@ -20,7 +20,7 @@ function createTempDir(prefix = "test-") {
  * Cleans up a temporary directory recursively
  * @param {string} dirPath - Path to the directory to clean up
  */
-function cleanupTempDir(dirPath) {
+export function cleanupTempDir(dirPath) {
   if (!dirPath || !fs.existsSync(dirPath)) return;
 
   try {
@@ -37,7 +37,7 @@ function cleanupTempDir(dirPath) {
  * @param {object[]} records - Array of records to write
  * @returns {string} Path to the created file
  */
-function createTempJsonl(dirPath, filename, records) {
+export function createTempJsonl(dirPath, filename, records) {
   const filePath = path.join(dirPath, filename);
   const content = records.map((r) => JSON.stringify(r)).join("\n") + "\n";
   fs.writeFileSync(filePath, content, "utf8");
@@ -49,7 +49,7 @@ function createTempJsonl(dirPath, filename, records) {
  * @param {string} filePath - Path to the JSONL file
  * @returns {object[]} Array of parsed records
  */
-function readJsonl(filePath) {
+export function readJsonl(filePath) {
   if (!fs.existsSync(filePath)) return [];
 
   const content = fs.readFileSync(filePath, "utf8");
@@ -74,7 +74,7 @@ function readJsonl(filePath) {
  * @param {string} rootPath - Path to use as vault root
  * @returns {object} Stub vault root functions
  */
-function createStubVaultRoot(rootPath) {
+export function createStubVaultRoot(rootPath) {
   return {
     resolveVaultRoot() {
       return rootPath;
@@ -87,47 +87,3 @@ function createStubVaultRoot(rootPath) {
     },
   };
 }
-
-/**
- * Creates a mock module cache entry
- * @param {string} modulePath - Path to the module
- * @param {object} exports - Module exports
- * @returns {object} Mock cache entry
- */
-function createMockCacheEntry(modulePath, exports) {
-  return {
-    id: modulePath,
-    filename: modulePath,
-    loaded: true,
-    exports: exports,
-  };
-}
-
-/**
- * Mocks the require cache for a specific module
- * @param {string} modulePath - Path to the module
- * @param {object} exports - Module exports to mock
- */
-function mockRequireCache(modulePath, exports) {
-  delete require.cache[modulePath];
-  require.cache[modulePath] = createMockCacheEntry(modulePath, exports);
-}
-
-/**
- * Clears mock from require cache
- * @param {string} modulePath - Path to the module
- */
-function clearMockCache(modulePath) {
-  delete require.cache[modulePath];
-}
-
-module.exports = {
-  createTempDir,
-  cleanupTempDir,
-  createTempJsonl,
-  readJsonl,
-  createStubVaultRoot,
-  createMockCacheEntry,
-  mockRequireCache,
-  clearMockCache,
-};

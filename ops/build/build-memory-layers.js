@@ -1,4 +1,3 @@
-"use strict";
 // ---------------------------------------------------------------------------
 // build-memory-layers.js — Main entry point
 // Refactored from 2019-line monolithic file into 4 modules:
@@ -7,8 +6,12 @@
 //   - ops/memory-layers-dedup.js    (deduplication + JSONL writing)
 // ---------------------------------------------------------------------------
 
-const fs = require("fs");
-const path = require("path");
+import fs from "fs";
+import path from "path";
+import { fileURLToPath, pathToFileURL } from "url";
+import { execSync } from "child_process";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ---------------------------------------------------------------------------
 // Imports from submodules
@@ -47,7 +50,7 @@ const {
   MIN_PROMOTION_CONFIDENCE,
   DURABLE_SCOPES,
   NON_PROMOTABLE_PROMOTION_TYPES,
-} = require("../memory/memory-layers-parse.js");
+} = await import("../memory/memory-layers-parse.js");
 
 const {
   // Context module — global context generation, summaries
@@ -57,7 +60,7 @@ const {
   GLOBAL_CONTEXT_MD: CTX_GLOBAL_CONTEXT_MD,
   GLOBAL_CONTEXT_META_JSON: CTX_GLOBAL_CONTEXT_META_JSON,
   GLOBAL_CONTEXT_BODY_MD: CTX_GLOBAL_CONTEXT_BODY_MD,
-} = require("../memory/memory-layers-context.js");
+} = await import("../memory/memory-layers-context.js");
 
 const {
   // Dedup module — deduplication, JSONL writing, daily logs
@@ -66,13 +69,13 @@ const {
   deduplicateSharedInbox,
   appendDailyLogs,
   DAILY_LOG_DIR,
-} = require("../memory/memory-layers-dedup.js");
+} = await import("../memory/memory-layers-dedup.js");
 
 // ---------------------------------------------------------------------------
 // Store root resolution (kept here — needed before any module loads)
 // ---------------------------------------------------------------------------
 
-function loadStoreRootHelper() {
+async function loadStoreRootHelper() {
   const candidates = [
     path.join(__dirname, "store-root.js"),
     path.join(__dirname, "..", "..", "bus", "store-root.js"),
@@ -82,14 +85,16 @@ function loadStoreRootHelper() {
 
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
-      return require(candidate);
+      const mod = await import(pathToFileURL(candidate));
+      return mod.default || mod;
     }
   }
 
   throw new Error(`store-root-helper-missing: tried ${candidates.join(", ")}`);
 }
 
-const { resolveStoreRoot } = loadStoreRootHelper();
+const resolveStoreRootMod = await loadStoreRootHelper();
+const resolveStoreRoot = resolveStoreRootMod.resolveStoreRoot || resolveStoreRootMod;
 
 // ---------------------------------------------------------------------------
 // Schema version (from memory-contract.js)
@@ -98,7 +103,21 @@ const { resolveStoreRoot } = loadStoreRootHelper();
 const {
   buildGeneratedArtifactMetadata,
   MEMORY_RECORD_SCHEMA_VERSION,
-} = require("../memory/memory-contract.js");
+} = await import("../memory/memory-contract.js");
+
+// ---------------------------------------------------------------------------
+// Re-export utilities needed by tests and other consumers
+// ---------------------------------------------------------------------------
+
+export {
+  normalizeSpaces,
+  getFreshness,
+  buildPromotionKey,
+  withFileLock,
+  deduplicateSharedInbox,
+  MEMORY_RECORD_SCHEMA_VERSION,
+  loadStoreRootHelper,
+};
 
 // ---------------------------------------------------------------------------
 // Main
@@ -275,7 +294,7 @@ async function main() {
 
   // Phase 2 L0-L1 bootstrap — runs after all layers are written
   try {
-    const { buildL0L1Bootstrap } = require("./build-l0-l1-bootstrap.js");
+    const { buildL0L1Bootstrap } = await import("./build-l0-l1-bootstrap.js");
     buildL0L1Bootstrap(process.cwd());
   } catch (e) {
     process.stderr.write(`[L0-L1] bootstrap skipped: ${e.message}\n`);
@@ -284,13 +303,11 @@ async function main() {
   // Phase 2: warm SQLite search result cache with recent queries from generated artifacts
   // Pass recent-queries list to warm-strategy.py for pre-loading cache on startup.
   try {
-    const path = require("path");
     const cacheDir = path.join(resolveStoreRoot(), "cache");
     // Import warm-strategy dynamically so the build script still works
     // when the Python module is unavailable.
     const { getWarmQueries } = (() => {
       try {
-        const { execSync } = require("child_process");
         const pyScript = path.join(__dirname, "..", "retrieval", "cache", "warm-strategy.py");
         const raw = execSync(
           `python "${pyScript}" --mode auto --max-queries 10 --cache-dir "${cacheDir}"`,
@@ -331,4 +348,10 @@ async function main() {
   );
 }
 
-main();
+// Only run main() when executed directly
+const __filename = fileURLToPath(import.meta.url);
+const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === __filename;
+
+if (isDirectRun) {
+  main();
+}

@@ -6,13 +6,12 @@
  * 运行: node ops/stress-test-concurrent.js
  */
 
-"use strict";
+import path from "node:path";
+import { spawn } from "node:child_process";
+import { setTimeout as sleep } from "node:timers/promises";
+import fs from "node:fs";
 
-const path = require("node:path");
 const PROJECT_ROOT = path.resolve(__dirname, "..", "..");
-const fs   = require("node:fs");
-const { spawn } = require("node:child_process");
-const { setTimeout: sleep } = require("node:timers/promises");
 
 // ---------------------------------------------------------------------------
 // 辅助
@@ -252,7 +251,7 @@ async function testInboxConcurrentWrite(concurrency = 10) {
   const start = now();
   let passed = 0, failed = 0, errors = 0;
 
-  const { resolveStoreRoot } = require(path.join(PROJECT_ROOT, "bus", "store-root.js"));
+  const { resolveStoreRoot } = await import(path.join(PROJECT_ROOT, "bus", "store-root.js"));
   const storeRoot = resolveStoreRoot();
   const inboxPath = path.join(storeRoot, "inbox", "stress-test.md");
   const session = `stress-${Date.now()}`;
@@ -306,8 +305,8 @@ async function testKgWalStress(iterations = 100) {
   const start = now();
   let passed = 0, failed = 0, errors = 0;
 
-  const { KnowledgeGraph } = require(path.join(PROJECT_ROOT, "ops/knowledge/knowledge-graph.js"));
-  const { resolveVaultRoot } = require(path.join(PROJECT_ROOT, "bus", "vault-root.js"));
+  const { KnowledgeGraph } = await import(path.join(PROJECT_ROOT, "ops/knowledge/knowledge-graph.js"));
+  const { resolveVaultRoot } = await import(path.join(PROJECT_ROOT, "bus", "vault-root.js"));
   const vault = resolveVaultRoot();
 
   for (let i = 0; i < iterations; i++) {
@@ -429,8 +428,8 @@ async function testDbLockContention() {
   const start = now();
   let locked = 0, ok = 0;
 
-  const { KnowledgeGraph } = require(path.join(PROJECT_ROOT, "ops/knowledge/knowledge-graph.js"));
-  const { resolveVaultRoot } = require(path.join(PROJECT_ROOT, "bus", "vault-root.js"));
+  const { KnowledgeGraph } = await import(path.join(PROJECT_ROOT, "ops/knowledge/knowledge-graph.js"));
+  const { resolveVaultRoot } = await import(path.join(PROJECT_ROOT, "bus", "vault-root.js"));
   const vault = resolveVaultRoot();
 
   for (let i = 0; i < 100; i++) {
@@ -471,7 +470,7 @@ async function main() {
   console.log("=".repeat(60));
 
   const results = [];
-  const { resolveVaultRoot } = require(path.join(PROJECT_ROOT, "bus", "vault-root.js"));
+  const { resolveVaultRoot } = await import(path.join(PROJECT_ROOT, "bus", "vault-root.js"));
   const vault = resolveVaultRoot();
   console.log("Vault:", vault);
 

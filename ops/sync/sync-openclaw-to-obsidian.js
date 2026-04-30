@@ -1,10 +1,7 @@
-const crypto = require("crypto");
-const fs = require("fs");
-const path = require("path");
-const { spawnSync } = require("child_process");
-
-const USER_HOME = process.env.USERPROFILE || process.env.HOME || "";
-const OPENCLAW_HOME = process.env.OPENCLAW_HOME || path.join(USER_HOME, ".openclaw");
+import crypto from "crypto";
+import fs from "fs";
+import path from "path";
+import { spawnSync } from "child_process";
 
 function loadVaultRootHelper() {
   const candidates = [
@@ -15,22 +12,27 @@ function loadVaultRootHelper() {
 
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
-      return require(candidate);
+      return import(candidate);
     }
   }
 
   throw new Error(`vault-root-helper-missing: tried ${candidates.join(", ")}`);
 }
 
-const { resolvePythonRuntime, withPythonArgs } = require(
-  fs.existsSync(path.join(__dirname, "python-runtime.js"))
-    ? path.join(__dirname, "python-runtime.js")
-    : path.join(__dirname, "..", "bus", "python-runtime.js")
-);
-const { MEMORY_RECORD_SCHEMA_VERSION } = require("../memory/memory-contract.js");
-const { resolveVaultRoot } = loadVaultRootHelper();
+const vaultRootModule = await loadVaultRootHelper();
+const { resolveVaultRoot } = vaultRootModule;
+
+const pythonRuntimePath = fs.existsSync(path.join(__dirname, "python-runtime.js"))
+  ? path.join(__dirname, "python-runtime.js")
+  : path.join(__dirname, "..", "bus", "python-runtime.js");
+const pythonRuntimeModule = await import(pythonRuntimePath);
+const { resolvePythonRuntime, withPythonArgs } = pythonRuntimeModule;
+const memoryContractModule = await import("../memory/memory-contract.js");
+const { MEMORY_RECORD_SCHEMA_VERSION } = memoryContractModule;
 const PYTHON = resolvePythonRuntime();
 
+const USER_HOME = process.env.USERPROFILE || process.env.HOME || "";
+const OPENCLAW_HOME = process.env.OPENCLAW_HOME || path.join(USER_HOME, ".openclaw");
 const VAULT_ROOT = resolveVaultRoot();
 const VB = path.join(VAULT_ROOT, "00-System", "ai-memory");
 const STRUCTURED_ROOT = path.join(VB, "structured");

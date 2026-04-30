@@ -1,5 +1,5 @@
-const { spawn } = require("child_process");
-const { buildEmbeddingConfigHash, normalizeEmbeddingAdapter } = require("./shared-crypto.js");
+import { spawn } from "child_process";
+import { buildEmbeddingConfigHash, normalizeEmbeddingAdapter } from "./shared-crypto.js";
 
 function normalizeString(value) {
   return String(value || "").trim();
@@ -256,7 +256,6 @@ for line in sys.stdin:
         print(json.dumps({"ok": False, "err": str(exc)}))
 `;
     const inputPayload = texts.join("\n") + "\n";
-    const { spawn } = require("child_process");
     return new Promise((resolve, reject) => {
       const child = spawn(pythonRuntime.command, withPythonArgs(pythonRuntime, ["-c", script]), {
         stdio: ["pipe", "pipe", "pipe"],
@@ -445,7 +444,7 @@ for line in sys.stdin:
   };
 }
 
-module.exports = {
+export {
   buildEmbeddingConfigHash,
   createEmbeddingProviderRegistry,
   getProviderHost,

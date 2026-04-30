@@ -132,7 +132,7 @@ const SAMPLE_RUNTIME_CONFIG = {
  */
 const NORMALIZATION_FIXTURES = {
   bom: {
-    input: "\uFEFFHello World",
+    input: "﻿Hello World",
     expected: "Hello World",
   },
   spaces: {
@@ -148,7 +148,7 @@ const NORMALIZATION_FIXTURES = {
     expected: "hello world",
   },
   mixed: {
-    input: "\uFEFF  Hello   World\n\nGood  \t  Morning  ",
+    input: "﻿  Hello   World\n\nGood  \t  Morning  ",
     expected: "Hello World Good Morning",
   },
   null_input: {
@@ -177,7 +177,7 @@ const FRESHNESS_FIXTURES = [
   { label: "unknown - invalid date", ageMs: "invalid", expected: "unknown" },
 ];
 
-module.exports = {
+export {
   SAMPLE_MEMORY_RECORDS,
   ENTITY_EXTRACTION_FIXTURES,
   SAMPLE_RECORDS_WITH_ENTITIES,

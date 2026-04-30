@@ -1,8 +1,9 @@
-"use strict";
+import crypto from "crypto";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 
-const crypto = require("crypto");
-const fs = require("fs");
-const path = require("path");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ---------------------------------------------------------------------------
 // Schema constants — prefer generated schema, fall back to inline definitions.
@@ -12,7 +13,7 @@ const path = require("path");
 
 let _genSchema;
 try {
-  _genSchema = require("../adapters/generated/memory-contract-schema.js");
+  _genSchema = await import("../adapters/generated/memory-contract-schema.js");
 } catch {
   _genSchema = null;
 }
@@ -848,7 +849,7 @@ function detectConflicts(records, options = {}) {
   });
 }
 
-module.exports = {
+export {
   ALLOWED_DURABLE_TYPES,
   ALLOWED_MEMORY_LEVELS,
   ALLOWED_SCOPES,

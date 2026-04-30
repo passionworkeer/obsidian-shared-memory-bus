@@ -19,10 +19,8 @@
  *   node ops/migrations/kg-v1-to-v2.js
  */
 
-"use strict";
-
-const fs   = require("node:fs");
-const path = require("node:path");
+import fs from "node:fs";
+import path from "node:path";
 
 const MIGRATION_VERSION = 2;
 const MIGRATION_NAME    = "kg-v1-to-v2";
@@ -37,20 +35,21 @@ function loadVaultRootHelper() {
     path.join(__dirname, "../vault-root.js"),
   ];
   for (const c of candidates) {
-    if (fs.existsSync(c)) return require(c);
+    if (fs.existsSync(c)) return import(c);
   }
   throw new Error(
     "[kg-migration] vault-root.js not found. Set AI_MEMORY_OBSIDIAN_VAULT env var or place vault-root.js in bus/."
   );
 }
 
-function resolveKgPath() {
-  const vaultRoot = loadVaultRootHelper().resolveVaultRoot();
+async function resolveKgPath() {
+  const vaultRootModule = await loadVaultRootHelper();
+  const vaultRoot = vaultRootModule.resolveVaultRoot();
   return path.join(vaultRoot, "00-System", "ai-memory", "kg", "knowledge-graph.sqlite3");
 }
 
-function resolveKgDir() {
-  return path.dirname(resolveKgPath());
+async function resolveKgDir() {
+  return path.dirname(await resolveKgPath());
 }
 
 // ---------------------------------------------------------------------------
@@ -62,12 +61,12 @@ function resolveKgDir() {
  * Idempotent: safe to call multiple times.
  * @returns {{ok?: boolean, skipped?: boolean, version: number, error?: string}}
  */
-function migrate() {
-  const dbPath = resolveKgPath();
-  const dbDir  = resolveKgDir();
+async function migrate() {
+  const dbPath = await resolveKgPath();
+  const dbDir  = await resolveKgDir();
 
   // Node.js 22.5+ built-in
-  const { DatabaseSync } = require("node:sqlite");
+  const { DatabaseSync } = await import("node:sqlite");
 
   // Ensure the KG directory exists (first-run scenario)
   if (!fs.existsSync(dbDir)) {
@@ -133,9 +132,9 @@ function migrate() {
 // Module & CLI entry point
 // ---------------------------------------------------------------------------
 
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   try {
-    const r = migrate();
+    const r = await migrate();
     console.log(JSON.stringify(r, null, 2));
     process.exit(0);
   } catch (e) {
@@ -144,4 +143,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { migrate, MIGRATION_VERSION, MIGRATION_NAME };
+export { migrate, MIGRATION_VERSION, MIGRATION_NAME };

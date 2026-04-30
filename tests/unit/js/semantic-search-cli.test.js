@@ -1,12 +1,6 @@
-/**
- * Migrated from retrieval/semantic-search-cli.test.js
- * Original require path updated for new location.
- */
-const test = require("node:test");
-const assert = require("node:assert/strict");
-
-// Resolve from tests/unit/js/ up two dirs to repo root, then retrieval/
-const { buildPythonSearchArgs, parseCliArgs } = require("../../../retrieval/semantic-search-cli.js");
+import test from "node:test";
+import assert from "node:assert/strict";
+import { buildPythonSearchArgs, parseCliArgs } from "../../../retrieval/semantic-search-cli.js";
 
 test("parseCliArgs keeps OpenClaw route and filter flags separate from the query", () => {
   const parsed = parseCliArgs([
