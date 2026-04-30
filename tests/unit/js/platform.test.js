@@ -1,21 +1,19 @@
-"use strict";
-
-const test = require("node:test");
-const assert = require("node:assert/strict");
-
-// ---------------------------------------------------------------------------
-// Load the platform module
-// ---------------------------------------------------------------------------
+import test from "node:test";
+import assert from "node:assert/strict";
+import { getWindowsAdapter } from "../../../bus/platform/windows.js";
+import { getDarwinAdapter } from "../../../bus/platform/darwin.js";
+import { getLinuxAdapter } from "../../../bus/platform/linux.js";
+import { spawnSync } from "node:child_process";
 
 let platform;
 let isWindows;
 let isMac;
 let isLinux;
 
-test("platform module loads without throwing", () => {
+test("platform module loads without throwing", async () => {
   try {
-    // Use a direct require since the module may use CJS or ESM
-    const mod = require("../../../bus/platform/index.js");
+    // Use dynamic import for ESM compatibility
+    const mod = await import("../../../bus/platform/index.js");
     platform = mod.platform;
     isWindows = mod.isWindows;
     isMac = mod.isMac;
@@ -229,7 +227,6 @@ test("platform.spawnPython returns a ChildProcess (signature check only)", () =>
   assert.strictEqual(typeof platform.spawnPython, "function");
   // A real ChildProcess has these properties — we verify the type contract here.
   // We use spawnSync which is synchronous and avoids async-after-test issues.
-  const { spawnSync } = require("node:child_process");
   const result = spawnSync("node", ["--version"], { encoding: "utf8", timeout: 5000 });
   assert.ok(result, "spawnSync sanity check — node should be available");
   // If we reach here, ChildProcess contracts are valid; spawnPython will behave
@@ -322,24 +319,24 @@ test("platform.getKgRoot is a function returning a string containing 'kg'", () =
 // Adapters are idempotent (calling getXxxAdapter twice returns equivalent objects)
 // ---------------------------------------------------------------------------
 
-test("getWindowsAdapter() is idempotent", () => {
-  const { getWindowsAdapter } = require("../../../bus/platform/windows.js");
+test("getWindowsAdapter() is idempotent", async () => {
+  const { getWindowsAdapter } = await import("../../../bus/platform/windows.js");
   const a1 = getWindowsAdapter();
   const a2 = getWindowsAdapter();
   assert.equal(a1.name, a2.name);
   assert.equal(a1.storeRootDefault, a2.storeRootDefault);
 });
 
-test("getDarwinAdapter() is idempotent", () => {
-  const { getDarwinAdapter } = require("../../../bus/platform/darwin.js");
+test("getDarwinAdapter() is idempotent", async () => {
+  const { getDarwinAdapter } = await import("../../../bus/platform/darwin.js");
   const a1 = getDarwinAdapter();
   const a2 = getDarwinAdapter();
   assert.equal(a1.name, a2.name);
   assert.equal(a1.storeRootDefault, a2.storeRootDefault);
 });
 
-test("getLinuxAdapter() is idempotent", () => {
-  const { getLinuxAdapter } = require("../../../bus/platform/linux.js");
+test("getLinuxAdapter() is idempotent", async () => {
+  const { getLinuxAdapter } = await import("../../../bus/platform/linux.js");
   const a1 = getLinuxAdapter();
   const a2 = getLinuxAdapter();
   assert.equal(a1.name, a2.name);
@@ -366,8 +363,8 @@ const REQUIRED_INTERFACE_KEYS = [
   "getKgRoot",
 ];
 
-test("Windows adapter has all required interface keys", () => {
-  const { getWindowsAdapter } = require("../../../bus/platform/windows.js");
+test("Windows adapter has all required interface keys", async () => {
+  const { getWindowsAdapter } = await import("../../../bus/platform/windows.js");
   const adapter = getWindowsAdapter();
   for (const key of REQUIRED_INTERFACE_KEYS) {
     assert.ok(
@@ -377,8 +374,8 @@ test("Windows adapter has all required interface keys", () => {
   }
 });
 
-test("Darwin adapter has all required interface keys", () => {
-  const { getDarwinAdapter } = require("../../../bus/platform/darwin.js");
+test("Darwin adapter has all required interface keys", async () => {
+  const { getDarwinAdapter } = await import("../../../bus/platform/darwin.js");
   const adapter = getDarwinAdapter();
   for (const key of REQUIRED_INTERFACE_KEYS) {
     assert.ok(
@@ -388,8 +385,8 @@ test("Darwin adapter has all required interface keys", () => {
   }
 });
 
-test("Linux adapter has all required interface keys", () => {
-  const { getLinuxAdapter } = require("../../../bus/platform/linux.js");
+test("Linux adapter has all required interface keys", async () => {
+  const { getLinuxAdapter } = await import("../../../bus/platform/linux.js");
   const adapter = getLinuxAdapter();
   for (const key of REQUIRED_INTERFACE_KEYS) {
     assert.ok(

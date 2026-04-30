@@ -1,25 +1,12 @@
-/**
- * tests/unit/js/inbox-atomic-write.test.js
- * ========================================
- * Unit tests for inbox-atomic-write.js — atomic single-line JSONL append.
- *
- * Covers:
- *   1. Normal append of a single line
- *   2. Concurrent append from 10 simultaneous calls — no dropped lines
- *   3. Auto-creates file when it doesn't exist
- *   4. Auto-creates parent directory when it doesn't exist
- *
- * Run: node tests/unit/js/inbox-atomic-write.test.js
- *       (also picked up by `npm test` / jest if configured)
- */
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "url";
 
-"use strict";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const fs   = require("node:fs");
-const path = require("node:path");
-const os   = require("node:os");
-
-const { appendLineAtomic } = require("../../../ops/inbox/inbox-atomic-write.js");
+const { appendLineAtomic } = await import("../../../ops/inbox/inbox-atomic-write.js");
 
 // ---------------------------------------------------------------------------
 // Setup / Teardown
@@ -122,27 +109,26 @@ function testConcurrentAppend() {
   const results = [];
 
   // Spawn N child processes that each call appendLineAtomic once.
-  // Using child processes (not threads) to get true parallel I/O.
-  const { spawn } = require("node:child_process");
+// Using child processes (not threads) to get true parallel I/O.
 
   const promises = Array.from({ length: N }, (_, i) =>
     new Promise((resolve) => {
       const child = spawn(
         process.execPath,
         [
-          "-e",
+          "--input-type=module",
           `
-          const { appendLineAtomic } = require(${JSON.stringify(path.join(__dirname, "..", "..", "..", "ops", "inbox-atomic-write.js"))});
-          const path = require("path");
-          const file = ${JSON.stringify(file)};
-          try {
-            appendLineAtomic(file, { id: ${i}, pid: process.pid });
-            process.stdout.write("ok");
-          } catch(e) {
-            process.stderr.write(e.message);
-            process.exit(1);
-          }
-          `,
+import { appendLineAtomic } from ${JSON.stringify("file://" + path.resolve(__dirname, "..", "..", "..", "ops", "inbox-atomic-write.js"))};
+import path from "node:path";
+const file = ${JSON.stringify(file)};
+try {
+  appendLineAtomic(file, { id: ${i}, pid: process.pid });
+  process.stdout.write("ok");
+} catch(e) {
+  process.stderr.write(e.message);
+  process.exit(1);
+}
+`,
         ],
         { windowsHide: true }
       );

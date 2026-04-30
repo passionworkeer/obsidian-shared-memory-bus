@@ -1,7 +1,7 @@
-const fs = require("fs");
-const path = require("path");
-const { spawnSync } = require("child_process");
-const { buildMemoryIntegrityReport } = require("../memory/memory-contract.js");
+import fs from "fs";
+import path from "path";
+import { spawnSync } from "child_process";
+import { buildMemoryIntegrityReport } from "../memory/memory-contract.js";
 
 function loadVaultRootHelper() {
   const candidates = [
@@ -12,7 +12,7 @@ function loadVaultRootHelper() {
 
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
-      return require(candidate);
+      return import(candidate);
     }
   }
 
@@ -142,7 +142,8 @@ function executeStep(name, runner) {
   };
 }
 
-const { resolveVaultRoot } = loadVaultRootHelper();
+const vaultRootModule = await loadVaultRootHelper();
+const { resolveVaultRoot } = vaultRootModule;
 const VAULT_ROOT = resolveVaultRoot();
 const AI_MEMORY_ROOT = path.join(VAULT_ROOT, "00-System", "ai-memory");
 const STRUCTURED_ROOT = path.join(AI_MEMORY_ROOT, "structured");

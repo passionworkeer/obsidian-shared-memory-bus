@@ -1,4 +1,3 @@
-"use strict";
 /**
  * memory-promotion-resolver.js — Resolves conflicts in the promotion queue.
  *
@@ -12,8 +11,8 @@
  *        [--queue <path>]   (default: E:\.ai-memory\queue\promotion-queue.jsonl)
  */
 
-const fs   = require("fs");
-const path = require("path");
+import fs from "fs";
+import path from "path";
 
 // ── CLI args ───────────────────────────────────────────────────────────────────
 

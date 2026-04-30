@@ -1,8 +1,6 @@
-"use strict";
-
-const path = require("node:path");
-const fs = require("node:fs");
-const { spawn, spawnSync } = require("node:child_process");
+import path from "node:path";
+import fs from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
 
 // ---------------------------------------------------------------------------
 // Derived constants
@@ -229,11 +227,10 @@ Loop
 // ---------------------------------------------------------------------------
 
 function spawnPython(args, options = {}) {
-  const { spawn: nodeSpawn } = require("node:child_process");
   const PYTHONUTF8 = process.env.PYTHONUTF8 || "1";
   const PYTHONIOENCODING = process.env.PYTHONIOENCODING || "utf-8";
 
-  return nodeSpawn("python", args, {
+  return spawn("python", args, {
     ...options,
     windowsHide: true,
     env: {
@@ -459,4 +456,4 @@ function getWindowsAdapter() {
   return _adapter;
 }
 
-module.exports = { getWindowsAdapter };
+export { getWindowsAdapter };

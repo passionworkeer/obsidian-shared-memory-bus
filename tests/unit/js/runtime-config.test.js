@@ -1,14 +1,6 @@
-/**
- * Unit tests for runtime-config.js exported functions
- *
- * Tests configuration normalization, merging, and runtime config resolution
- *
- * Run with: node --test tests/unit/js/runtime-config.test.js
- */
-
-"use strict";
-
-const {
+import { test, describe } from "node:test";
+import assert from "node:assert/strict";
+import {
   buildEmbeddingRuntimeCatalog,
   loadRuntimeConfig,
   normalizeEmbeddingAdapter,
@@ -16,14 +8,7 @@ const {
   resolveRuntimeConfigPath,
   updateEmbeddingRuntimeSelection,
   writeRuntimeConfig,
-} = require("../../../bus/runtime-config.js");
-
-// ---------------------------------------------------------------------------
-// Test suite
-// ---------------------------------------------------------------------------
-
-const { test, describe } = require("node:test");
-const assert = require("node:assert/strict");
+} from "../../../bus/runtime-config.js";
 
 describe("runtime config", () => {
   // ---------------------------------------------------------------------------

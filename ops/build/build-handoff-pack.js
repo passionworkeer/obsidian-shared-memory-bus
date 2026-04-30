@@ -1,10 +1,11 @@
-const fs = require("fs");
-const path = require("path");
-const {
-  buildGeneratedArtifactMetadata,
-} = require("../memory/memory-contract.js");
+import fs from "fs";
+import path from "path";
+import { fileURLToPath, pathToFileURL } from "url";
+import { buildGeneratedArtifactMetadata } from "../memory/memory-contract.js";
 
-function loadStoreRootHelper() {
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+async function loadStoreRootHelper() {
   const candidates = [
     // bus/ sibling (project layout: ops/build -> ../../bus/)
     path.join(__dirname, "..", "..", "bus", "store-root.js"),
@@ -16,14 +17,16 @@ function loadStoreRootHelper() {
 
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
-      return require(candidate);
+      const mod = await import(pathToFileURL(candidate));
+      return mod.default || mod;
     }
   }
 
   throw new Error(`store-root-helper-missing: tried ${candidates.join(", ")}`);
 }
 
-const { resolveStoreRoot } = loadStoreRootHelper();
+const resolveStoreRootMod = await loadStoreRootHelper();
+const resolveStoreRoot = resolveStoreRootMod.resolveStoreRoot || resolveStoreRootMod;
 
 const STORE_ROOT = resolveStoreRoot(); // e.g. "E:\\.ai-memory"
 const AI_MEMORY_ROOT = STORE_ROOT;
@@ -294,9 +297,31 @@ function main() {
   );
 }
 
-// Only run main() when executed directly (not when required as a module in tests).
+// Exports for testing
+export {
+  normalizeSpaces,
+  toTimestamp,
+  trimText,
+  isInteresting,
+  formatRecordLine,
+  selectUnique,
+  matchesAny,
+  buildPack,
+  renderMarkdown,
+  HANDOFF_JSON_PATH,
+  HANDOFF_MD_PATH,
+  STORE_ROOT,
+  AI_MEMORY_ROOT,
+  STRUCTURED_ROOT,
+  GENERATED_ROOT,
+};
+
+// Only run main() when executed directly (not when imported as a module in tests).
 // Guard against E:\ drive not existing on CI runners.
-if (require.main === module) {
+const __filename = fileURLToPath(import.meta.url);
+const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === __filename;
+
+if (isDirectRun) {
   try {
     main();
   } catch (err) {

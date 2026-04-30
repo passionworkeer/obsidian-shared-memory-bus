@@ -1,16 +1,16 @@
-// generate-embeddings.js
-// Incrementally rebuilds the shared dense index from structured/*.jsonl.
+import { spawn, spawnSync } from "child_process";
+import crypto from "crypto";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import { createEmbeddingProviderRegistry, getProviderHost, buildEmbeddingConfigHash, normalizeEmbeddingAdapter } from "./embedding-provider-registry.js";
+import { resolvePythonRuntime, withPythonArgs } from "./python-runtime.js";
+import { resolveEmbeddingRuntime } from "./runtime-config.js";
+import { resolveVaultRoot } from "./vault-root.js";
+import { VECTOR_SCHEMA_VERSION, fnv1a32, buildHashFeatures, buildHashEmbedding } from "./lsh-hash.js";
+import { createJsonlStream } from "../ops/util/jsonl-stream.js";
 
-const { spawn, spawnSync } = require("child_process");
-const crypto = require("crypto");
-const fs = require("fs");
-const path = require("path");
-const { createEmbeddingProviderRegistry, getProviderHost, buildEmbeddingConfigHash, normalizeEmbeddingAdapter } = require("./embedding-provider-registry.js");
-const { resolvePythonRuntime, withPythonArgs } = require("./python-runtime.js");
-const { resolveEmbeddingRuntime } = require("./runtime-config.js");
-const { resolveVaultRoot } = require("./vault-root.js");
-const { VECTOR_SCHEMA_VERSION, fnv1a32, buildHashFeatures, buildHashEmbedding } = require("./lsh-hash.js");
-const { createJsonlStream } = require("../ops/util/jsonl-stream.js");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WINDOWS_ENV_CACHE = new Map();
 
 hydrateProcessEnvFromWindows([
@@ -742,8 +742,19 @@ async function main() {
   }
 }
 
-// Only run when executed as CLI (not when required as a module in tests).
-if (require.main === module) {
+export {
+  normalizeSpaces,
+  buildEmbeddingConfigHash,
+  isNoise,
+  fallbackId,
+  extractFieldTexts,
+  buildParentSearchText,
+  hashFieldText,
+  fieldTextsUnchanged,
+  buildDocument,
+};
+
+if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch((error) => {
     console.error(error && error.stack ? error.stack : String(error));
     process.exit(1);

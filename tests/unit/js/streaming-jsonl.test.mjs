@@ -15,19 +15,13 @@ import assert from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createRequire } from "module";
+import { fileURLToPath } from "url";
 
-// Use createRequire so we can clear the CJS require cache from within this ESM test file
-const require = createRequire(import.meta.url);
-
-// Clear CJS require cache so we always get the real module (not a patched version from another test)
-const jsonlPath = require.resolve("../../../ops/util/jsonl-stream.js");
-delete require.cache[jsonlPath];
-
-// ESM bridge: import CommonJS module via file URL (reliable relative resolution)
+// ESM import: import the module using file URL
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const jsonlModule = await import(
   new URL("../../../ops/util/jsonl-stream.js", import.meta.url).href
-).then((m) => m.default || m);
+);
 const { createJsonlStream, createJsonlBatcher } = jsonlModule;
 
 // ---------------------------------------------------------------------------

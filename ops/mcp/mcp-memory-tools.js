@@ -1,4 +1,3 @@
-"use strict";
 
 /**
  * Shared memory MCP helpers backed by the local .ai-memory store.
@@ -10,11 +9,15 @@
  * CLI output is always JSON.
  */
 
-const fs = require("node:fs");
-const path = require("node:path");
-const crypto = require("node:crypto");
+import fs from "node:fs";
+import path from "node:path";
+import crypto from "node:crypto";
+import { fileURLToPath } from "url";
+import { pathToFileURL } from "url";
 
-function loadHelper(relativeParts) {
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+async function loadHelper(relativeParts) {
   const candidates = [
     path.join(__dirname, "..", "..", ...relativeParts),
     path.join(__dirname, "..", ...relativeParts),
@@ -22,7 +25,8 @@ function loadHelper(relativeParts) {
   ];
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
-      return require(candidate);
+      const mod = await import(pathToFileURL(candidate));
+      return mod.default || mod;
     }
   }
   return null;
@@ -36,8 +40,8 @@ function loadBm25Helper() {
   return loadHelper(["bus", "bm25.js"]);
 }
 
-function resolveStoreHelpers() {
-  const helper = loadStoreRootHelper();
+async function resolveStoreHelpers() {
+  const helper = await loadStoreRootHelper();
   if (helper) {
     return helper;
   }
@@ -55,10 +59,9 @@ function resolveStoreHelpers() {
   };
 }
 
-const {
-  DEFAULT_STORE_ROOT,
-  resolveStoreRoot,
-} = resolveStoreHelpers();
+const storeHelpers = await resolveStoreHelpers();
+const DEFAULT_STORE_ROOT = storeHelpers.DEFAULT_STORE_ROOT;
+const resolveStoreRoot = storeHelpers.resolveStoreRoot;
 
 function getProjectsRoot(storeRoot) {
   return path.join(storeRoot || resolveStoreRoot(), "projects");
@@ -67,11 +70,14 @@ function getProjectsRoot(storeRoot) {
 function getContextPath(storeRoot) {
   return path.join(storeRoot || resolveStoreRoot(), "CONTEXT.md");
 }
-const { search: bm25Search } = loadBm25Helper() || {
-  search() {
-    return [];
-  },
-};
+
+async function getBm25Search() {
+  const helper = await loadBm25Helper();
+  return helper ? helper.search : () => [];
+}
+
+const bm25Helper = await loadBm25Helper();
+const bm25Search = bm25Helper ? bm25Helper.search : () => [];
 
 const VALID_SCOPES = new Set(["user", "project", "feedback", "reference"]);
 const VALID_TYPES = new Set(["bugfix", "feature", "refactor", "discovery", "docs", "chore", "note"]);
@@ -321,10 +327,12 @@ function memory_write({ project = "", cwd = "", facts = [] } = {}) {
   };
 }
 
-module.exports = { memory_boot, memory_search, memory_query, memory_write };
+export { memory_boot, memory_search, memory_query, memory_write };
 
-if (require.main === module) {
-  const [, , cmd, ...args] = process.argv;
+// CLI entry point - only runs when executed directly
+async function runCli() {
+  const cmd = process.argv[2];
+  const args = process.argv.slice(3);
 
   function parseArgs(argList) {
     const options = {};
@@ -384,3 +392,9 @@ if (require.main === module) {
     process.exit(1);
   }
 }
+
+// Run CLI if this file is executed directly
+if (import.meta.url === `file://${process.argv[1]}`) {
+  runCli();
+}
+

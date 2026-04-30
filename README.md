@@ -47,51 +47,35 @@
 
 ## 快速开始
 
-### 一键启动
+### 3 步完成配置
 
 ```bash
-# 克隆后直接运行
-node start.js
-```
+# 1. 克隆仓库
+git clone <repo-url>
+cd obsidian-shared-memory-bus
 
-或双击 `start.bat`（Windows 用户）
-
-这将自动启动所有 MCP 服务器：
-- Memory: http://127.0.0.1:9338
-- Obsidian: http://127.0.0.1:9335
-- Fetch: http://127.0.0.1:9332
-- Time: http://127.0.0.1:9333
-
-### 安装依赖（首次）
-
-```bash
+# 2. 安装依赖（首次）
 npm install
+
+# 3. 启动 MCP 服务器（双击 start.bat 或命令行）
+node start.js
+
+# 4. 配置 Claude Code（自动检测并写入配置）
+node setup-mcp.js
 ```
 
-### 配置 Claude Code Hooks（可选）
+重启 Claude Code 即可使用共享记忆系统。
 
-```bash
-.\scripts\setup-hooks.ps1
-```
+### MCP 端点
 
-### 高级启动（PowerShell）
-
-```powershell
-.\scripts\start-all.ps1
-```
-
-### 使用
-
-将 AI 工具连接到共享 MCP 端点：
-
-```
-http://127.0.0.1:9338/mcp   # memory（搜索、记忆引导）
-http://127.0.0.1:9335/mcp   # obsidian（笔记读写）
-http://127.0.0.1:9331/mcp   # context7（文档）
-http://127.0.0.1:9332/mcp   # fetch（网页获取）
-http://127.0.0.1:9333/mcp   # time（时区）
-http://127.0.0.1:9337/mcp   # playwright（浏览器自动化，可选）
-```
+| 服务 | URL |
+|------|-----|
+| Memory | http://127.0.0.1:9338/mcp |
+| Obsidian | http://127.0.0.1:9335/mcp |
+| Fetch | http://127.0.0.1:9332/mcp |
+| Time | http://127.0.0.1:9333/mcp |
+| Context7 | http://127.0.0.1:9331/mcp |
+| Playwright | http://127.0.0.1:9337/mcp |
 
 ---
 

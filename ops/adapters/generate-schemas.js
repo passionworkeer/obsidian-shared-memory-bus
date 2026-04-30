@@ -16,10 +16,11 @@
  * Run with --check to confirm generated output matches the registry.
  */
 
-"use strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "url";
 
-const fs = require("fs");
-const path = require("path");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const REGISTRY_PATH = path.join(__dirname, "schema-registry.json");
 const OUTPUT_DIR = path.join(__dirname, "generated");
@@ -100,7 +101,7 @@ const ALLOWED_TIERS = new Set(${JSON.stringify(tiers, null, 2)});
 const SCHEMA_REGISTRY_VERSION = ${registry.version};
 // SCHEMA_REGISTRY_GENERATED_AT: filled by generate-schemas.js at write time
 
-module.exports = {
+export {
   ALLOWED_DURABLE_TYPES,
   ALLOWED_MEMORY_LEVELS,
   ALLOWED_SCOPES,
@@ -288,7 +289,8 @@ function runCheck() {
 // Main
 // ---------------------------------------------------------------------------
 
-switch (outputMode) {
+function main() {
+  switch (outputMode) {
   case "check":
     runCheck();
     break;
@@ -306,4 +308,7 @@ switch (outputMode) {
   default:
     console.error(`Unknown output mode: ${outputMode}. Use --output node, --output python, or --check.`);
     process.exit(1);
+  }
 }
+
+main();

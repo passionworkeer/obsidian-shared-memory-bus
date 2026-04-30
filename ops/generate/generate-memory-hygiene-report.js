@@ -1,8 +1,8 @@
 "use strict";
 
-const crypto = require("crypto");
-const fs = require("fs");
-const path = require("path");
+import crypto from "crypto";
+import fs from "fs";
+import path from "path";
 
 function loadVaultRootHelper() {
   const candidates = [
@@ -13,20 +13,23 @@ function loadVaultRootHelper() {
 
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
-      return require(candidate);
+      return import(candidate);
     }
   }
 
   throw new Error(`vault-root-helper-missing: tried ${candidates.join(", ")}`);
 }
 
-const { resolveVaultRoot } = loadVaultRootHelper();
+const vaultRootModule = await loadVaultRootHelper();
+const { resolveVaultRoot } = vaultRootModule;
 
 // Reuse the structured layer definitions from memory-contract so we stay in sync
 let STRUCTURED_LAYER_DEFINITIONS;
 let isExpectedDerivedDuplicate;
 try {
-  ({ STRUCTURED_LAYER_DEFINITIONS, isExpectedDerivedDuplicate } = require("../memory/memory-contract.js"));
+  const memoryContractModule = await import("../memory/memory-contract.js");
+  STRUCTURED_LAYER_DEFINITIONS = memoryContractModule.STRUCTURED_LAYER_DEFINITIONS;
+  isExpectedDerivedDuplicate = memoryContractModule.isExpectedDerivedDuplicate;
 } catch (_err) {
   // Inline fallback — used only when memory-contract.js is unavailable
   STRUCTURED_LAYER_DEFINITIONS = [
@@ -454,7 +457,6 @@ function main() {
   }
 
   // Build structured signature (hash of all structured layer files)
-  const crypto = require("crypto");
   function sha1(value) {
     return crypto.createHash("sha1").update(String(value || ""), "utf8").digest("hex");
   }

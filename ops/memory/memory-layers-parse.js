@@ -1,23 +1,17 @@
-"use strict";
-// ---------------------------------------------------------------------------
-// memory-layers-parse.js — Record parsing and file I/O helpers
-// Extracted from ops/build-memory-layers.js (2019 lines)
-// ---------------------------------------------------------------------------
+import crypto from "crypto";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath, pathToFileURL } from "url";
+import { createJsonlStream } from "../util/jsonl-stream.js";
+import { buildGeneratedArtifactMetadata, MEMORY_RECORD_SCHEMA_VERSION } from "./memory-contract.js";
 
-const crypto = require("crypto");
-const fs = require("fs");
-const path = require("path");
-const { createJsonlStream } = require("../util/jsonl-stream.js");
-const {
-  buildGeneratedArtifactMetadata,
-  MEMORY_RECORD_SCHEMA_VERSION,
-} = require("./memory-contract.js");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ---------------------------------------------------------------------------
 // Store root resolution
 // ---------------------------------------------------------------------------
 
-function loadStoreRootHelper() {
+async function loadStoreRootHelper() {
   const candidates = [
     path.join(__dirname, "store-root.js"),
     path.join(__dirname, "..", "..", "bus", "store-root.js"),
@@ -27,14 +21,16 @@ function loadStoreRootHelper() {
 
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
-      return require(candidate);
+      const mod = await import(pathToFileURL(candidate));
+      return mod.default || mod;
     }
   }
 
   throw new Error(`store-root-helper-missing: tried ${candidates.join(", ")}`);
 }
 
-const { resolveStoreRoot } = loadStoreRootHelper();
+const resolveStoreRootMod = await loadStoreRootHelper();
+const resolveStoreRoot = resolveStoreRootMod.resolveStoreRoot || resolveStoreRootMod;
 
 // ---------------------------------------------------------------------------
 // Path constants
@@ -1144,7 +1140,7 @@ function getTargetJsonl(record) {
   return SHARED_INBOX_JSONL;
 }
 
-module.exports = {
+export {
   // I/O
   readJsonl, readText, writeText, ensureDirectory, withFileLock,
   // Parsers
@@ -1173,7 +1169,4 @@ module.exports = {
   NON_PROMOTABLE_PROMOTION_TYPES,
   MEMORY_RECORD_SCHEMA_VERSION,
   buildGeneratedArtifactMetadata,
-  // Aliases for convenience (used by build-memory-layers.js test patch)
-  buildPromotionKey,
-  getFreshness,
 };

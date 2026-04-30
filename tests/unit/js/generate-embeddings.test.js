@@ -1,52 +1,17 @@
-/**
- * Unit tests for generate-embeddings.js pure functions.
- *
- * Uses Module.prototype._compile patching (same pattern as build-memory-layers.test.js)
- * to export internal module-level functions that are not otherwise exported.
- *
- * Run with: node --test tests/unit/js/generate-embeddings.test.js
- */
-"use strict";
+import { describe, test } from "node:test";
+import assert from "node:assert/strict";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "url";
 
-const Module = require("module");
-const path = require("path");
-const fs = require("fs");
+const _thisTestFile = fileURLToPath(import.meta.url);
+const _testDir = path.dirname(_thisTestFile);
+const _projectRoot = path.resolve(_testDir, "../../../");
 
 // ---------------------------------------------------------------------------
-// Patch-inject: intercept require() and append module.exports to the source
+// normalizeSpaces tests
 // ---------------------------------------------------------------------------
 
-const _thisTestFile = __filename; // e.g. E:\...\tests\unit\js\generate-embeddings.test.js
-const _testDir = path.dirname(_thisTestFile); // E:\...\tests\unit\js\
-// bus/ is at project-root/bus/, project-root is 3 levels up from tests/unit/js/
-const _projectRoot = path.resolve(_testDir, "../../../"); // E:\desktop\obsidian-shared-memory-bus
-const GENERATE_EMBEDDINGS_PATH = path.join(_projectRoot, "bus", "generate-embeddings.js");
-const _compilePatches = new Map();
-_compilePatches.set(GENERATE_EMBEDDINGS_PATH, `
-module.exports = {
-  normalizeSpaces,
-  buildEmbeddingConfigHash,
-  normalizeEmbeddingAdapter,
-  isNoise,
-  fallbackId,
-  extractFieldTexts,
-  buildParentSearchText,
-  hashFieldText,
-  fieldTextsUnchanged,
-};
-`);
-
-const _originalCompile = Module.prototype._compile;
-Module.prototype._compile = function _patchedCompile(code, filename) {
-  const patch = _compilePatches.get(filename);
-  if (patch) {
-    _compilePatches.delete(filename);
-    code = code + "\n" + patch;
-  }
-  return _originalCompile.call(this, code, filename);
-};
-delete require.cache[GENERATE_EMBEDDINGS_PATH];
-
+// Import the module directly - functions should be exported
 const {
   normalizeSpaces,
   buildEmbeddingConfigHash,
@@ -56,14 +21,7 @@ const {
   buildParentSearchText,
   hashFieldText,
   fieldTextsUnchanged,
-} = require(GENERATE_EMBEDDINGS_PATH);
-
-// ---------------------------------------------------------------------------
-// normalizeSpaces tests
-// ---------------------------------------------------------------------------
-
-const { test, describe } = require("node:test");
-const assert = require("node:assert/strict");
+} = await import(pathToFileURL(path.join(_projectRoot, "bus", "generate-embeddings.js")));
 
 describe("normalizeSpaces", () => {
   test("normal text: no change", () => {

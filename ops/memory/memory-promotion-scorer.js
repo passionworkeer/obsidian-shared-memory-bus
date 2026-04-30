@@ -1,4 +1,3 @@
-"use strict";
 /**
  * memory-promotion-scorer.js — Conflict-aware promotion scoring for Tier 2→3 and Tier 3→4.
  *
@@ -16,9 +15,9 @@
  *   node ops/memory/memory-promotion-scorer.js [--vault-root <path>] [--dry-run] [--verbose]
  */
 
-const fs   = require("fs");
-const path = require("path");
-const crypto = require("crypto");
+import fs from "fs";
+import path from "path";
+import crypto from "crypto";
 
 // ── CLI args ───────────────────────────────────────────────────────────────────
 

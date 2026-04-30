@@ -1,9 +1,13 @@
-"use strict";
+import test from "node:test";
+import assert from "node:assert/strict";
 
-const test = require("node:test");
-const assert = require("node:assert/strict");
-
-const { VECTOR_SCHEMA_VERSION, normalizeSpaces, fnv1a32, buildHashFeatures, buildHashEmbedding } = require("../../../bus/lsh-hash.js");
+const {
+  VECTOR_SCHEMA_VERSION,
+  normalizeSpaces,
+  fnv1a32,
+  buildHashFeatures,
+  buildHashEmbedding,
+} = await import("../../../bus/lsh-hash.js");
 
 // ---------------------------------------------------------------------------
 // VECTOR_SCHEMA_VERSION

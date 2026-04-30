@@ -1,16 +1,5 @@
-/**
- * Unit tests for shared-mcp/memory-bridge.js pure functions.
- *
- * Pure functions (jsonResult, jsonErrorResult, errorResult, truncateText,
- * firstNonEmpty, describeClaudeMemFailure) are inlined for test isolation.
- * These match the source implementation at memory-bridge.js lines 16-122.
- *
- * Run with: node --test tests/unit/js/memory-bridge.test.js
- */
-"use strict";
-
-const { test, describe } = require("node:test");
-const assert = require("node:assert/strict");
+import { test, describe } from "node:test";
+import assert from "node:assert/strict";
 
 // ---------------------------------------------------------------------------
 // Pure function implementations (mirrored from memory-bridge.js)

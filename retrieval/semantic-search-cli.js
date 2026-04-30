@@ -150,7 +150,7 @@ function formatPayloadText(payload) {
   return lines.join("\n").trimEnd() + "\n";
 }
 
-module.exports = {
+export {
   buildPythonSearchArgs,
   buildUsage,
   formatPayloadText,

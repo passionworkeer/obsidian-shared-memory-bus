@@ -1,12 +1,11 @@
-"use strict";
 // ---------------------------------------------------------------------------
 // memory-layers-dedup.js — Deduplication, JSONL writing, daily append logs
 // Extracted from ops/build-memory-layers.js (2019 lines)
 // ---------------------------------------------------------------------------
 
-const fs = require("fs");
-const path = require("path");
-const {
+import fs from "fs";
+import path from "path";
+import {
   readJsonl,
   writeText,
   ensureDirectory,
@@ -16,7 +15,7 @@ const {
   shouldSkipAsRecentDuplicate,
   normalizeSpaces,
   DAILY_LOG_DIR,
-} = require("./memory-layers-parse.js");
+} from "./memory-layers-parse.js";
 
 // ---------------------------------------------------------------------------
 // JSONL writing
@@ -238,7 +237,7 @@ function appendDailyLogs(newRecords, dryRun = false) {
   }
 }
 
-module.exports = {
+export {
   writeJsonl,
   patchJsonlRecord,
   deduplicateSharedInbox,

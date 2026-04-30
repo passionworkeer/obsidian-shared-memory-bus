@@ -1,8 +1,6 @@
-"use strict";
-
-const path = require("node:path");
-const fs = require("node:fs");
-const { spawn } = require("node:child_process");
+import path from "node:path";
+import fs from "node:fs";
+import { spawn } from "node:child_process";
 
 // ---------------------------------------------------------------------------
 // Derived constants
@@ -142,8 +140,7 @@ function getKgRoot(storeRoot) {
 // ---------------------------------------------------------------------------
 
 function spawnPython(args, options = {}) {
-  const { spawn: nodeSpawn } = require("node:child_process");
-  return nodeSpawn("python3", args, {
+  return spawn("python3", args, {
     ...options,
     env: {
       ...(options.env || process.env),
@@ -240,4 +237,4 @@ function getLinuxAdapter() {
   return _adapter;
 }
 
-module.exports = { getLinuxAdapter };
+export { getLinuxAdapter };
