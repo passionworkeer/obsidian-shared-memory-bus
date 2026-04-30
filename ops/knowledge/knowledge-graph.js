@@ -21,17 +21,19 @@
  *   kg.addTriple('Alice', 'uses', 'MemPalace')
  *   const results = kg.queryEntity('Alice')
  */
-"use strict";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "url";
+import { pathToFileURL } from "url";
 
-const crypto = require("node:crypto");
-const fs = require("node:fs");
-const path = require("node:path");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ---------------------------------------------------------------------------
 // Store root resolution — no Obsidian dependency
 // ---------------------------------------------------------------------------
 
-function loadStoreRootHelper() {
+async function loadStoreRootHelper() {
   const candidates = [
     // bus/ sibling (project layout)
     path.join(__dirname, "..", "..", "bus", "store-root.js"),
@@ -41,26 +43,29 @@ function loadStoreRootHelper() {
     path.join(__dirname, "store-root.js"),
   ];
   for (const c of candidates) {
-    if (fs.existsSync(c)) return require(c);
+    if (fs.existsSync(c)) {
+      const mod = await import(pathToFileURL(c));
+      return mod.default || mod;
+    }
   }
   return null;
 }
 
-function resolveStoreRoot() {
-  const helper = loadStoreRootHelper();
+async function resolveStoreRoot() {
+  const helper = await loadStoreRootHelper();
   if (helper) {
     try {
       return helper.resolveStoreRoot();
     } catch { /* fall through */ }
   }
   // Use DEFAULT_STORE_ROOT from store-root.js to avoid hardcoding
-  const { DEFAULT_STORE_ROOT } = require("./store-root.js");
+  const { DEFAULT_STORE_ROOT } = await import(pathToFileURL(path.join(__dirname, "store-root.js")));
   return process.env.AI_MEMORY_STORE || DEFAULT_STORE_ROOT;
 }
 
 /** @param {string} [storeRoot] @returns {string} KG SQLite database path */
-function resolveKgPath(storeRoot) {
-  const root = storeRoot || resolveStoreRoot();
+async function resolveKgPath(storeRoot) {
+  const root = storeRoot || await resolveStoreRoot();
   return path.join(root, "kg", "knowledge-graph.sqlite3");
 }
 
@@ -104,6 +109,7 @@ class Db {
    */
   constructor(dbPath, readOnly = false) {
     let { DatabaseSync } = require("node:sqlite");
+    // Note: node:sqlite is a built-in module, keep require for sync usage
     this._db = new DatabaseSync(dbPath, { readOnly });
     this._execWithRetry("PRAGMA journal_mode = WAL");
     this._execWithRetry("PRAGMA foreign_keys = ON");
@@ -164,7 +170,7 @@ class KnowledgeGraph {
    */
   constructor(opts = {}) {
     // vaultRoot kept for backward compat but now treated as store root
-    this.dbPath = opts.dbPath || resolveKgPath(opts.storeRoot || opts.vaultRoot);
+    this.dbPath = opts.dbPath || path.join(opts.storeRoot || opts.vaultRoot || "", "kg", "knowledge-graph.sqlite3");
     this._db = null;
     this._initDb();
   }
@@ -789,13 +795,13 @@ class KnowledgeGraph {
 // Exports
 // ---------------------------------------------------------------------------
 
-module.exports = { KnowledgeGraph, entityId, resolveKgPath };
+export { KnowledgeGraph, entityId, resolveKgPath };
 
 // ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
 
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   const [,, action, ...args] = process.argv;
   const vaultRoot = process.env.AI_MEMORY_OBSIDIAN_VAULT || "";
 

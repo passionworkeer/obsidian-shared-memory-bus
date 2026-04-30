@@ -114,7 +114,7 @@ function buildHashEmbedding(text, dimension = 384) {
   return vector;
 }
 
-module.exports = {
+export {
   VECTOR_SCHEMA_VERSION,
   normalizeSpaces,
   fnv1a32,

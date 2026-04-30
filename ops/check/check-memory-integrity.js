@@ -1,5 +1,5 @@
-const fs = require("fs");
-const path = require("path");
+import fs from "node:fs";
+import path from "node:path";
 
 function loadVaultRootHelper() {
   const candidates = [
@@ -16,15 +16,17 @@ function loadVaultRootHelper() {
 
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
-      return require(candidate);
+      return import(candidate);
     }
   }
 
   throw new Error(`vault-root-helper-missing: tried ${candidates.join(", ")}`);
 }
 
-const { resolveVaultRoot } = loadVaultRootHelper();
-const { buildMemoryIntegrityReport } = require("../memory/memory-contract.js");
+const vaultRootModule = await loadVaultRootHelper();
+const { resolveVaultRoot } = vaultRootModule;
+const memoryContractModule = await import("../memory/memory-contract.js");
+const { buildMemoryIntegrityReport } = memoryContractModule;
 
 function parseArgs(argv) {
   return {

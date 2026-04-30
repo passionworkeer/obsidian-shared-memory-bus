@@ -3,7 +3,7 @@
  * Shared cryptographic utilities used across multiple bus modules.
  */
 
-const crypto = require("crypto");
+import crypto from "crypto";
 
 /**
  * Build a short (16-char hex) config hash from embedding backend parameters.
@@ -49,7 +49,7 @@ function normalizeEmbeddingAdapter(value, fallback = "") {
   return normalized;
 }
 
-module.exports = {
+export {
   buildEmbeddingConfigHash,
   normalizeString,
   normalizeEmbeddingAdapter,

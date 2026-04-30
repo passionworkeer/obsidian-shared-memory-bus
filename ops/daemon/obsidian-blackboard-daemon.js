@@ -1,8 +1,12 @@
-const fs = require("fs");
-const path = require("path");
-const { spawnSync } = require("child_process");
+import fs from "node:fs";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { pathToFileURL } from "url";
+import { fileURLToPath } from "url";
 
-function loadPythonRuntimeHelpers() {
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+async function loadPythonRuntimeHelpers() {
   const candidates = [
     path.join(__dirname, "python-runtime.js"),
     path.join(__dirname, "..", "bus", "python-runtime.js"),
@@ -11,14 +15,15 @@ function loadPythonRuntimeHelpers() {
 
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
-      return require(candidate);
+      const mod = await import(pathToFileURL(candidate));
+      return mod.default || mod;
     }
   }
 
   throw new Error(`python-runtime-helper-missing: tried ${candidates.join(", ")}`);
 }
 
-function loadVaultRootHelpers() {
+async function loadVaultRootHelpers() {
   const candidates = [
     path.join(__dirname, "vault-root.js"),
     path.join(__dirname, "..", "bus", "vault-root.js"),
@@ -27,15 +32,18 @@ function loadVaultRootHelpers() {
 
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
-      return require(candidate);
+      const mod = await import(pathToFileURL(candidate));
+      return mod.default || mod;
     }
   }
 
   throw new Error(`vault-root-helper-missing: tried ${candidates.join(", ")}`);
 }
 
-const { resolvePythonRuntime, withPythonArgs } = loadPythonRuntimeHelpers();
-const { resolveVaultRoot } = loadVaultRootHelpers();
+const pythonHelpers = await loadPythonRuntimeHelpers();
+const vaultHelpers = await loadVaultRootHelpers();
+const { resolvePythonRuntime, withPythonArgs } = pythonHelpers;
+const { resolveVaultRoot } = vaultHelpers;
 
 const USER_HOME = process.env.USERPROFILE || process.env.HOME || "";
 const OPENCLAW_HOME = process.env.OPENCLAW_HOME || path.join(USER_HOME, ".openclaw");
@@ -115,21 +123,20 @@ process.on("exit", (code) => {
 
 // --- File-based lock mechanism ---
 
+// Try to load flock at module initialization, fall back gracefully
+let flockModule = null;
+try {
+  flockModule = (await import("flock")).default;
+} catch (_e) {
+  // flock package not available; will use pid-file fallback
+}
+
 function acquireLock(lockPath) {
   const deadline = Date.now() + 5000;
-  let flockAvailable = false;
-  let flock;
 
-  try {
-    flock = require("flock");
-    flockAvailable = true;
-  } catch (_e) {
-    // flock package not available; fall back to pid-file approach
-  }
-
-  if (flockAvailable) {
+  if (flockModule) {
     return new Promise((resolve) => {
-      flock(lockPath, { exclusive: true, wait: 5000 }, (err, release) => {
+      flockModule(lockPath, { exclusive: true, wait: 5000 }, (err, release) => {
         if (err || Date.now() > deadline) {
           console.warn(`[blackboard-daemon] flock lock timed out on ${lockPath}, skipping cycle`);
           resolve(null);
@@ -341,7 +348,7 @@ function renderBlackboard(rows) {
   return lines.join("\n");
 }
 
-function syncDbToMd() {
+async function syncDbToMd() {
   try {
     if (!fs.existsSync(MD_PATH)) {
       return;
@@ -369,7 +376,7 @@ function syncDbToMd() {
     }
 
     const lockPath = MD_PATH + ".lock";
-    const lockHandle = acquireLock(lockPath);
+    const lockHandle = await acquireLock(lockPath);
     if (!lockHandle) {
       console.warn("[blackboard-daemon] syncDbToMd: could not acquire lock, skipping cycle");
       return;
@@ -417,7 +424,7 @@ function extractCheckedTaskIds(content) {
   return [...new Set(taskIds)];
 }
 
-function handleMdChange() {
+async function handleMdChange() {
   if (!fs.existsSync(MD_PATH)) {
     return;
   }
@@ -429,7 +436,7 @@ function handleMdChange() {
   lastMdSignature = currentSignature;
 
   const lockPath = MD_PATH + ".lock";
-  const lockHandle = acquireLock(lockPath);
+  const lockHandle = await acquireLock(lockPath);
   if (!lockHandle) {
     console.warn("[blackboard-daemon] handleMdChange: could not acquire lock, skipping cycle");
     return;

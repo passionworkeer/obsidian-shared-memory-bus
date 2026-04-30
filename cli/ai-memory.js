@@ -4,12 +4,15 @@
  * Usage: ai-memory <command> [options]
  */
 
-"use strict";
+import { spawn } from "child_process";
+import { spawn as spawnNet } from "net";
+import path from "path";
+import fs from "fs";
+import os from "os";
+import crypto from "crypto";
+import { fileURLToPath } from "url";
 
-const { spawn } = require("child_process");
-const path = require("path");
-const fs = require("fs");
-const os = require("os");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ---------------------------------------------------------------------------
 // Environment & paths
@@ -622,7 +625,7 @@ async function runDoctorChecks() {
 
   try {
     const python = await new Promise((resolve) => {
-      const child = require("child_process").spawn(
+      const child = spawn(
         "python",
         ["--version"],
         { shell: true, windowsHide: true }
@@ -655,7 +658,7 @@ async function runDoctorChecks() {
 
   try {
     const pwsh = await new Promise((resolve) => {
-      const child = require("child_process").spawn(
+      const child = spawn(
         "pwsh",
         ["--version"],
         { shell: true, windowsHide: true }
@@ -710,8 +713,7 @@ async function runDoctorChecks() {
   const criticalPorts = [9331, 9332, 9333, 9334, 9335, 9338];
   for (const port of criticalPorts) {
     const inUse = await new Promise((resolve) => {
-      const net = require("net");
-      const server = net.createServer();
+      const server = spawnNet();
       server.once("error", () => { resolve(true); });
       server.once("listening", () => { server.close(); resolve(false); });
       server.listen(port, "127.0.0.1");

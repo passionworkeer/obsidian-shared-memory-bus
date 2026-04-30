@@ -7,23 +7,30 @@
  *   node entity-backfill.js                          # process all structured files
  *   node entity-backfill.js shared-inbox.jsonl      # process one file
  */
-"use strict";
+import fs from "node:fs";
+import path from "node:path";
+import { pathToFileURL } from "url";
+import { fileURLToPath } from "url";
 
-const fs = require("fs");
-const path = require("path");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Load helpers from build-memory-layers.js
-function loadVaultRootHelper() {
+async function loadVaultRootHelper() {
   const candidates = [
     path.join(__dirname, "vault-root.js"),
     path.join(__dirname, "..", "bus", "vault-root.js"),
   ];
   for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) return require(candidate);
+    if (fs.existsSync(candidate)) {
+      const mod = await import(pathToFileURL(candidate));
+      return mod.default || mod;
+    }
   }
   throw new Error("vault-root-helper-missing");
 }
-const { resolveVaultRoot } = loadVaultRootHelper();
+
+const _vaultRootHelper = await loadVaultRootHelper();
+const { resolveVaultRoot } = _vaultRootHelper;
 
 const VAULT_ROOT = resolveVaultRoot();
 const AI_MEMORY_ROOT = path.join(VAULT_ROOT, "00-System", "ai-memory");
@@ -38,12 +45,18 @@ const DEFAULT_FILES = [
   "task-memory.jsonl",
 ];
 
-const entityExtractor = (() => {
-  try { return require("./entity-extractor.js"); } catch { return { extractFromRecord: r => r }; }
+const entityExtractor = (async () => {
+  try {
+    const mod = await import("./entity-extractor.js");
+    return mod.entityExtractor || mod.default || { extractFromRecord: r => r };
+  } catch { return { extractFromRecord: r => r }; }
 })();
 
-const KnowledgeGraph = (() => {
-  try { return require("./knowledge-graph.js").KnowledgeGraph; } catch { return null; }
+const KnowledgeGraph = (async () => {
+  try {
+    const mod = await import("./knowledge-graph.js");
+    return mod.KnowledgeGraph || null;
+  } catch { return null; }
 })();
 
 /**
@@ -165,4 +178,4 @@ function main() {
   console.log(`\nTotal: ${totals.processed} processed, ${totals.enriched} enriched, ${totals.errors} errors`);
 }
 
-if (require.main === module) main();
+if (import.meta.url === `file://${process.argv[1]}`) main();

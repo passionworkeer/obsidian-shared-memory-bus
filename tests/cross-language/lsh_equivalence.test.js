@@ -5,12 +5,14 @@
  * produce identical outputs for the FNV-1a32 LSH feature extraction algorithm.
  */
 
-"use strict";
+import { test, describe } from "node:test";
+import assert from "node:assert/strict";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "url";
+import { pathToFileURL } from "url";
 
-const { test, describe } = require("node:test");
-const assert = require("node:assert");
-const path = require("path");
-const { spawnSync } = require("child_process");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Load the JS implementation directly
 const {
@@ -18,7 +20,7 @@ const {
   fnv1a32,
   buildHashFeatures,
   buildHashEmbedding,
-} = require("../../bus/lsh-hash.js");
+} = await import(pathToFileURL(path.join(PROJECT_ROOT, "bus/lsh-hash.js")));
 
 // Python retrieval module path (forward slashes for cross-platform compatibility)
 const PYTHON_MODULE_PATH = "E:/desktop/obsidian-shared-memory-bus/retrieval";

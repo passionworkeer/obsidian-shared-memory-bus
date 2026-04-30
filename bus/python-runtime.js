@@ -1,6 +1,9 @@
-const fs = require("fs");
-const path = require("path");
-const { spawnSync } = require("child_process");
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import { spawnSync } from "child_process";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const IS_WINDOWS = process.platform === "win32";
 const IS_MACOS = process.platform === "darwin";
@@ -211,7 +214,7 @@ function withPythonArgs(runtime, args) {
   return [...(runtime.argsPrefix || []), ...(Array.isArray(args) ? args : [])];
 }
 
-module.exports = {
+export {
   resolvePythonRuntime,
   withPythonArgs,
 };

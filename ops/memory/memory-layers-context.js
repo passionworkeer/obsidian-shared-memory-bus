@@ -1,11 +1,10 @@
-"use strict";
 // ---------------------------------------------------------------------------
 // memory-layers-context.js — Global context and layer summary generation
 // Extracted from ops/build-memory-layers.js (2019 lines)
 // ---------------------------------------------------------------------------
 
-const fs = require("fs");
-const path = require("path");
+import fs from "fs";
+import path from "path";
 const {
   normalizeSpaces,
   sha256,
@@ -22,7 +21,7 @@ const {
   DURABLE_SCOPES,
   MIN_PROMOTION_CONFIDENCE,
   NON_PROMOTABLE_PROMOTION_TYPES,
-} = require("./memory-layers-parse.js");
+} = await import("./memory-layers-parse.js");
 
 // ---------------------------------------------------------------------------
 // Re-export path constants from parse module (no duplication)
@@ -588,15 +587,13 @@ function buildLayerSummary(layers) {
 // @include directive resolver (shared)
 // ---------------------------------------------------------------------------
 
-const {
-  resolveIncludes: resolveIncludesParse,
-} = require("./memory-layers-parse.js");
+import { resolveIncludes as resolveIncludesParse } from "./memory-layers-parse.js";
 
 function resolveIncludes(content, baseDir, maxDepth = 5, currentDepth = 0) {
   return resolveIncludesParse(content, baseDir, maxDepth, currentDepth);
 }
 
-module.exports = {
+export {
   // Config constants
   CONTEXT_LIMITS,
   TIER_BUDGET_LIMITS,

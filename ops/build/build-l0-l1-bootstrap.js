@@ -1,12 +1,13 @@
-"use strict"
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "url";
 
-const fs = require("node:fs")
-const path = require("node:path")
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ---------------------------------------------------------------------------
 // Store root resolution — no Obsidian dependency
 // ---------------------------------------------------------------------------
-function loadStoreRootHelper() {
+async function loadStoreRootHelper() {
   const candidates = [
     // bus/ sibling (project layout: ops/ and bus/ are siblings under project root)
     path.join(__dirname, "..", "..", "bus", "store-root.js"),
@@ -14,21 +15,24 @@ function loadStoreRootHelper() {
     path.join(__dirname, "..", "bus", "store-root.js"),
     // Script-local (installed flat layout: ~/.ai-memory/ops/)
     path.join(__dirname, "store-root.js"),
-  ]
+  ];
   for (const c of candidates) {
-    if (fs.existsSync(c)) return require(c)
+    if (fs.existsSync(c)) {
+      const mod = await import(pathToFileURL(c));
+      return mod.default || mod;
+    }
   }
-  return null
+  return null;
 }
 
-function resolveStoreRoot() {
-  const helper = loadStoreRootHelper()
+async function resolveStoreRoot() {
+  const helper = await loadStoreRootHelper();
   if (helper) {
-    try { return helper.resolveStoreRoot() } catch { /* fall through */ }
+    try { return helper.resolveStoreRoot(); } catch { /* fall through */ }
   }
   // Use DEFAULT_STORE_ROOT from store-root.js to avoid hardcoding
-  const { DEFAULT_STORE_ROOT } = require("./store-root.js")
-  return process.env.AI_MEMORY_STORE || DEFAULT_STORE_ROOT
+  const { DEFAULT_STORE_ROOT } = await import(pathToFileURL(path.join(__dirname, "..", "..", "bus", "store-root.js")));
+  return process.env.AI_MEMORY_STORE || DEFAULT_STORE_ROOT;
 }
 
 // ---------------------------------------------------------------------------
@@ -38,8 +42,8 @@ function resolveStoreRoot() {
  * @param {string} cwd  — project working directory (default: process.cwd())
  * @returns {{ project_key: string, storeRoot: string, l0BootstrapPath: string }}
  */
-function buildL0L1Bootstrap(cwd) {
-  const storeRoot = resolveStoreRoot()
+async function buildL0L1Bootstrap(cwd) {
+  const storeRoot = await resolveStoreRoot();
   const project_key = cwd ? path.basename(cwd) : ""
 
   const L0_FIXED = path.join(storeRoot, "L0-fixed.md")
@@ -55,8 +59,8 @@ function buildL0L1Bootstrap(cwd) {
   let l1Count = 0
   if (project_key) {
     try {
-      const { KnowledgeGraph } = require("./knowledge-graph.js")
-      const kg = new KnowledgeGraph({ storeRoot })
+      const { KnowledgeGraph } = await import(pathToFileURL(path.join(__dirname, "knowledge-graph.js")));
+      const kg = new KnowledgeGraph({ storeRoot });
       const triples = typeof kg.queryCurrentTriples === "function"
         ? kg.queryCurrentTriples({ limit: 20 })
         : []
@@ -111,15 +115,18 @@ function buildL0L1Bootstrap(cwd) {
 // ---------------------------------------------------------------------------
 // CLI entry point
 // ---------------------------------------------------------------------------
-if (require.main === module) {
-  const cwd = process.argv[2] || process.cwd()
+const __filename = fileURLToPath(import.meta.url);
+const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === __filename;
+
+if (isDirectRun) {
+  const cwd = process.argv[2] || process.cwd();
   try {
-    const result = buildL0L1Bootstrap(cwd)
-    console.log(JSON.stringify({ ok: true, ...result }))
+    const result = await buildL0L1Bootstrap(cwd);
+    console.log(JSON.stringify({ ok: true, ...result }));
   } catch (e) {
-    console.error(JSON.stringify({ ok: false, error: e.message }))
-    process.exit(1)
+    console.error(JSON.stringify({ ok: false, error: e.message }));
+    process.exit(1);
   }
 }
 
-module.exports = { buildL0L1Bootstrap }
+export { buildL0L1Bootstrap };
