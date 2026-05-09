@@ -234,40 +234,6 @@ test("platform.spawnPython returns a ChildProcess (signature check only)", () =>
 });
 
 // ---------------------------------------------------------------------------
-// resolveVaultRoot
-// ---------------------------------------------------------------------------
-
-test("platform.resolveVaultRoot is a function", () => {
-  assert.strictEqual(typeof platform.resolveVaultRoot, "function");
-});
-
-test("platform.resolveVaultRoot() does not throw", () => {
-  // May return empty string on a fresh system — that's fine
-  // It must not throw for this test
-  try {
-    const result = platform.resolveVaultRoot();
-    assert.ok(typeof result === "string", "resolveVaultRoot should return a string");
-  } catch (err) {
-    // Some environments may not have a vault — that's acceptable
-    assert.ok(
-      err.message.includes("no-obsidian-vault") || err.message.includes("ENOENT"),
-      `Unexpected error: ${err.message}`
-    );
-  }
-});
-
-test("platform.resolveVaultRoot({ refresh: true }) does not throw", () => {
-  try {
-    platform.resolveVaultRoot({ refresh: true });
-  } catch (err) {
-    assert.ok(
-      err.message.includes("no-obsidian-vault") || err.message.includes("ENOENT"),
-      `Unexpected error: ${err.message}`
-    );
-  }
-});
-
-// ---------------------------------------------------------------------------
 // resolveStoreRoot
 // ---------------------------------------------------------------------------
 
@@ -356,7 +322,6 @@ const REQUIRED_INTERFACE_KEYS = [
   "watchdog",
   "makeWatchdogScript",
   "spawnPython",
-  "resolveVaultRoot",
   "resolveStoreRoot",
   "getInboxRoot",
   "getGeneratedRoot",

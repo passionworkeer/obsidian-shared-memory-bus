@@ -242,10 +242,8 @@ function spawnPython(args, options = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// resolveVaultRoot — mirrors the logic from bus/vault-root.js
+// Utility: isDirectory
 // ---------------------------------------------------------------------------
-
-let cachedVaultRoot = null;
 
 function isDirectory(candidate) {
   if (!candidate) return false;
@@ -256,85 +254,31 @@ function isDirectory(candidate) {
   }
 }
 
-function getObsidianConfigCandidates() {
-  const candidates = [];
-  if (APP_DATA) {
-    candidates.push(path.join(APP_DATA, "obsidian", "obsidian.json"));
-  }
-  candidates.push(path.join(LOCAL_APPDATA, "obsidian", "obsidian.json"));
-  candidates.push(path.join(USER_HOME, "AppData", "Roaming", "obsidian", "obsidian.json"));
-  return [...new Set(candidates)];
-}
+// ---------------------------------------------------------------------------
+// Default store candidates (non-Obsidian)
+// ---------------------------------------------------------------------------
 
-function resolveFromObsidianConfig() {
-  for (const configPath of getObsidianConfigCandidates()) {
-    if (!fs.existsSync(configPath)) continue;
-    try {
-      const payload = JSON.parse(fs.readFileSync(configPath, "utf8"));
-      const vaults = Object.values(payload?.vaults || {})
-        .map((entry) => ({
-          path: String(entry?.path || "").trim(),
-          open: Boolean(entry?.open),
-          ts: Number(entry?.ts || 0),
-        }))
-        .filter((entry) => isDirectory(entry.path))
-        .map((entry) => ({ ...entry, path: path.resolve(entry.path) }));
-
-      if (vaults.length === 0) continue;
-
-      const byRecent = [...vaults].sort((l, r) => r.ts - l.ts);
-      const openVault = byRecent.find((e) => e.open);
-      return openVault ? openVault.path : byRecent[0].path;
-    } catch (_err) {
-      // Malformed config — skip
-    }
-  }
-  return "";
-}
-
-function getDefaultVaultCandidates() {
+function getDefaultStoreCandidates() {
   return [
-    path.join(USER_HOME, "Obsidian Vault"),
-    path.join(USER_HOME, "Documents", "Obsidian Vault"),
-    path.join(USER_HOME, "Desktop", "Obsidian Vault"),
     "E:\\Obsidian Vault",
     "D:\\Obsidian Vault",
   ];
 }
 
+// ---------------------------------------------------------------------------
+// resolveVaultRoot — DEPRECATED: alias for resolveStoreRoot
+// ---------------------------------------------------------------------------
+
+/**
+ * @deprecated Use resolveStoreRoot() instead. resolveVaultRoot is kept for
+ * backward compatibility only and will be removed in a future version.
+ */
 function resolveVaultRoot(options = {}) {
-  if (cachedVaultRoot && !options.refresh) {
-    return cachedVaultRoot;
-  }
-
-  for (const envKey of ["AI_MEMORY_STORE", "AI_MEMORY_STORE_ROOT", "AI_MEMORY_OBSIDIAN_VAULT", "OBSIDIAN_VAULT_ROOT"]) {
-    const candidate = String(process.env[envKey] || "").trim();
-    if (isDirectory(candidate)) {
-      cachedVaultRoot = path.resolve(candidate);
-      return cachedVaultRoot;
-    }
-  }
-
-  const obsidianVault = resolveFromObsidianConfig();
-  if (obsidianVault) {
-    cachedVaultRoot = obsidianVault;
-    return cachedVaultRoot;
-  }
-
-  const fallback = getDefaultVaultCandidates().find((c) => isDirectory(c));
-  if (fallback) {
-    cachedVaultRoot = path.resolve(fallback);
-    return cachedVaultRoot;
-  }
-
-  throw Object.assign(
-    new Error("no-obsidian-vault: Set AI_MEMORY_OBSIDIAN_VAULT or OBSIDIAN_VAULT_ROOT, or open/create an Obsidian vault first."),
-    { code: "ENOENT" }
-  );
+  return resolveStoreRoot(options);
 }
 
 // ---------------------------------------------------------------------------
-// Store root resolution (mirrors bus/store-root.js but via this adapter)
+// Store root resolution
 // ---------------------------------------------------------------------------
 
 const MIN_FREE_SPACE_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB
@@ -442,6 +386,7 @@ function getWindowsAdapter() {
     spawnPython,
     resolveVaultRoot,
     resolveStoreRoot,
+    getDefaultStoreCandidates,
     getInboxRoot,
     getGeneratedRoot,
     getKgRoot,

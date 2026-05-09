@@ -130,14 +130,14 @@ Runs a consolidation pass over durable, session, and task layers to produce a cl
 It now also builds a typed durable promotion and refresh queue, so downstream writeback can see `sourceLayer`, `sourceScope`, `targetScope`, `sourceKind`, `sourceRecordId`, and the recorded promotion reason instead of relying on untyped "newer than baseline" guesses.
 It should run after both `MEMORY-LAYERS` and `HANDOFF` so all generated outputs share the same `sourceStructuredSignature`.
 
-### `ops/run-obsidian-mcp.ps1`
-Finds the active Obsidian vault and launches the Obsidian MCP server from the bundle-local or global `mcpvault` install.
+### `ops/run-memory-mcp.ps1`
+Launches the optional memory MCP server using environment-provided configuration.
 
 ### `ops/run-minimax-mcp.ps1`
 Starts the optional MiniMax MCP using environment-provided secrets and either an auto-detected executable or `MINIMAX_MCP_COMMAND`.
 
 ### `shared-mcp/start-default-shared-mcp.ps1`
-Starts the default shared MCP set: `context7`, `fetch`, `time`, `sequential-thinking`, `obsidian`, `memory`, `playwright`, and `MiniMax` when its environment is configured.
+Starts the default shared MCP set: `context7`, `fetch`, `time`, `sequential-thinking`, `memory`, `playwright`, and `MiniMax` when its environment is configured.
 
 ### `shared-mcp/start-shared-mcp.ps1`
 Starts or adopts shared singleton MCP listeners from `shared-mcp/manifest.json`.
@@ -256,7 +256,7 @@ See [`docs/DEPLOYMENT-MATRIX.md`](DEPLOYMENT-MATRIX.md) for recommended operatin
 | `shared-mcp/omni-memory-server.js` | Shared `memory` MCP server: HTTP transport, tool dispatch, retrieval worker management |
 | `bus/generate-embeddings.js` | Embeddings generation: reads structured JSONL, calls embedding provider, writes index |
 | `ops/build-memory-layers.js` | Reads structured/*.jsonl, builds layered MEMORY-LAYERS snapshot, stamps promotion metadata |
-| `ops/sync-openclaw-to-obsidian.js` | Ingests OpenClaw sessions/runs/jobs/blackboard → structured JSONL |
+| `ops/sync-openclaw.js` | Ingests OpenClaw sessions/runs/jobs/blackboard → structured JSONL |
 
 ### Python Files
 | File | Responsibility |

@@ -159,8 +159,8 @@ pwsh --version    # 7+
 ### Step 1 — Get the Repository / 第一步 — 获取仓库
 
 ```bash
-git clone https://github.com/your-org/obsidian-shared-memory-bus.git
-cd obsidian-shared-memory-bus
+git clone https://github.com/your-org/local-ai-memory-bus.git
+cd local-ai-memory-bus
 ```
 
 ### Step 2 — Run the Installer / 第二步 — 运行安装程序

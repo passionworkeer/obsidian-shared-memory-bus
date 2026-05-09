@@ -132,7 +132,7 @@ Returns a compact layered wake-up context for session bootstrap. Combines identi
     { "content": "User prefers Chinese responses", "source": "..." }
   ],
   "essential": [
-    { "content": "Current project: obsidian-shared-memory-bus", "source": "..." }
+    { "content": "Current project: local-ai-memory-bus", "source": "..." }
   ],
   "recent": [
     { "content": "Added cross-platform docs", "source": "..." }

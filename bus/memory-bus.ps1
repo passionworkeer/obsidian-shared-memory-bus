@@ -29,16 +29,6 @@ if (-not $helperPath) {
 
 . $helperPath
 
-function Resolve-ObsidianVaultRoot {
-    param([AllowEmptyString()][string]$FallbackPath = "")
-
-    return (Resolve-SharedObsidianVaultRoot -FallbackPath $FallbackPath)
-}
-
-$Script:UserHome = Get-SharedUserHome
-$Script:BusHome = if (-not [string]::IsNullOrWhiteSpace($env:AI_MEMORY_ROOT)) { $env:AI_MEMORY_ROOT } else { $PSScriptRoot }
-$Script:BundleHome = Split-Path -Parent $PSScriptRoot
-
 function Resolve-BusScriptPath {
     param([Parameter(Mandatory = $true)][string[]]$Candidates)
 
@@ -58,8 +48,10 @@ function Resolve-BusScriptPath {
     return (Join-Path $Script:BusHome $Candidates[0])
 }
 
-$Script:LegacyVaultRoot = Join-SharedPath @($Script:UserHome, "Documents", "Obsidian Vault")
-$Script:VaultRoot = Resolve-ObsidianVaultRoot -FallbackPath $Script:LegacyVaultRoot
+$Script:UserHome = Get-SharedUserHome
+$Script:BusHome = if (-not [string]::IsNullOrWhiteSpace($env:AI_MEMORY_ROOT)) { $env:AI_MEMORY_ROOT } else { $PSScriptRoot }
+$Script:BundleHome = Split-Path -Parent $PSScriptRoot
+$Script:VaultRoot = Resolve-SharedStoreRoot -FallbackPath (Join-SharedPath @($Script:UserHome, "Documents", "Obsidian Vault"))
 $Script:ClaudeMemoryRoot = Join-SharedPath @($Script:BusHome, ".ai-memory")
 $Script:BusRoot = if ((Test-Path (Join-Path $Script:ClaudeMemoryRoot "structured"))) {
     $Script:ClaudeMemoryRoot

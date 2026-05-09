@@ -28,10 +28,10 @@ if (-not (Test-Path "$WorkspaceRoot\.git")) {
     }
 }
 
-$vaultRoot = if ($env:AI_MEMORY_OBSIDIAN_VAULT) { $env:AI_MEMORY_OBSIDIAN_VAULT } elseif ($env:OBSIDIAN_VAULT_ROOT) { $env:OBSIDIAN_VAULT_ROOT } else { $null }
-if (-not $vaultRoot) { exit 0 }  # no vault, skip silently
+$storeRoot = if ($env:AI_MEMORY_STORE) { $env:AI_MEMORY_STORE } elseif ($env:AI_MEMORY_OBSIDIAN_VAULT) { $env:AI_MEMORY_OBSIDIAN_VAULT } else { $null }
+if (-not $storeRoot) { exit 0 }  # no store, skip silently
 
-$structDir = Join-Path $vaultRoot "00-System\ai-memory\structured"
+$structDir = Join-Path $storeRoot "structured"
 
 # ── Step 1: Detect active agent ────────────────────────────────────────────
 function Get-ActiveAgent {
@@ -74,7 +74,7 @@ $registration | Out-File -FilePath $regFile -Append -Encoding UTF8 -ErrorAction 
 # ── Step 3: Fast inbox cleanup (smoke mode — 30d+ only) ────────────────
 $cleanupScript = Join-Path $WorkspaceRoot "ops\cleanup-inbox.ps1"
 if (Test-Path $cleanupScript) {
-    $null = Start-Process -FilePath "pwsh" -ArgumentList "-NoProfile","-ExecutionPolicy","Bypass","-File",$cleanupScript,"-VaultRoot",$vaultRoot,"-SmokeMode" -WindowStyle Hidden -PassThru -ErrorAction SilentlyContinue
+    $null = Start-Process -FilePath "pwsh" -ArgumentList "-NoProfile","-ExecutionPolicy","Bypass","-File",$cleanupScript,"-StoreRoot",$storeRoot,"-SmokeMode" -WindowStyle Hidden -PassThru -ErrorAction SilentlyContinue
 }
 
 # Always exit 0 — non-blocking

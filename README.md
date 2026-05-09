@@ -1,8 +1,8 @@
-# Shared AI Memory Bus
+# Local AI Memory Bus
 
-> 让多个 AI 工具共享一个记忆系统，不再重复解释上下文
+> 让多个 AI 工具共享一个本地记忆系统，不再重复解释上下文
 
-[![Test CI](https://github.com/passionworkeer/obsidian-shared-memory-bus/actions/workflows/test.yml/badge.svg)](https://github.com/passionworkeer/obsidian-shared-memory-bus/actions/workflows/test.yml)
+[![Test CI](https://github.com/passionworkeer/local-ai-memory-bus/actions/workflows/test.yml/badge.svg)](https://github.com/passionworkeer/local-ai-memory-bus/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js >=18](https://img.shields.io/badge/Node.js-%3E%3D18-brightgreen)](https://nodejs.org)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-orange)](https://python.org)
@@ -14,7 +14,7 @@
 
 如果你同时使用多个 AI 编程工具（Claude Code、Codex、Cursor、Copilot 等），每个工具都有自己独立的记忆，互不共享。
 
-**解决方案**：让所有 AI 工具共享同一个本地记忆后端（基于 Obsidian），不再重复解释上下文。
+**解决方案**：让所有 AI 工具共享同一个本地记忆后端，不再重复解释上下文。
 
 ---
 
@@ -52,7 +52,7 @@
 ```bash
 # 1. 克隆仓库
 git clone <repo-url>
-cd obsidian-shared-memory-bus
+cd local-ai-memory-bus
 
 # 2. 安装依赖（首次）
 npm install
@@ -71,7 +71,6 @@ node setup-mcp.js
 | 服务 | URL |
 |------|-----|
 | Memory | http://127.0.0.1:9338/mcp |
-| Obsidian | http://127.0.0.1:9335/mcp |
 | Fetch | http://127.0.0.1:9332/mcp |
 | Time | http://127.0.0.1:9333/mcp |
 | Context7 | http://127.0.0.1:9331/mcp |
@@ -90,7 +89,7 @@ node setup-mcp.js
                           ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    Shared MCP Layer                          │
-│  memory:9338  │  obsidian:9335  │  context7/fetch/time     │
+│  memory:9338  │  context7/fetch/time  │  playwright:9337     │
 └─────────────────────────┬───────────────────────────────────┘
                           │
                           ▼
@@ -141,7 +140,7 @@ node setup-mcp.js
 ## 项目结构
 
 ```
-obsidian-shared-memory-bus/
+local-ai-memory-bus/
 ├── bus/                    # 核心运行时
 │   ├── memory-bus.ps1       # 主内存总线
 │   ├── memory-watchdog.ps1  # 后台观察者
@@ -182,7 +181,6 @@ obsidian-shared-memory-bus/
 | `AI_MEMORY_STORE` | `{AI_MEMORY_ROOT}/.ai-memory` | 存储目录 |
 | `AI_MEMORY_EMBED_ADAPTER` | `hash` | 向量嵌入适配器 |
 | `AI_MEMORY_EMBED_MODEL` | `hashing-v1` | 嵌入模型 |
-| `OBSIDIAN_VAULT_ROOT` | 自动检测 | Obsidian 库路径 |
 
 ### 向量嵌入选项
 

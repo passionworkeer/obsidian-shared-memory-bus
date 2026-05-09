@@ -72,7 +72,6 @@ Writeback rules:
 
 Retrieval defaults:
 - Prefer the shared `memory` MCP for fuzzy cross-tool recall and historical search; use hybrid retrieval when available.
-- Use the Obsidian MCP for direct note lookup, exact reads, and writeback.
 "@.Trim() + "`n"
 }
 
@@ -91,12 +90,11 @@ function Sync-ManagedEntrypoints {
     $copilotStartupPath = Join-Path $Script:StartupRoot "copilot.md"
 
 $vaultAgents = @"
-# Obsidian Vault AI Collaboration Entry
+# Shared Memory Bus AI Collaboration Entry
 
-This vault is the canonical shared memory source for Claude Code, Codex, Trae, OpenClaw, OpenCode, GitHub Copilot, and newly onboarded agents.
+This store is the canonical shared memory source for Claude Code, Codex, Trae, OpenClaw, OpenCode, GitHub Copilot, and newly onboarded agents.
 
 ## Canonical Files
-- 02-KB/OBSIDIAN.md: vault collaboration rules
 - 02-KB/MEMORY.md: durable cross-session memory
 - 02-KB/WORKING.md: current active work
 - 00-System/ai-memory/generated/GLOBAL-CONTEXT.md: generated cross-tool context
@@ -108,7 +106,6 @@ This vault is the canonical shared memory source for Claude Code, Codex, Trae, O
 - 00-System/ai-memory/events/*.jsonl is the append-only event log
 
 ## Rules
-- Prefer the Obsidian MCP server for reads and writes when available
 - Write stable, reusable facts into the appropriate tool inbox
 - Keep WORKING.md focused on active work, not every transient thought
 - Never store secrets, raw tokens, credentials, or private keys
@@ -118,46 +115,40 @@ This vault is the canonical shared memory source for Claude Code, Codex, Trae, O
 $codexAgents = @"
 # Codex Global Shared Memory
 
-You share a long-term memory layer with Claude Code, Trae, and OpenClaw through Obsidian.
+You share a long-term memory layer with Claude Code, Trae, and OpenClaw through the shared memory bus.
 
 ## Read Order
 Before doing substantive work, read these files in order:
-1. $Script:CanonicalObsidian
-2. $Script:CanonicalMemory
-3. $Script:CanonicalWorking
-4. $Script:GlobalContextPath
-5. $Script:CodexMirror
-
-## Tools
-- The obsidian MCP server is configured in $Script:CodexConfigPath
-- Prefer Obsidian MCP for search, read, and write operations
+1. $Script:CanonicalMemory
+2. $Script:CanonicalWorking
+3. $Script:GlobalContextPath
+4. $Script:CodexMirror
 
 ## Writeback Policy
 - Durable preferences, reusable methods, and cross-project facts go to $codexInboxPath
 - Current-task progress belongs in $Script:CanonicalWorking
-- Project-specific durable knowledge belongs in the relevant project note inside the vault
+- Project-specific durable knowledge belongs in the relevant project note
 - Avoid duplicates and never store secrets, tokens, or credentials
 - Background refresh is maintained by $Script:WatchdogScript
 
 ## Intent
-- Obsidian is the shared long-term source of truth
+- The shared memory bus is the long-term source of truth
 - ~/.codex/memories is optional native state, not the canonical store
-- When a fact matters across sessions or projects, write it back to the Obsidian shared layer
+- When a fact matters across sessions or projects, write it back to the shared memory layer
 "@
     Write-TextIfChanged -Path (Join-Path $Script:CodexRoot "AGENTS.md") -Content ($codexAgents.Trim() + "`n") | Out-Null
 
     $traeUserRules = @"
 # Trae Global Shared Memory Rules
 
-You share one long-term memory layer with Claude Code, Codex, and OpenClaw through Obsidian.
+You share one long-term memory layer with Claude Code, Codex, and OpenClaw through the shared memory bus.
 
 ## Read Order
 Before substantive work, read these files in order:
-1. $Script:CanonicalObsidian
-2. $Script:CanonicalMemory
-3. $Script:CanonicalWorking
-4. $Script:GlobalContextPath
-5. $traeStartupPath
+1. $Script:CanonicalMemory
+2. $Script:CanonicalWorking
+3. $Script:GlobalContextPath
+4. $traeStartupPath
 
 ## Project Overlay
 If the workspace contains `.trae/rules/project_rules.md`, treat it as the project-specific overlay on top of this global file.
@@ -165,11 +156,11 @@ If the workspace contains `.trae/rules/project_rules.md`, treat it as the projec
 ## Writeback Policy
 - Durable user preferences, cross-project facts, and reusable decisions go to $traeInboxPath
 - Current-task progress belongs in $Script:CanonicalWorking
-- Project-specific durable knowledge belongs in the relevant project note inside the vault
+- Project-specific durable knowledge belongs in the relevant project note
 - Avoid duplicates and never store secrets, raw tokens, or credentials
 
 ## Tooling
-- Prefer the Obsidian MCP server for search, read, and write operations when available
+- Use the shared memory MCP for search, read, and write operations when available
 - If a fact is only useful for the current turn, keep it out of long-term memory
 "@
     Write-TextIfChanged -Path (Join-Path $Script:TraeRulesRoot "user_rules.md") -Content ($traeUserRules.Trim() + "`n") | Out-Null
@@ -182,29 +173,26 @@ Project root: $Script:PortableProjectRootPlaceholder
 
 This file complements $Script:PortableTraeUserRulesPath for this workspace.
 
-Resolve $Script:PortableVaultPlaceholder from `AI_MEMORY_OBSIDIAN_VAULT`, `OBSIDIAN_VAULT_ROOT`, or the active vault in Obsidian.
-
 ## Read Order
 1. $Script:PortableTraeUserRulesPath
-2. $Script:PortableCanonicalObsidian
-3. $Script:PortableCanonicalMemory
-4. $Script:PortableCanonicalWorking
-5. $Script:PortableGlobalContextPath
-6. $Script:PortableTraeStartupPath
+2. $Script:PortableCanonicalMemory
+3. $Script:PortableCanonicalWorking
+4. $Script:PortableGlobalContextPath
+5. $Script:PortableTraeStartupPath
 
 ## Writeback Policy
 - Cross-project durable facts go to $Script:PortableTraeInboxPath
 - Current task progress goes to $Script:PortableCanonicalWorking
-- Project-specific durable conclusions belong in the relevant Obsidian project note
+- Project-specific durable conclusions belong in the relevant project note
 - Never store secrets, raw tokens, or credentials
 "@
         Write-TextIfChanged -Path (Join-Path $ProjectDirectory $Script:TraeProjectRulesRelativePath) -Content ($traeProjectRules.Trim() + "`n") | Out-Null
     }
 
     $claudeSection = @"
-## Shared Obsidian Memory Bus
+## Shared Memory Bus
 
-- Canonical long-term memory lives in Obsidian, not only in local Claude-native stores.
+- Canonical long-term memory lives in the shared memory store, not only in local Claude-native stores.
 - Session start injects $claudeStartupPath and the latest generated global context via hooks.
 - Durable writeback target: $claudeInboxPath
 - Current task tracking target: $Script:CanonicalWorking
@@ -220,10 +208,10 @@ Resolve $Script:PortableVaultPlaceholder from `AI_MEMORY_OBSIDIAN_VAULT`, `OBSID
     Write-TextIfChanged -Path $claudePath -Content $claudeUpdated | Out-Null
 
     $opencodeSection = @"
-## Shared Obsidian Memory Bus
+## Shared Memory Bus
 
-- Canonical long-term memory lives in Obsidian, not only in local OpenCode session state.
-- Before substantive work, read $Script:CanonicalObsidian, $Script:CanonicalMemory, $Script:CanonicalWorking, $Script:GlobalContextPath, and $opencodeStartupPath.
+- Canonical long-term memory lives in the shared memory store, not only in local OpenCode session state.
+- Before substantive work, read $Script:CanonicalMemory, $Script:CanonicalWorking, $Script:GlobalContextPath, and $opencodeStartupPath.
 - Durable writeback target: $opencodeInboxPath
 - Current task tracking target: $Script:CanonicalWorking
 - For tasks with 2 or more independent slices, prefer short-lived subagents/parallel decomposition instead of one long-running thread.
@@ -238,10 +226,10 @@ Resolve $Script:PortableVaultPlaceholder from `AI_MEMORY_OBSIDIAN_VAULT`, `OBSID
     Write-TextIfChanged -Path $Script:OpenCodeAgentsPath -Content $opencodeUpdated | Out-Null
 
     $copilotHomeSection = @"
-## Shared Obsidian Memory Bus
+## Shared Memory Bus
 
-- Canonical long-term memory lives in Obsidian, not only in local Copilot session history.
-- Before substantive work, read $Script:CanonicalObsidian, $Script:CanonicalMemory, $Script:CanonicalWorking, $Script:GlobalContextPath, and $copilotStartupPath.
+- Canonical long-term memory lives in the shared memory store, not only in local Copilot session history.
+- Before substantive work, read $Script:CanonicalMemory, $Script:CanonicalWorking, $Script:GlobalContextPath, and $copilotStartupPath.
 - Durable writeback target: $copilotInboxPath
 - Current task tracking target: $Script:CanonicalWorking
 - For tasks with 2 or more independent slices, prefer subagents or separate focused waves instead of one long-running session.
@@ -258,11 +246,10 @@ Resolve $Script:PortableVaultPlaceholder from `AI_MEMORY_OBSIDIAN_VAULT`, `OBSID
     if (-not [string]::IsNullOrWhiteSpace($ProjectDirectory)) {
         $projectAgentsPath = Join-Path $ProjectDirectory "AGENTS.md"
         $projectAgentsSection = @"
-## Shared Obsidian Memory Bus
+## Shared Memory Bus
 
 - Follow `CLAUDE.md` for repository-specific conventions and treat this section as the cross-tool memory overlay for OpenCode and GitHub Copilot.
-- Resolve $Script:PortableVaultPlaceholder from `AI_MEMORY_OBSIDIAN_VAULT`, `OBSIDIAN_VAULT_ROOT`, or the active vault in Obsidian.
-- Before substantive work, read $Script:PortableCanonicalObsidian, $Script:PortableCanonicalMemory, $Script:PortableCanonicalWorking, $Script:PortableGlobalContextPath, and $Script:PortableCopilotStartupPath.
+- Before substantive work, read $Script:PortableCanonicalMemory, $Script:PortableCanonicalWorking, $Script:PortableGlobalContextPath, and $Script:PortableCopilotStartupPath.
 - Durable writeback targets: $Script:PortableOpenCodeInboxPath (OpenCode), $Script:PortableCopilotInboxPath (GitHub Copilot)
 - Current task tracking target: $Script:PortableCanonicalWorking
 - For tasks with 2 or more independent slices, default to multi-agent/subagent decomposition.
@@ -278,9 +265,8 @@ Resolve $Script:PortableVaultPlaceholder from `AI_MEMORY_OBSIDIAN_VAULT`, `OBSID
 
         $projectCopilotInstructionsPath = Join-SharedPath @($ProjectDirectory, ".github", "copilot-instructions.md")
         $projectCopilotSection = @"
-## Shared Obsidian Memory Bus
+## Shared Memory Bus
 
-- Resolve $Script:PortableVaultPlaceholder from `AI_MEMORY_OBSIDIAN_VAULT`, `OBSIDIAN_VAULT_ROOT`, or the active vault in Obsidian.
 - Before long or multi-step work, consult `AGENTS.md`, $Script:PortableCanonicalMemory, $Script:PortableCanonicalWorking, $Script:PortableGlobalContextPath, and $Script:PortableCopilotStartupPath.
 - Durable cross-project facts belong in $Script:PortableCopilotInboxPath.
 - Current-task progress belongs in $Script:PortableCanonicalWorking.

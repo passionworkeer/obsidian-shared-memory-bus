@@ -12,10 +12,8 @@ const XDG_DATA_HOME = process.env.XDG_DATA_HOME || path.join(USER_HOME, ".local"
 const APP_SUPPORT = path.join(USER_HOME, "Library", "Application Support");
 
 // ---------------------------------------------------------------------------
-// resolveVaultRoot — macOS variant
+// Utility: isDirectory
 // ---------------------------------------------------------------------------
-
-let cachedVaultRoot = null;
 
 function isDirectory(candidate) {
   if (!candidate) return false;
@@ -26,74 +24,24 @@ function isDirectory(candidate) {
   }
 }
 
-function getObsidianConfigCandidates() {
-  const candidates = [];
-  candidates.push(path.join(APP_SUPPORT, "obsidian", "obsidian.json"));
-  candidates.push(path.join(XDG_CONFIG_HOME, "obsidian", "obsidian.json"));
-  return [...new Set(candidates)];
+// ---------------------------------------------------------------------------
+// Default store candidates (non-Obsidian)
+// ---------------------------------------------------------------------------
+
+function getDefaultStoreCandidates() {
+  return [];
 }
 
-function resolveFromObsidianConfig() {
-  for (const configPath of getObsidianConfigCandidates()) {
-    if (!fs.existsSync(configPath)) continue;
-    try {
-      const payload = JSON.parse(fs.readFileSync(configPath, "utf8"));
-      const vaults = Object.values(payload?.vaults || {})
-        .map((entry) => ({
-          path: String(entry?.path || "").trim(),
-          open: Boolean(entry?.open),
-          ts: Number(entry?.ts || 0),
-        }))
-        .filter((entry) => isDirectory(entry.path))
-        .map((entry) => ({ ...entry, path: path.resolve(entry.path) }));
+// ---------------------------------------------------------------------------
+// resolveVaultRoot — DEPRECATED: alias for resolveStoreRoot
+// ---------------------------------------------------------------------------
 
-      if (vaults.length === 0) continue;
-
-      const byRecent = [...vaults].sort((l, r) => r.ts - l.ts);
-      const openVault = byRecent.find((e) => e.open);
-      return openVault ? openVault.path : byRecent[0].path;
-    } catch (_err) {
-      // Malformed config
-    }
-  }
-  return "";
-}
-
-function getDefaultVaultCandidates() {
-  return [
-    path.join(USER_HOME, "Obsidian Vault"),
-    path.join(USER_HOME, "Documents", "Obsidian Vault"),
-    path.join(USER_HOME, "Desktop", "Obsidian Vault"),
-  ];
-}
-
+/**
+ * @deprecated Use resolveStoreRoot() instead. resolveVaultRoot is kept for
+ * backward compatibility only and will be removed in a future version.
+ */
 function resolveVaultRoot(options = {}) {
-  if (cachedVaultRoot && !options.refresh) return cachedVaultRoot;
-
-  for (const envKey of ["AI_MEMORY_STORE", "AI_MEMORY_STORE_ROOT", "AI_MEMORY_OBSIDIAN_VAULT", "OBSIDIAN_VAULT_ROOT"]) {
-    const candidate = String(process.env[envKey] || "").trim();
-    if (isDirectory(candidate)) {
-      cachedVaultRoot = path.resolve(candidate);
-      return cachedVaultRoot;
-    }
-  }
-
-  const obsidianVault = resolveFromObsidianConfig();
-  if (obsidianVault) {
-    cachedVaultRoot = obsidianVault;
-    return cachedVaultRoot;
-  }
-
-  const fallback = getDefaultVaultCandidates().find((c) => isDirectory(c));
-  if (fallback) {
-    cachedVaultRoot = path.resolve(fallback);
-    return cachedVaultRoot;
-  }
-
-  throw Object.assign(
-    new Error("no-obsidian-vault: Set AI_MEMORY_OBSIDIAN_VAULT or OBSIDIAN_VAULT_ROOT, or open/create an Obsidian vault first."),
-    { code: "ENOENT" }
-  );
+  return resolveStoreRoot(options);
 }
 
 // ---------------------------------------------------------------------------
@@ -226,6 +174,7 @@ function getDarwinAdapter() {
     spawnPython,
     resolveVaultRoot,
     resolveStoreRoot,
+    getDefaultStoreCandidates,
     getInboxRoot,
     getGeneratedRoot,
     getKgRoot,

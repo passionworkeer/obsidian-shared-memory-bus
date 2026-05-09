@@ -75,27 +75,27 @@ if ($LASTEXITCODE -eq 0 -and $npmVersion) {
     $checks += @{ name = "npm"; ok = $false; detail = "not found" }
 }
 
-# Obsidian Vault - try multiple paths
-$vaultPaths = @(
-    $env:OBSIDIAN_VAULT_ROOT,
-    $env:AI_MEMORY_OBSIDIAN_VAULT,
-    "E:\desktop\Obsidian Vault",
-    "$env:USERPROFILE\Documents\Obsidian Vault",
-    "$env:APPDATA\obsidian\obsidian.json"
+# AI Memory Store - try multiple paths
+$storePaths = @(
+    $env:AI_MEMORY_STORE,
+    $env:AI_MEMORY_STORE_ROOT,
+    "$env:USERPROFILE\.ai-memory",
+    "$env:USERPROFILE\ai-memory"
 )
 
-$foundVault = $null
-foreach ($vp in $vaultPaths) {
-    if ($vp -and (Test-Path -LiteralPath $vp -PathType Container)) {
-        $foundVault = $vp
+$foundStore = $null
+foreach ($sp in $storePaths) {
+    if ($sp -and (Test-Path -LiteralPath $sp -PathType Container)) {
+        $foundStore = $sp
         break
     }
 }
 
-if ($foundVault) {
-    $checks += @{ name = "Obsidian Vault"; ok = $true; detail = $foundVault }
+if ($foundStore) {
+    $checks += @{ name = "AI Memory Store"; ok = $true; detail = $foundStore }
+    $env:AI_MEMORY_STORE = $foundStore
 } else {
-    $checks += @{ name = "Obsidian Vault"; ok = $false; detail = "not found" }
+    $checks += @{ name = "AI Memory Store"; ok = $false; detail = "not found" }
 }
 
 # Display results
@@ -219,7 +219,7 @@ if ($Verify -or (-not $SkipMcp)) {
         "9332" = "fetch"
         "9333" = "time"
         "9334" = "sequential-thinking"
-        "9335" = "obsidian"
+        "9335" = "memory"
         "9336" = "MiniMax (optional)"
         "9337" = "playwright (optional)"
         "9338" = "memory"

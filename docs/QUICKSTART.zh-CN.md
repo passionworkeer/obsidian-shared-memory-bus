@@ -9,7 +9,7 @@
 ```powershell
 # 1. 克隆项目
 git clone <repo-url>
-cd obsidian-shared-memory-bus
+cd local-ai-memory-bus
 
 # 2. 一键启动所有服务
 .\scripts\start-all.ps1
@@ -23,7 +23,7 @@ cd obsidian-shared-memory-bus
 ```bash
 # 1. 克隆项目
 git clone <repo-url>
-cd obsidian-shared-memory-bus
+cd local-ai-memory-bus
 
 # 2. 一键启动
 pwsh ./scripts/start-all.ps1
@@ -66,9 +66,6 @@ start-all.ps1 会自动：
 | 9332 | fetch | HTTP 请求 |
 | 9333 | time | 时间工具 |
 | 9334 | sequential-thinking | 推理助手 |
-| 9335 | obsidian | Obsidian 笔记 |
-| 9336 | MiniMax | 可选：需要 API Key |
-| 9337 | playwright | 可选：浏览器自动化 |
 | 9338 | memory | 记忆系统 |
 
 ## 配置 AI 工具
@@ -99,7 +96,6 @@ start-all.ps1 会自动：
 
 ## 记忆文件位置
 
-- **Obsidian Vault**: `E:\desktop\Obsidian Vault\00-System\ai-memory\`
 - **本地存储**: `E:\desktop\.ai-memory\` (或 `~/.ai-memory/`)
 
 ### 目录结构

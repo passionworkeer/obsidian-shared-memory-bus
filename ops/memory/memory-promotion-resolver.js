@@ -7,7 +7,7 @@
  *   3. Tiebreaker: later last_access timestamp wins
  *
  * Usage:
- *   node ops/memory/memory-promotion-resolver.js [--vault-root <path>] [--dry-run] [--verbose]
+ *   node ops/memory/memory-promotion-resolver.js [--store-root <path>] [--dry-run] [--verbose]
  *        [--queue <path>]   (default: E:\.ai-memory\queue\promotion-queue.jsonl)
  */
 
@@ -26,20 +26,20 @@ const opt  = (flag, def) => {
   return next;
 };
 
-const VAULT_ROOT = opt("--vault-root", process.env.AI_MEMORY_OBSIDIAN_VAULT || process.env.OBSIDIAN_VAULT_ROOT || null);
+const STORE_ROOT = opt("--store-root", process.env.AI_MEMORY_STORE || null);
 const DRY_RUN    = opt("--dry-run",    false);
 const VERBOSE    = opt("--verbose",   false) || opt("-v", false);
 const QUEUE_PATH = opt("--queue",     null);
 
-if (!VAULT_ROOT) {
-  console.error("Error: --vault-root or AI_MEMORY_OBSIDIAN_VAULT is required.");
+if (!STORE_ROOT) {
+  console.error("Error: --store-root or AI_MEMORY_STORE is required.");
   process.exit(1);
 }
 
 // ── Paths ──────────────────────────────────────────────────────────────────────
 
-const QUEUE_DIR       = path.join(VAULT_ROOT, ".ai-memory/queue");
-const STRUCT_DIR      = path.join(VAULT_ROOT, "00-System/ai-memory/structured");
+const QUEUE_DIR       = path.join(STORE_ROOT, ".ai-memory/queue");
+const STRUCT_DIR      = path.join(STORE_ROOT, "00-System/ai-memory/structured");
 const DEFAULT_QUEUE   = path.join(QUEUE_DIR,  "promotion-queue.jsonl");
 const RESOLVED_QUEUE  = path.join(QUEUE_DIR,  "resolved-queue.jsonl");
 const REVIEW_QUEUE    = path.join(QUEUE_DIR,  "human-review-queue.jsonl");

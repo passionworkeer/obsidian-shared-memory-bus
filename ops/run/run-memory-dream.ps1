@@ -1081,8 +1081,8 @@ function Release-DreamLock {
     }
 }
 
-$VaultRoot = Resolve-SharedObsidianVaultRoot -ThrowIfMissing
-$AiMemoryRoot = Join-SharedPath @($VaultRoot, "00-System", "ai-memory")
+$StoreRoot = Resolve-SharedStoreRoot -ThrowIfMissing
+$AiMemoryRoot = Join-SharedPath @($StoreRoot, "00-System", "ai-memory")
 $StructuredRoot = Join-SharedPath @($AiMemoryRoot, "structured")
 $GeneratedRoot = Join-SharedPath @($AiMemoryRoot, "generated")
 $StateRoot = Join-SharedPath @($AiMemoryRoot, "state")
@@ -1090,7 +1090,7 @@ $DreamMarkdownPath = Join-Path $GeneratedRoot "AUTO-DREAM.md"
 $DreamJsonPath = Join-Path $GeneratedRoot "AUTO-DREAM.json"
 $DreamStatePath = Join-Path $StateRoot "auto-dream-state.json"
 $MemoryIndexPath = Join-Path $GeneratedRoot "MEMORY.md"
-$DreamLockPath = Join-Path (Join-Path $VaultRoot ".lock") "consolidation.lock"
+$DreamLockPath = Join-Path (Join-Path $StoreRoot ".lock") "consolidation.lock"
 $TaskMemoryPath = Join-Path $StructuredRoot "task-memory.jsonl"
 $ClaudeCodeStructuredPath = Join-Path $StructuredRoot "claude-code.jsonl"
 $OpenClawSessionStructuredPath = Join-Path $StructuredRoot "openclaw.jsonl"
@@ -1220,7 +1220,7 @@ try {
     $archivalScript = Join-Path $PSScriptRoot "memory-archival.js"
     if (-not $SkipArchive -and -not $DryRun -and (Test-Path -LiteralPath $archivalScript -PathType Leaf)) {
         try {
-            $archivalJob = Start-Process -FilePath "node" -ArgumentList @($archivalScript, "--vault-root", $VaultRoot, "--trigger", "dream") -WindowStyle Hidden -PassThru -ErrorAction SilentlyContinue
+            $archivalJob = Start-Process -FilePath "node" -ArgumentList @($archivalScript, "--store-root", $StoreRoot, "--trigger", "dream") -WindowStyle Hidden -PassThru -ErrorAction SilentlyContinue
             Write-Verbose "Archival triggered: pid=$($archivalJob.Id)"
         } catch {
             Write-Verbose "Archival trigger failed (non-blocking): $_"

@@ -58,34 +58,22 @@ async function resolveStoreRoot() {
   return process.env.AI_MEMORY_STORE || DEFAULT_STORE_ROOT;
 }
 
-function resolveVaultRoot() {
-  // Legacy: try to find the Obsidian vault that holds ai-memory
-  const vaultRootCandidates = [
+function resolveLegacySource() {
+  // Legacy: try to find the old ai-memory in Obsidian vault (backward compat fallback)
+  const legacyCandidates = [
     process.env.AI_MEMORY_OBSIDIAN_VAULT,
     process.env.OBSIDIAN_VAULT_ROOT,
   ];
-  for (const candidate of vaultRootCandidates) {
-    if (candidate && fs.existsSync(candidate)) return path.resolve(candidate);
-  }
-  // Heuristic: find "Obsidian Vault" folder
-  const userHome = process.env.USERPROFILE || "";
-  const candidateVaults = [
-    path.join(userHome, "Obsidian Vault"),
-    path.join(userHome, "Desktop", "Obsidian Vault"),
-    path.join(userHome, "Documents", "Obsidian Vault"),
-    // Common desktop locations
-    "E:\\desktop\\Obsidian Vault",
-    "E:\\Obsidian Vault",
-    "D:\\Obsidian Vault",
-  ];
-  for (const candidate of candidateVaults) {
-    const aiMemoryPath = path.join(candidate, "00-System", "ai-memory");
-    if (fs.existsSync(aiMemoryPath)) return path.resolve(candidate);
+  for (const candidate of legacyCandidates) {
+    if (candidate && fs.existsSync(candidate)) {
+      const aiMemoryPath = path.join(candidate, "00-System", "ai-memory");
+      if (fs.existsSync(aiMemoryPath)) return path.resolve(candidate);
+    }
   }
   return "";
 }
 
-const VAULT_ROOT = resolveVaultRoot();
+const LEGACY_SOURCE = resolveLegacySource();
 
 async function main() {
   console.log("=".repeat(60));
@@ -94,8 +82,8 @@ async function main() {
   console.log();
 
   const STORE_ROOT = await resolveStoreRoot();
-  const LEGACY_AI_MEMORY = VAULT_ROOT
-    ? path.join(VAULT_ROOT, "00-System", "ai-memory")
+  const LEGACY_AI_MEMORY = LEGACY_SOURCE
+    ? path.join(LEGACY_SOURCE, "00-System", "ai-memory")
     : "";
 
   // ---------------------------------------------------------------------------
@@ -178,7 +166,7 @@ async function main() {
   if (FORCE) console.log("*** FORCE mode — existing files WILL be overwritten ***\n");
 
   console.log(`New store root : ${STORE_ROOT}`);
-  console.log(`Legacy vault    : ${VAULT_ROOT || "(not auto-detected)"}`);
+  console.log(`Legacy source  : ${LEGACY_SOURCE || "(not auto-detected)"}`);
   console.log(`Legacy data     : ${LEGACY_AI_MEMORY || "(not found)"}`);
   console.log();
 

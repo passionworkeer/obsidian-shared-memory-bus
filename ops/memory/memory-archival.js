@@ -9,7 +9,7 @@
  *   4. --dry-run never acquires a lock and is always safe to re-run.
  *
  * Usage:
- *   node ops/memory-archival.js [--vault-root <path>] [--dry-run] [--verbose]
+ *   node ops/memory-archival.js [--store-root <path>] [--dry-run] [--verbose]
  *        [--trigger watchdog|dream|manual]
  *
  * Triggers:
@@ -32,23 +32,23 @@ const opt = (flag, def) => {
   return idx >= 0 ? args[idx + 1] || true : def;
 };
 
-const VAULT_ROOT = opt("--vault-root", process.env.AI_MEMORY_OBSIDIAN_VAULT || process.env.OBSIDIAN_VAULT_ROOT || null);
+const STORE_ROOT = opt("--store-root", process.env.AI_MEMORY_STORE || null);
 const DRY_RUN = opt("--dry-run", false);
 const VERBOSE = opt("--verbose", false) || opt("-v", false);
 const TRIGGER = opt("--trigger", null); // watchdog | dream | manual | null
 
-if (!VAULT_ROOT) {
-  console.error("Error: --vault-root or AI_MEMORY_OBSIDIAN_VAULT is required.");
+if (!STORE_ROOT) {
+  console.error("Error: --store-root or AI_MEMORY_STORE is required.");
   process.exit(1);
 }
 
 // ── Paths ─────────────────────────────────────────────────────────────────────
 
-const LOCK_DIR        = path.join(VAULT_ROOT, "00-System/ai-memory/.lock");
+const LOCK_DIR        = path.join(STORE_ROOT, "00-System/ai-memory/.lock");
 const LOCK_FILE       = path.join(LOCK_DIR, "archival.lock");
-const MANIFEST_FILE   = path.join(VAULT_ROOT, "00-System/ai-memory/structured/archive-manifest.jsonl");
-const STRUCT_DIR      = path.join(VAULT_ROOT, "00-System/ai-memory/structured");
-const TIER_BUDGET_FILE = path.join(VAULT_ROOT, "00-System/ai-memory/.config/tier-budget.json");
+const MANIFEST_FILE   = path.join(STORE_ROOT, "00-System/ai-memory/structured/archive-manifest.jsonl");
+const STRUCT_DIR      = path.join(STORE_ROOT, "00-System/ai-memory/structured");
+const TIER_BUDGET_FILE = path.join(STORE_ROOT, "00-System/ai-memory/.config/tier-budget.json");
 
 const LOCK_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
@@ -508,6 +508,7 @@ function simplifyMemory(filePath) {
 
 async function main() {
   info(`Starting memory-archival.js (trigger=${TRIGGER || "auto"}, dry_run=${DRY_RUN})`);
+  info(`Store root: ${STORE_ROOT}`);
 
   if (!fs.existsSync(STRUCT_DIR)) {
     info("Structured directory not found — nothing to archive. Exiting.");
@@ -532,7 +533,7 @@ async function main() {
     ensureDir(STRUCT_DIR);
     if (!fs.existsSync(MANIFEST_FILE)) {
       if (!DRY_RUN) fs.writeFileSync(MANIFEST_FILE, "", "utf8");
-      info(`Created: ${path.relative(VAULT_ROOT, MANIFEST_FILE)}`);
+      info(`Created: ${path.relative(STORE_ROOT, MANIFEST_FILE)}`);
     }
 
     // Step 2: TTL / cold-access archive scan

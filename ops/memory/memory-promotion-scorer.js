@@ -12,7 +12,7 @@
  * Human-review range:     0.40 – 0.65  (marked needs_review: true)
  *
  * Usage:
- *   node ops/memory/memory-promotion-scorer.js [--vault-root <path>] [--dry-run] [--verbose]
+ *   node ops/memory/memory-promotion-scorer.js [--store-root <path>] [--dry-run] [--verbose]
  */
 
 import fs from "fs";
@@ -31,19 +31,19 @@ const opt  = (flag, def) => {
   return next;
 };
 
-const VAULT_ROOT = opt("--vault-root", process.env.AI_MEMORY_OBSIDIAN_VAULT || process.env.OBSIDIAN_VAULT_ROOT || null);
+const STORE_ROOT = opt("--store-root", process.env.AI_MEMORY_STORE || null);
 const DRY_RUN    = opt("--dry-run",    false);
 const VERBOSE    = opt("--verbose",   false) || opt("-v", false);
 
-if (!VAULT_ROOT) {
-  console.error("Error: --vault-root or AI_MEMORY_OBSIDIAN_VAULT is required.");
+if (!STORE_ROOT) {
+  console.error("Error: --store-root or AI_MEMORY_STORE is required.");
   process.exit(1);
 }
 
 // ── Paths ──────────────────────────────────────────────────────────────────────
 
-const STRUCT_DIR      = path.join(VAULT_ROOT, "00-System/ai-memory/structured");
-const QUEUE_DIR       = path.join(VAULT_ROOT, ".ai-memory/queue");
+const STRUCT_DIR      = path.join(STORE_ROOT, "00-System/ai-memory/structured");
+const QUEUE_DIR       = path.join(STORE_ROOT, ".ai-memory/queue");
 const PROMOTION_QUEUE = path.join(QUEUE_DIR,   "promotion-queue.jsonl");
 
 // ── Scoring weights (can be overridden via env) ───────────────────────────────
@@ -364,7 +364,7 @@ function loadStructuredRecords() {
 // ── CLI dry-run ───────────────────────────────────────────────────────────────
 
 function main() {
-  info(`Starting promotion scorer (dry_run=${DRY_RUN}, vault=${VAULT_ROOT})`);
+  info(`Starting promotion scorer (dry_run=${DRY_RUN}, store=${STORE_ROOT})`);
   info(`Weights: recency=${SCORING_WEIGHTS.recency} confidence=${SCORING_WEIGHTS.confidence} crossSession=${SCORING_WEIGHTS.crossSessionHits} sourceQuality=${SCORING_WEIGHTS.sourceQuality}`);
   info(`Thresholds: auto_promote>=${AUTO_PROMOTE_THRESHOLD}  review=${REVIEW_LOWER_BOUND}-${AUTO_PROMOTE_THRESHOLD}  conflict_overlap>=${CONFLICT_OVERLAP_THRESHOLD}`);
 

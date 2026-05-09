@@ -179,22 +179,9 @@ function Get-OnboardingSharedMcpUrl {
     return ("http://{0}:{1}{2}" -f $manifest.defaults.host, [int]$Server.port, $manifest.defaults.path)
 }
 
-function Build-OnboardingObsidianStdioConfigJson {
-    $obsidianMcpScript = ((Resolve-BusScriptPath -Candidates @("run-obsidian-mcp.ps1", "ops/run/run-obsidian-mcp.ps1")) -replace "\\", "/")
-    $payload = [ordered]@{
-        mcpServers = [ordered]@{
-            obsidian = [ordered]@{
-                command = (Get-SharedPowerShellCommandName)
-                args = (Get-SharedPowerShellFileArguments -ScriptPath $obsidianMcpScript)
-            }
-        }
-    }
-
-    return (($payload | ConvertTo-Json -Depth 8).Trim() + "`n")
-}
-
+# Build-OnboardingMcpConfigJson - deprecated, kept for compatibility
 function Build-OnboardingMcpConfigJson {
-    return (Build-OnboardingObsidianStdioConfigJson)
+    return " { }`n"
 }
 
 function Build-OnboardingSharedMcpCodexToml {
@@ -272,11 +259,9 @@ $(if ($optionalLines.Count -gt 0) { $optionalLines -join "`n" } else { "- (none)
 - ``cursor.shared-mcp.json``: Cursor HTTP MCP config
 - ``copilot.shared-mcp.json``: GitHub Copilot HTTP MCP config
 - ``*.optional.*``: optional services such as MiniMax
-- ``obsidian-stdio.json``: fallback only for hosts that still need a local stdio launcher instead of the shared HTTP layer
 
 ## Rule Of Thumb
-- Prefer the HTTP shared MCP snippets first
-- Keep ``obsidian-stdio.json`` only as a compatibility fallback
+- Use the HTTP shared MCP snippets for transport
 - Add plugins only after MCP plus skill integration already works
 "@.Trim() + "`n"
 }
@@ -452,7 +437,6 @@ This folder is the portable shared-memory pack for $($Definition.displayName).
 - ``generic/AGENTS.md``: universal rule file for agents that support a global instruction file
 - ``generic/codex.shared-mcp.toml`` / ``cursor.shared-mcp.json`` / ``copilot.shared-mcp.json``: shared HTTP MCP snippets for the safe default set
 - ``generic/*.optional.*``: optional shared MCP snippets such as MiniMax
-- ``generic/obsidian-stdio.json``: fallback MCP snippet for hosts that still require a local stdio launcher
 - ``generic/skills/shared-memory/SKILL.md``: portable skill template for behavior, read order, and writeback policy
 - ``generic/plugin/README.md``: thin plugin-adapter contract for host-native last-mile integrations
 - ``generic/platforms.md``: cross-platform recommendation for Windows, macOS, and Linux
@@ -545,7 +529,6 @@ function Build-ArchitectureGuide {
 ## Future-Proof Onboarding Contract
 - Give the new agent one onboarding pack from ``generated/onboarding/<agent>/``
 - Prefer the shared HTTP MCP snippets in the onboarding pack
-- Keep ``obsidian-stdio.json`` only as a compatibility fallback
 - Configure the agent rule file or skill to read the canonical files and write back into its inbox
 - Keep plugins thin and host-native; do not move canonical memory logic into them
 - Keep portable shared skills in ``~/.agents/skills`` and repo-local portable skills in ``.agents/skills``
@@ -580,7 +563,6 @@ function Write-OnboardingPack {
     Write-Text -Path (Join-Path $genericRoot "codex.shared-mcp.optional.toml") -Content (Build-OnboardingSharedMcpCodexToml -IncludeOptional)
     Write-Text -Path (Join-Path $genericRoot "cursor.shared-mcp.optional.json") -Content (Build-OnboardingSharedMcpCursorJson -IncludeOptional)
     Write-Text -Path (Join-Path $genericRoot "copilot.shared-mcp.optional.json") -Content (Build-OnboardingSharedMcpCopilotJson -IncludeOptional)
-    Write-Text -Path (Join-Path $genericRoot "obsidian-stdio.json") -Content (Build-OnboardingObsidianStdioConfigJson)
     Write-Text -Path (Join-Path $skillRoot "SKILL.md") -Content (Build-OnboardingSkillTemplate -Definition $Definition)
     Write-Text -Path (Join-Path $pluginRoot "README.md") -Content (Build-OnboardingPluginAdapterGuide -Definition $Definition)
     Write-Text -Path (Join-Path $genericRoot "platforms.md") -Content (Build-OnboardingPlatformGuide)
