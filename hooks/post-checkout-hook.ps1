@@ -32,15 +32,15 @@ if (-not (Test-Path "$WorkspaceRoot\.git")) {
     foreach ($c in $candidates) { if (Test-Path "$c\.git") { $WorkspaceRoot = $c; break } }
 }
 
-$vaultRoot = if ($env:AI_MEMORY_OBSIDIAN_VAULT) { $env:AI_MEMORY_OBSIDIAN_VAULT } elseif ($env:OBSIDIAN_VAULT_ROOT) { $env:OBSIDIAN_VAULT_ROOT } else { $null }
-if (-not $vaultRoot) { exit 0 }
+$storeRoot = if ($env:AI_MEMORY_STORE) { $env:AI_MEMORY_STORE } elseif ($env:AI_MEMORY_OBSIDIAN_VAULT) { $env:AI_MEMORY_OBSIDIAN_VAULT } else { $null }
+if (-not $storeRoot) { exit 0 }
 
 # ── Step 1: Staleness check ───────────────────────────────────────────
-$gctxFile = Join-Path $vaultRoot "00-System\ai-memory\generated\GLOBAL-CONTEXT.md"
-$gctxMetaFile = Join-Path $vaultRoot "00-System\ai-memory\generated\GLOBAL-CONTEXT.meta.json"
+$gctxFile = Join-Path $storeRoot "generated\GLOBAL-CONTEXT.md"
+$gctxMetaFile = Join-Path $storeRoot "generated\GLOBAL-CONTEXT.meta.json"
 
-$structDir = Join-Path $vaultRoot "00-System\ai-memory\structured"
-$stateDir  = Join-Path $vaultRoot "00-System\ai-memory\state"
+$structDir = Join-Path $storeRoot "structured"
+$stateDir  = Join-Path $storeRoot "state"
 
 function Get-StructuredSignature {
     param([string]$StructDir)

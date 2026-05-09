@@ -376,8 +376,8 @@ class TestDefaultVaultCandidates:
         for candidate in get_default_vault_candidates():
             assert candidate.is_absolute(), f"Candidate '{candidate}' is not absolute"
 
-    def test_contains_obsidian_vault(self):
-        """Must include a path ending with 'Obsidian Vault'."""
-        candidates = get_default_vault_candidates()
-        names = [p.name for p in candidates]
-        assert "Obsidian Vault" in names, f"No 'Obsidian Vault' in candidates: {names}"
+    def test_contains_ai_memory(self):
+        """Must include a path ending with '.ai-memory' (via get_default_store_root)."""
+        # Test that the default store root is .ai-memory
+        store_root = get_default_store_root()
+        assert store_root.name == ".ai-memory", f"Store root should be '.ai-memory', got '{store_root.name}'"

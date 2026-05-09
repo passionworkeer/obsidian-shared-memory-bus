@@ -19,11 +19,11 @@ if (-not (Test-Path "$WorkspaceRoot\.git")) {
     foreach ($c in $candidates) { if (Test-Path "$c\.git") { $WorkspaceRoot = $c; break } }
 }
 
-$vaultRoot = if ($env:AI_MEMORY_OBSIDIAN_VAULT) { $env:AI_MEMORY_OBSIDIAN_VAULT } elseif ($env:OBSIDIAN_VAULT_ROOT) { $env:OBSIDIAN_VAULT_ROOT } else { $null }
-if (-not $vaultRoot) { exit 0 }
+$storeRoot = if ($env:AI_MEMORY_STORE) { $env:AI_MEMORY_STORE } elseif ($env:AI_MEMORY_OBSIDIAN_VAULT) { $env:AI_MEMORY_OBSIDIAN_VAULT } else { $null }
+if (-not $storeRoot) { exit 0 }
 
-$structDir = Join-Path $vaultRoot "00-System\ai-memory\structured"
-$watchdogSignalDir = Join-Path $vaultRoot "00-System\ai-memory\.watchdog"
+$structDir = Join-Path $storeRoot "structured"
+$watchdogSignalDir = Join-Path $storeRoot ".watchdog"
 
 # ── Step 1: Detect structured layer changes ─────────────────────────────
 # Simple heuristic: check if any JSONL files were modified in the last 60 seconds
@@ -40,7 +40,7 @@ if ($recentChanges) {
     $dreamScript = Join-Path $WorkspaceRoot "ops\run-memory-dream.ps1"
     if (Test-Path $dreamScript) {
         # Run as background job (non-blocking)
-        $null = Start-Process -FilePath "pwsh" -ArgumentList "-NoProfile","-ExecutionPolicy","Bypass","-File",$dreamScript,"-VaultRoot",$vaultRoot,"-Writeback","-SkipArchive" -WindowStyle Hidden -PassThru -ErrorAction SilentlyContinue
+        $null = Start-Process -FilePath "pwsh" -ArgumentList "-NoProfile","-ExecutionPolicy","Bypass","-File",$dreamScript,"-StoreRoot",$storeRoot,"-Writeback","-SkipArchive" -WindowStyle Hidden -PassThru -ErrorAction SilentlyContinue
     }
 }
 

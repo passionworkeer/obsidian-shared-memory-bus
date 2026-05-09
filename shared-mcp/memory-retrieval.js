@@ -120,7 +120,7 @@ async function runSemanticSearchOnce({
   const result = await spawnProcess(PYTHON.command, withPythonArgs(PYTHON, args), {
     env: {
       ...PYTHON_SPAWN_ENV,
-      AI_MEMORY_OBSIDIAN_VAULT: VAULT_ROOT,
+      AI_MEMORY_STORE: VAULT_ROOT,
     },
   });
   if (result.code !== 0) {

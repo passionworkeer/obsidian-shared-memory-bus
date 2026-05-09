@@ -1,12 +1,12 @@
 {
-  "name": "obsidian-shared-memory-bus",
+  "name": "local-ai-memory-bus",
   "version": "3.1.0",
-  "description": "Portable local-first shared memory bus for multi-agent AI setups backed by Obsidian",
+  "description": "Portable local-first shared memory bus for multi-agent AI setups",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/passionworkeer/obsidian-shared-memory-bus"
+    "url": "https://github.com/passionworkeer/local-ai-memory-bus"
   },
   "workspaces": [
     "shared-mcp"
@@ -31,11 +31,6 @@
     "test:all": "node --test --test-concurrency=1 --experimental-test-isolation=none tests/unit/js/*.test.js tests/unit/js/*.test.mjs && node --test --test-concurrency=1 --experimental-test-isolation=none tests/integration/js/*.test.mjs && pytest tests/unit/py/ tests/cross-language/ -v"
   },
   "keywords": [
-    "obsidian",
-    "memory",
-    "mcp",
-    "multi-agent",
-    "shared-memory",
     "ai-memory"
   ],
   "author": " passionworkeer",

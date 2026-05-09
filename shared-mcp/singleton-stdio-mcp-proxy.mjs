@@ -160,7 +160,6 @@ function teardownChild(reason) {
   }
 
   // Kill the entire process tree so no grandchild zombies survive.
-  // (child.kill() alone only kills the shell; grandchild mcpvault survives.)
   killTree(currentChild.pid);
 }
 

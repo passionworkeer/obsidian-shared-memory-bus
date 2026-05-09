@@ -14,7 +14,7 @@ platform: cross-platform
 ## Project Structure / 项目结构
 
 ```
-obsidian-shared-memory-bus/
+local-ai-memory-bus/
 ├── bus/                        # Core bus runtime (PowerShell orchestration)
 │   ├── memory-bus.ps1          # Memory write/filter/distribute engine
 │   ├── memory-watchdog.ps1      # Background sync watchdog (daemon)
@@ -109,8 +109,8 @@ obsidian-shared-memory-bus/
 ### Clone and Install / 克隆并安装依赖
 
 ```bash
-git clone https://github.com/your-org/obsidian-shared-memory-bus.git
-cd obsidian-shared-memory-bus
+git clone https://github.com/your-org/local-ai-memory-bus.git
+cd local-ai-memory-bus
 
 # Install Node.js dependencies for shared MCP
 cd shared-mcp && npm install && cd ..

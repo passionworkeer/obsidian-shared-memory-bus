@@ -676,6 +676,8 @@ function Resolve-StdioEnvironment {
                 "AI_MEMORY_EMBED_ALLOW_BATCH_FALLBACK",
                 "AI_MEMORY_PYTHON",
                 "UV_COMMAND",
+                "AI_MEMORY_STORE",
+                "AI_MEMORY_STORE_ROOT",
                 "AI_MEMORY_OBSIDIAN_VAULT",
                 "OBSIDIAN_VAULT_ROOT",
                 "CLAUDE_MEM_BASE",

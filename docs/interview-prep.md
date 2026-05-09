@@ -1,4 +1,4 @@
-# Obsidian Shared Memory Bus
+# Local AI Memory Bus
 ## PPT 汇报材料 | Agent + 多模态大模型方向
 
 > 目标：5-8 分钟面试汇报，重点展示与多模态 Agent 相关的项目经验
@@ -11,11 +11,11 @@
 
 # 第 1 页：封面
 
-## Obsidian Shared Memory Bus
+## Local AI Memory Bus
 
 **Portable Local-first Shared Memory Bus for Multi-Agent AI Setups**
 
-- 个人项目 | GitHub: passionworkeer/obsidian-shared-memory-bus
+- 个人项目 | GitHub: passionworkeer/local-ai-memory-bus
 - 技术栈：Node.js + Python + MCP
 - 方向：Agent Memory / RAG / 跨工具协作
 
@@ -66,11 +66,11 @@
               └───────────┬─────────────┘
                           │
        ┌──────────────────┼──────────────────┐
-       ▼                  ▼                  ▼
-  ┌─────────┐       ┌─────────┐       ┌─────────┐
-  │Obsidian │       │.ai-     │       │ L0-L5   │
-  │Vault    │       │memory/  │       │分层记忆 │
-  └─────────┘       └─────────┘       └─────────┘
+       ▼                  ▼
+  ┌─────────┐       ┌─────────┐
+  │.ai-     │       │ L0-L5   │
+  │memory/  │       │分层记忆 │
+  └─────────┘       └─────────┘
 ```
 
 ## 核心技术选型
@@ -279,9 +279,9 @@ Query
 
 # 第 11 页：项目信息
 
-## Obsidian Shared Memory Bus
+## Local AI Memory Bus
 
-- **GitHub**: github.com/passionworkeer/obsidian-shared-memory-bus
+- **GitHub**: github.com/passionworkeer/local-ai-memory-bus
 - **版本**: 3.1.0
 - **测试**: 1129 个用例，100% 通过
 - **License**: MIT
@@ -302,7 +302,7 @@ node start.js
 
 ### 第 1 页：封面（30 秒）
 
-> "大家好，我今天介绍一个个人项目——Obsidian Shared Memory Bus，解决的是多 Agent 协作时的记忆孤岛问题。"
+> "大家好，我今天介绍一个个人项目——Local AI Memory Bus，解决的是多 Agent 协作时的记忆孤岛问题。"
 
 - 语速：中等，稳一点
 - 眼神：扫一下面试官，不要只盯着屏幕
@@ -324,7 +324,7 @@ node start.js
 > "核心思路很简单——让所有工具共享同一个记忆后端。它们工作前读记忆，工作后写记录。"
 
 指着架构图说：
-> "上层是各种 AI 工具，中间是 MCP 协议接入的共享记忆总线，底层用 Obsidian 做持久化存储。"
+> "上层是各种 AI 工具，中间是 MCP 协议接入的共享记忆总线，底层用 .ai-memory 本地存储做持久化。"
 
 技术选型一句话带过：
 > "选 MCP 是因为 Claude Code 原生支持，不需要额外开发适配层。"
@@ -767,9 +767,9 @@ curl -X POST http://localhost:9338/search \
 ### 3. GitHub 展示
 
 提前准备好项目页面，面试官可以直接扫码或打开：
-> **github.com/passionworkeer/obsidian-shared-memory-bus**
+> **github.com/passionworkeer/local-ai-memory-bus**
 
 ---
 
-*文档版本: 2026-05-08 | 含讲述稿 + Q&A + 测试方法*
+*文档版本: 2026-05-09 | 含讲述稿 + Q&A + 测试方法*
 *建议每页 PPT 讲 30-45 秒，总时长 5-8 分钟*

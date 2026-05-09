@@ -4,7 +4,7 @@ description: Portable shared-memory bootstrap for a new AI host. Use when an age
 
 # Portable Skill Template — Gateway to Universal Skill
 
-This template is a **legacy gateway**. For the canonical unified entry point, see the root `SKILL.md` in the obsidian-shared-memory-bus repository root.
+This template is a **legacy gateway**. For the canonical unified entry point, see the root `SKILL.md` in the local-ai-memory-bus repository root.
 
 ## Root SKILL.md Contents (Reference)
 
@@ -63,7 +63,6 @@ Read this file before substantive work:
 Prefer the shared HTTP endpoints for:
 
 - `memory` (port 9338)
-- `obsidian` (port 9335) — optional, no Obsidian dependency
 - `context7` (port 9331)
 - `fetch` (port 9332)
 - `time` (port 9333)

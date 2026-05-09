@@ -391,7 +391,7 @@ Inserts a new item into the local `claude-mem` store.
     "observation": {
       "id": 2482,
       "title": "codex-bridge-probe",
-      "project": "obsidian-shared-memory-bus"
+      "project": "local-ai-memory-bus"
     }
   },
   "response": {

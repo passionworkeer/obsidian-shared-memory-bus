@@ -8,35 +8,12 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ---------------------------------------------------------------------------
-// Stub vault-root so build-memory-layers.js can be loaded without side effects
-// ---------------------------------------------------------------------------
-
-const stubVaultRootPath = path.resolve(__dirname, "..", "..", "..", "bus", "vault-root.js");
-
-// Ensure the bus/vault-root.js stub exists (copy the one used by the main test file)
-const vaultRootStub = `
-export default {
-  resolveVaultRoot() {
-    return "E:/desktop/Obsidian Vault";
-  },
-  getDefaultVaultCandidates() {
-    return ["E:/desktop/Obsidian Vault"];
-  },
-};
-export const resolveVaultRoot = () => "E:/desktop/Obsidian Vault";
-export const getDefaultVaultCandidates = () => ["E:/desktop/Obsidian Vault"];
-`;
-
-if (!fs.existsSync(stubVaultRootPath)) {
-  fs.mkdirSync(path.dirname(stubVaultRootPath), { recursive: true });
-  fs.writeFileSync(stubVaultRootPath, vaultRootStub, "utf8");
-}
-
-// ---------------------------------------------------------------------------
-// Stub store-root so build-memory-layers.js can be loaded
+// Stub store-root so build-memory-layers.js can be loaded without side effects
 // ---------------------------------------------------------------------------
 
 const stubStoreRootPath = path.resolve(__dirname, "..", "..", "..", "bus", "store-root.js");
+
+// Ensure the bus/store-root.js stub exists
 const storeRootStub = `
 export default {
   resolveStoreRoot() {
@@ -44,14 +21,13 @@ export default {
   },
 };
 export const resolveStoreRoot = () => "E:/desktop/.ai-memory";
+export const getDefaultStoreCandidates = () => ["E:/desktop/.ai-memory"];
 `;
 
 if (!fs.existsSync(stubStoreRootPath)) {
+  fs.mkdirSync(path.dirname(stubStoreRootPath), { recursive: true });
   fs.writeFileSync(stubStoreRootPath, storeRootStub, "utf8");
 }
-
-// ESM Note: Module.prototype._compile patching is not available in ESM
-// The module will be imported directly without patching
 
 // ---------------------------------------------------------------------------
 // jsonl-stream.js tests (no dependencies on build-memory-layers.js)

@@ -208,17 +208,18 @@ async function testStoreRoot() {
 }
 
 // ============================================================================
-// Test 8: Vault Root
+// Test 8: Store Root
 // ============================================================================
-async function testVaultRoot() {
-  console.log("\n=== Test 8: Vault Root ===");
+async function testStoreRoot() {
+  console.log("\n=== Test 8: Store Root ===");
 
   try {
-    const { resolveVaultRoot } = await import(toFileUrl(path.join(REPO_ROOT, "bus/vault-root.js")));
+    const storeModule = await import(toFileUrl(path.join(REPO_ROOT, "bus/store-root.js")));
+    const resolveStoreRoot = storeModule.resolveStoreRoot;
 
-    const vaultRoot = resolveVaultRoot();
-    assertTrue(vaultRoot !== null, "Vault root resolved");
-    assertTrue(vaultRoot.length > 0, "Vault root not empty");
+    const storeRoot = resolveStoreRoot();
+    assertTrue(storeRoot !== null, "Store root resolved");
+    assertTrue(storeRoot.length > 0, "Store root not empty");
   } catch (err) {
     console.error(`  ⊘ Test failed: ${err.message}`);
     failed++;
@@ -367,7 +368,6 @@ async function runAllTests() {
   await testJsonlStream();
   await testHealthCheck();
   await testStoreRoot();
-  await testVaultRoot();
   await testInboxAtomicWrite();
   await testPlatformDetection();
   await testEmbeddingRegistry();

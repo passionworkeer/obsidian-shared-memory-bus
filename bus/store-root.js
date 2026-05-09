@@ -1,7 +1,4 @@
 
-export function resolveStoreRoot() {
-  return process.env.AI_MEMORY_STORE ||
-    process.env.AI_MEMORY_STORE_ROOT ||
-    "E:/desktop/.ai-memory";
-}
-export default { resolveStoreRoot };
+export function resolveStoreRoot() { return "E:/desktop/.ai-memory"; }
+export function getDefaultStoreCandidates() { return ["E:/desktop/.ai-memory"]; }
+export default { resolveStoreRoot, getDefaultStoreCandidates };

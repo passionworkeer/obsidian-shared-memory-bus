@@ -8,19 +8,19 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ---------------------------------------------------------------------------
-// Stub memory-contract and vault-root before the module is loaded
+// Stub memory-contract and store-root before the module is loaded
 // ESM Note: module patching and require.cache are not available in ESM
 // These stubs are written to files for the module to find at runtime
 // ---------------------------------------------------------------------------
 
-const stubVaultRootPath = path.resolve(__dirname, "..", "..", "..", "bus", "vault-root.js");
-const vaultRootStub = `
-export function resolveVaultRoot() { return "E:/desktop/Obsidian Vault"; }
-export function getDefaultVaultCandidates() { return ["E:/desktop/Obsidian Vault"]; }
-export default { resolveVaultRoot, getDefaultVaultCandidates };
+const stubStoreRootPath = path.resolve(__dirname, "..", "..", "..", "bus", "store-root.js");
+const storeRootStub = `
+export function resolveStoreRoot() { return "E:/desktop/.ai-memory"; }
+export function getDefaultStoreCandidates() { return ["E:/desktop/.ai-memory"]; }
+export default { resolveStoreRoot, getDefaultStoreCandidates };
 `;
-fs.mkdirSync(path.dirname(stubVaultRootPath), { recursive: true });
-fs.writeFileSync(stubVaultRootPath, vaultRootStub, "utf8");
+fs.mkdirSync(path.dirname(stubStoreRootPath), { recursive: true });
+fs.writeFileSync(stubStoreRootPath, storeRootStub, "utf8");
 
 // ESM Note: Module.prototype._compile patching is not available in ESM
 // The module will need to be imported and its exports used directly

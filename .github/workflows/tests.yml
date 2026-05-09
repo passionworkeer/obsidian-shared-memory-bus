@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Set vault env
-        run: echo "AI_MEMORY_OBSIDIAN_VAULT=$RUNNER_TEMP/vault-smoke" >> $GITHUB_ENV
+        run: echo "AI_MEMORY_STORE=$RUNNER_TEMP/memory-store" >> $GITHUB_ENV
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -42,7 +42,7 @@ jobs:
           python-version: "3.11"
 
       - name: Create smoke vault
-        run: mkdir -p "$AI_MEMORY_OBSIDIAN_VAULT"
+        run: mkdir -p "$AI_MEMORY_STORE"
         shell: bash
 
       - name: Install pytest
@@ -58,10 +58,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Set vault env
-        run: echo "AI_MEMORY_OBSIDIAN_VAULT=$RUNNER_TEMP/vault-smoke" >> $GITHUB_ENV
+        run: echo "AI_MEMORY_STORE=$RUNNER_TEMP/memory-store" >> $GITHUB_ENV
 
       - name: Create smoke vault
-        run: mkdir -p "$AI_MEMORY_OBSIDIAN_VAULT"
+        run: mkdir -p "$AI_MEMORY_STORE"
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -112,7 +112,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Set vault env
-        run: Add-Content -Path $env:GITHUB_ENV -Value "AI_MEMORY_OBSIDIAN_VAULT=$env:RUNNER_TEMP\vault-smoke"
+        run: Add-Content -Path $env:GITHUB_ENV -Value "AI_MEMORY_STORE=$env:RUNNER_TEMP\memory-store"
         shell: pwsh
 
       - name: Checkout
@@ -132,7 +132,7 @@ jobs:
         run: npm ci
 
       - name: Create smoke vault
-        run: New-Item -ItemType Directory -Force -Path "$env:AI_MEMORY_OBSIDIAN_VAULT" | Out-Null
+        run: New-Item -ItemType Directory -Force -Path "$env:AI_MEMORY_STORE" | Out-Null
         shell: pwsh
 
       - name: Install pytest

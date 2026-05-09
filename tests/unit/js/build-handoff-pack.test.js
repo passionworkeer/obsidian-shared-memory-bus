@@ -7,32 +7,33 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ---------------------------------------------------------------------------
-// Stub memory-contract and vault-root before the module is loaded
+// Stub memory-contract and store-root before the module is loaded
 // ESM Note: require.cache and module patching not available in ESM
 // These stubs are written to files for the module to find at runtime
 // ---------------------------------------------------------------------------
 
-const stubVaultRootPath = path.resolve(__dirname, "..", "..", "..", "bus", "vault-root.js");
-const vaultRootStub = `
-export function resolveVaultRoot() { return "E:/desktop/Obsidian Vault"; }
-export function getDefaultVaultCandidates() { return ["E:/desktop/Obsidian Vault"]; }
-export default { resolveVaultRoot, getDefaultVaultCandidates };
+const stubStoreRootPath = path.resolve(__dirname, "..", "..", "..", "bus", "store-root.js");
+const storeRootStub = `
+export function resolveStoreRoot() { return "E:/desktop/.ai-memory"; }
+export function getDefaultStoreCandidates() { return ["E:/desktop/.ai-memory"]; }
+export default { resolveStoreRoot, getDefaultStoreCandidates };
 `;
-fs.mkdirSync(path.dirname(stubVaultRootPath), { recursive: true });
-fs.writeFileSync(stubVaultRootPath, vaultRootStub, "utf8");
+fs.mkdirSync(path.dirname(stubStoreRootPath), { recursive: true });
+fs.writeFileSync(stubStoreRootPath, storeRootStub, "utf8");
 
 // ---------------------------------------------------------------------------
 // Stub store-root at the path build-handoff-pack.js will find
 // build-handoff-pack.js is in ops/build/, so it looks in ops/bus/
 // ---------------------------------------------------------------------------
 
-const stubStoreRootPath = path.resolve(__dirname, "..", "..", "..", "ops", "bus", "store-root.js");
-fs.mkdirSync(path.dirname(stubStoreRootPath), { recursive: true });
-const storeRootStub = `
+const stubStoreRootOpsPath = path.resolve(__dirname, "..", "..", "..", "ops", "bus", "store-root.js");
+fs.mkdirSync(path.dirname(stubStoreRootOpsPath), { recursive: true });
+const storeRootOpsStub = `
 export function resolveStoreRoot() { return "E:/desktop/.ai-memory"; }
-export default { resolveStoreRoot };
+export function getDefaultStoreCandidates() { return ["E:/desktop/.ai-memory"]; }
+export default { resolveStoreRoot, getDefaultStoreCandidates };
 `;
-fs.writeFileSync(stubStoreRootPath, storeRootStub, "utf8");
+fs.writeFileSync(stubStoreRootOpsPath, storeRootOpsStub, "utf8");
 
 // ---------------------------------------------------------------------------
 // Load the source under test

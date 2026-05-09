@@ -93,7 +93,7 @@ export function createMemoryEmbeddings(params) {
     const result = await spawnProcess(process.execPath, args_, {
       env: {
         ...RUNTIME_ENV,
-        AI_MEMORY_OBSIDIAN_VAULT: VAULT_ROOT,
+        AI_MEMORY_STORE: VAULT_ROOT,
       },
     });
 

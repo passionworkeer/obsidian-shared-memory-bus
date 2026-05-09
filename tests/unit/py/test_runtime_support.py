@@ -414,8 +414,8 @@ class TestVaultRootResolution:
             assert isinstance(vault, Path)
             # The vault path should exist (may not be an actual vault, but path exists)
         except RuntimeError as e:
-            # If RuntimeError, it should be about missing vault
-            assert "no-obsidian-vault" in str(e)
+            # If RuntimeError, it should be about missing store
+            assert "no-store-root" in str(e) or "STORE_RESOLUTION_FAILED" in str(e)
 
     def test_platform_windows_flag(self):
         """Test that IS_WINDOWS is correctly set."""

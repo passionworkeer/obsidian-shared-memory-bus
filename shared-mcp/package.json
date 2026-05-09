@@ -1,21 +1,20 @@
 {
-  "name": "obsidian-shared-memory-bus-mcp",
+  "name": "local-ai-memory-bus-mcp",
   "version": "3.1.0",
-  "description": "Shared MCP server for obsidian-shared-memory-bus — memory, obsidian, and utility tools",
+  "description": "Shared MCP server for local-ai-memory-bus — memory and utility tools",
   "license": "MIT",
   "private": true,
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "https://github.com/passionworkeer/obsidian-shared-memory-bus"
+    "url": "https://github.com/passionworkeer/local-ai-memory-bus"
   },
   "author": " passionworkeer",
   "bugs": {
-    "url": "https://github.com/passionworkeer/obsidian-shared-memory-bus/issues"
+    "url": "https://github.com/passionworkeer/local-ai-memory-bus/issues"
   },
   "keywords": [
     "mcp",
-    "obsidian",
     "memory",
     "ai"
   ],
@@ -27,7 +26,6 @@
     "lint:fix": "eslint --fix --ignore-path ../.eslintignore --max-warnings=-1 ."
   },
   "dependencies": {
-    "@bitbonsai/mcpvault": "^0.11.0",
     "@modelcontextprotocol/sdk": "^1.18.0"
   },
   "devDependencies": {

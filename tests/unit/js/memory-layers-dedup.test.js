@@ -16,17 +16,17 @@ fs.mkdirSync(TEST_AI_MEMORY_ROOT, { recursive: true });
 process.env.AI_MEMORY_ROOT = TEST_AI_MEMORY_ROOT;
 
 // ---------------------------------------------------------------------------
-// Stub vault-root before the module is loaded
+// Stub store-root before the module is loaded
 // ESM Note: require.cache not available in ESM, stubs written to files
 // ---------------------------------------------------------------------------
-const stubVaultRootPath = path.resolve(__dirname, "..", "..", "..", "bus", "vault-root.js");
-const vaultRootStub = `
-export function resolveVaultRoot() { return "E:/desktop/Obsidian Vault"; }
-export function getDefaultVaultCandidates() { return ["E:/desktop/Obsidian Vault"]; }
-export default { resolveVaultRoot, getDefaultVaultCandidates };
+const stubStoreRootPath = path.resolve(__dirname, "..", "..", "..", "bus", "store-root.js");
+const storeRootStub = `
+export function resolveStoreRoot() { return "E:/desktop/.ai-memory"; }
+export function getDefaultStoreCandidates() { return ["E:/desktop/.ai-memory"]; }
+export default { resolveStoreRoot, getDefaultStoreCandidates };
 `;
-fs.mkdirSync(path.dirname(stubVaultRootPath), { recursive: true });
-fs.writeFileSync(stubVaultRootPath, vaultRootStub, "utf8");
+fs.mkdirSync(path.dirname(stubStoreRootPath), { recursive: true });
+fs.writeFileSync(stubStoreRootPath, storeRootStub, "utf8");
 
 // ESM Note: Module.prototype._compile patching is not available in ESM
 // The module will need to be imported directly and exports used

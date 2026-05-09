@@ -85,7 +85,7 @@ export function createMemoryGeneration(params) {
     const result = await spawnProcess(POWERSHELL_COMMAND, args, {
       env: {
         ...RUNTIME_ENV,
-        AI_MEMORY_OBSIDIAN_VAULT: VAULT_ROOT,
+        AI_MEMORY_STORE: VAULT_ROOT,
       },
     });
 

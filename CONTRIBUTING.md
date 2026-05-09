@@ -1,4 +1,4 @@
-# Contributing to Obsidian Shared Memory Bus
+# Contributing to Local AI Memory Bus
 
 Thank you for helping improve this project. This guide covers everything you need to get started.
 
@@ -7,8 +7,8 @@ Thank you for helping improve this project. This guide covers everything you nee
 ### 1. Clone and Install
 
 ```bash
-git clone https://github.com/passionworkeer/obsidian-shared-memory-bus
-cd obsidian-shared-memory-bus
+git clone https://github.com/passionworkeer/local-ai-memory-bus
+cd local-ai-memory-bus
 npm install
 ```
 

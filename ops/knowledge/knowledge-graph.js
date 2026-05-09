@@ -803,9 +803,9 @@ export { KnowledgeGraph, entityId, resolveKgPath };
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const [,, action, ...args] = process.argv;
-  const vaultRoot = process.env.AI_MEMORY_OBSIDIAN_VAULT || "";
+  const storeRoot = process.env.AI_MEMORY_STORE || "";
 
-  const kg = new KnowledgeGraph({ vaultRoot });
+  const kg = new KnowledgeGraph({ storeRoot });
 
   const run = () => {
     try {

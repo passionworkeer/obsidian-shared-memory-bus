@@ -13,24 +13,10 @@ import { spawn } from "node:child_process";
 
 const PROJECT_ROOT = path.resolve(__dirname, "..");
 
-// Resolve the Obsidian vault from the Obsidian app config.
-function resolveObsidianVaultRoot() {
-  try {
-    const obsidianCfg = path.join(process.env.APPDATA || "", "obsidian", "obsidian.json");
-    const { vaults } = JSON.parse(fs.readFileSync(obsidianCfg, "utf8"));
-    const active = Object.values(vaults).find(v => v.open) || Object.values(vaults)[0];
-    return active ? active.path : null;
-  } catch (_e) {
-    return null;
-  }
-}
+// Resolve store root from AI_MEMORY_STORE environment variable.
+const store = process.env.AI_MEMORY_STORE || "";
 
-const vault     = resolveObsidianVaultRoot() ||
-  process.env.AI_MEMORY_OBSIDIAN_VAULT ||
-  process.env.OBSIDIAN_VAULT_ROOT ||
-  "E:\\desktop\\Obsidian Vault";
-
-const inboxPath = path.join(vault, "00-System", "ai-memory", "inbox", "stress-verify.md");
+const inboxPath = path.join(store, "00-System", "ai-memory", "inbox", "stress-verify.md");
 const inboxDir  = path.dirname(inboxPath);
 const session   = "verify-" + Date.now();
 const N         = 10;

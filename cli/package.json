@@ -1,7 +1,7 @@
 {
   "name": "ai-memory-cli",
   "version": "1.0.0",
-  "description": "Unified CLI for Obsidian Shared Memory Bus",
+  "description": "Unified CLI for Local AI Memory Bus",
   "bin": {
     "ai-memory": "./ai-memory.js"
   },
@@ -10,7 +10,6 @@
     "node": ">=16"
   },
   "keywords": [
-    "obsidian",
     "memory",
     "cli"
   ],
