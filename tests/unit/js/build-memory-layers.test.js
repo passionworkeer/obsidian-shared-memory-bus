@@ -35,7 +35,7 @@ export function resolveStoreRoot() {
   // Always read env at call time so test beforeEach can override the store root
   return process.env.AI_MEMORY_STORE ||
     process.env.AI_MEMORY_STORE_ROOT ||
-    "E:/desktop/.ai-memory";
+    process.env.AI_MEMORY_ROOT || "E:/desktop/.ai-memory";
 }
 export default { resolveStoreRoot };
 `;

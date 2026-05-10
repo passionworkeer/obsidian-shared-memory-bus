@@ -124,7 +124,7 @@ $Script:PortableTraeInboxPath = "{0}/00-System/ai-memory/inbox/trae.md" -f $Scri
 $Script:PortableOpenCodeInboxPath = "{0}/00-System/ai-memory/inbox/opencode.md" -f $Script:PortableVaultPlaceholder
 $Script:PortableCopilotInboxPath = "{0}/00-System/ai-memory/inbox/copilot.md" -f $Script:PortableVaultPlaceholder
 $Script:SharedSkillsSyncScript = Resolve-BusScriptPath -Candidates @("sync-shared-skills.ps1", "ops/sync/sync-shared-skills.ps1")
-$Script:RefreshGeneratedArtifactsScript = Resolve-BusScriptPath -Candidates @("refresh-generated-artifacts.js", "ops/generate/refresh-generated-artifacts.js")
+$Script:RefreshGeneratedArtifactsScript = Resolve-BusScriptPath -Candidates @("refresh-generated-artifacts.cjs", "refresh-generated-artifacts.js", "ops/generate/refresh-generated-artifacts.cjs", "ops/generate/refresh-generated-artifacts.js")
 $Script:ClaudeMemApiBase = if ($env:CLAUDE_MEM_BASE) {
     $env:CLAUDE_MEM_BASE -replace '/+$', '' -replace '$', '/api'
 } else {
