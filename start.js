@@ -21,7 +21,6 @@ const PROJECT_ROOT = join(__dirname, 'shared-mcp');
 const servers = [
   { id: 'fetch', port: 9332, command: 'python', args: ['-m', 'mcp_server_fetch'] },
   { id: 'time', port: 9333, command: 'python', args: ['-m', 'mcp_server_time'] },
-  { id: 'obsidian', port: 9335, script: 'ops/run/run-obsidian-mcp.ps1' },
   { id: 'memory', port: 9338, command: 'node', args: ['--experimental-default-type=module', 'omni-memory-server.js'] },
 ];
 
@@ -107,7 +106,6 @@ async function main() {
 
   console.log('\nMCP servers started!');
   console.log('Memory: http://127.0.0.1:9338/mcp');
-  console.log('Obsidian: http://127.0.0.1:9335/mcp');
   console.log('Fetch: http://127.0.0.1:9332/mcp');
   console.log('Time: http://127.0.0.1:9333/mcp');
 }

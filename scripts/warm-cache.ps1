@@ -22,13 +22,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# Resolve AI_MEMORY_STORE
+# Resolve store root: env vars → user home default
 $storeRoot = $env:AI_MEMORY_STORE
+if (-not $storeRoot) { $storeRoot = $env:AI_MEMORY_STORE_ROOT }
+if (-not $storeRoot) { $storeRoot = $env:AI_MEMORY_ROOT }
 if (-not $storeRoot) {
-    $storeRoot = $env:AI_MEMORY_STORE_ROOT
-}
-if (-not $storeRoot) {
-    $storeRoot = "E:\desktop\.ai-memory"
+    $storeRoot = Join-Path $env:USERPROFILE ".ai-memory"
 }
 
 $cacheDir = if ($CacheDir) { $CacheDir } else { Join-Path $storeRoot "cache" }
@@ -39,7 +38,7 @@ if (-not $scriptRoot) {
 }
 
 $pythonExe = "python"
-$warmScript = Join-Path $scriptRoot "retrieval\cache\warm-strategy.py"
+$warmScript = Join-Path $scriptRoot "retrieval" "cache" "warm-strategy.py"
 
 if (-not (Test-Path $warmScript)) {
     Write-Error "warm-strategy.py not found at: $warmScript"

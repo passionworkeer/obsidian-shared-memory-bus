@@ -7,6 +7,7 @@
 [![Node.js >=18](https://img.shields.io/badge/Node.js-%3E%3D18-brightgreen)](https://nodejs.org)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-orange)](https://python.org)
 [![Platforms: Windows | macOS | Linux](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-brightgreen)]()
+[![Docker](https://img.shields.io/badge/Docker-ready-blue)](https://docker.com)
 
 ---
 
@@ -40,8 +41,8 @@
 | OpenCode | ✅ 一级支持 | 完整集成验证 |
 | OpenClaw | ✅ 支持 | 通过结构化记忆同步 |
 | Cursor | ✅ 支持 | MCP 配置支持 |
-| VS Code / Copilot | ✅ 支持 | 配置接线支持 |
-| Trae | ⚡ 便携目标 | 新代理集成指南 |
+| VS Code / Copilot | ✅ 支持 | MCP 配置支持 |
+| Trae | ✅ 支持 | AGENTS.md 集成 |
 
 ---
 
@@ -126,14 +127,28 @@ node setup-mcp.js
 
 | 测试类型 | 测试数 | 状态 |
 |----------|--------|------|
-| JS 单元测试 | 579 | ✅ 全部通过 |
-| JS 集成测试 | 12 | ✅ 全部通过 |
-| Python 测试 | 458 | ✅ 全部通过 |
-| 跨语言测试 | 10 | ✅ 全部通过 |
-| E2E 测试 | 32 | ✅ 全部通过 |
-| 压力测试 | 30 | ✅ 全部通过 |
-| 冒烟测试 | 8 | ✅ 全部通过 |
-| **总计** | **1129** | **✅ 100%** |
+| JS 单元测试 | 576 | ✅ 通过 (573/576) |
+| Python 测试 | 582 | ✅ 全部通过 |
+| **总计** | **1158** | **✅ 99.7%** |
+
+> 注：3 个失败的 JS 测试为 MCP 集成测试，需要真实 MCP 服务器环境。
+
+---
+
+## 快速启动（Docker）
+
+```bash
+# 构建镜像
+docker build -t local-ai-memory-bus .
+
+# 启动（使用默认 ~/.ai-memory 存储）
+docker run --rm -v ~/.ai-memory:/root/.ai-memory \
+  -p 9338:9338 -p 9090:9090 \
+  local-ai-memory-bus
+
+# 或使用 docker-compose
+docker-compose up -d
+```
 
 ---
 
@@ -177,10 +192,14 @@ local-ai-memory-bus/
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `AI_MEMORY_ROOT` | `~/.ai-memory` | 记忆存储根目录 |
-| `AI_MEMORY_STORE` | `{AI_MEMORY_ROOT}/.ai-memory` | 存储目录 |
-| `AI_MEMORY_EMBED_ADAPTER` | `hash` | 向量嵌入适配器 |
-| `AI_MEMORY_EMBED_MODEL` | `hashing-v1` | 嵌入模型 |
+| `AI_MEMORY_ROOT` | `~/.ai-memory` | 记忆存储根目录（所有平台） |
+| `AI_MEMORY_STORE` | `~/.ai-memory` | 存储目录别名，与 AI_MEMORY_ROOT 相同 |
+| `AI_MEMORY_STORE_ROOT` | `~/.ai-memory` | 存储根别名 |
+| `AI_MEMORY_PYTHON` | auto | Python 运行时路径 |
+| `AI_MEMORY_EMBED_BACKEND` | `hash` | 向量嵌入后端（hash=本地，openai=API） |
+| `AI_MEMORY_EMBED_BASE_URL` | — | OpenAI 兼容 API 地址 |
+| `AI_MEMORY_EMBED_API_KEY` | — | API 密钥 |
+| `AI_MEMORY_EMBED_MODEL` | — | 嵌入模型名 |
 
 ### 向量嵌入选项
 
