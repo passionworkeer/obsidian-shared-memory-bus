@@ -31,13 +31,26 @@ fs.writeFileSync(stubVaultRootPath, vaultRootStub, "utf8");
 
 const stubStoreRootPath = path.join(__dirname, "..", "..", "..", "bus", "store-root.js");
 const storeRootStub = `
+import path from "node:path";
+import os from "node:os";
 export function resolveStoreRoot() {
-  // Always read env at call time so test beforeEach can override the store root
-  return process.env.AI_MEMORY_STORE ||
+  return (
+    process.env.AI_MEMORY_STORE ||
     process.env.AI_MEMORY_STORE_ROOT ||
-    process.env.AI_MEMORY_ROOT || "E:/desktop/.ai-memory";
+    process.env.AI_MEMORY_ROOT ||
+    path.join(os.homedir(), ".ai-memory")
+  );
 }
-export default { resolveStoreRoot };
+export function getProjectsRoot(storeRoot) {
+  return path.join(storeRoot, "projects");
+}
+export function getContextPath(storeRoot) {
+  return path.join(storeRoot, "CONTEXT.md");
+}
+export function getDefaultStoreCandidates() {
+  return [path.join(os.homedir(), '.ai-memory')];
+}
+export default { resolveStoreRoot, getProjectsRoot, getContextPath, getDefaultStoreCandidates };
 `;
 
 // Always write the stub so it gets updated (the file may have been created by a

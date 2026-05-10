@@ -15,9 +15,26 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const stubStoreRootPath = path.resolve(__dirname, "..", "..", "..", "bus", "store-root.js");
 const storeRootStub = `
-export function resolveStoreRoot() { return process.env.AI_MEMORY_ROOT || "E:/desktop/.ai-memory"; }
-export function getDefaultStoreCandidates() { return [process.env.AI_MEMORY_ROOT || "E:/desktop/.ai-memory"]; }
-export default { resolveStoreRoot, getDefaultStoreCandidates };
+import path from "node:path";
+import os from "node:os";
+export function resolveStoreRoot() {
+  return (
+    process.env.AI_MEMORY_STORE ||
+    process.env.AI_MEMORY_STORE_ROOT ||
+    process.env.AI_MEMORY_ROOT ||
+    path.join(os.homedir(), ".ai-memory")
+  );
+}
+export function getProjectsRoot(storeRoot) {
+  return path.join(storeRoot, "projects");
+}
+export function getContextPath(storeRoot) {
+  return path.join(storeRoot, "CONTEXT.md");
+}
+export function getDefaultStoreCandidates() {
+  return [path.join(os.homedir(), '.ai-memory')];
+}
+export default { resolveStoreRoot, getProjectsRoot, getContextPath, getDefaultStoreCandidates };
 `;
 fs.mkdirSync(path.dirname(stubStoreRootPath), { recursive: true });
 fs.writeFileSync(stubStoreRootPath, storeRootStub, "utf8");
