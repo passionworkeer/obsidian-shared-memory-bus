@@ -1,0 +1,70 @@
+# =============================================================================
+# docker-compose.yml — Local AI Memory Bus Full Stack
+# =============================================================================
+# Starts all MCP servers (fetch, time, memory) with persistent .ai-memory store.
+#
+# Usage:
+#   docker-compose up -d
+#   docker-compose logs -f memory
+#
+# Endpoints:
+#   Memory MCP:  http://localhost:9338/mcp
+#   Fetch MCP:   http://localhost:9332/mcp
+#   Time MCP:    http://localhost:9333/mcp
+#   Metrics:     http://localhost:9090/metrics
+# =============================================================================
+
+services:
+  memory-bus:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: local-ai-memory-bus:latest
+    container_name: local-ai-memory-bus
+    restart: unless-stopped
+    ports:
+      - "9338:9338"  # Memory MCP server
+      - "9090:9090"  # Metrics endpoint
+    volumes:
+      # Mount host .ai-memory store into the container
+      - ai-memory-store:/root/.ai-memory
+    environment:
+      AI_MEMORY_ROOT: /root/.ai-memory
+      AI_MEMORY_STORE: /root/.ai-memory
+      AI_MEMORY_EMBED_BACKEND: hash
+      # Python runtime for semantic search
+      AI_MEMORY_PYTHON: /usr/bin/python3
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9338/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - ai-memory-net
+
+  # Optional: Python retrieval engine (for dense embeddings when AI_MEMORY_EMBED_BACKEND != hash)
+  retrieval-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile.retrieval
+    image: local-ai-memory-bus-retrieval:latest
+    container_name: local-ai-memory-bus-retrieval
+    restart: unless-stopped
+    volumes:
+      - ai-memory-store:/root/.ai-memory
+    environment:
+      AI_MEMORY_ROOT: /root/.ai-memory
+      AI_MEMORY_STORE: /root/.ai-memory
+    profiles:
+      - dense-embeddings  # Only starts with: docker-compose --profile dense-embeddings up
+    networks:
+      - ai-memory-net
+
+networks:
+  ai-memory-net:
+    driver: bridge
+
+volumes:
+  ai-memory-store:
+    driver: local

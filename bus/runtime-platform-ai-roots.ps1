@@ -4,11 +4,11 @@ $ErrorActionPreference = "Stop"
 # ---------------------------------------------------------------------------
 # runtime-platform-ai-roots.ps1
 # AI tool path roots: OpenCode, Copilot, Trae, VS Code.
-# Depends on: runtime-platform-paths.ps1, runtime-platform-vault.ps1
+# Depends on: runtime-platform-paths.ps1, runtime-platform-store.ps1
 # ---------------------------------------------------------------------------
 
 . "$PSScriptRoot\runtime-platform-paths.ps1"
-. "$PSScriptRoot\runtime-platform-vault.ps1"
+. "$PSScriptRoot\runtime-platform-store.ps1"
 
 function Get-SharedOpenCodeDataRoot {
     $userHome = Get-SharedUserHome

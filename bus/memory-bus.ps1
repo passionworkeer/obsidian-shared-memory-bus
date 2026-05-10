@@ -53,7 +53,12 @@ $Script:BusHome = if (-not [string]::IsNullOrWhiteSpace($env:AI_MEMORY_ROOT)) { 
 $Script:BundleHome = Split-Path -Parent $PSScriptRoot
 $Script:VaultRoot = Resolve-SharedStoreRoot -FallbackPath (Join-SharedPath @($Script:UserHome, "Documents", "Obsidian Vault"))
 $Script:ClaudeMemoryRoot = Join-SharedPath @($Script:BusHome, ".ai-memory")
-$Script:BusRoot = if ((Test-Path (Join-Path $Script:ClaudeMemoryRoot "structured"))) {
+# BusRoot: prefer the AI_MEMORY_ROOT itself as the store root; if not set, fall back to
+# the .ai-memory subdir under BusHome (legacy behavior when BusHome==PSScriptRoot).
+# Do NOT double-nest: AI_MEMORY_ROOT/.ai-memory is wrong when AI_MEMORY_ROOT already IS the store.
+$Script:BusRoot = if (-not [string]::IsNullOrWhiteSpace($env:AI_MEMORY_ROOT)) {
+    $env:AI_MEMORY_ROOT
+} elseif ((Test-Path (Join-Path $Script:ClaudeMemoryRoot "structured"))) {
     $Script:ClaudeMemoryRoot
 } elseif (Test-Path (Join-Path $Script:BusHome "structured")) {
     $Script:BusHome

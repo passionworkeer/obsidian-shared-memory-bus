@@ -3,8 +3,7 @@ import path from "node:path";
 import http from "node:http";
 import process from "node:process";
 import { spawn, spawnSync } from "node:child_process";
-import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -26,7 +25,6 @@ import { runWithTraceId } from "./metrics/trace-manager.js";
 // --- ESM globals and constants (must be defined before any code that uses them) ---
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const require = createRequire(import.meta.url);
 
 // Project root is always the parent of shared-mcp/
 // Use import.meta.url to reliably determine project root regardless of cwd
@@ -52,10 +50,10 @@ function resolveProjectPath(relPath) {
   return path.join(PROJECT_ROOT, relPath);
 }
 
-// memory_boot and memory_query — resolves via resolveProjectPath so it works
-// whether AI_MEMORY_ROOT points to the project dir or to a separate data dir.
-const { handlers: mcpMemoryHandlers } = require(
-  resolveProjectPath(path.join("ops", "mcp", "mcp-memory-tools-handler.js"))
+// Use dynamic import() instead of require() to support ESM modules with top-level await.
+// Must be async and called from top-level (file is ESM via --experimental-default-type or .mjs).
+const { handlers: mcpMemoryHandlers } = await import(
+  pathToFileURL(resolveProjectPath(path.join("ops", "mcp", "mcp-memory-tools-handler.js"))).href
 );
 
 const WINDOWS_ENV_CACHE = new Map();
@@ -97,29 +95,29 @@ function resolveRuntimePath(...candidates) {
   return path.join(PROJECT_ROOT, candidates[0]);
 }
 
-function loadStoreRootHelper() {
+async function loadStoreRootHelper() {
   const helperPath = resolveRuntimePath("store-root.js", path.join("bus", "store-root.js"));
-  return require(helperPath);
+  return import(pathToFileURL(helperPath).href);
 }
 
-function loadPythonRuntimeHelper() {
+async function loadPythonRuntimeHelper() {
   const helperPath = resolveRuntimePath("python-runtime.js", path.join("bus", "python-runtime.js"));
-  return require(helperPath);
+  return import(pathToFileURL(helperPath).href);
 }
 
-function loadRuntimeConfigHelper() {
+async function loadRuntimeConfigHelper() {
   const helperPath = resolveRuntimePath("runtime-config.js", path.join("bus", "runtime-config.js"));
-  return require(helperPath);
+  return import(pathToFileURL(helperPath).href);
 }
 
-function loadEmbeddingProviderHelper() {
+async function loadEmbeddingProviderHelper() {
   const helperPath = resolveRuntimePath("embedding-provider-registry.js", path.join("bus", "embedding-provider-registry.js"));
-  return require(helperPath);
+  return import(pathToFileURL(helperPath).href);
 }
 
-function loadMemoryContractHelper() {
+async function loadMemoryContractHelper() {
   const helperPath = resolveRuntimePath("memory/memory-contract.js", path.join("ops", "memory", "memory-contract.js"));
-  return require(helperPath);
+  return import(pathToFileURL(helperPath).href);
 }
 
 /**
@@ -271,11 +269,11 @@ const SEARCH_SCRIPT = resolveRuntimePath(
 );
 const EMBEDDINGS_SCRIPT = resolveRuntimePath("generate-embeddings.js", path.join("bus", "generate-embeddings.js"));
 const MEMORY_BUS_SCRIPT = resolveRuntimePath("memory-bus.ps1", path.join("bus", "memory-bus.ps1"));
-const { resolveStoreRoot } = loadStoreRootHelper();
-const { resolvePythonRuntime, withPythonArgs } = loadPythonRuntimeHelper();
-const { buildEmbeddingConfigHash } = loadEmbeddingProviderHelper();
-const { buildMemoryIntegrityReport } = loadMemoryContractHelper();
-const { buildEmbeddingRuntimeCatalog, resolveEmbeddingRuntime, updateEmbeddingRuntimeSelection } = loadRuntimeConfigHelper();
+const { resolveStoreRoot } = await loadStoreRootHelper();
+const { resolvePythonRuntime, withPythonArgs } = await loadPythonRuntimeHelper();
+const { buildEmbeddingConfigHash } = await loadEmbeddingProviderHelper();
+const { buildMemoryIntegrityReport } = await loadMemoryContractHelper();
+const { buildEmbeddingRuntimeCatalog, resolveEmbeddingRuntime, updateEmbeddingRuntimeSelection } = await loadRuntimeConfigHelper();
 const POWERSHELL_COMMAND = resolvePowerShellCommand();
 const WATCHDOG_STATE_PATH = path.join(AI_MEMORY_ROOT, "watchdog-state.json");
 const WATCHDOG_SUPERVISOR_VBS_PATH = IS_WINDOWS

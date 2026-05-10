@@ -6,7 +6,7 @@ import { fileURLToPath } from "url";
 import { createEmbeddingProviderRegistry, getProviderHost, buildEmbeddingConfigHash, normalizeEmbeddingAdapter } from "./embedding-provider-registry.js";
 import { resolvePythonRuntime, withPythonArgs } from "./python-runtime.js";
 import { resolveEmbeddingRuntime } from "./runtime-config.js";
-import { resolveVaultRoot } from "./vault-root.js";
+import { resolveStoreRoot } from "./store-root.js";
 import { VECTOR_SCHEMA_VERSION, fnv1a32, buildHashFeatures, buildHashEmbedding } from "./lsh-hash.js";
 import { createJsonlStream } from "../ops/util/jsonl-stream.js";
 
@@ -149,9 +149,7 @@ function resolveTimeoutMs() {
   return Math.max(1000, timeoutSeconds * 1000);
 }
 
-const VAULT_ROOT = resolveVaultRoot();
-console.error("[DEBUG] VAULT_ROOT:", VAULT_ROOT);
-console.error("[DEBUG] STRUCTURED_DIR:", path.join(VAULT_ROOT, "00-System", "ai-memory", "structured"));
+const VAULT_ROOT = resolveStoreRoot();
 const SHARED_MEMORY_ROOT = path.join(VAULT_ROOT, "00-System", "ai-memory");
 const STRUCTURED_DIR = path.join(SHARED_MEMORY_ROOT, "structured");
 const EMBEDDINGS_DIR = path.join(SHARED_MEMORY_ROOT, "embeddings");
