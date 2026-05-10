@@ -13,21 +13,32 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const stubStoreRootPath = path.resolve(__dirname, "..", "..", "..", "bus", "store-root.js");
 
-// Ensure the bus/store-root.js stub exists
+// Always write the stub so it gets updated with deferred env-var logic
 const storeRootStub = `
-export default {
-  resolveStoreRoot() {
-    return process.env.AI_MEMORY_ROOT || "E:/desktop/.ai-memory";
-  },
-};
-export const resolveStoreRoot = () => process.env.AI_MEMORY_ROOT || "E:/desktop/.ai-memory";
-export const getDefaultStoreCandidates = () => [process.env.AI_MEMORY_ROOT || "E:/desktop/.ai-memory"];
+import path from "node:path";
+import os from "node:os";
+export function resolveStoreRoot() {
+  return (
+    process.env.AI_MEMORY_STORE ||
+    process.env.AI_MEMORY_STORE_ROOT ||
+    process.env.AI_MEMORY_ROOT ||
+    path.join(os.homedir(), ".ai-memory")
+  );
+}
+export function getProjectsRoot(storeRoot) {
+  return path.join(storeRoot, "projects");
+}
+export function getContextPath(storeRoot) {
+  return path.join(storeRoot, "CONTEXT.md");
+}
+export function getDefaultStoreCandidates() {
+  return [path.join(os.homedir(), '.ai-memory')];
+}
+export default { resolveStoreRoot, getProjectsRoot, getContextPath, getDefaultStoreCandidates };
 `;
 
-if (!fs.existsSync(stubStoreRootPath)) {
-  fs.mkdirSync(path.dirname(stubStoreRootPath), { recursive: true });
-  fs.writeFileSync(stubStoreRootPath, storeRootStub, "utf8");
-}
+fs.mkdirSync(path.dirname(stubStoreRootPath), { recursive: true });
+fs.writeFileSync(stubStoreRootPath, storeRootStub, "utf8");
 
 // ---------------------------------------------------------------------------
 // jsonl-stream.js tests (no dependencies on build-memory-layers.js)

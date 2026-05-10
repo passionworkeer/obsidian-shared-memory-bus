@@ -5,7 +5,7 @@
  */
 
 import { spawn } from "child_process";
-import { spawn as spawnNet } from "net";
+import net from "net";
 import path from "path";
 import fs from "fs";
 import os from "os";
@@ -22,20 +22,22 @@ const AI_MEMORY_ROOT = process.env.AI_MEMORY_ROOT ||
   path.resolve(__dirname, "..");
 
 // Load vault-root helper from bus/ so we get the full resolution chain
-function loadVaultRootHelper() {
+async function loadVaultRootHelper() {
+  const { pathToFileURL } = await import("url");
   const candidates = [
     path.join(AI_MEMORY_ROOT, "bus", "vault-root.js"),
     path.join(AI_MEMORY_ROOT, "vault-root.js"),
   ];
   for (const c of candidates) {
     if (fs.existsSync(c)) {
-      return require(c);
+      const mod = await import(pathToFileURL(c));
+      return mod.default || mod;
     }
   }
   return null;
 }
 
-const vaultRootHelper = loadVaultRootHelper();
+const vaultRootHelper = await loadVaultRootHelper();
 
 // ---------------------------------------------------------------------------
 // Version
@@ -713,7 +715,7 @@ async function runDoctorChecks() {
   const criticalPorts = [9331, 9332, 9333, 9334, 9335, 9338];
   for (const port of criticalPorts) {
     const inUse = await new Promise((resolve) => {
-      const server = spawnNet();
+      const server = net.createServer();
       server.once("error", () => { resolve(true); });
       server.once("listening", () => { server.close(); resolve(false); });
       server.listen(port, "127.0.0.1");

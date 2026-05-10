@@ -1,5 +1,6 @@
 import path from "node:path";
 import fs from "node:fs";
+import os from "node:os";
 import { spawn, spawnSync } from "node:child_process";
 
 // ---------------------------------------------------------------------------
@@ -260,8 +261,7 @@ function isDirectory(candidate) {
 
 function getDefaultStoreCandidates() {
   return [
-    "E:\\Obsidian Vault",
-    "D:\\Obsidian Vault",
+    path.join(os.homedir(), ".ai-memory"),
   ];
 }
 
@@ -318,7 +318,7 @@ function detectBestDrive() {
   return { drive: best.letter + ":", path: path.join(best.letter + ":", ".ai-memory"), freeBytes: best.freeBytes };
 }
 
-const DEFAULT_STORE_ROOT = "E:\\.ai-memory";
+const DEFAULT_STORE_ROOT = path.join(os.homedir(), ".ai-memory");
 let cachedStoreRoot = null;
 
 function resolveStoreRoot(options = {}) {

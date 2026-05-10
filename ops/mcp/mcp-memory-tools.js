@@ -11,6 +11,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import crypto from "node:crypto";
 import { fileURLToPath } from "url";
 import { pathToFileURL } from "url";
@@ -40,44 +41,50 @@ function loadBm25Helper() {
   return loadHelper(["bus", "bm25.js"]);
 }
 
+// Cache helpers at call-time, not module-load-time, so test env vars can override.
+// eslint-disable-next-line consistent-return
 async function resolveStoreHelpers() {
   const helper = await loadStoreRootHelper();
   if (helper) {
     return helper;
   }
   return {
-    DEFAULT_STORE_ROOT: process.env.AI_MEMORY_STORE || process.env.AI_MEMORY_STORE_ROOT || path.resolve(".ai-memory"),
     resolveStoreRoot() {
-      return process.env.AI_MEMORY_STORE || process.env.AI_MEMORY_STORE_ROOT || path.resolve(".ai-memory");
-    },
-    getProjectsRoot(storeRoot) {
-      return path.join(storeRoot || this.resolveStoreRoot(), "projects");
-    },
-    getContextPath(storeRoot) {
-      return path.join(storeRoot || this.resolveStoreRoot(), "CONTEXT.md");
+      return (
+        process.env.AI_MEMORY_STORE ||
+        process.env.AI_MEMORY_STORE_ROOT ||
+        process.env.AI_MEMORY_ROOT ||
+        path.join(os.homedir(), ".ai-memory")
+      );
     },
   };
 }
 
-const storeHelpers = await resolveStoreHelpers();
-const DEFAULT_STORE_ROOT = storeHelpers.DEFAULT_STORE_ROOT;
-const resolveStoreRoot = storeHelpers.resolveStoreRoot;
+let _storeRootResolver = null;
+async function getStoreRootResolver() {
+  if (!_storeRootResolver) _storeRootResolver = await resolveStoreHelpers();
+  return _storeRootResolver;
+}
+
+// Resolve store root lazily so tests can override process.env before the first call.
+async function resolveStoreRoot() {
+  const helpers = await getStoreRootResolver();
+  return helpers.resolveStoreRoot();
+}
 
 function getProjectsRoot(storeRoot) {
-  return path.join(storeRoot || resolveStoreRoot(), "projects");
+  return path.join(storeRoot, "projects");
 }
 
 function getContextPath(storeRoot) {
-  return path.join(storeRoot || resolveStoreRoot(), "CONTEXT.md");
+  return path.join(storeRoot, "CONTEXT.md");
 }
 
+let _bm25Helper = null;
 async function getBm25Search() {
-  const helper = await loadBm25Helper();
-  return helper ? helper.search : () => [];
+  if (!_bm25Helper) _bm25Helper = await loadBm25Helper();
+  return _bm25Helper ? _bm25Helper.search : () => [];
 }
-
-const bm25Helper = await loadBm25Helper();
-const bm25Search = bm25Helper ? bm25Helper.search : () => [];
 
 const VALID_SCOPES = new Set(["user", "project", "feedback", "reference"]);
 const VALID_TYPES = new Set(["bugfix", "feature", "refactor", "discovery", "docs", "chore", "note"]);
@@ -188,8 +195,8 @@ function validateFact(fact) {
   return null;
 }
 
-function memory_boot({ agent_id: _agentId, project = "", cwd = "", top_k = 20 } = {}) {
-  const storeRoot = resolveStoreRoot();
+async function memory_boot({ agent_id: _agentId, project = "", cwd = "", top_k = 20 } = {}) {
+  const storeRoot = await resolveStoreRoot();
   const projectKey = detectProjectKey({ project, cwd });
   const globalPath = path.join(storeRoot, "global.md");
   const globalMd = fs.existsSync(globalPath) ? fs.readFileSync(globalPath, "utf8").trim() : "";
@@ -198,7 +205,7 @@ function memory_boot({ agent_id: _agentId, project = "", cwd = "", top_k = 20 } 
   return {
     source: "memory_boot",
     store_root: storeRoot,
-    default_store_root: DEFAULT_STORE_ROOT,
+    default_store_root: path.join(os.homedir(), ".ai-memory"),
     project: projectKey,
     context_md: getContextPath(storeRoot),
     global_exists: fs.existsSync(globalPath),
@@ -209,19 +216,20 @@ function memory_boot({ agent_id: _agentId, project = "", cwd = "", top_k = 20 } 
   };
 }
 
-function memory_search({ query = "", project = "", cwd = "", top_k = 10 } = {}) {
+async function memory_search({ query = "", project = "", cwd = "", top_k = 10 } = {}) {
   if (!query || !String(query).trim()) {
     return { query: "", project: detectProjectKey({ project, cwd }), results: [], total_docs: 0, error: "query is required" };
   }
 
-  const storeRoot = resolveStoreRoot();
+  const storeRoot = await resolveStoreRoot();
   const projectKey = project || cwd ? detectProjectKey({ project, cwd }) : "";
   const docs = collectSearchDocuments(projectKey, storeRoot);
   if (docs.length === 0) {
     return { query, project: projectKey || null, results: [], total_docs: 0 };
   }
 
-  const hits = bm25Search(docs, String(query), { topK: Number(top_k) || 10 });
+  const bm25Fn = await getBm25Search();
+  const hits = bm25Fn(docs, String(query), { topK: Number(top_k) || 10 });
   const results = hits.map((hit) => {
     const record = hit._raw || docs.find((doc) => doc.id === hit.id)?._raw || {};
     return {
@@ -244,8 +252,8 @@ function memory_search({ query = "", project = "", cwd = "", top_k = 10 } = {}) 
   };
 }
 
-function memory_query({ query = "", depth = "compact", project = "", cwd = "", top_k = 10 } = {}) {
-  const searchResult = memory_search({ query, project, cwd, top_k });
+async function memory_query({ query = "", depth = "compact", project = "", cwd = "", top_k = 10 } = {}) {
+  const searchResult = await memory_search({ query, project, cwd, top_k });
   if (searchResult.error) {
     return {
       query,
@@ -280,7 +288,7 @@ function memory_query({ query = "", depth = "compact", project = "", cwd = "", t
   };
 }
 
-function memory_write({ project = "", cwd = "", facts = [] } = {}) {
+async function memory_write({ project = "", cwd = "", facts = [] } = {}) {
   if (!Array.isArray(facts) || facts.length === 0) {
     return { ok: false, error: "facts[] is required" };
   }
@@ -292,7 +300,7 @@ function memory_write({ project = "", cwd = "", facts = [] } = {}) {
     }
   }
 
-  const storeRoot = resolveStoreRoot();
+  const storeRoot = await resolveStoreRoot();
   const projectKey = detectProjectKey({ project, cwd });
   const projectsRoot = getProjectsRoot(storeRoot);
   const jsonlPath = path.join(projectsRoot, `${projectKey}.jsonl`);
