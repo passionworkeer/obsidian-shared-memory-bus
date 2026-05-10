@@ -23,6 +23,12 @@ retrieval/cache/__pycache__/
 *.egg-info/
 .pytest_cache/
 
+# Runtime-generated memory store artifacts (live in user store directory, not in project)
+# Note: ops/adapters/generated/ contains source-code schema files — NOT gitignored
+./generated/
+./structured/
+test-e2e.jsonl
+
 # Bundles and generated state
 node_modules/
 shared-mcp/node_modules/

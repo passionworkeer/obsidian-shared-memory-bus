@@ -1,31 +1,51 @@
-import fs from "fs";
-import path from "path";
-import { spawnSync } from "child_process";
-import { buildMemoryIntegrityReport } from "../memory/memory-contract.js";
+"use strict";
+const fs = require("fs");
+const path = require("path");
+const { spawnSync } = require("child_process");
+const { fileURLToPath } = require("url");
+const { pathToFileURL } = require("url");
 
-function loadVaultRootHelper() {
+// __dirname for CJS
+// __dirname for CJS — available natively in CommonJS scope
+// (CJS provides __dirname automatically)
+
+// Helper for ESM module imports
+function toFileUrl(filePath) {
+  return pathToFileURL(filePath).href;
+}
+
+// memory-contract.js is ESM with top-level await — must use toFileUrl
+function loadMemoryContractHelper() {
   const candidates = [
-    path.join(__dirname, "vault-root.js"),
-    path.join(__dirname, "..", "bus", "vault-root.js"),
-    path.join(__dirname, "bus", "vault-root.js"),
+    path.join(__dirname, "memory-contract.js"),
+    path.join(__dirname, "..", "memory", "memory-contract.js"),
+    path.join(__dirname, "memory", "memory-contract.js"),
   ];
-
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
-      return import(candidate);
+      return import(toFileUrl(candidate));
     }
   }
-
-  throw new Error(`vault-root-helper-missing: tried ${candidates.join(", ")}`);
+  throw new Error(`memory-contract-helper-missing: tried ${candidates.join(", ")}`);
 }
 
 function resolveRuntimePath(candidates) {
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
-      return candidate;
+  // Search in: project root (where package.json lives), and key subdirectories
+  const projectRoot = path.join(__dirname, "..", "..");
+  const searchRoots = [
+    process.cwd(),
+    projectRoot,
+    path.join(projectRoot, "ops", "build"),
+    path.join(projectRoot, "ops", "run"),
+  ];
+  for (const root of searchRoots) {
+    for (const candidate of candidates) {
+      const absPath = path.join(root, candidate);
+      if (fs.existsSync(absPath)) {
+        return absPath;
+      }
     }
   }
-
   throw new Error(`runtime-script-missing: tried ${candidates.join(", ")}`);
 }
 
@@ -33,7 +53,6 @@ function resolvePowerShellExecutable() {
   if (process.env.AI_MEMORY_PWSH && process.env.AI_MEMORY_PWSH.trim()) {
     return process.env.AI_MEMORY_PWSH.trim();
   }
-
   return process.platform === "win32" ? "powershell.exe" : "pwsh";
 }
 
@@ -53,7 +72,6 @@ function summarizeIntegrity(report) {
       recordSchemaAligned: artifact.recordSchemaAligned !== false,
     };
   }
-
   return {
     status: String(report.status || ""),
     issues: Array.isArray(report.issues) ? report.issues : [],
@@ -64,13 +82,11 @@ function summarizeIntegrity(report) {
 
 function getGeneratedArtifactProblems(report) {
   const problems = [];
-
   for (const [key, artifact] of Object.entries(report.generatedArtifacts || {})) {
     if (!artifact.exists) {
       problems.push(`${key}:missing`);
       continue;
     }
-
     if (artifact.status === "stale" || artifact.status === "error") {
       problems.push(`${key}:${artifact.status}`);
     }
@@ -84,7 +100,6 @@ function getGeneratedArtifactProblems(report) {
       problems.push(`${key}:record-schema-mismatch`);
     }
   }
-
   return problems;
 }
 
@@ -94,7 +109,6 @@ function runNodeScript(scriptPath) {
     encoding: "utf8",
     windowsHide: true,
   });
-
   return {
     ok: !result.error && result.status === 0,
     exitCode: result.status,
@@ -105,22 +119,14 @@ function runNodeScript(scriptPath) {
 
 function runPowerShellScript(scriptPath, args = []) {
   const executable = resolvePowerShellExecutable();
-  const commandArgs = [];
-
-  if (process.platform === "win32") {
-    commandArgs.push("-NoProfile", "-ExecutionPolicy", "Bypass");
-  } else {
-    commandArgs.push("-NoProfile");
-  }
-
-  commandArgs.push("-File", scriptPath, ...args);
-
+  const commandArgs = process.platform === "win32"
+    ? ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath, ...args]
+    : ["-NoProfile", "-File", scriptPath, ...args];
   const result = spawnSync(executable, commandArgs, {
     cwd: path.dirname(scriptPath),
     encoding: "utf8",
     windowsHide: true,
   });
-
   return {
     ok: !result.error && result.status === 0,
     exitCode: result.status,
@@ -132,88 +138,70 @@ function runPowerShellScript(scriptPath, args = []) {
 function executeStep(name, runner) {
   const startedAt = new Date().toISOString();
   const result = runner();
-  return {
-    name,
-    startedAt,
-    ok: result.ok,
-    exitCode: result.exitCode,
-    stdout: result.stdout,
-    stderr: result.stderr,
-  };
+  return { name, startedAt, ok: result.ok, exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
 }
 
-const vaultRootModule = await loadVaultRootHelper();
-const { resolveVaultRoot } = vaultRootModule;
-const VAULT_ROOT = resolveVaultRoot();
-const AI_MEMORY_ROOT = path.join(VAULT_ROOT, "00-System", "ai-memory");
-const STRUCTURED_ROOT = path.join(AI_MEMORY_ROOT, "structured");
-const GENERATED_ROOT = path.join(AI_MEMORY_ROOT, "generated");
-const FORCE = process.argv.includes("--force");
+async function main() {
+  // Load memory-contract (ESM with top-level await) via toFileUrl
+  const mcModule = await loadMemoryContractHelper();
+  const buildMemoryIntegrityReport = mcModule.buildMemoryIntegrityReport;
 
-const BUILD_MEMORY_LAYERS_SCRIPT = resolveRuntimePath([
-  path.join(__dirname, "build-memory-layers.js"),
-  path.join(__dirname, "..", "ops", "build-memory-layers.js"),
-]);
-const BUILD_HANDOFF_PACK_SCRIPT = resolveRuntimePath([
-  path.join(__dirname, "build-handoff-pack.js"),
-  path.join(__dirname, "..", "ops", "build-handoff-pack.js"),
-]);
-const RUN_MEMORY_DREAM_SCRIPT = resolveRuntimePath([
-  path.join(__dirname, "run-memory-dream.ps1"),
-  path.join(__dirname, "..", "ops", "run-memory-dream.ps1"),
-]);
+  // vault-root.cjs is pure CJS — require it by absolute path
+  const vaultRootPath = path.join(__dirname, "..", "..", "bus", "vault-root.cjs");
+  const { resolveVaultRoot } = require(vaultRootPath);
+  const STORE_ROOT = resolveVaultRoot();
+  const STRUCTURED_ROOT = path.join(STORE_ROOT, "structured");
+  const GENERATED_ROOT = path.join(STORE_ROOT, "generated");
+  const FORCE = process.argv.includes("--force");
 
-function main() {
-  const before = buildMemoryIntegrityReport({
-    structuredRoot: STRUCTURED_ROOT,
-    generatedRoot: GENERATED_ROOT,
-  });
+  const BUILD_MEMORY_LAYERS_SCRIPT = resolveRuntimePath([
+    "build-memory-layers.js",
+  ]);
+  const BUILD_HANDOFF_PACK_SCRIPT = resolveRuntimePath([
+    "build-handoff-pack.js",
+  ]);
+  const RUN_MEMORY_DREAM_SCRIPT = resolveRuntimePath([
+    "run-memory-dream.ps1",
+  ]);
+
+  const before = buildMemoryIntegrityReport({ structuredRoot: STRUCTURED_ROOT, generatedRoot: GENERATED_ROOT });
   const beforeProblems = getGeneratedArtifactProblems(before);
   const refreshed = FORCE || beforeProblems.length > 0;
   const steps = [];
 
   if (refreshed) {
     steps.push(executeStep("build-memory-layers", () => runNodeScript(BUILD_MEMORY_LAYERS_SCRIPT)));
-    if (!steps[steps.length - 1].ok) {
-      return finish(false, refreshed, before, steps);
-    }
+    if (!steps[steps.length - 1].ok) return finish(false, refreshed, before, steps, buildMemoryIntegrityReport, STRUCTURED_ROOT, GENERATED_ROOT);
 
     steps.push(executeStep("build-handoff-pack", () => runNodeScript(BUILD_HANDOFF_PACK_SCRIPT)));
-    if (!steps[steps.length - 1].ok) {
-      return finish(false, refreshed, before, steps);
-    }
+    if (!steps[steps.length - 1].ok) return finish(false, refreshed, before, steps, buildMemoryIntegrityReport, STRUCTURED_ROOT, GENERATED_ROOT);
 
-    steps.push(
-      executeStep("run-memory-dream", () => runPowerShellScript(RUN_MEMORY_DREAM_SCRIPT, ["-Force"]))
-    );
-    if (!steps[steps.length - 1].ok) {
-      return finish(false, refreshed, before, steps);
-    }
+    steps.push(executeStep("run-memory-dream", () => runPowerShellScript(RUN_MEMORY_DREAM_SCRIPT, ["-Force"])));
+    if (!steps[steps.length - 1].ok) return finish(false, refreshed, before, steps, buildMemoryIntegrityReport, STRUCTURED_ROOT, GENERATED_ROOT);
   }
 
-  return finish(true, refreshed, before, steps);
+  return finish(true, refreshed, before, steps, buildMemoryIntegrityReport, STRUCTURED_ROOT, GENERATED_ROOT);
 }
 
-function finish(preStepOk, refreshed, before, steps) {
-  const after = buildMemoryIntegrityReport({
-    structuredRoot: STRUCTURED_ROOT,
-    generatedRoot: GENERATED_ROOT,
-  });
+function finish(preStepOk, refreshed, before, steps, buildMemoryIntegrityReport, structuredRoot, generatedRoot) {
+  const after = buildMemoryIntegrityReport({ structuredRoot, generatedRoot });
   const afterProblems = getGeneratedArtifactProblems(after);
   const ok = preStepOk && afterProblems.length === 0;
   const payload = {
     ok,
     refreshed,
-    force: FORCE,
+    force: process.argv.includes("--force"),
     before: summarizeIntegrity(before),
     after: summarizeIntegrity(after),
     beforeProblemCount: getGeneratedArtifactProblems(before).length,
     afterProblemCount: afterProblems.length,
     steps,
   };
-
   process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
   process.exit(ok ? 0 : 1);
 }
 
-main();
+main().catch((err) => {
+  console.error("Fatal:", err.message);
+  process.exit(1);
+});

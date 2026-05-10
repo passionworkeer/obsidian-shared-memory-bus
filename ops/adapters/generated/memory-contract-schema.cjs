@@ -9,8 +9,6 @@
  * If this file is missing, memory-contract.js falls back to inline definitions.
  */
 
-"use strict";
-
 // Schema version constants
 const MEMORY_RECORD_SCHEMA_VERSION = 2;
 const MEMORY_INTEGRITY_CONTRACT_VERSION = 2;

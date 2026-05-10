@@ -13,7 +13,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let _genSchema;
 try {
-  _genSchema = await import("../adapters/generated/memory-contract-schema.js");
+  _genSchema = await import("../adapters/generated/memory-contract-schema.cjs");
 } catch {
   _genSchema = null;
 }

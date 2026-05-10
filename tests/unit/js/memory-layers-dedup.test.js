@@ -21,8 +21,8 @@ process.env.AI_MEMORY_ROOT = TEST_AI_MEMORY_ROOT;
 // ---------------------------------------------------------------------------
 const stubStoreRootPath = path.resolve(__dirname, "..", "..", "..", "bus", "store-root.js");
 const storeRootStub = `
-export function resolveStoreRoot() { return "E:/desktop/.ai-memory"; }
-export function getDefaultStoreCandidates() { return ["E:/desktop/.ai-memory"]; }
+export function resolveStoreRoot() { return process.env.AI_MEMORY_ROOT || "E:/desktop/.ai-memory"; }
+export function getDefaultStoreCandidates() { return [process.env.AI_MEMORY_ROOT || "E:/desktop/.ai-memory"]; }
 export default { resolveStoreRoot, getDefaultStoreCandidates };
 `;
 fs.mkdirSync(path.dirname(stubStoreRootPath), { recursive: true });

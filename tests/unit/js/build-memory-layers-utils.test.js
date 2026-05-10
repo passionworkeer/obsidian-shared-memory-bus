@@ -17,11 +17,11 @@ const stubStoreRootPath = path.resolve(__dirname, "..", "..", "..", "bus", "stor
 const storeRootStub = `
 export default {
   resolveStoreRoot() {
-    return "E:/desktop/.ai-memory";
+    return process.env.AI_MEMORY_ROOT || "E:/desktop/.ai-memory";
   },
 };
-export const resolveStoreRoot = () => "E:/desktop/.ai-memory";
-export const getDefaultStoreCandidates = () => ["E:/desktop/.ai-memory"];
+export const resolveStoreRoot = () => process.env.AI_MEMORY_ROOT || "E:/desktop/.ai-memory";
+export const getDefaultStoreCandidates = () => [process.env.AI_MEMORY_ROOT || "E:/desktop/.ai-memory"];
 `;
 
 if (!fs.existsSync(stubStoreRootPath)) {
