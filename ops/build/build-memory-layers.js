@@ -37,6 +37,7 @@ const {
   buildPromotionKey,
   STRUCTURED_ROOT,
   GENERATED_ROOT,
+  PROJECTS_ROOT,
   SHARED_INBOX_JSONL,
   DREAM_INBOX_JSONL,
   SESSION_MEMORY_JSONL,
@@ -151,6 +152,26 @@ async function main() {
     )
     .filter(Boolean);
 
+  // Read projects/*.jsonl (written by stop-extract.mjs stop hooks)
+  const projectRecords = [];
+  if (fs.existsSync(PROJECTS_ROOT)) {
+    const projectFiles = fs.readdirSync(PROJECTS_ROOT).filter(f => f.endsWith('.jsonl'));
+    for (const file of projectFiles) {
+      const records = readJsonl(path.join(PROJECTS_ROOT, file));
+      for (const rec of records) {
+        if (rec && rec.content) {
+          // Convert project JSONL records to structured format
+          projectRecords.push({
+            ...rec,
+            source: 'projects',
+            memory_level: 'session',
+            scope: 'project',
+          });
+        }
+      }
+    }
+  }
+
   // Build content_hash -> record index from existing structured records.
   // This is used by the 30-second dedup window in deduplicateSharedInbox.
   const existingRecordsByHash = new Map();
@@ -186,7 +207,14 @@ async function main() {
   };
 
   writeJsonl(SHARED_INBOX_JSONL, layers.sharedInbox);
-  writeJsonl(SESSION_MEMORY_JSONL, layers.sessionMemory);
+  // Merge session-memory: existing records + sessionMemory from parseSessionMemoryEntries() + projectRecords
+  const existingSession = readJsonl(SESSION_MEMORY_JSONL);
+  const existingIds = new Set(existingSession.map(r => r.id));
+  const projectRecordsFiltered = projectRecords.filter(r => !existingIds.has(r.id));
+  const allSessionRecords = [...existingSession, ...layers.sessionMemory, ...projectRecordsFiltered];
+  writeJsonl(SESSION_MEMORY_JSONL, allSessionRecords);
+  // Update layers.sessionMemory to reflect actual records for summary generation
+  layers.sessionMemory = allSessionRecords;
   writeJsonl(SHARED_EVENTS_JSONL, layers.sharedEvents);
   writeJsonl(TASK_MEMORY_JSONL, layers.taskMemory);
 
@@ -200,6 +228,7 @@ async function main() {
     ...layers.sharedEvents,
     ...layers.taskMemory,
     ...dreamRecords,   // also extract entities from dream writeback records
+    ...projectRecords, // also extract entities from project JSONL files
   ];
 
   // Open a KG batch so that hundreds of ingestRecord calls share one transaction

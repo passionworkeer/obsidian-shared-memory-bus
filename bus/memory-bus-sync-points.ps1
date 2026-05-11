@@ -83,16 +83,18 @@ function Sync-ManagedEntrypoints {
     $claudeInboxPath = Join-Path $Script:InboxRoot "claude-code.md"
     $opencodeInboxPath = Join-Path $Script:InboxRoot "opencode.md"
     $copilotInboxPath = Join-Path $Script:InboxRoot "copilot.md"
+    $hermesInboxPath = Join-Path $Script:InboxRoot "hermes-agent.md"
     $codexStartupPath = Join-Path $Script:StartupRoot "codex.md"
     $traeStartupPath = Join-Path $Script:StartupRoot "trae.md"
     $claudeStartupPath = Join-Path $Script:StartupRoot "claude-code.md"
     $opencodeStartupPath = Join-Path $Script:StartupRoot "opencode.md"
     $copilotStartupPath = Join-Path $Script:StartupRoot "copilot.md"
+    $hermesStartupPath = Join-Path $Script:StartupRoot "hermes-agent.md"
 
 $vaultAgents = @"
 # Shared Memory Bus AI Collaboration Entry
 
-This store is the canonical shared memory source for Claude Code, Codex, Trae, OpenClaw, OpenCode, GitHub Copilot, and newly onboarded agents.
+This store is the canonical shared memory source for Claude Code, Codex, Trae, OpenClaw, OpenCode, GitHub Copilot, Hermes Agent, and newly onboarded agents.
 
 ## Canonical Files
 - 02-KB/MEMORY.md: durable cross-session memory
@@ -318,4 +320,31 @@ $(Normalize-Text -Text $sharedGlobal)
 - Current tasks: $Script:CanonicalWorking
 - Project notes: write to the relevant vault project note
 "@
+
+    # Hermes Agent sync
+    $hermesStartup = Read-Text -Path (Join-Path $Script:StartupRoot "hermes-agent.md")
+    $hermesSection = @"
+# Hermes Agent Shared Memory
+
+You share a long-term memory layer with Claude Code, Codex, Trae, OpenClaw, OpenCode, and GitHub Copilot through the shared memory bus.
+
+## Read Order
+Before doing substantive work, read these files in order:
+1. $Script:CanonicalMemory
+2. $Script:CanonicalWorking
+3. $Script:GlobalContextPath
+4. $(Join-Path $Script:StartupRoot "hermes-agent.md")
+
+## Writeback Policy
+- Durable preferences, reusable methods, and cross-project facts go to $(Join-Path $Script:InboxRoot "hermes-agent.md")
+- Current-task progress belongs in $Script:CanonicalWorking
+- Project-specific durable knowledge belongs in the relevant project note
+- Avoid duplicates and never store secrets, tokens, or credentials
+
+## Intent
+- The shared memory bus is the long-term source of truth
+- ~/.hermes/memories is optional native state, not the canonical store
+- When a fact matters across sessions or projects, write it back to the shared memory layer
+"@
+    Write-Text -Path (Join-Path $Script:StartupRoot "hermes-agent.md") -Content ($hermesSection.Trim() + "`n")
 }

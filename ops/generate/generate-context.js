@@ -99,8 +99,8 @@ function generateContext(opts = {}) {
   return contextPath;
 }
 
-// CLI
-if (require.main === module) {
+// CLI entry point
+async function cliMain() {
   const args = process.argv.slice(2);
   const projectIdx = args.indexOf("--project");
   const project = projectIdx >= 0 ? args[projectIdx + 1] : undefined;
@@ -113,6 +113,11 @@ if (require.main === module) {
     process.stderr.write(`[generate-context] error: ${err.message}\n`);
     process.exit(1);
   }
+}
+
+// Run as CLI
+if (import.meta.url === `file://${process.argv[1]}`) {
+  cliMain();
 }
 
 export { generateContext };
