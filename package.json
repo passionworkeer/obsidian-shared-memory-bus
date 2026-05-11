@@ -28,7 +28,8 @@
     "test:py": "pytest tests/ -v",
     "test:cross": "node --test tests/cross-language/*.test.js",
     "test:integration": "node --test --test-concurrency=1 --experimental-test-isolation=none tests/integration/js/*.test.mjs",
-    "test:all": "node --test --test-concurrency=1 --experimental-test-isolation=none tests/unit/js/*.test.js tests/unit/js/*.test.mjs && node --test --test-concurrency=1 --experimental-test-isolation=none tests/integration/js/*.test.mjs && pytest tests/unit/py/ tests/cross-language/ -v"
+    "test:all": "node --test --test-concurrency=1 --experimental-test-isolation=none tests/unit/js/*.test.js tests/unit/js/*.test.mjs && node --test --test-concurrency=1 --experimental-test-isolation=none tests/integration/js/*.test.mjs && pytest tests/unit/py/ tests/cross-language/ -v",
+    "test:full": "node scripts/test-all.js"
   },
   "keywords": [
     "ai-memory"
