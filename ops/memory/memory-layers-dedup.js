@@ -21,8 +21,21 @@ import {
 // JSONL writing
 // ---------------------------------------------------------------------------
 
-function writeJsonl(filePath, records) {
+function writeJsonl(filePath, records, options = {}) {
   ensureDirectory(path.dirname(filePath));
+  if (options && options.append) {
+    // Append mode: read existing, merge, write
+    const existing = readJsonl(filePath);
+    const existingIds = new Set(existing.map(r => r.id));
+    const newRecords = records.filter(r => !existingIds.has(r.id));
+    if (newRecords.length > 0) {
+      const existingBody = existing.map((record) => JSON.stringify(record)).join("\n");
+      const newBody = newRecords.map((record) => JSON.stringify(record)).join("\n");
+      writeText(filePath, existingBody ? `${existingBody}\n${newBody}\n` : `${newBody}\n`);
+    }
+    return;
+  }
+  // Normal mode: overwrite
   const body = records.map((record) => JSON.stringify(record)).join("\n");
   writeText(filePath, body ? `${body}\n` : "");
 }

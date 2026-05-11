@@ -10,7 +10,8 @@ function Get-CoreAgentDefinitions {
         [pscustomobject]@{ slug = "openclaw"; displayName = "OpenClaw"; preset = "openclaw"; nativeImport = $true },
         [pscustomobject]@{ slug = "trae"; displayName = "Trae"; preset = "trae"; nativeImport = $true },
         [pscustomobject]@{ slug = "opencode"; displayName = "OpenCode"; preset = "opencode"; nativeImport = $true },
-        [pscustomobject]@{ slug = "copilot"; displayName = "GitHub Copilot"; preset = "copilot"; nativeImport = $true }
+        [pscustomobject]@{ slug = "copilot"; displayName = "GitHub Copilot"; preset = "copilot"; nativeImport = $true },
+        [pscustomobject]@{ slug = "hermes-agent"; displayName = "Hermes Agent"; preset = "hermes"; nativeImport = $true }
     )
 }
 
