@@ -78,6 +78,11 @@ _run_*.sh
 $null
 interview/
 
+# Memory bus sync mirrors (generated, user-specific)
+imported/
+inbox/
+agents.json
+
 # Test-generated stubs
 ops/bus/
 
