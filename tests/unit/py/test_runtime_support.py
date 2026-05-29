@@ -17,6 +17,7 @@ from retrieval.runtime_support import (
     get_user_home,
     get_config_home,
     get_default_vault_candidates,
+    resolve_store_root,
     resolve_vault_root,
     resolve_runtime_root,
     load_runtime_config,
@@ -186,6 +187,16 @@ class TestPathResolution:
         assert len(candidates) > 0
         for candidate in candidates:
             assert isinstance(candidate, Path)
+
+    def test_resolve_store_root_uses_ai_memory_store(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("AI_MEMORY_STORE", str(tmp_path / "store"))
+        monkeypatch.setenv("AI_MEMORY_STORE_ROOT", str(tmp_path / "store-root"))
+        assert resolve_store_root() == (tmp_path / "store").resolve()
+
+    def test_resolve_store_root_uses_store_root_alias(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("AI_MEMORY_STORE", raising=False)
+        monkeypatch.setenv("AI_MEMORY_STORE_ROOT", str(tmp_path / "store-root"))
+        assert resolve_store_root() == (tmp_path / "store-root").resolve()
 
     def test_resolve_runtime_root_candidates_empty(self):
         with patch.dict(os.environ, {}, clear=True):
@@ -414,8 +425,13 @@ class TestVaultRootResolution:
             assert isinstance(vault, Path)
             # The vault path should exist (may not be an actual vault, but path exists)
         except RuntimeError as e:
-            # If RuntimeError, it should be about missing store
-            assert "no-store-root" in str(e) or "STORE_RESOLUTION_FAILED" in str(e)
+            # Vault-less CI/dev machines should fail with an explicit resolution error.
+            message = str(e)
+            assert (
+                "no-obsidian-vault" in message
+                or "no-store-root" in message
+                or "STORE_RESOLUTION_FAILED" in message
+            )
 
     def test_platform_windows_flag(self):
         """Test that IS_WINDOWS is correctly set."""

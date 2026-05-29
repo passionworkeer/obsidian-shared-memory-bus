@@ -6,47 +6,24 @@ import os from "node:os";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-// ---------------------------------------------------------------------------
-// Stub vault-root before the module is loaded
-// ESM Note: require.cache not available in ESM, stubs written to files
-// ---------------------------------------------------------------------------
-const stubVaultRootPath = path.resolve(__dirname, "..", "..", "..", "bus", "vault-root.js");
-const vaultRootStub = `
-import { existsSync } from "node:fs";
-import { resolve } from "node:path";
-
-function getVaultRoot() {
-  const envVault = process.env.OBSIDIAN_VAULT_ROOT || process.env.AI_MEMORY_OBSIDIAN_VAULT;
-  if (envVault) {
-    return resolve(envVault);
-  }
-  // Fallback to platform-specific defaults for testing
-  const userHome = process.env.USERPROFILE || process.env.HOME || "";
-  const defaultPath = resolve(userHome, "Desktop", "Obsidian Vault");
-  if (existsSync(defaultPath)) {
-    return defaultPath;
-  }
-  return resolve(userHome, "Obsidian Vault");
-}
-
-export function resolveVaultRoot() {
-  return getVaultRoot();
-}
-export function getDefaultVaultCandidates() {
-  const userHome = process.env.USERPROFILE || process.env.HOME || "";
-  return [
-    resolve(userHome, "Desktop", "Obsidian Vault"),
-    resolve(userHome, "Obsidian Vault"),
-  ];
-}
-export default { resolveVaultRoot, getDefaultVaultCandidates };
-`;
-fs.mkdirSync(path.dirname(stubVaultRootPath), { recursive: true });
-fs.writeFileSync(stubVaultRootPath, vaultRootStub, "utf8");
+const ORIGINAL_AI_MEMORY_STORE = process.env.AI_MEMORY_STORE;
+const TEST_STORE_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "ai-memory-parse-test-"));
+process.env.AI_MEMORY_STORE = TEST_STORE_ROOT;
 
 // ESM Note: Module.prototype._compile patching is not available in ESM
 // The module will need to be imported directly and exports used
+
+const memoryLayersParse = await import("../../../ops/memory/memory-layers-parse.js");
+
+if (ORIGINAL_AI_MEMORY_STORE === undefined) {
+  delete process.env.AI_MEMORY_STORE;
+} else {
+  process.env.AI_MEMORY_STORE = ORIGINAL_AI_MEMORY_STORE;
+}
+
+test.after(() => {
+  fs.rmSync(TEST_STORE_ROOT, { recursive: true, force: true });
+});
 
 const {
   normalizeSpaces, sha1, sha256, parseTimestamp, classifyScope,
@@ -65,7 +42,7 @@ const {
   shouldSkipAsRecentDuplicate, getFreshness, tokenize,
   NON_PROMOTABLE_PROMOTION_TYPES,
   loadStructuredRecords,
-} = await import("../../../ops/memory/memory-layers-parse.js");
+} = memoryLayersParse;
 
 // ---------------------------------------------------------------------------
 // Path constants
@@ -764,15 +741,33 @@ test("withFileLock: idempotent sequential calls", () => {
 // loadEntityExtractor / loadKnowledgeGraph
 // ---------------------------------------------------------------------------
 
-test("loadEntityExtractor: returns object with extractFromRecord", () => {
-  const extractor = loadEntityExtractor();
+test("loadEntityExtractor: returns object with extractFromRecord", async () => {
+  const extractor = await loadEntityExtractor();
   assert.equal(typeof extractor.extractFromRecord, "function");
-  const result = extractor.extractFromRecord({ id: "test", content: "test" });
+  const result = extractor.extractFromRecord({
+    id: "test",
+    content: "Alice works on MemPalace project with Postgres",
+  });
   assert.ok(result !== null && typeof result === "object");
+  assert.ok(
+    Array.isArray(result.entities) && result.entities.some((entity) => entity.name === "Alice"),
+    "lazy-loaded extractor should enrich records instead of returning passthrough records"
+  );
 });
 
-test("loadKnowledgeGraph: returns object with ingestRecord and close", () => {
-  const kg = loadKnowledgeGraph();
+test("loadKnowledgeGraph: returns real graph object when node:sqlite is available", async (t) => {
+  try {
+    await import("node:sqlite");
+  } catch {
+    t.skip("node:sqlite is not available on this Node.js version");
+    return;
+  }
+
+  const kg = await loadKnowledgeGraph();
   assert.equal(typeof kg.ingestRecord, "function");
+  assert.equal(typeof kg.stats, "function");
   assert.equal(typeof kg.close, "function");
+  assert.notEqual(kg.available, false, "KG loader should not silently return an unavailable no-op adapter");
+  assert.equal(kg.stats().entities, 0);
+  kg.close();
 });

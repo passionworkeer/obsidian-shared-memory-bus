@@ -11,6 +11,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Create temp directory for DAILY_LOG_DIR to avoid hardcoded path dependency
 // MUST be set before any module that uses AI_MEMORY_ROOT
 // ---------------------------------------------------------------------------
+const ORIGINAL_AI_MEMORY_ROOT = process.env.AI_MEMORY_ROOT;
 const TEST_AI_MEMORY_ROOT = path.join(os.tmpdir(), `ai-memory-test-${Date.now()}`);
 fs.mkdirSync(TEST_AI_MEMORY_ROOT, { recursive: true });
 process.env.AI_MEMORY_ROOT = TEST_AI_MEMORY_ROOT;
@@ -48,6 +49,18 @@ fs.writeFileSync(stubStoreRootPath, storeRootStub, "utf8");
 // ESM Note: Module.prototype._compile patching is not available in ESM
 // The module will need to be imported directly and exports used
 
+const memoryLayersDedup = await import("../../../ops/memory/memory-layers-dedup.js");
+
+if (ORIGINAL_AI_MEMORY_ROOT === undefined) {
+  delete process.env.AI_MEMORY_ROOT;
+} else {
+  process.env.AI_MEMORY_ROOT = ORIGINAL_AI_MEMORY_ROOT;
+}
+
+test.after(() => {
+  fs.rmSync(TEST_AI_MEMORY_ROOT, { recursive: true, force: true });
+});
+
 const {
   writeJsonl,
   patchJsonlRecord,
@@ -62,7 +75,7 @@ const {
   sha256,
   getFreshness,
   shouldSkipAsRecentDuplicate,
-} = await import("../../../ops/memory/memory-layers-dedup.js");
+} = memoryLayersDedup;
 
 // ---------------------------------------------------------------------------
 // writeJsonl

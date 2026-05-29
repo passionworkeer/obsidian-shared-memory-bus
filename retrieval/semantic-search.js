@@ -4,24 +4,39 @@
 //   node semantic-search.js --mode hybrid --top-k 8 "query"
 //   node semantic-search.js --json --route task --tool openclaw --source-kind blackboard "query"
 
-const { spawn } = require("child_process");
-const fs = require("fs");
-const path = require("path");
-const {
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import {
   buildPythonSearchArgs,
   buildUsage,
   formatPayloadText,
   parseCliArgs,
-} = require("./semantic-search-cli.js");
+} from "./semantic-search-cli.js";
 
-const AI_MEMORY_ROOT = process.env.AI_MEMORY_ROOT || __dirname;
-const { resolvePythonRuntime, withPythonArgs } = require(
-  fs.existsSync(path.join(__dirname, "python-runtime.js"))
-    ? path.join(__dirname, "python-runtime.js")
-    : path.join(__dirname, "..", "bus", "python-runtime.js")
-);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const RUNTIME_ROOT = process.env.AI_MEMORY_ROOT || path.resolve(__dirname, "..");
+const pythonRuntimeHelperPath = fs.existsSync(path.join(__dirname, "python-runtime.js"))
+  ? path.join(__dirname, "python-runtime.js")
+  : path.join(__dirname, "..", "bus", "python-runtime.js");
+const { resolvePythonRuntime, withPythonArgs } = await import(pathToFileURL(pythonRuntimeHelperPath).href);
 const PYTHON = resolvePythonRuntime();
-const SCRIPT = path.join(AI_MEMORY_ROOT, "semantic_search.py");
+
+function resolveSearchScript() {
+  for (const candidate of [
+    path.join(__dirname, "semantic_search.py"),
+    path.join(RUNTIME_ROOT, "semantic_search.py"),
+    path.join(RUNTIME_ROOT, "retrieval", "semantic_search.py"),
+  ]) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return path.join(__dirname, "semantic_search.py");
+}
+
+const SCRIPT = resolveSearchScript();
 
 function main() {
   const parsed = parseCliArgs(process.argv.slice(2));

@@ -143,7 +143,7 @@ from runtime_support import (
     normalize_bool,
     normalize_int,
     resolve_embedding_runtime,
-    resolve_vault_root,
+    resolve_store_root,
     normalize_embedding_adapter,
 )
 
@@ -242,14 +242,14 @@ _BM25_CACHE_MAX_ENTRIES = normalize_int(first_non_empty_env("AI_MEMORY_BM25_CACH
 # ---------------------------------------------------------------------------
 
 try:
-    VAULT_ROOT = str(resolve_vault_root())
+    STORE_ROOT = str(resolve_store_root())
 except RuntimeError:
-    # CI or vault-less environment: use a temp directory as fallback
+    # CI or store-less environment: use a temp directory as fallback
     import tempfile as _tmp
-    VAULT_ROOT = _tmp.mkdtemp(prefix="ai-memory-smoke-")
-AI_MEMORY_ROOT = os.path.join(VAULT_ROOT, "00-System", "ai-memory")
-STRUCTURED_DIR = os.path.join(AI_MEMORY_ROOT, "structured")
-EMBEDDINGS_INDEX = os.path.join(AI_MEMORY_ROOT, "embeddings", "index.jsonl")
+    STORE_ROOT = _tmp.mkdtemp(prefix="ai-memory-smoke-")
+AI_MEMORY_ROOT = STORE_ROOT
+STRUCTURED_DIR = os.path.join(STORE_ROOT, "structured")
+EMBEDDINGS_INDEX = os.path.join(STORE_ROOT, "embeddings", "index.jsonl")
 
 # ---------------------------------------------------------------------------
 # Resiliency infrastructure

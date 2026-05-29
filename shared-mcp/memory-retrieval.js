@@ -15,6 +15,7 @@
  */
 
 import { spawn } from "node:child_process";
+import path from "node:path";
 import { TOOLS } from "./memory-tools.js";
 
 const SEARCH_ROUTE_VALUES = new Set(["auto", "mixed", "durable", "task", "recent", "reference"]);
@@ -34,6 +35,24 @@ function errorResult(message) {
     content: [{ type: "text", text: JSON.stringify({ ok: false, error: String(message) }, null, 2) }],
     isError: true,
   };
+}
+
+function resolveStoreRootParam(params = {}) {
+  return (
+    params.STORE_ROOT ||
+    params.MEMORY_STORE_ROOT ||
+    params.storeRoot ||
+    params.memoryStoreRoot ||
+    params.AI_MEMORY_STORE ||
+    params.AI_MEMORY_STORE_ROOT ||
+    params.AI_MEMORY_ROOT ||
+    process.env.AI_MEMORY_STORE ||
+    process.env.AI_MEMORY_STORE_ROOT ||
+    process.env.AI_MEMORY_ROOT ||
+    params.VAULT_ROOT ||
+    params.vaultRoot ||
+    path.join(process.env.USERPROFILE || process.env.HOME || ".", ".ai-memory")
+  );
 }
 
 function spawnProcess(executable, args, options = {}) {
@@ -82,7 +101,8 @@ async function runSemanticSearchOnce({
   snippetWindow = 220,
   maxVerbatimPerResult = 1,
 }) {
-  const { SEARCH_SCRIPT, VAULT_ROOT, PYTHON_SPAWN_ENV, PYTHON, withPythonArgs } = params;
+  const { SEARCH_SCRIPT, PYTHON_SPAWN_ENV, PYTHON, withPythonArgs } = params;
+  const storeRoot = resolveStoreRootParam(params);
   const normalizedRoute = SEARCH_ROUTE_VALUES.has(String(route || "").trim().toLowerCase())
     ? String(route || "").trim().toLowerCase()
     : "auto";
@@ -120,7 +140,7 @@ async function runSemanticSearchOnce({
   const result = await spawnProcess(PYTHON.command, withPythonArgs(PYTHON, args), {
     env: {
       ...PYTHON_SPAWN_ENV,
-      AI_MEMORY_STORE: VAULT_ROOT,
+      AI_MEMORY_STORE: storeRoot,
     },
   });
   if (result.code !== 0) {
@@ -455,12 +475,26 @@ Only include records that are genuinely relevant. Return fewer than max_results 
 
   // ── Entity / knowledge-graph handlers ─────────────────────────────────
 
-  function loadKnowledgeGraph() {
+  async function loadKnowledgeGraph() {
     try {
-      const { KnowledgeGraph } = require("../../ops/knowledge/knowledge-graph.js");
-      return new KnowledgeGraph({ vaultRoot: params.VAULT_ROOT });
-    } catch {
-      return null;
+      const moduleUrl = new URL("../ops/knowledge/knowledge-graph.js", import.meta.url);
+      const { KnowledgeGraph } = await import(moduleUrl.href);
+      return new KnowledgeGraph({ storeRoot: resolveStoreRootParam(params) });
+    } catch (error) {
+      return {
+        available: false,
+        error: String(error?.message || error),
+        ingestRecord: () => {},
+        beginBatch: () => {},
+        endBatch: () => {},
+        close: () => {},
+        stats: () => ({ entities: 0, triples: 0, currentFacts: 0, expiredFacts: 0 }),
+        getEntity: () => null,
+        queryEntity: () => [],
+        searchEntities: () => [],
+        timeline: () => [],
+        getEntitiesByType: () => [],
+      };
     }
   }
 
@@ -468,8 +502,10 @@ Only include records that are genuinely relevant. Return fewer than max_results 
     const name = String(args.name || "").trim();
     if (!name) return errorResult("name is required");
 
-    const kg = loadKnowledgeGraph();
-    if (!kg) return errorResult("knowledge-graph-unavailable: run build-memory-layers.js first");
+    const kg = await loadKnowledgeGraph();
+    if (kg.available === false) {
+      return errorResult(`knowledge-graph-unavailable: ${kg.error || "unknown-error"}`);
+    }
 
     try {
       const entity = kg.getEntity(name);
@@ -490,8 +526,10 @@ Only include records that are genuinely relevant. Return fewer than max_results 
     const entityQuery = String(args.entity_query || "").trim();
     if (!entityQuery) return errorResult("entity_query is required");
 
-    const kg = loadKnowledgeGraph();
-    if (!kg) return errorResult("knowledge-graph-unavailable: run build-memory-layers.js first");
+    const kg = await loadKnowledgeGraph();
+    if (kg.available === false) {
+      return errorResult(`knowledge-graph-unavailable: ${kg.error || "unknown-error"}`);
+    }
 
     try {
       // 1. Find matching entities
@@ -525,8 +563,10 @@ Only include records that are genuinely relevant. Return fewer than max_results 
   // ── KG stats ───────────────────────────────────────────────────────────
 
   async function handleGetKgStats(_args) {
-    const kg = loadKnowledgeGraph();
-    if (!kg) return errorResult("knowledge-graph-unavailable: run build-memory-layers.js first");
+    const kg = await loadKnowledgeGraph();
+    if (kg.available === false) {
+      return errorResult(`knowledge-graph-unavailable: ${kg.error || "unknown-error"}`);
+    }
     try {
       const stats = kg.stats();
       // Get entity counts by type via the known type list
@@ -562,8 +602,10 @@ Only include records that are genuinely relevant. Return fewer than max_results 
     const limit = Math.max(1, Number(args.limit ?? 10) || 10);
     const typeFilter = args.type ? String(args.type).trim() : null;
 
-    const kg = loadKnowledgeGraph();
-    if (!kg) return errorResult("knowledge-graph-unavailable: run build-memory-layers.js first");
+    const kg = await loadKnowledgeGraph();
+    if (kg.available === false) {
+      return errorResult(`knowledge-graph-unavailable: ${kg.error || "unknown-error"}`);
+    }
     try {
       let matched = kg.searchEntities(query, { limit });
       if (typeFilter) {
@@ -591,8 +633,10 @@ Only include records that are genuinely relevant. Return fewer than max_results 
     if (!entityType) return errorResult("entityType is required");
     const limit = Math.max(1, Number(args.limit ?? 50) || 50);
 
-    const kg = loadKnowledgeGraph();
-    if (!kg) return errorResult("knowledge-graph-unavailable: run build-memory-layers.js first");
+    const kg = await loadKnowledgeGraph();
+    if (kg.available === false) {
+      return errorResult(`knowledge-graph-unavailable: ${kg.error || "unknown-error"}`);
+    }
     try {
       const rows = kg.getEntitiesByType(entityType);
       return jsonResult({
@@ -612,8 +656,10 @@ Only include records that are genuinely relevant. Return fewer than max_results 
     const direction = args.direction || "both";
     const limit = Math.max(1, Number(args.limit ?? 50) || 50);
 
-    const kg = loadKnowledgeGraph();
-    if (!kg) return errorResult("knowledge-graph-unavailable: run build-memory-layers.js first");
+    const kg = await loadKnowledgeGraph();
+    if (kg.available === false) {
+      return errorResult(`knowledge-graph-unavailable: ${kg.error || "unknown-error"}`);
+    }
     try {
       const rels = kg.queryEntity(entityName, { direction });
       return jsonResult({

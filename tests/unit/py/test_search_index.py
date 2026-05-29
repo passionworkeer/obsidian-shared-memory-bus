@@ -39,6 +39,16 @@ _index_mod = importlib.util.module_from_spec(_index_spec)
 _index_spec.loader.exec_module(_index_mod)
 
 
+def _load_search_index_module(module_name: str = "search_index_reloaded"):
+    spec = importlib.util.spec_from_file_location(
+        module_name, _retrieval_dir / "search_index.py"
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 # ---------------------------------------------------------------------------
 # build_file_stamp tests
 # ---------------------------------------------------------------------------
@@ -69,6 +79,18 @@ class TestBuildFileStamp:
 # ---------------------------------------------------------------------------
 
 class TestSignatures:
+    def test_module_paths_follow_ai_memory_store(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AI_MEMORY_STORE", str(tmp_path))
+        monkeypatch.delenv("AI_MEMORY_STORE_ROOT", raising=False)
+        monkeypatch.delenv("AI_MEMORY_OBSIDIAN_VAULT", raising=False)
+        monkeypatch.delenv("OBSIDIAN_VAULT_ROOT", raising=False)
+
+        module = _load_search_index_module("search_index_store_root_test")
+
+        assert Path(module.AI_MEMORY_ROOT) == tmp_path.resolve()
+        assert Path(module.STRUCTURED_DIR) == tmp_path.resolve() / "structured"
+        assert Path(module.EMBEDDINGS_INDEX) == tmp_path.resolve() / "embeddings" / "index.jsonl"
+
     def test_structured_signature_missing_dir(self, tmp_path):
         with patch.object(_index_mod, "STRUCTURED_DIR", str(tmp_path / "nonexistent")):
             sig = _index_mod.build_structured_signature()

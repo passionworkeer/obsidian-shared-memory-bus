@@ -24,10 +24,13 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "url";
 import { pathToFileURL } from "url";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
 
 // ---------------------------------------------------------------------------
 // Store root resolution — no Obsidian dependency
@@ -801,9 +804,15 @@ export { KnowledgeGraph, entityId, resolveKgPath };
 // CLI
 // ---------------------------------------------------------------------------
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === __filename;
+
+if (isDirectRun) {
   const [,, action, ...args] = process.argv;
-  const storeRoot = process.env.AI_MEMORY_STORE || "";
+  const storeRoot =
+    process.env.AI_MEMORY_STORE ||
+    process.env.AI_MEMORY_STORE_ROOT ||
+    process.env.AI_MEMORY_ROOT ||
+    path.join(process.env.USERPROFILE || process.env.HOME || "", ".ai-memory");
 
   const kg = new KnowledgeGraph({ storeRoot });
 

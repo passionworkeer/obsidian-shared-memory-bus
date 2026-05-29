@@ -334,24 +334,36 @@ function resolveIncludes(content, baseDir, maxDepth = 5, currentDepth = 0) {
 // Entity extraction helpers (lazy-loaded, no external dependencies)
 // ---------------------------------------------------------------------------
 
-/** @returns {{ extractFromRecord: (r: object) => object } | null} */
-function loadEntityExtractor() {
+/** @returns {Promise<{ extractFromRecord: (r: object) => object }>} */
+async function loadEntityExtractor() {
   try {
-    return require("../entity/entity-extractor.js");
-  } catch {
-    return { extractFromRecord: (r) => r };  // passthrough when module unavailable
+    const moduleUrl = new URL("../entity/entity-extractor.js", import.meta.url);
+    const mod = await import(moduleUrl.href);
+    return mod.default || mod;
+  } catch (error) {
+    return {
+      available: false,
+      error: String(error?.message || error),
+      extractFromRecord: (r) => r,
+    };
   }
 }
 
-/** @returns {{ ingestRecord: (r: object) => void, close: () => void } | null} */
-function loadKnowledgeGraph() {
+/** @returns {Promise<{ ingestRecord: (r: object) => void, close: () => void }>} */
+async function loadKnowledgeGraph() {
   try {
-    const { KnowledgeGraph } = require("../knowledge/knowledge-graph.js");
+    const moduleUrl = new URL("../knowledge/knowledge-graph.js", import.meta.url);
+    const { KnowledgeGraph } = await import(moduleUrl.href);
     return new KnowledgeGraph({ storeRoot: STORE_ROOT });
-  } catch {
+  } catch (error) {
     return {
+      available: false,
+      error: String(error?.message || error),
       ingestRecord: () => {},
+      beginBatch: () => {},
+      endBatch: () => {},
       close: () => {},
+      stats: () => ({ entities: 0, triples: 0, currentFacts: 0, expiredFacts: 0 }),
     };
   }
 }
