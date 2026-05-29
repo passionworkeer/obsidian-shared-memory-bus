@@ -1,29 +1,33 @@
+import path from "node:path";
+import os from "node:os";
 
-import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+function homedir() {
+  return process.env.USERPROFILE || process.env.HOME || os.homedir();
+}
 
-function getVaultRoot() {
-  const envVault = process.env.OBSIDIAN_VAULT_ROOT || process.env.AI_MEMORY_OBSIDIAN_VAULT;
-  if (envVault) {
-    return resolve(envVault);
-  }
-  // Fallback to platform-specific defaults for testing
-  const userHome = process.env.USERPROFILE || process.env.HOME || "";
-  const defaultPath = resolve(userHome, "Desktop", "Obsidian Vault");
-  if (existsSync(defaultPath)) {
-    return defaultPath;
-  }
-  return resolve(userHome, "Obsidian Vault");
+function nonEmptyEnv(name) {
+  const value = process.env[name];
+  return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
 export function resolveVaultRoot() {
-  return getVaultRoot();
+  return (
+    nonEmptyEnv("AI_MEMORY_OBSIDIAN_VAULT") ||
+    nonEmptyEnv("OBSIDIAN_VAULT_ROOT") ||
+    nonEmptyEnv("AI_MEMORY_STORE") ||
+    nonEmptyEnv("AI_MEMORY_STORE_ROOT") ||
+    nonEmptyEnv("AI_MEMORY_ROOT") ||
+    path.join(homedir(), ".ai-memory")
+  );
 }
+
 export function getDefaultVaultCandidates() {
-  const userHome = process.env.USERPROFILE || process.env.HOME || "";
+  const home = homedir();
   return [
-    resolve(userHome, "Desktop", "Obsidian Vault"),
-    resolve(userHome, "Obsidian Vault"),
+    path.join(home, ".ai-memory"),
+    path.join(home, ".obsidian"),
+    path.join(home, "Documents", "Obsidian Vault"),
   ];
 }
+
 export default { resolveVaultRoot, getDefaultVaultCandidates };

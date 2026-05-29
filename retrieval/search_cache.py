@@ -51,12 +51,18 @@ def _get_sqlite_cache():
         return _SQLITE_CACHE
     _SQLITE_CACHE_INIT = True
 
-    # Resolve cache directory: AI_MEMORY_STORE/cache
+    # Resolve cache directory from the same canonical store root as search_index.
     import os
-    store_root = os.environ.get(
-        "AI_MEMORY_STORE",
-        os.environ.get("AI_MEMORY_STORE_ROOT", os.path.join(os.path.expanduser("~"), ".ai-memory")),
-    )
+    try:
+        from runtime_support import resolve_store_root
+        store_root = str(resolve_store_root())
+    except Exception:
+        store_root = (
+            os.environ.get("AI_MEMORY_STORE")
+            or os.environ.get("AI_MEMORY_STORE_ROOT")
+            or os.environ.get("AI_MEMORY_ROOT")
+            or os.path.join(os.path.expanduser("~"), ".ai-memory")
+        )
     cache_dir = os.path.join(store_root, "cache")
 
     try:

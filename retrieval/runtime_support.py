@@ -240,6 +240,18 @@ def resolve_vault_root() -> Path:
     )
 
 
+def resolve_store_root() -> Path:
+    """Resolve the canonical .ai-memory store root.
+
+    The store is the data plane. Obsidian vault variables are deliberately not
+    part of this resolution chain; they are only for legacy import/overlay use.
+    """
+    candidate = first_non_empty_env("AI_MEMORY_STORE", "AI_MEMORY_STORE_ROOT", "AI_MEMORY_ROOT")
+    if candidate:
+        return Path(candidate).expanduser().resolve()
+    return get_default_store_root().expanduser().resolve()
+
+
 def resolve_runtime_root_candidates(anchor_file: str = "", root_override: str = "") -> List[Path]:
     candidates: List[Path] = []
     anchor_path = Path(anchor_file).resolve() if anchor_file else None

@@ -4,11 +4,11 @@
  * Bridges stdio-based MCP calls to the HTTP/SSE-based Playwright MCP server
  * Uses mcp-session-id header for session affinity (StreamableHTTP transport)
  */
-const http = require('http');
-const readline = require('readline');
+import http from 'node:http';
+import readline from 'node:readline';
 
-const PLAYWRIGHT_HOST = 'localhost';
-const PLAYWRIGHT_PORT = 9337;
+const PLAYWRIGHT_HOST = process.env.PLAYWRIGHT_MCP_HOST || 'localhost';
+const PLAYWRIGHT_PORT = Number(process.env.PLAYWRIGHT_MCP_PORT || 9337);
 
 // Safe stdout write queue — prevents concurrent writes from interleaving JSON
 const stdoutQueue = [];

@@ -50,17 +50,22 @@ from search_ranking import _BM25_CACHE, _SEARCH_RESULT_CACHE, _QUERY_EMBEDDING_C
 # Path constants (mirrored from semantic_search for testability)
 # ---------------------------------------------------------------------------
 
-def _resolve_vault_root() -> str:
+def _resolve_store_root() -> str:
     try:
-        from runtime_support import resolve_vault_root
-        return str(resolve_vault_root())
+        from runtime_support import resolve_store_root
+        return str(resolve_store_root())
     except Exception:
-        return os.environ.get("VAULT_ROOT", "")
+        return (
+            os.environ.get("AI_MEMORY_STORE")
+            or os.environ.get("AI_MEMORY_STORE_ROOT")
+            or os.environ.get("AI_MEMORY_ROOT")
+            or os.path.join(os.path.expanduser("~"), ".ai-memory")
+        )
 
-VAULT_ROOT = _resolve_vault_root()
-AI_MEMORY_ROOT = os.path.join(VAULT_ROOT, "00-System", "ai-memory")
-STRUCTURED_DIR = os.path.join(AI_MEMORY_ROOT, "structured")
-EMBEDDINGS_INDEX = os.path.join(AI_MEMORY_ROOT, "embeddings", "index.jsonl")
+STORE_ROOT = _resolve_store_root()
+AI_MEMORY_ROOT = STORE_ROOT
+STRUCTURED_DIR = os.path.join(STORE_ROOT, "structured")
+EMBEDDINGS_INDEX = os.path.join(STORE_ROOT, "embeddings", "index.jsonl")
 
 
 # ---------------------------------------------------------------------------

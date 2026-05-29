@@ -218,8 +218,14 @@ async function main() {
   writeJsonl(SHARED_EVENTS_JSONL, layers.sharedEvents);
   writeJsonl(TASK_MEMORY_JSONL, layers.taskMemory);
 
-  const entityExtractor = loadEntityExtractor();
-  const knowledgeGraph = loadKnowledgeGraph();
+  const entityExtractor = await loadEntityExtractor();
+  const knowledgeGraph = await loadKnowledgeGraph();
+  if (entityExtractor.available === false) {
+    console.error(`[build-memory-layers] entity extractor unavailable: ${entityExtractor.error || "unknown-error"}`);
+  }
+  if (knowledgeGraph.available === false) {
+    console.error(`[build-memory-layers] knowledge graph unavailable: ${knowledgeGraph.error || "unknown-error"}`);
+  }
 
   // Daily append-only logs (only touches today/yesterday files — never rewrites history)
   const allRecords = [

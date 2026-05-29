@@ -28,9 +28,6 @@
         "ops/cleanup" = @(
             "cleanup-inbox.ps1"
         )
-        "ops/daemon" = @(
-            "obsidian-blackboard-daemon.js"
-        )
         "ops/entity" = @(
             "entity-backfill.js"
             "entity-extractor.js"
@@ -38,7 +35,7 @@
         "ops/generate" = @(
             "generate-context.js"
             "generate-memory-hygiene-report.js"
-            "refresh-generated-artifacts.js"
+            "refresh-generated-artifacts.cjs"
         )
         "ops/inbox" = @(
             "inbox-atomic-write.js"
@@ -63,7 +60,6 @@
         "ops/run" = @(
             "run-memory-dream.ps1"
             "run-minimax-mcp.ps1"
-            "run-obsidian-mcp.ps1"
             "run-pressure-test.ps1"
         )
         "ops/setup" = @(
@@ -75,8 +71,6 @@
             "stress-test-concurrent.js"
         )
         "ops/sync" = @(
-            "sync-claudemem-to-obsidian.ps1"
-            "sync-openclaw-to-obsidian.js"
             "sync-shared-skills.ps1"
         )
         "ops/util" = @(
@@ -137,6 +131,11 @@
     LegacyCleanupFiles = @(
         "benchmark-embedding-backends.py"
         "export-bundle.ps1"
+        "ops/daemon/obsidian-blackboard-daemon.js"
+        "ops/generate/refresh-generated-artifacts.js"
+        "ops/run/run-obsidian-mcp.ps1"
+        "ops/sync/sync-claudemem-to-obsidian.ps1"
+        "ops/sync/sync-openclaw-to-obsidian.js"
         "probe-embedding-models.py"
         "run-shared-stack-pressure-test.ps1"
     )
