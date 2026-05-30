@@ -13,7 +13,9 @@ process.env.AI_MEMORY_STORE = TEST_STORE_ROOT;
 // ESM Note: Module.prototype._compile patching is not available in ESM
 // The module will need to be imported directly and exports used
 
-const memoryLayersParse = await import("../../../ops/memory/memory-layers-parse.js");
+const memoryLayersParse = await import(
+  `../../../ops/memory/memory-layers-parse.js?testStore=${encodeURIComponent(TEST_STORE_ROOT)}`
+);
 
 if (ORIGINAL_AI_MEMORY_STORE === undefined) {
   delete process.env.AI_MEMORY_STORE;
