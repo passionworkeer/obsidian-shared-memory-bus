@@ -9,7 +9,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -335,25 +335,28 @@ async function main() {
     process.stderr.write(`[L0-L1] bootstrap skipped: ${e.message}\n`);
   }
 
-  // Phase 2: warm SQLite search result cache with recent queries from generated artifacts
-  // Pass recent-queries list to warm-strategy.py for pre-loading cache on startup.
+  // Phase 2: warm SQLite search result cache with recent queries from generated artifacts.
   try {
-    const cacheDir = path.join(resolveStoreRoot(), "cache");
-    // Import warm-strategy dynamically so the build script still works
-    // when the Python module is unavailable.
-    const { getWarmQueries } = (() => {
-      try {
-        const pyScript = path.join(__dirname, "..", "retrieval", "cache", "warm-strategy.py");
-        const raw = execSync(
-          `python "${pyScript}" --mode auto --max-queries 10 --cache-dir "${cacheDir}"`,
-          { encoding: "utf8", timeout: 15000, windowsHide: true }
-        );
-        return { result: raw.trim() };
-      } catch (e) {
-        return { result: null };
-      }
-    })();
-    process.stderr.write(`[cache-warm] warm complete (auto mode)\n`);
+    const storeRoot = resolveStoreRoot();
+    const cacheDir = path.join(storeRoot, "cache");
+    const pyScript = path.join(__dirname, "..", "..", "retrieval", "cache", "warm_strategy.py");
+    if (!fs.existsSync(pyScript)) {
+      process.stderr.write(`[cache-warm] skipped: warm_strategy.py not found at ${pyScript}\n`);
+    } else {
+      const python = process.env.AI_MEMORY_PYTHON || "python";
+      const raw = execFileSync(
+        python,
+        [pyScript, "--mode", "auto", "--max-queries", "10", "--cache-dir", cacheDir],
+        {
+          encoding: "utf8",
+          timeout: 15000,
+          windowsHide: true,
+          cwd: path.join(__dirname, "..", ".."),
+          env: { ...process.env, AI_MEMORY_STORE: storeRoot },
+        }
+      ).trim();
+      process.stderr.write(`[cache-warm] ${raw || "warm complete (auto mode)"}\n`);
+    }
   } catch (e) {
     process.stderr.write(`[cache-warm] skipped: ${e.message}\n`);
   }

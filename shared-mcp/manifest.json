@@ -101,10 +101,10 @@
       "port": 9337,
       "healthPath": "/mcp",
       "launchCommandCandidatesWindows": [
-        "playwright-mcp.cmd --host 127.0.0.1 --port 9337 --headless --isolated --allowed-hosts=*",
-        "npx @playwright/mcp@latest --host 127.0.0.1 --port 9337 --headless --isolated --allowed-hosts=*"
+        "playwright-mcp.cmd --host {{host}} --port {{port}} --headless --isolated --allowed-hosts=*",
+        "npx @playwright/mcp@latest --host {{host}} --port {{port}} --headless --isolated --allowed-hosts=*"
       ],
-      "launchCommandPosix": "npx @playwright/mcp@latest --host 127.0.0.1 --port 9337 --headless --isolated --allowed-hosts=*",
+      "launchCommandPosix": "npx @playwright/mcp@latest --host {{host}} --port {{port}} --headless --isolated --allowed-hosts=*",
       "probeType": "mcp-initialize",
       "notes": "Standalone Playwright MCP HTTP server on 9337. Multiple clients can share one backend while keeping isolated MCP sessions and browser profiles."
     },

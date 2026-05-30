@@ -37,6 +37,7 @@ hydrateProcessEnvFromWindows([
 
 const USER_HOME = process.env.USERPROFILE || process.env.HOME || "";
 const AI_MEMORY_ROOT = process.env.AI_MEMORY_ROOT || __dirname;
+const DEBUG = /^(1|true|yes|on)$/i.test(String(process.env.AI_MEMORY_DEBUG || ""));
 const PYTHON = resolvePythonRuntime();
 const EMBED_RUNTIME = resolveEmbeddingRuntime({
   rootPath: AI_MEMORY_ROOT,
@@ -344,7 +345,7 @@ function collectDocuments() {
     if (!fileName.endsWith(".jsonl")) {
       continue;
     }
-    console.error("[DEBUG] Reading file:", fileName);
+    if (DEBUG) console.error("[DEBUG] Reading file:", fileName);
     const filePath = path.join(STRUCTURED_DIR, fileName);
     const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
     for (const line of lines) {
@@ -388,17 +389,17 @@ function collectDocuments() {
             || 2;
         }
         if (!allowedTiers.has(recordTier)) {
-          if (documents.size < 3) console.error("[DEBUG] filtered by tier:", recordTier, "allowed:", [...allowedTiers]);
+          if (DEBUG && documents.size < 3) console.error("[DEBUG] filtered by tier:", recordTier, "allowed:", [...allowedTiers]);
           continue;
         }
         const { title, content, facts, concepts } = extractFieldTexts(entry);
         const rawText = [title, content].filter(Boolean).join(" ");
-        if (documents.size < 3) {
+        if (DEBUG && documents.size < 3) {
           console.error("[DEBUG] first record - memory_level:", entry.memory_level, "scope:", entry.scope, "tier:", recordTier, "rawText len:", rawText.length, "title:", String(title).slice(0,30));
         }
 
         if (isNoise(rawText)) {
-          if (documents.size < 3) console.error("[DEBUG] filtered by isNoise:", String(rawText).slice(0,50));
+          if (DEBUG && documents.size < 3) console.error("[DEBUG] filtered by isNoise:", String(rawText).slice(0,50));
           continue;
         }
 
