@@ -12,28 +12,29 @@ import path from "node:path";
 import { pathToFileURL } from "url";
 import { fileURLToPath } from "url";
 
+const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Load helpers from build-memory-layers.js
-async function loadVaultRootHelper() {
+async function loadStoreRootHelper() {
   const candidates = [
-    path.join(__dirname, "vault-root.js"),
-    path.join(__dirname, "..", "bus", "vault-root.js"),
+    path.join(__dirname, "..", "..", "bus", "store-root.js"),
+    path.join(__dirname, "..", "bus", "store-root.js"),
+    path.join(__dirname, "store-root.js"),
   ];
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
-      const mod = await import(pathToFileURL(candidate));
+      const mod = await import(pathToFileURL(candidate).href);
       return mod.default || mod;
     }
   }
-  throw new Error("vault-root-helper-missing");
+  throw new Error("store-root-helper-missing");
 }
 
-const _vaultRootHelper = await loadVaultRootHelper();
-const { resolveVaultRoot } = _vaultRootHelper;
+const storeRootHelper = await loadStoreRootHelper();
+const { resolveStoreRoot } = storeRootHelper;
 
-const VAULT_ROOT = resolveVaultRoot();
-const AI_MEMORY_ROOT = path.join(VAULT_ROOT, "00-System", "ai-memory");
+const STORE_ROOT = resolveStoreRoot();
+const AI_MEMORY_ROOT = STORE_ROOT;
 const STRUCTURED_ROOT = path.join(AI_MEMORY_ROOT, "structured");
 const KG_DIR = path.join(AI_MEMORY_ROOT, "kg");
 const KG_PATH = path.join(KG_DIR, "knowledge-graph.sqlite3");
@@ -45,19 +46,28 @@ const DEFAULT_FILES = [
   "task-memory.jsonl",
 ];
 
-const entityExtractor = (async () => {
+async function loadEntityExtractor() {
   try {
     const mod = await import("./entity-extractor.js");
     return mod.entityExtractor || mod.default || { extractFromRecord: r => r };
   } catch { return { extractFromRecord: r => r }; }
-})();
+}
 
-const KnowledgeGraph = (async () => {
+async function loadKnowledgeGraph() {
+  const candidates = [
+    path.join(__dirname, "..", "knowledge", "knowledge-graph.js"),
+    path.join(__dirname, "knowledge-graph.js"),
+  ];
+
   try {
-    const mod = await import("./knowledge-graph.js");
-    return mod.KnowledgeGraph || null;
+    for (const candidate of candidates) {
+      if (!fs.existsSync(candidate)) continue;
+      const mod = await import(pathToFileURL(candidate).href);
+      return mod.KnowledgeGraph || null;
+    }
+    return null;
   } catch { return null; }
-})();
+}
 
 /**
  * Count records in a JSONL file.
@@ -71,7 +81,7 @@ function countRecords(filePath) {
  * Backfill a single JSONL file.
  * @returns {{ processed: number, enriched: number, errors: number }}
  */
-function backfillFile(filePath) {
+function backfillFile(filePath, extractor) {
   if (!fs.existsSync(filePath)) {
     console.error(`  File not found: ${filePath}`);
     return { processed: 0, enriched: 0, errors: 0 };
@@ -91,7 +101,7 @@ function backfillFile(filePath) {
         patched.push(line);
         continue;
       }
-      const enrichedRecord = entityExtractor.extractFromRecord(record);
+      const enrichedRecord = extractor.extractFromRecord(record);
       const hasNewData = (enrichedRecord.facts?.length || enrichedRecord.concepts?.length || enrichedRecord.entities?.length);
       if (hasNewData) {
         enriched++;
@@ -130,15 +140,18 @@ function ingestFileIntoKG(filePath, kg) {
   return count;
 }
 
-function main() {
+async function main() {
   const args = process.argv.slice(2);
   const files = args.length > 0
     ? args.map(f => path.resolve(f))
     : DEFAULT_FILES.map(f => path.join(STRUCTURED_ROOT, f));
 
   console.log(`\n=== Entity Backfill ===`);
-  console.log(`Vault: ${VAULT_ROOT}`);
+  console.log(`Store: ${STORE_ROOT}`);
   console.log(`Files: ${files.length}`);
+
+  const entityExtractor = await loadEntityExtractor();
+  const KnowledgeGraph = await loadKnowledgeGraph();
 
   // Count before
   const beforeCounts = files.map(f => ({ file: path.basename(f), count: countRecords(f) }));
@@ -148,7 +161,7 @@ function main() {
   const totals = { processed: 0, enriched: 0, errors: 0 };
   for (const file of files) {
     process.stdout.write(`Processing ${path.basename(file)}... `);
-    const result = backfillFile(file);
+    const result = backfillFile(file, entityExtractor);
     console.log(`${result.processed} records, ${result.enriched} enriched, ${result.errors} errors`);
     totals.processed += result.processed;
     totals.enriched += result.enriched;
@@ -159,7 +172,7 @@ function main() {
   let kgRecordCount = 0;
   if (KnowledgeGraph && fs.existsSync(path.dirname(KG_PATH))) {
     try {
-      const kg = new KnowledgeGraph({ vaultRoot: VAULT_ROOT });
+      const kg = new KnowledgeGraph({ storeRoot: STORE_ROOT });
       kg.beginBatch();
       for (const file of files) {
         kgRecordCount += ingestFileIntoKG(file, kg);
@@ -178,4 +191,9 @@ function main() {
   console.log(`\nTotal: ${totals.processed} processed, ${totals.enriched} enriched, ${totals.errors} errors`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main();
+if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+  main().catch((error) => {
+    console.error(error?.stack || error?.message || String(error));
+    process.exit(1);
+  });
+}

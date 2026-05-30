@@ -21,6 +21,27 @@ function runNode(args, options = {}) {
   });
 }
 
+function makeStoreRoot(prefix = "ai-memory-entrypoint-") {
+  const storeRoot = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  fs.mkdirSync(path.join(storeRoot, "structured"), { recursive: true });
+  fs.mkdirSync(path.join(storeRoot, "generated"), { recursive: true });
+  return storeRoot;
+}
+
+test("package scripts point to existing CLI entrypoints", () => {
+  const packageJson = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "package.json"), "utf8"));
+
+  for (const scriptName of ["check-integrity", "generate-context"]) {
+    const script = String(packageJson.scripts?.[scriptName] || "");
+    const match = script.match(/\bnode\s+([^\s]+)/);
+    assert.ok(match, `${scriptName} should run a node entrypoint`);
+    assert.ok(
+      fs.existsSync(path.join(REPO_ROOT, match[1])),
+      `${scriptName} references missing entrypoint: ${match[1]}`
+    );
+  }
+});
+
 test("semantic-search.js starts as an ESM CLI and prints usage without a query", () => {
   const result = runNode(["retrieval/semantic-search.js"]);
 
@@ -40,6 +61,138 @@ test("playwright-stdio-proxy.js starts as an ESM CLI and reports an unreachable 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Playwright MCP HTTP server not running on port 65534/);
   assert.doesNotMatch(result.stderr, /require is not defined/);
+});
+
+test("judgments-generator.js starts as an ESM CLI and prints usage without input", () => {
+  const result = runNode(["retrieval/eval/judgments-generator.js"]);
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Usage: node judgments-generator\.js/);
+  assert.doesNotMatch(result.stderr, /require is not defined|ERR_AMBIGUOUS_MODULE_SYNTAX/);
+});
+
+test("check-memory-integrity.js starts as an ESM CLI against STORE_ROOT", () => {
+  const storeRoot = makeStoreRoot("ai-memory-integrity-");
+  try {
+    const result = runNode(["ops/check/check-memory-integrity.js", "--json"], {
+      env: {
+        AI_MEMORY_STORE: storeRoot,
+        AI_MEMORY_STORE_ROOT: "",
+        AI_MEMORY_ROOT: "",
+      },
+    });
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /"contractVersion"/);
+    assert.doesNotMatch(result.stderr, /ERR_AMBIGUOUS_MODULE_SYNTAX|require is not defined/);
+  } finally {
+    fs.rmSync(storeRoot, { recursive: true, force: true });
+  }
+});
+
+test("entity-backfill.js starts as an ESM CLI and uses STORE_ROOT paths", () => {
+  const storeRoot = makeStoreRoot("ai-memory-entity-backfill-");
+  const missingFile = path.join(storeRoot, "structured", "missing.jsonl");
+  try {
+    const result = runNode(["ops/entity/entity-backfill.js", missingFile], {
+      env: {
+        AI_MEMORY_STORE: storeRoot,
+        AI_MEMORY_STORE_ROOT: "",
+        AI_MEMORY_ROOT: "",
+      },
+    });
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /=== Entity Backfill ===/);
+    assert.match(result.stdout, new RegExp(storeRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.doesNotMatch(result.stderr, /vault-root-helper-missing|require is not defined/);
+  } finally {
+    fs.rmSync(storeRoot, { recursive: true, force: true });
+  }
+});
+
+test("entity-backfill.js ingests existing entity data into the store KG", async (t) => {
+  try {
+    await import("node:sqlite");
+  } catch {
+    t.skip("node:sqlite is unavailable in this runtime");
+    return;
+  }
+
+  const storeRoot = makeStoreRoot("ai-memory-entity-backfill-kg-");
+  fs.mkdirSync(path.join(storeRoot, "kg"), { recursive: true });
+  const jsonlPath = path.join(storeRoot, "structured", "entity-records.jsonl");
+  fs.writeFileSync(
+    jsonlPath,
+    JSON.stringify({
+      id: "record-1",
+      _entityExtracted: true,
+      entities: [{ name: "Alice", type: "person", confidence: 0.9 }],
+      facts: [{ subject: "Alice", predicate: "uses", object: "Memory Bus", confidence: 0.95 }],
+    }) + "\n",
+    "utf8"
+  );
+
+  try {
+    const result = runNode(["ops/entity/entity-backfill.js", jsonlPath], {
+      env: {
+        AI_MEMORY_STORE: storeRoot,
+        AI_MEMORY_STORE_ROOT: "",
+        AI_MEMORY_ROOT: "",
+      },
+    });
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /KG: ingested entities\/facts from 1 records/);
+    assert.ok(fs.existsSync(path.join(storeRoot, "kg", "knowledge-graph.sqlite3")));
+  } finally {
+    fs.rmSync(storeRoot, { recursive: true, force: true });
+  }
+});
+
+test("extraction-stress-test.mjs exits cleanly when the optional extraction pipeline is absent", () => {
+  const storeRoot = makeStoreRoot("ai-memory-extraction-stress-");
+  try {
+    const result = runNode(["ops/extract/extraction-stress-test.mjs"], {
+      env: {
+        AI_MEMORY_STORE: storeRoot,
+        AI_MEMORY_STORE_ROOT: "",
+        AI_MEMORY_ROOT: "",
+      },
+    });
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /skipped/i);
+    assert.doesNotMatch(result.stderr, /ERR_MODULE_NOT_FOUND|Fatal:/);
+  } finally {
+    fs.rmSync(storeRoot, { recursive: true, force: true });
+  }
+});
+
+test("platform adapters treat AI_MEMORY_ROOT as the store root, not a parent", async () => {
+  const storeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ai-memory-platform-root-"));
+  const previous = {
+    AI_MEMORY_STORE: process.env.AI_MEMORY_STORE,
+    AI_MEMORY_STORE_ROOT: process.env.AI_MEMORY_STORE_ROOT,
+    AI_MEMORY_ROOT: process.env.AI_MEMORY_ROOT,
+  };
+  try {
+    delete process.env.AI_MEMORY_STORE;
+    delete process.env.AI_MEMORY_STORE_ROOT;
+    process.env.AI_MEMORY_ROOT = storeRoot;
+
+    const { getWindowsAdapter, getDarwinAdapter, getLinuxAdapter } = await import("../../../bus/platform/index.js");
+    for (const getAdapter of [getWindowsAdapter, getDarwinAdapter, getLinuxAdapter]) {
+      const adapter = getAdapter();
+      assert.equal(adapter.resolveStoreRoot({ refresh: true }), path.resolve(storeRoot));
+    }
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    fs.rmSync(storeRoot, { recursive: true, force: true });
+  }
 });
 
 test("knowledge-graph.js constructs from ESM when node:sqlite is available", async (t) => {
