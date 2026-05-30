@@ -48,7 +48,7 @@
 
 ## 快速开始
 
-### 3 步完成配置
+### 4 步完成配置
 
 ```bash
 # 1. 克隆仓库
@@ -192,9 +192,9 @@ local-ai-memory-bus/
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `AI_MEMORY_ROOT` | `~/.ai-memory` | 记忆存储根目录（所有平台） |
-| `AI_MEMORY_STORE` | `~/.ai-memory` | 存储目录别名，与 AI_MEMORY_ROOT 相同 |
-| `AI_MEMORY_STORE_ROOT` | `~/.ai-memory` | 存储根别名 |
+| `AI_MEMORY_ROOT` | repo root / runtime root | 运行时根目录；旧入口仍可能把它当作存储回退 |
+| `AI_MEMORY_STORE` | `~/.ai-memory` | 共享记忆存储根目录，优先使用 |
+| `AI_MEMORY_STORE_ROOT` | `~/.ai-memory` | `AI_MEMORY_STORE` 的旧别名 |
 | `AI_MEMORY_PYTHON` | auto | Python 运行时路径 |
 | `AI_MEMORY_EMBED_BACKEND` | `hash` | 向量嵌入后端（hash=本地，openai=API） |
 | `AI_MEMORY_EMBED_BASE_URL` | — | OpenAI 兼容 API 地址 |

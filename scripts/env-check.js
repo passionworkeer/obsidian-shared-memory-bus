@@ -7,7 +7,7 @@
  * Exit code: 0 = all pass, 1 = one or more fail
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -27,8 +27,8 @@ function check(name, fn) {
   }
 }
 
-function exe(name, args, extraEnv) {
-  return execSync(`${name} ${args}`, {
+function exe(name, args = [], extraEnv = {}) {
+  return execFileSync(name, args, {
     encoding: 'utf8',
     timeout: 5000,
     windowsHide: true,
@@ -40,17 +40,17 @@ const nodeExe = platform.executables?.node || 'node';
 const pyExe = platform.executables?.python || (platform.name === 'win32' ? 'python' : 'python3');
 
 // Node.js
-check('Node.js', () => exe(nodeExe, '--version'));
+check('Node.js', () => exe(nodeExe, ['--version']));
 
 // Python — try multiple names since 'python' may not be in PATH on Windows
 check('Python', () => {
-  const candidates = [pyExe, 'python.exe', 'D:/python/python.exe', 'py', '-3'];
+  const candidates = [[pyExe], ['python.exe'], ['D:/python/python.exe'], ['py', '-3']];
   const tried = [];
-  for (const name of candidates) {
+  for (const [name, ...baseArgs] of candidates) {
     try {
-      return exe(name, '--version', { PYTHONIOENCODING: 'utf-8' });
+      return exe(name, [...baseArgs, '--version'], { PYTHONIOENCODING: 'utf-8' });
     } catch {
-      tried.push(name);
+      tried.push([name, ...baseArgs].join(' '));
     }
   }
   throw new Error(`none of [${tried.join(', ')}] found`);

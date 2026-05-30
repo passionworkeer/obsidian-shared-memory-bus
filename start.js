@@ -12,10 +12,17 @@ import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
+import os from 'node:os';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PROJECT_ROOT = join(__dirname, 'shared-mcp');
+const DEFAULT_STORE_ROOT = join(os.homedir(), '.ai-memory');
+const DEFAULT_BASE_PORT = 9330;
+const configuredBasePort = Number.parseInt(process.env.AI_MEMORY_BASE_PORT || '', 10);
+const BASE_PORT = Number.isFinite(configuredBasePort) && configuredBasePort > 0
+  ? configuredBasePort
+  : DEFAULT_BASE_PORT;
 
 // MCP servers configuration
 const servers = [
@@ -23,6 +30,10 @@ const servers = [
   { id: 'time', port: 9333, command: 'python', args: ['-m', 'mcp_server_time'] },
   { id: 'memory', port: 9338, command: 'node', args: ['--experimental-default-type=module', 'omni-memory-server.js'] },
 ];
+
+function getServerPort(server) {
+  return BASE_PORT + (server.port - DEFAULT_BASE_PORT);
+}
 
 // Check if port is in use
 async function isPortInUse(port) {
@@ -43,6 +54,11 @@ function startSingletonProxy(serverId, port, stdioCommand) {
 
   // Base64 encode the stdio command
   const encodedCommand = Buffer.from(stdioCommand).toString('base64');
+  const env = {
+    ...process.env,
+    AI_MEMORY_ROOT: process.env.AI_MEMORY_ROOT || __dirname,
+    AI_MEMORY_STORE: process.env.AI_MEMORY_STORE || process.env.AI_MEMORY_STORE_ROOT || DEFAULT_STORE_ROOT,
+  };
 
   const child = spawn('node', [
     proxyScript,
@@ -52,7 +68,7 @@ function startSingletonProxy(serverId, port, stdioCommand) {
   ], {
     cwd: PROJECT_ROOT,
     stdio: 'inherit',
-    env: { ...process.env, AI_MEMORY_ROOT: __dirname }
+    env,
   });
 
   child.on('error', (err) => {
@@ -82,32 +98,33 @@ async function main() {
   console.log('Starting AI Memory Bus MCP servers...\n');
 
   for (const server of servers) {
-    const inUse = await isPortInUse(server.port);
+    const port = getServerPort(server);
+    const inUse = await isPortInUse(port);
 
     if (inUse) {
-      console.log(`[${server.id}] port ${server.port} already in use, skipping`);
+      console.log(`[${server.id}] port ${port} already in use, skipping`);
       continue;
     }
 
-    console.log(`[${server.id}] starting on port ${server.port}...`);
+    console.log(`[${server.id}] starting on port ${port}...`);
 
     if (server.script) {
       const scriptPath = join(__dirname, server.script);
       if (existsSync(scriptPath)) {
-        startPowerShellScript(scriptPath, server.id, server.port);
+        startPowerShellScript(scriptPath, server.id, port);
       } else {
         console.log(`[${server.id}] script not found: ${scriptPath}`);
       }
     } else {
       const stdioCommand = `${server.command} ${server.args.join(' ')}`;
-      startSingletonProxy(server.id, server.port, stdioCommand);
+      startSingletonProxy(server.id, port, stdioCommand);
     }
   }
 
   console.log('\nMCP servers started!');
-  console.log('Memory: http://127.0.0.1:9338/mcp');
-  console.log('Fetch: http://127.0.0.1:9332/mcp');
-  console.log('Time: http://127.0.0.1:9333/mcp');
+  console.log(`Memory: http://127.0.0.1:${getServerPort(servers.find((server) => server.id === 'memory'))}/mcp`);
+  console.log(`Fetch: http://127.0.0.1:${getServerPort(servers.find((server) => server.id === 'fetch'))}/mcp`);
+  console.log(`Time: http://127.0.0.1:${getServerPort(servers.find((server) => server.id === 'time'))}/mcp`);
 }
 
 // Run if called directly

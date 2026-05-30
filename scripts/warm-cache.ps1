@@ -37,33 +37,34 @@ if (-not $scriptRoot) {
     $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 }
 
-$pythonExe = "python"
-$warmScript = Join-Path $scriptRoot "retrieval" "cache" "warm-strategy.py"
+$pythonExe = if ($env:AI_MEMORY_PYTHON) { $env:AI_MEMORY_PYTHON } else { "python" }
+$repoRoot = Split-Path -Parent $scriptRoot
+$warmScript = Join-Path $repoRoot "retrieval" "cache" "warm_strategy.py"
 
 if (-not (Test-Path $warmScript)) {
-    Write-Error "warm-strategy.py not found at: $warmScript"
+    Write-Error "warm_strategy.py not found at: $warmScript"
     exit 1
 }
 
-$pythonCmd = @(
-    $pythonExe,
+$pythonArgs = @(
     $warmScript,
     "--mode", $Mode,
     "--timeout", $Timeout,
-    "--max-queries", $MaxQueries
+    "--max-queries", $MaxQueries,
+    "--cache-dir", $cacheDir
 )
-
-if ($CacheDir) {
-    $pythonCmd += "--cache-dir", $CacheDir
-}
 
 Write-Host "[warm-cache] Starting warm (mode=$Mode, timeout=${Timeout}s, max=${MaxQueries})..." -ForegroundColor Cyan
 
 if ($Mode -eq "manual") {
-    # Read JSON objects from stdin, pass through pipeline
-    $pythonCmd | Invoke-Expression
+    $stdinContent = @($input) -join [Environment]::NewLine
+    if ([string]::IsNullOrWhiteSpace($stdinContent)) {
+        Write-Host "No queries provided via stdin."
+        exit 0
+    }
+    $stdinContent | & $pythonExe @pythonArgs
 } else {
-    & $pythonExe $warmScript --mode $Mode --timeout $Timeout --max-queries $MaxQueries
+    & $pythonExe @pythonArgs
 }
 
 $exitCode = $LASTEXITCODE

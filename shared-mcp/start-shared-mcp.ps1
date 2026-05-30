@@ -169,7 +169,7 @@ function Get-ServerUrl {
         [string]$manifest.defaults.path
     }
 
-    return "http://{0}:{1}{2}" -f $manifest.defaults.host, [int]$Server.port, $path
+    return "http://{0}:{1}{2}" -f $manifest.defaults.host, (Get-EffectiveServerPort -Server $Server), $path
 }
 
 function Get-ServerHealthUrl {
@@ -181,7 +181,7 @@ function Get-ServerHealthUrl {
         [string]$manifest.defaults.healthPath
     }
 
-    return "http://{0}:{1}{2}" -f $manifest.defaults.host, [int]$Server.port, $path
+    return "http://{0}:{1}{2}" -f $manifest.defaults.host, (Get-EffectiveServerPort -Server $Server), $path
 }
 
 function Test-ServerReady {
@@ -242,6 +242,26 @@ function Get-ServerStartupProbeAttempts {
     }
 
     return [Math]::Min([Math]::Max($candidate, 1), 180)
+}
+
+function Get-EffectiveServerPort {
+    param($Server)
+
+    if ($null -eq $Server -or -not ($Server.PSObject.Properties.Name -contains "port")) {
+        return 0
+    }
+
+    $configuredPort = [int]$Server.port
+    if ($configuredPort -le 0) {
+        return 0
+    }
+
+    $manifestBasePort = [int]$manifest.defaults.basePort
+    if ($manifestBasePort -le 0 -or $basePort -le 0 -or $basePort -eq $manifestBasePort) {
+        return $configuredPort
+    }
+
+    return [int]($basePort + ($configuredPort - $manifestBasePort))
 }
 
 function ConvertTo-ShellLiteral {
@@ -484,14 +504,17 @@ function Test-CommandTemplateAvailable {
 }
 
 function Resolve-PreferredCommandTemplate {
-    param([string[]]$Templates)
+    param(
+        [string[]]$Templates,
+        $Server = $null
+    )
 
     $resolvedTemplates = New-Object System.Collections.Generic.List[string]
     foreach ($template in @($Templates)) {
         if ([string]::IsNullOrWhiteSpace([string]$template)) {
             continue
         }
-        $resolved = Resolve-CommandTemplate -Template ([string]$template)
+        $resolved = Resolve-CommandTemplate -Template ([string]$template) -Server $Server
         if (-not [string]::IsNullOrWhiteSpace($resolved)) {
             $resolvedTemplates.Add($resolved) | Out-Null
         }
@@ -562,13 +585,18 @@ sys.exit(0 if importlib.util.find_spec(sys.argv[1]) else 1)
 }
 
 function Resolve-CommandTemplate {
-    param([Parameter(Mandatory = $true)][string]$Template)
+    param(
+        [Parameter(Mandatory = $true)][string]$Template,
+        $Server = $null
+    )
 
     if ([string]::IsNullOrWhiteSpace($Template)) {
         return ""
     }
 
     $replacements = [ordered]@{
+        "{{host}}" = [string]$manifest.defaults.host
+        "{{port}}" = if ($null -ne $Server) { [string](Get-EffectiveServerPort -Server $Server) } else { "" }
         "{{powershell}}" = (ConvertTo-ShellLiteral (Resolve-SharedPowerShellExecutable))
         "{{node}}" = (ConvertTo-ShellLiteral (Resolve-SharedNodeExecutable))
         "{{python}}" = (ConvertTo-ShellLiteral (Resolve-SharedPythonExecutable))
@@ -613,7 +641,7 @@ function Resolve-StdioCommand {
         return ""
     }
 
-    return Resolve-PreferredCommandTemplate -Templates $templates
+    return Resolve-PreferredCommandTemplate -Templates $templates -Server $Server
 }
 
 function Resolve-LaunchCommand {
@@ -624,7 +652,7 @@ function Resolve-LaunchCommand {
         return ""
     }
 
-    return Resolve-PreferredCommandTemplate -Templates $templates
+    return Resolve-PreferredCommandTemplate -Templates $templates -Server $Server
 }
 
 function Get-EnvironmentValue {
@@ -797,16 +825,16 @@ function Clean-StateFile {
 
         # PID is dead. Mark it and re-probe the port.
         $port = 0
-        if ($record.ContainsKey("port")) {
-            $port = [int]$record["port"]
-        } else {
-            # Look up port from manifest.
-            foreach ($srv in @($Manifest.servers)) {
-                if ([string]$srv.id -eq $serverId -and $srv.PSObject.Properties.Name -contains "port") {
-                    $port = [int]$srv.port
-                    break
-                }
+        # Look up effective port from manifest first so AI_MEMORY_BASE_PORT is honored
+        # even when state.json was written before the base port changed.
+        foreach ($srv in @($Manifest.servers)) {
+            if ([string]$srv.id -eq $serverId -and $srv.PSObject.Properties.Name -contains "port") {
+                $port = Get-EffectiveServerPort -Server $srv
+                break
             }
+        }
+        if ($port -le 0 -and $record.ContainsKey("port")) {
+            $port = [int]$record["port"]
         }
 
         $record["status"] = "dead"
@@ -857,7 +885,7 @@ try {
             continue
         }
 
-        $port = [int]$server.port
+        $port = Get-EffectiveServerPort -Server $server
         $url = Get-ServerUrl -Server $server
         $healthUrl = Get-ServerHealthUrl -Server $server
         $readyTimeoutSeconds = Get-ServerReadyTimeoutSeconds -Server $server

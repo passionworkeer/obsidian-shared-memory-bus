@@ -93,6 +93,36 @@ function Test-McpInitialize {
     }
 }
 
+function Get-EffectiveServerPort {
+    param($Server)
+
+    if ($null -eq $Server -or -not ($Server.PSObject.Properties.Name -contains "port")) {
+        return 0
+    }
+
+    $configuredPort = [int]$Server.port
+    if ($configuredPort -le 0) {
+        return 0
+    }
+
+    $manifestBasePort = [int]$manifest.defaults.basePort
+    if ($manifestBasePort -le 0) {
+        return $configuredPort
+    }
+
+    $envBasePort = 0
+    $envBasePortRaw = [Environment]::GetEnvironmentVariable("AI_MEMORY_BASE_PORT")
+    if (-not [string]::IsNullOrWhiteSpace($envBasePortRaw)) {
+        $envBasePort = [int]$envBasePortRaw
+    }
+
+    if ($envBasePort -le 0 -or $envBasePort -eq $manifestBasePort) {
+        return $configuredPort
+    }
+
+    return [int]($envBasePort + ($configuredPort - $manifestBasePort))
+}
+
 function Get-ServerUrl {
     param($Server)
 
@@ -102,7 +132,7 @@ function Get-ServerUrl {
         [string]$manifest.defaults.path
     }
 
-    return "http://{0}:{1}{2}" -f $manifest.defaults.host, [int]$Server.port, $path
+    return "http://{0}:{1}{2}" -f $manifest.defaults.host, (Get-EffectiveServerPort -Server $Server), $path
 }
 
 function Get-ServerHealthUrl {
@@ -114,7 +144,7 @@ function Get-ServerHealthUrl {
         [string]$manifest.defaults.healthPath
     }
 
-    return "http://{0}:{1}{2}" -f $manifest.defaults.host, [int]$Server.port, $path
+    return "http://{0}:{1}{2}" -f $manifest.defaults.host, (Get-EffectiveServerPort -Server $Server), $path
 }
 
 function Test-ServerReady {
@@ -232,7 +262,7 @@ foreach ($server in @($manifest.servers)) {
     }
 
     $record    = $state[$id]
-    $port      = if ($server.PSObject.Properties.Name -contains "port") { [int]$server.port } else { 0 }
+    $port      = Get-EffectiveServerPort -Server $server
     $url       = $null
     $healthUrl = $null
 

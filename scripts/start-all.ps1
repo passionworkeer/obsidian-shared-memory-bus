@@ -95,7 +95,14 @@ if ($foundStore) {
     $checks += @{ name = "AI Memory Store"; ok = $true; detail = $foundStore }
     $env:AI_MEMORY_STORE = $foundStore
 } else {
-    $checks += @{ name = "AI Memory Store"; ok = $false; detail = "not found" }
+    $defaultStore = Join-Path $env:USERPROFILE ".ai-memory"
+    try {
+        New-Item -ItemType Directory -Path $defaultStore -Force | Out-Null
+        $env:AI_MEMORY_STORE = $defaultStore
+        $checks += @{ name = "AI Memory Store"; ok = $true; detail = "$defaultStore (created)" }
+    } catch {
+        $checks += @{ name = "AI Memory Store"; ok = $false; detail = "not found and could not create $defaultStore" }
+    }
 }
 
 # Display results
