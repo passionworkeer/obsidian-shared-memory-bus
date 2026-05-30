@@ -15,11 +15,12 @@
  * Skips entries that already have non-empty relevant_ids (human annotations).
  */
 
-"use strict";
+import fs from "node:fs";
+import path from "node:path";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
-const fs   = require("fs");
-const path = require("path");
-const { spawn } = require("child_process");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ── CLI args ──────────────────────────────────────────────────────────────────
 
@@ -78,13 +79,15 @@ function runSemanticSearch(query, route, topK = 10) {
   return new Promise((resolve, reject) => {
     const workspaceRoot = process.env.AI_MEMORY_OBSIDIAN_VAULT || process.env.OBSIDIAN_VAULT_ROOT || "";
 
-    // Use Python directly — find python interpreter
-    const pythonCmd = process.platform === "win32" ? "python" : "python3";
-    const scriptPath = path.join(PROJECT_ROOT, "retrieval", "semantic-search.py");
+    const pythonCmd =
+      process.env.AI_MEMORY_PYTHON ||
+      process.env.AI_MEMORY_MCP_PYTHON ||
+      (process.platform === "win32" ? "python" : "python3");
+    const scriptPath = path.join(PROJECT_ROOT, "retrieval", "semantic_search.py");
 
     if (!fs.existsSync(scriptPath)) {
       // Fall back: try to import the module directly (sibling to this script)
-      reject(new Error(`semantic-search.py not found at ${scriptPath}`));
+      reject(new Error(`semantic_search.py not found at ${scriptPath}`));
       return;
     }
 

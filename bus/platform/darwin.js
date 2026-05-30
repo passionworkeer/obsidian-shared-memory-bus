@@ -54,7 +54,7 @@ let cachedStoreRoot = null;
 function resolveStoreRoot(options = {}) {
   if (cachedStoreRoot && !options.refresh) return cachedStoreRoot;
 
-  for (const envKey of ["AI_MEMORY_STORE", "AI_MEMORY_STORE_ROOT"]) {
+  for (const envKey of ["AI_MEMORY_STORE", "AI_MEMORY_STORE_ROOT", "AI_MEMORY_ROOT"]) {
     const candidate = (process.env[envKey] || "").trim();
     if (candidate) {
       cachedStoreRoot = path.resolve(candidate);
@@ -62,13 +62,8 @@ function resolveStoreRoot(options = {}) {
     }
   }
 
-  const aiMemoryRoot = process.env.AI_MEMORY_ROOT || "";
-  const fallback = aiMemoryRoot
-    ? path.join(aiMemoryRoot, ".ai-memory")
-    : DEFAULT_STORE_ROOT;
-
-  cachedStoreRoot = fallback;
-  return fallback;
+  cachedStoreRoot = DEFAULT_STORE_ROOT;
+  return cachedStoreRoot;
 }
 
 function getInboxRoot(storeRoot) {

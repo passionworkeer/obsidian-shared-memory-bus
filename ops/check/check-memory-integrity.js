@@ -1,30 +1,28 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-function loadVaultRootHelper() {
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+async function loadStoreRootHelper() {
   const candidates = [
-    // Script-local (installed flat layout: ~/.ai-memory/vault-root.js)
-    path.join(__dirname, "vault-root.js"),
-    // Sibling bus/ (project layout: ops/ and bus/ are siblings under project root)
-    path.join(__dirname, "..", "bus", "vault-root.js"),
-    path.join(__dirname, "bus", "vault-root.js"),
-    // Bus sibling (installed flat: ~/.ai-memory/bus/vault-root.js)
-    path.join(__dirname, "..", "..", "bus", "vault-root.js"),
-    // AI_MEMORY_ROOT direct (when AI_MEMORY_ROOT is project root)
-    path.join(__dirname, "..", "..", "..", "bus", "vault-root.js"),
+    path.join(__dirname, "..", "..", "bus", "store-root.js"),
+    path.join(__dirname, "..", "bus", "store-root.js"),
+    path.join(__dirname, "store-root.js"),
   ];
 
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
-      return import(candidate);
+      return import(pathToFileURL(candidate).href);
     }
   }
 
-  throw new Error(`vault-root-helper-missing: tried ${candidates.join(", ")}`);
+  throw new Error(`store-root-helper-missing: tried ${candidates.join(", ")}`);
 }
 
-const vaultRootModule = await loadVaultRootHelper();
-const { resolveVaultRoot } = vaultRootModule;
+const storeRootModule = await loadStoreRootHelper();
+const { resolveStoreRoot } = storeRootModule;
 const memoryContractModule = await import("../memory/memory-contract.js");
 const { buildMemoryIntegrityReport } = memoryContractModule;
 
@@ -59,11 +57,10 @@ function renderHumanSummary(report) {
 
 function main() {
   const parsed = parseArgs(process.argv.slice(2));
-  const vaultRoot = resolveVaultRoot();
-  const aiMemoryRoot = path.join(vaultRoot, "00-System", "ai-memory");
+  const storeRoot = resolveStoreRoot();
   const report = buildMemoryIntegrityReport({
-    structuredRoot: path.join(aiMemoryRoot, "structured"),
-    generatedRoot: path.join(aiMemoryRoot, "generated"),
+    structuredRoot: path.join(storeRoot, "structured"),
+    generatedRoot: path.join(storeRoot, "generated"),
   });
 
   if (parsed.json) {
