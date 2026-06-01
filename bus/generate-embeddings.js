@@ -10,7 +10,8 @@ import { resolveStoreRoot } from "./store-root.js";
 import { VECTOR_SCHEMA_VERSION, fnv1a32, buildHashFeatures, buildHashEmbedding } from "./lsh-hash.js";
 import { createJsonlStream } from "../ops/util/jsonl-stream.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const WINDOWS_ENV_CACHE = new Map();
 
 hydrateProcessEnvFromWindows([
@@ -35,9 +36,11 @@ hydrateProcessEnvFromWindows([
   "UV_COMMAND",
 ]);
 
-const USER_HOME = process.env.USERPROFILE || process.env.HOME || "";
-const AI_MEMORY_ROOT = process.env.AI_MEMORY_ROOT || __dirname;
-const DEBUG = /^(1|true|yes|on)$/i.test(String(process.env.AI_MEMORY_DEBUG || ""));
+const AI_MEMORY_ROOT =
+  process.env.AI_MEMORY_STORE ||
+  process.env.AI_MEMORY_STORE_ROOT ||
+  process.env.AI_MEMORY_ROOT ||
+  __dirname;
 const PYTHON = resolvePythonRuntime();
 const EMBED_RUNTIME = resolveEmbeddingRuntime({
   rootPath: AI_MEMORY_ROOT,
@@ -150,10 +153,9 @@ function resolveTimeoutMs() {
   return Math.max(1000, timeoutSeconds * 1000);
 }
 
-const VAULT_ROOT = resolveStoreRoot();
-const SHARED_MEMORY_ROOT = path.join(VAULT_ROOT, "00-System", "ai-memory");
-const STRUCTURED_DIR = path.join(SHARED_MEMORY_ROOT, "structured");
-const EMBEDDINGS_DIR = path.join(SHARED_MEMORY_ROOT, "embeddings");
+const STORE_ROOT = resolveStoreRoot();
+const STRUCTURED_DIR = path.join(STORE_ROOT, "structured");
+const EMBEDDINGS_DIR = path.join(STORE_ROOT, "embeddings");
 const INDEX_FILE = path.join(EMBEDDINGS_DIR, "index.jsonl");
 
 function normalizeSpaces(value) {
@@ -753,7 +755,8 @@ export {
   buildDocument,
 };
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === __filename;
+if (isDirectRun) {
   main().catch((error) => {
     console.error(error && error.stack ? error.stack : String(error));
     process.exit(1);

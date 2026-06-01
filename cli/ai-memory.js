@@ -58,6 +58,35 @@ function getVersion() {
   return "unknown";
 }
 
+function parseArgs(raw) {
+  const flags = [];
+  const positional = [];
+  const valueFlags = new Set(["--workspace"]);
+
+  for (let index = 0; index < raw.length; index += 1) {
+    const arg = raw[index];
+    if (!arg.startsWith("--")) {
+      positional.push(arg);
+      continue;
+    }
+
+    const equalsIndex = arg.indexOf("=");
+    if (equalsIndex > 0) {
+      flags.push(arg.slice(0, equalsIndex));
+      flags.push(arg.slice(equalsIndex + 1));
+      continue;
+    }
+
+    flags.push(arg);
+    if (valueFlags.has(arg) && index + 1 < raw.length && !raw[index + 1].startsWith("-")) {
+      flags.push(raw[index + 1]);
+      index += 1;
+    }
+  }
+
+  return { flags, positional };
+}
+
 // ---------------------------------------------------------------------------
 // Vault root resolution
 // ---------------------------------------------------------------------------
@@ -78,6 +107,12 @@ function resolveVaultRoot(flags) {
   const envVault = process.env.AI_MEMORY_OBSIDIAN_VAULT;
   if (envVault && fs.existsSync(envVault)) {
     return path.resolve(envVault);
+  }
+
+  // 2b. AI_MEMORY_STORE env (canonical store root)
+  const envStore = process.env.AI_MEMORY_STORE || process.env.AI_MEMORY_STORE_ROOT;
+  if (envStore && fs.existsSync(envStore)) {
+    return path.resolve(envStore);
   }
 
   // 3. AI_MEMORY_ROOT/config.json
@@ -405,12 +440,19 @@ function spawnPowerShell(scriptPath, extraArgs, vaultRoot, flags) {
   }
 
   return new Promise((resolve) => {
+    const childEnv = {
+      ...process.env,
+      AI_MEMORY_STORE: vaultRoot,
+      AI_MEMORY_STORE_ROOT: vaultRoot,
+      AI_MEMORY_OBSIDIAN_VAULT: vaultRoot,
+    };
     let child;
     try {
       child = spawn("powershell.exe", psArgs, {
         stdio: ["ignore", "pipe", "pipe"],
         shell: false,
         windowsHide: true,
+        env: childEnv,
         cwd: AI_MEMORY_ROOT,
       });
     } catch (err) {
@@ -491,7 +533,12 @@ function spawnNode(scriptPath, extraArgs, flags, vaultRoot) {
 
   if (flags.includes("--dry-run")) {
     const exe = process.execPath;
-    const envParts = Object.entries({ ...process.env, AI_MEMORY_OBSIDIAN_VAULT: vaultRoot })
+    const envParts = Object.entries({
+      ...process.env,
+      AI_MEMORY_STORE: vaultRoot,
+      AI_MEMORY_STORE_ROOT: vaultRoot,
+      AI_MEMORY_OBSIDIAN_VAULT: vaultRoot,
+    })
       .filter(([k]) => k.startsWith("AI_MEMORY_"))
       .map(([k, v]) => `${k}=${v}`);
     process.stdout.write(`[dry-run] ${exe} ${[scriptAbs, ...allArgs].map(a => /[\s"]/.test(a) ? JSON.stringify(a) : a).join(" ")}\n`);
@@ -502,7 +549,12 @@ function spawnNode(scriptPath, extraArgs, flags, vaultRoot) {
   }
 
   // Set vault root env so the child script can pick it up
-  const childEnv = { ...process.env, AI_MEMORY_OBSIDIAN_VAULT: vaultRoot };
+  const childEnv = {
+    ...process.env,
+    AI_MEMORY_STORE: vaultRoot,
+    AI_MEMORY_STORE_ROOT: vaultRoot,
+    AI_MEMORY_OBSIDIAN_VAULT: vaultRoot,
+  };
 
   return new Promise((resolve) => {
     let child;
@@ -573,7 +625,12 @@ async function runCommand(cmd, subArgs, flags, vaultRoot) {
   const KNOWN_FLAGS = new Set([
     "--help", "-h", "--version", "--workspace", "--json", "--dry-run", "--strict",
   ]);
-  for (const flag of flags) {
+  for (let index = 0; index < flags.length; index += 1) {
+    const flag = flags[index];
+    if (flag === "--workspace") {
+      index += 1;
+      continue;
+    }
     if (!KNOWN_FLAGS.has(flag) && !flag.startsWith("--workspace=")) {
       process.stderr.write(`error: unknown global flag '${flag}'. See ai-memory --help.\n`);
       return { exitCode: 1 };
@@ -775,8 +832,7 @@ async function main() {
   const raw = process.argv.slice(2);
 
   // Split into flags (--key or --key=value) and positional arguments
-  const flags = raw.filter((a) => a.startsWith("--"));
-  const positional = raw.filter((a) => !a.startsWith("--"));
+  const { flags, positional } = parseArgs(raw);
 
   // Handle --version early
   if (flags.includes("--version")) {

@@ -8,18 +8,33 @@
  *   node entity-backfill.js shared-inbox.jsonl      # process one file
  */
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "url";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __dirname = path.dirname(__filename);
 
+function fallbackStoreRootHelper() {
+  return {
+    resolveStoreRoot() {
+      return (
+        process.env.AI_MEMORY_STORE ||
+        process.env.AI_MEMORY_STORE_ROOT ||
+        process.env.AI_MEMORY_ROOT ||
+        path.join(os.homedir(), ".ai-memory")
+      );
+    },
+  };
+}
+
+// Load store-root helper from the installed or project layout.
 async function loadStoreRootHelper() {
   const candidates = [
+    path.join(__dirname, "store-root.js"),
     path.join(__dirname, "..", "..", "bus", "store-root.js"),
     path.join(__dirname, "..", "bus", "store-root.js"),
-    path.join(__dirname, "store-root.js"),
+    path.join(__dirname, "bus", "store-root.js"),
   ];
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
@@ -27,17 +42,14 @@ async function loadStoreRootHelper() {
       return mod.default || mod;
     }
   }
-  throw new Error("store-root-helper-missing");
+  return fallbackStoreRootHelper();
 }
 
-const storeRootHelper = await loadStoreRootHelper();
-const { resolveStoreRoot } = storeRootHelper;
+const _storeRootHelper = await loadStoreRootHelper();
+const { resolveStoreRoot } = _storeRootHelper;
 
 const STORE_ROOT = resolveStoreRoot();
-const AI_MEMORY_ROOT = STORE_ROOT;
-const STRUCTURED_ROOT = path.join(AI_MEMORY_ROOT, "structured");
-const KG_DIR = path.join(AI_MEMORY_ROOT, "kg");
-const KG_PATH = path.join(KG_DIR, "knowledge-graph.sqlite3");
+const STRUCTURED_ROOT = path.join(STORE_ROOT, "structured");
 
 const DEFAULT_FILES = [
   "shared-inbox.jsonl",
@@ -49,25 +61,19 @@ const DEFAULT_FILES = [
 async function loadEntityExtractor() {
   try {
     const mod = await import("./entity-extractor.js");
-    return mod.entityExtractor || mod.default || { extractFromRecord: r => r };
+    return mod.entityExtractor || mod.default || mod;
   } catch { return { extractFromRecord: r => r }; }
 }
 
-async function loadKnowledgeGraph() {
-  const candidates = [
-    path.join(__dirname, "..", "knowledge", "knowledge-graph.js"),
-    path.join(__dirname, "knowledge-graph.js"),
-  ];
-
+async function loadKnowledgeGraphClass() {
   try {
-    for (const candidate of candidates) {
-      if (!fs.existsSync(candidate)) continue;
-      const mod = await import(pathToFileURL(candidate).href);
-      return mod.KnowledgeGraph || null;
-    }
-    return null;
+    const mod = await import("../knowledge/knowledge-graph.js");
+    return mod.KnowledgeGraph || null;
   } catch { return null; }
 }
+
+const entityExtractor = await loadEntityExtractor();
+const KnowledgeGraph = await loadKnowledgeGraphClass();
 
 /**
  * Count records in a JSONL file.
@@ -105,7 +111,7 @@ function backfillFile(filePath, extractor) {
       const hasNewData = (enrichedRecord.facts?.length || enrichedRecord.concepts?.length || enrichedRecord.entities?.length);
       if (hasNewData) {
         enriched++;
-        patched.push(JSON.stringify(enrichedRecord));
+        patched.push(JSON.stringify({ ...enrichedRecord, _entityExtracted: true }));
       } else {
         patched.push(line);
       }
@@ -143,7 +149,7 @@ function ingestFileIntoKG(filePath, kg) {
 async function main() {
   const args = process.argv.slice(2);
   const files = args.length > 0
-    ? args.map(f => path.resolve(f))
+    ? args.map(f => (path.isAbsolute(f) || path.dirname(f) !== "." ? path.resolve(f) : path.join(STRUCTURED_ROOT, f)))
     : DEFAULT_FILES.map(f => path.join(STRUCTURED_ROOT, f));
 
   console.log(`\n=== Entity Backfill ===`);
@@ -170,7 +176,7 @@ async function main() {
 
   // Ingest into KG
   let kgRecordCount = 0;
-  if (KnowledgeGraph && fs.existsSync(path.dirname(KG_PATH))) {
+  if (KnowledgeGraph) {
     try {
       const kg = new KnowledgeGraph({ storeRoot: STORE_ROOT });
       kg.beginBatch();
@@ -191,9 +197,5 @@ async function main() {
   console.log(`\nTotal: ${totals.processed} processed, ${totals.enriched} enriched, ${totals.errors} errors`);
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
-  main().catch((error) => {
-    console.error(error?.stack || error?.message || String(error));
-    process.exit(1);
-  });
-}
+const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === __filename;
+if (isDirectRun) main();

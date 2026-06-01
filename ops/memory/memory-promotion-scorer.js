@@ -42,7 +42,7 @@ if (!STORE_ROOT) {
 
 // ── Paths ──────────────────────────────────────────────────────────────────────
 
-const STRUCT_DIR      = path.join(STORE_ROOT, "00-System/ai-memory/structured");
+const STRUCT_DIR      = path.join(STORE_ROOT, "structured");
 const QUEUE_DIR       = path.join(STORE_ROOT, ".ai-memory/queue");
 const PROMOTION_QUEUE = path.join(QUEUE_DIR,   "promotion-queue.jsonl");
 

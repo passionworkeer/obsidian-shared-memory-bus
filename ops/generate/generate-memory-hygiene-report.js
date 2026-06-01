@@ -2,26 +2,44 @@
 
 import crypto from "crypto";
 import fs from "fs";
+import os from "os";
 import path from "path";
+import { fileURLToPath, pathToFileURL } from "url";
 
-function loadVaultRootHelper() {
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+function fallbackStoreRootHelper() {
+  return {
+    resolveStoreRoot() {
+      return (
+        process.env.AI_MEMORY_STORE ||
+        process.env.AI_MEMORY_STORE_ROOT ||
+        process.env.AI_MEMORY_ROOT ||
+        path.join(os.homedir(), ".ai-memory")
+      );
+    },
+  };
+}
+
+function loadStoreRootHelper() {
   const candidates = [
-    path.join(__dirname, "vault-root.js"),
-    path.join(__dirname, "..", "bus", "vault-root.js"),
-    path.join(__dirname, "bus", "vault-root.js"),
+    path.join(__dirname, "store-root.js"),
+    path.join(__dirname, "..", "..", "bus", "store-root.js"),
+    path.join(__dirname, "..", "bus", "store-root.js"),
+    path.join(__dirname, "bus", "store-root.js"),
   ];
 
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
-      return import(candidate);
+      return import(pathToFileURL(candidate).href);
     }
   }
 
-  throw new Error(`vault-root-helper-missing: tried ${candidates.join(", ")}`);
+  return fallbackStoreRootHelper();
 }
 
-const vaultRootModule = await loadVaultRootHelper();
-const { resolveVaultRoot } = vaultRootModule;
+const storeRootModule = await loadStoreRootHelper();
+const { resolveStoreRoot } = storeRootModule.default || storeRootModule;
 
 // Reuse the structured layer definitions from memory-contract so we stay in sync
 let STRUCTURED_LAYER_DEFINITIONS;
@@ -445,11 +463,10 @@ function computeTierBudgetStatus(allRecords) {
 }
 
 function main() {
-  const vaultRoot = resolveVaultRoot();
-  const aiMemoryRoot = path.join(vaultRoot, "00-System", "ai-memory");
-  const structuredRoot = path.join(aiMemoryRoot, "structured");
-  const generatedRoot = path.join(aiMemoryRoot, "generated");
-  const embeddingsIndexPath = path.join(aiMemoryRoot, "embeddings", "index.jsonl");
+  const storeRoot = resolveStoreRoot();
+  const structuredRoot = path.join(storeRoot, "structured");
+  const generatedRoot = path.join(storeRoot, "generated");
+  const embeddingsIndexPath = path.join(storeRoot, "embeddings", "index.jsonl");
 
   // Ensure generated directory exists
   if (!fs.existsSync(generatedRoot)) {

@@ -39,7 +39,7 @@ if (!STORE_ROOT) {
 // ── Paths ──────────────────────────────────────────────────────────────────────
 
 const QUEUE_DIR       = path.join(STORE_ROOT, ".ai-memory/queue");
-const STRUCT_DIR      = path.join(STORE_ROOT, "00-System/ai-memory/structured");
+const STRUCT_DIR      = path.join(STORE_ROOT, "structured");
 const DEFAULT_QUEUE   = path.join(QUEUE_DIR,  "promotion-queue.jsonl");
 const RESOLVED_QUEUE  = path.join(QUEUE_DIR,  "resolved-queue.jsonl");
 const REVIEW_QUEUE    = path.join(QUEUE_DIR,  "human-review-queue.jsonl");

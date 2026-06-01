@@ -62,6 +62,8 @@ $Script:BusRoot = if (-not [string]::IsNullOrWhiteSpace($env:AI_MEMORY_ROOT)) {
     $Script:ClaudeMemoryRoot
 } elseif (Test-Path (Join-Path $Script:BusHome "structured")) {
     $Script:BusHome
+} elseif (Test-Path (Join-Path $Script:VaultRoot "structured")) {
+    $Script:VaultRoot
 } else {
     Join-SharedPath @($Script:VaultRoot, "00-System", "ai-memory")
 }

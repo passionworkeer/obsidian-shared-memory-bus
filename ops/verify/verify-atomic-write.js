@@ -10,13 +10,16 @@ import path from "path";
 import fs from "fs";
 import os from "os";
 import { spawn } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-const PROJECT_ROOT = path.resolve(__dirname, "..");
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PROJECT_ROOT = path.resolve(__dirname, "..", "..");
 
 // Resolve store root from AI_MEMORY_STORE environment variable.
 const store = process.env.AI_MEMORY_STORE || "";
 
-const inboxPath = path.join(store, "00-System", "ai-memory", "inbox", "stress-verify.md");
+const inboxPath = path.join(store, "inbox", "stress-verify.md");
 const inboxDir  = path.dirname(inboxPath);
 const session   = "verify-" + Date.now();
 const N         = 10;
@@ -26,12 +29,13 @@ const N         = 10;
 // ---------------------------------------------------------------------------
 
 const childScriptPath = path.join(os.tmpdir(), `atomic-write-child-${process.pid}.js`);
+const appendLineAtomicUrl = pathToFileURL(path.join(PROJECT_ROOT, "ops", "inbox", "inbox-atomic-write.js")).href;
 
 // Use JSON.stringify to safely embed the strings without any escaping risk.
 const childScriptContent = [
   "/* Auto-generated child entry — do not edit */",
   "import path from 'path';",
-  "import { appendLineAtomic } from " + JSON.stringify(path.join(PROJECT_ROOT, "ops", "inbox-atomic-write.js")) + ";",
+  "import { appendLineAtomic } from " + JSON.stringify(appendLineAtomicUrl) + ";",
   "const inboxPath = " + JSON.stringify(inboxPath) + ";",
   "const id = Number(process.argv[2] || '0');",
   "const session = " + JSON.stringify(session) + ";",

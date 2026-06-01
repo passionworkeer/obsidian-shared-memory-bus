@@ -44,11 +44,11 @@ if (!STORE_ROOT) {
 
 // ── Paths ─────────────────────────────────────────────────────────────────────
 
-const LOCK_DIR        = path.join(STORE_ROOT, "00-System/ai-memory/.lock");
+const LOCK_DIR        = path.join(STORE_ROOT, ".lock");
 const LOCK_FILE       = path.join(LOCK_DIR, "archival.lock");
-const MANIFEST_FILE   = path.join(STORE_ROOT, "00-System/ai-memory/structured/archive-manifest.jsonl");
-const STRUCT_DIR      = path.join(STORE_ROOT, "00-System/ai-memory/structured");
-const TIER_BUDGET_FILE = path.join(STORE_ROOT, "00-System/ai-memory/.config/tier-budget.json");
+const MANIFEST_FILE   = path.join(STORE_ROOT, "structured", "archive-manifest.jsonl");
+const STRUCT_DIR      = path.join(STORE_ROOT, "structured");
+const TIER_BUDGET_FILE = path.join(STORE_ROOT, ".config", "tier-budget.json");
 
 const LOCK_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
