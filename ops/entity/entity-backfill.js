@@ -156,8 +156,7 @@ async function main() {
   console.log(`Store: ${STORE_ROOT}`);
   console.log(`Files: ${files.length}`);
 
-  const entityExtractor = await loadEntityExtractor();
-  const KnowledgeGraph = await loadKnowledgeGraph();
+  // entityExtractor and KnowledgeGraph are loaded at module top-level.
 
   // Count before
   const beforeCounts = files.map(f => ({ file: path.basename(f), count: countRecords(f) }));

@@ -89,18 +89,21 @@ export function createMemoryStatus(params) {
   }
 
   function resolveStoreDir(workspaceRoot, dirName, canonicalDir) {
-    if (workspaceRoot) {
-      const directDir = path.join(workspaceRoot, dirName);
+    const root = workspaceRoot || params.CANONICAL_AI_MEMORY_ROOT || params.VAULT_ROOT || "";
+    if (root) {
+      const directDir = path.join(root, dirName);
       if (fs.existsSync(directDir)) {
         return directDir;
       }
 
-      const legacyDir = path.join(workspaceRoot, "00-System", "ai-memory", dirName);
+      const legacyDir = path.join(root, "00-System", "ai-memory", dirName);
       if (fs.existsSync(legacyDir)) {
         return legacyDir;
       }
+
+      return canonicalDir || directDir;
     }
-    return canonicalDir;
+    return canonicalDir || "";
   }
 
   function resolveGeneratedDir(workspaceRoot) {
