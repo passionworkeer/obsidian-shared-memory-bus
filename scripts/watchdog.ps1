@@ -1,6 +1,6 @@
 # AI Memory Bus Watchdog Supervisor
 # Usage: .\watchdog.ps1 -PidFile <path> -Callback <command>
-# Example: .\watchdog.ps1 -PidFile "C:\.ai-memory\bus.pid" -Callback "node scripts/vault-detect.js"
+# Example: .\watchdog.ps1 -PidFile "$env:AI_MEMORY_STORE\bus.pid" -Callback "node scripts/vault-detect.js"
 #
 # Cross-platform PowerShell watchdog for Windows.
 

@@ -21,7 +21,7 @@
 
 "use strict";
 
-const { execSync } = require("child_process");
+const { execSync, spawnSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
@@ -129,41 +129,52 @@ function checkPythonSchemaConsistency() {
   ].join("\n");
 
   const PYTHON_CANDIDATES = [
-    process.env.PYTHON_EXE || process.env.PYTHON || "python",
-    "D:/python/python.exe",
-    "D:/python/python3.exe",
-    "C:/Python312/python.exe",
-    "C:/Python311/python.exe",
-    "C:/Python310/python.exe",
-  ];
+    { command: process.env.AI_MEMORY_PYTHON, argsPrefix: [] },
+    { command: process.env.PYTHON_EXE, argsPrefix: [] },
+    { command: process.env.PYTHON, argsPrefix: [] },
+    { command: "python", argsPrefix: [] },
+    { command: "python3", argsPrefix: [] },
+    ...(process.platform === "win32"
+      ? [
+          { command: "py", argsPrefix: ["-3"] },
+          { command: "py", argsPrefix: [] },
+        ]
+      : []),
+  ].filter((candidate) => candidate.command);
 
   // Try to find a working Python
-  let pythonExe = null;
+  let pythonRuntime = null;
   for (const candidate of PYTHON_CANDIDATES) {
-    try {
-      execSync(`"${candidate}" --version`, { stdio: "ignore" });
-      pythonExe = candidate;
+    const probe = spawnSync(candidate.command, [...candidate.argsPrefix, "--version"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    if (!probe.error && probe.status === 0) {
+      pythonRuntime = candidate;
       break;
-    } catch {}
+    }
   }
 
-  if (!pythonExe) {
+  if (!pythonRuntime) {
     return { ok: true, issues: ["Python not found on this system — skipping Python schema check"] };
   }
 
   try {
     fs.writeFileSync(tmpScript, checkPyContent, "utf8");
-    execSync(`"${pythonExe}" "${tmpScript}"`, {
+    const result = spawnSync(pythonRuntime.command, [...pythonRuntime.argsPrefix, tmpScript], {
       cwd: ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf8",
       timeout: 30000,
+      windowsHide: true,
     });
+    if (result.error || result.status !== 0) {
+      throw new Error(result.stderr || result.error?.message || `exit ${result.status}`);
+    }
     return { ok: true, issues: [] };
   } catch (err) {
-    const stderr = err.stderr?.toString() || "";
     return {
       ok: false,
-      issues: [`Python schema consistency check failed: ${stderr || err.message}`],
+      issues: [`Python schema consistency check failed: ${err.message}`],
     };
   } finally {
     try { fs.unlinkSync(tmpScript); } catch {}

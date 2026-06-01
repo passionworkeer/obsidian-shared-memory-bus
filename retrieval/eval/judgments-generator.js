@@ -19,8 +19,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { resolvePythonRuntime, withPythonArgs } from "../../bus/python-runtime.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PYTHON = resolvePythonRuntime();
 
 // ── CLI args ──────────────────────────────────────────────────────────────────
 
@@ -79,29 +81,33 @@ function runSemanticSearch(query, route, topK = 10) {
   return new Promise((resolve, reject) => {
     const workspaceRoot = process.env.AI_MEMORY_OBSIDIAN_VAULT || process.env.OBSIDIAN_VAULT_ROOT || "";
 
-    const pythonCmd =
-      process.env.AI_MEMORY_PYTHON ||
-      process.env.AI_MEMORY_MCP_PYTHON ||
-      (process.platform === "win32" ? "python" : "python3");
     const scriptPath = path.join(PROJECT_ROOT, "retrieval", "semantic_search.py");
 
     if (!fs.existsSync(scriptPath)) {
-      // Fall back: try to import the module directly (sibling to this script)
       reject(new Error(`semantic_search.py not found at ${scriptPath}`));
       return;
     }
+    if (!PYTHON.available) {
+      reject(new Error(`Python runtime unavailable: ${PYTHON.error || "unknown-error"}`));
+      return;
+    }
 
-    const payload = JSON.stringify({
-      query,
-      route,
-      top_k: topK,
-      mode: "hybrid",
-      workspace_root: workspaceRoot,
-    });
+    const searchArgs = [
+      scriptPath,
+      "--mode", "hybrid",
+      "--route", route || "auto",
+      "--top-k", String(topK),
+      "--json",
+    ];
+    if (workspaceRoot) {
+      searchArgs.push("--workspace", workspaceRoot);
+    }
+    searchArgs.push(query);
 
-    const child = spawn(pythonCmd, [scriptPath], {
+    const child = spawn(PYTHON.command, withPythonArgs(PYTHON, searchArgs), {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env },
+      windowsHide: true,
+      env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" },
     });
 
     let stdout = "";
@@ -119,8 +125,8 @@ function runSemanticSearch(query, route, topK = 10) {
     child.on("close", (code) => {
       clearTimeout(timer);
       if (code !== 0) {
-        log(`semantic-search.py exited ${code}: ${stderr.slice(0, 200)}`);
-        reject(new Error(`semantic-search.py exited ${code}`));
+        log(`semantic_search.py exited ${code}: ${stderr.slice(0, 200)}`);
+        reject(new Error(`semantic_search.py exited ${code}`));
         return;
       }
 
@@ -153,9 +159,6 @@ function runSemanticSearch(query, route, topK = 10) {
       clearTimeout(timer);
       reject(e);
     });
-
-    // Write query as stdin JSON
-    child.stdin.write(payload);
     child.stdin.end();
   });
 }

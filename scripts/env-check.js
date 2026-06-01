@@ -27,8 +27,8 @@ function check(name, fn) {
   }
 }
 
-function exe(name, args = [], extraEnv = {}) {
-  return execFileSync(name, args, {
+function exe(name, args, extraEnv) {
+  return execFileSync(name, Array.isArray(args) ? args : [args], {
     encoding: 'utf8',
     timeout: 5000,
     windowsHide: true,
@@ -44,13 +44,26 @@ check('Node.js', () => exe(nodeExe, ['--version']));
 
 // Python — try multiple names since 'python' may not be in PATH on Windows
 check('Python', () => {
-  const candidates = [[pyExe], ['python.exe'], ['D:/python/python.exe'], ['py', '-3']];
+  const candidates = [
+    { command: process.env.AI_MEMORY_PYTHON, argsPrefix: [] },
+    { command: process.env.PYTHON_EXE, argsPrefix: [] },
+    { command: process.env.PYTHON, argsPrefix: [] },
+    { command: pyExe, argsPrefix: [] },
+    { command: 'python', argsPrefix: [] },
+    { command: 'python3', argsPrefix: [] },
+    ...(platform.name === 'win32'
+      ? [
+          { command: 'py', argsPrefix: ['-3'] },
+          { command: 'py', argsPrefix: [] },
+        ]
+      : []),
+  ].filter((candidate) => candidate.command);
   const tried = [];
-  for (const [name, ...baseArgs] of candidates) {
+  for (const candidate of candidates) {
     try {
-      return exe(name, [...baseArgs, '--version'], { PYTHONIOENCODING: 'utf-8' });
+      return exe(candidate.command, [...candidate.argsPrefix, '--version'], { PYTHONIOENCODING: 'utf-8' });
     } catch {
-      tried.push([name, ...baseArgs].join(' '));
+      tried.push([candidate.command, ...candidate.argsPrefix].join(' '));
     }
   }
   throw new Error(`none of [${tried.join(', ')}] found`);

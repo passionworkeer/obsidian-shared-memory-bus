@@ -76,15 +76,14 @@ function assertNoError(promise, label) {
 
 function detectPythonRuntime() {
   const { execSync } = require("child_process");
-  const paths = [
-    "D:\\python\\python.exe",
-    "C:\\Python312\\python.exe",
-    "C:\\Python311\\python.exe",
-    "C:\\Python310\\python.exe",
+  const candidates = [
+    process.env.AI_MEMORY_PYTHON,
+    process.env.PYTHON,
     "python",
     "python3",
-  ];
-  for (const cmd of paths) {
+    ...(process.platform === "win32" ? ["py -3", "py"] : []),
+  ].filter(Boolean);
+  for (const cmd of candidates) {
     try {
       const v = execSync(`${cmd} --version`, { encoding: "utf8", timeout: 5000 }).trim();
       if (v.includes("Python")) {

@@ -39,8 +39,6 @@ function getStoreCandidates() {
     return [
       path.join(HOME, '.ai-memory'),
       path.join(HOME, 'ai-memory'),
-      'E:\\.ai-memory',
-      'E:\\ai-memory',
     ];
   }
   // macOS / Linux
