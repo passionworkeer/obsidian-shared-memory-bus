@@ -97,7 +97,6 @@
             "search_server.py"
             "streaming_index.py"
             "semantic-search-cli.js"
-            "semantic-search-cli.test.js"
             "semantic-search.js"
             "semantic_search.py"
         )
