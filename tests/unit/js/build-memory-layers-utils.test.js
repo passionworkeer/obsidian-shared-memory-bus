@@ -3,42 +3,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { fileURLToPath } from "url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-// ---------------------------------------------------------------------------
-// Stub store-root so build-memory-layers.js can be loaded without side effects
-// ---------------------------------------------------------------------------
-
-const stubStoreRootPath = path.resolve(__dirname, "..", "..", "..", "bus", "store-root.js");
-
-// Always write the stub so it gets updated with deferred env-var logic
-const storeRootStub = `
-import path from "node:path";
-import os from "node:os";
-export function resolveStoreRoot() {
-  return (
-    process.env.AI_MEMORY_STORE ||
-    process.env.AI_MEMORY_STORE_ROOT ||
-    process.env.AI_MEMORY_ROOT ||
-    path.join(os.homedir(), ".ai-memory")
-  );
-}
-export function getProjectsRoot(storeRoot) {
-  return path.join(storeRoot, "projects");
-}
-export function getContextPath(storeRoot) {
-  return path.join(storeRoot, "CONTEXT.md");
-}
-export function getDefaultStoreCandidates() {
-  return [path.join(os.homedir(), '.ai-memory')];
-}
-export default { resolveStoreRoot, getProjectsRoot, getContextPath, getDefaultStoreCandidates };
-`;
-
-fs.mkdirSync(path.dirname(stubStoreRootPath), { recursive: true });
-fs.writeFileSync(stubStoreRootPath, storeRootStub, "utf8");
 
 // ---------------------------------------------------------------------------
 // jsonl-stream.js tests (no dependencies on build-memory-layers.js)

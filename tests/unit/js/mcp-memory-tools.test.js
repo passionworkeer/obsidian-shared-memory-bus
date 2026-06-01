@@ -3,37 +3,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-// Ensure the store-root stub exists before mcp-memory-tools.js loads.
-// The stub must exist and use process.env (deferred evaluation) so that
-// beforeEach can override the store root before any test calls memory_*.
-const stubStoreRootPath = path.resolve(__dirname, "..", "..", "..", "bus", "store-root.js");
-const storeRootStub = `
-import path from "node:path";
-import os from "node:os";
-export function resolveStoreRoot() {
-  return (
-    process.env.AI_MEMORY_STORE ||
-    process.env.AI_MEMORY_STORE_ROOT ||
-    process.env.AI_MEMORY_ROOT ||
-    path.join(os.homedir(), ".ai-memory")
-  );
-}
-export function getProjectsRoot(storeRoot) {
-  return path.join(storeRoot, "projects");
-}
-export function getContextPath(storeRoot) {
-  return path.join(storeRoot, "CONTEXT.md");
-}
-export function getDefaultStoreCandidates() {
-  return [path.join(os.homedir(), ".ai-memory")];
-}
-export default { resolveStoreRoot, getProjectsRoot, getContextPath, getDefaultStoreCandidates };
-`;
-fs.writeFileSync(stubStoreRootPath, storeRootStub, "utf8");
 
 const {
   memory_boot,

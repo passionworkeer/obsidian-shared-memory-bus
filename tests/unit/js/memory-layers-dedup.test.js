@@ -3,9 +3,6 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { fileURLToPath } from "url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ---------------------------------------------------------------------------
 // Create temp directory for DAILY_LOG_DIR to avoid hardcoded path dependency
@@ -15,36 +12,6 @@ const ORIGINAL_AI_MEMORY_ROOT = process.env.AI_MEMORY_ROOT;
 const TEST_AI_MEMORY_ROOT = path.join(os.tmpdir(), `ai-memory-test-${Date.now()}`);
 fs.mkdirSync(TEST_AI_MEMORY_ROOT, { recursive: true });
 process.env.AI_MEMORY_ROOT = TEST_AI_MEMORY_ROOT;
-
-// ---------------------------------------------------------------------------
-// Stub store-root before the module is loaded
-// ESM Note: require.cache not available in ESM, stubs written to files
-// ---------------------------------------------------------------------------
-const stubStoreRootPath = path.resolve(__dirname, "..", "..", "..", "bus", "store-root.js");
-const storeRootStub = `
-import path from "node:path";
-import os from "node:os";
-export function resolveStoreRoot() {
-  return (
-    process.env.AI_MEMORY_STORE ||
-    process.env.AI_MEMORY_STORE_ROOT ||
-    process.env.AI_MEMORY_ROOT ||
-    path.join(os.homedir(), ".ai-memory")
-  );
-}
-export function getProjectsRoot(storeRoot) {
-  return path.join(storeRoot, "projects");
-}
-export function getContextPath(storeRoot) {
-  return path.join(storeRoot, "CONTEXT.md");
-}
-export function getDefaultStoreCandidates() {
-  return [path.join(os.homedir(), ".ai-memory")];
-}
-export default { resolveStoreRoot, getProjectsRoot, getContextPath, getDefaultStoreCandidates };
-`;
-fs.mkdirSync(path.dirname(stubStoreRootPath), { recursive: true });
-fs.writeFileSync(stubStoreRootPath, storeRootStub, "utf8");
 
 // ESM Note: Module.prototype._compile patching is not available in ESM
 // The module will need to be imported directly and exports used

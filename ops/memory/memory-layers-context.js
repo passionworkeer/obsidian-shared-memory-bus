@@ -269,7 +269,7 @@ function buildGlobalContext(layers) {
         .map(([k, n]) => `- ${k}: ${n} 条`)
         .join("\n"),
       "",
-      "完整记录请查看 `00-System/ai-memory/structured/` 下的 JSONL 文件。",
+      "完整记录请查看 store root 下的 `structured/` JSONL 文件。",
       ""
     );
   } else {
@@ -443,7 +443,7 @@ function buildMemoryIndex(layers) {
   lines.push("- [HANDOFF.md](./HANDOFF.md) — 交接包");
   lines.push("- [MEMORY-LAYERS.md](./MEMORY-LAYERS.md) — 层级概览");
   lines.push("");
-  lines.push("> Memory hygiene stats: see `00-System/ai-memory/generated/memory_hygiene_report.json` if present");
+  lines.push("> Memory hygiene stats: see `generated/memory_hygiene_report.json` under the store root if present");
 
   return lines.join("\n");
 }

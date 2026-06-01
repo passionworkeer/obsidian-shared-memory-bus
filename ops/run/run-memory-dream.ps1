@@ -1082,7 +1082,7 @@ function Release-DreamLock {
 }
 
 $StoreRoot = Resolve-SharedStoreRoot -ThrowIfMissing
-$AiMemoryRoot = Join-SharedPath @($StoreRoot, "00-System", "ai-memory")
+$AiMemoryRoot = $StoreRoot
 $StructuredRoot = Join-SharedPath @($AiMemoryRoot, "structured")
 $GeneratedRoot = Join-SharedPath @($AiMemoryRoot, "generated")
 $StateRoot = Join-SharedPath @($AiMemoryRoot, "state")
