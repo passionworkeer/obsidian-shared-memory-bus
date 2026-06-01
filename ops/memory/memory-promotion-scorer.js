@@ -302,7 +302,7 @@ function detectConflicts(scoredCandidates, originalRecords) {
 }
 
 /**
- * Build the promotion queue and write to E:\.ai-memory\queue\promotion-queue.jsonl.
+ * Build the promotion queue under the resolved AI_MEMORY_STORE root.
  *
  * @param {{id: string, score: number, components: object, tier_from: number, tier_to: number, needs_review: boolean, conflicts: object[], record_summary: object, scored_at: string}[]} scoredCandidates
  * @returns {{written: number, auto_promote: number, needs_review: number, conflicts: number, path: string}}

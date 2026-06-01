@@ -2,7 +2,7 @@
 /**
  * ops/generate-context.js
  * -----------------------
- * Generates E:\.ai-memory\CONTEXT.md
+ * Generates CONTEXT.md under the resolved AI_MEMORY_STORE root.
  * Used by passive agents (Trae, OpenCode, Codex) that can't call MCP.
  *
  * Content: global.md + top-10 recent facts from each project

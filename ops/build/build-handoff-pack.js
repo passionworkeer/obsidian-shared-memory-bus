@@ -28,7 +28,7 @@ async function loadStoreRootHelper() {
 const resolveStoreRootMod = await loadStoreRootHelper();
 const resolveStoreRoot = resolveStoreRootMod.resolveStoreRoot || resolveStoreRootMod;
 
-const STORE_ROOT = resolveStoreRoot(); // e.g. "E:\\.ai-memory"
+const STORE_ROOT = resolveStoreRoot();
 const AI_MEMORY_ROOT = STORE_ROOT;
 const STRUCTURED_ROOT = path.join(AI_MEMORY_ROOT, "structured");
 const GENERATED_ROOT = path.join(AI_MEMORY_ROOT, "generated");
@@ -317,18 +317,9 @@ export {
 };
 
 // Only run main() when executed directly (not when imported as a module in tests).
-// Guard against E:\ drive not existing on CI runners.
 const __filename = fileURLToPath(import.meta.url);
 const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === __filename;
 
 if (isDirectRun) {
-  try {
-    main();
-  } catch (err) {
-    if (err.code === "ENOENT" && err.message.includes("E:\\")) {
-      // E:\.ai-memory\ does not exist on this CI runner — skip silently.
-      process.exit(0);
-    }
-    throw err;
-  }
+  main();
 }

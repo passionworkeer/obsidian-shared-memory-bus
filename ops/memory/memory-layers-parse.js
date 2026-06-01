@@ -40,7 +40,7 @@ const USER_HOME = process.env.USERPROFILE || process.env.HOME || "";
 const OPENCLAW_HOME = process.env.OPENCLAW_HOME || path.join(USER_HOME, ".openclaw");
 const CLAUDE_HOME = process.env.CLAUDE_HOME || path.join(USER_HOME, ".claude");
 
-const STORE_ROOT = resolveStoreRoot(); // e.g. "E:\\.ai-memory"
+const STORE_ROOT = resolveStoreRoot();
 const AI_MEMORY_ROOT = STORE_ROOT;
 const INBOX_ROOT = path.join(AI_MEMORY_ROOT, "inbox");
 const EVENTS_ROOT = path.join(AI_MEMORY_ROOT, "events");

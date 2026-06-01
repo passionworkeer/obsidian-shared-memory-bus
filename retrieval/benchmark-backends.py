@@ -26,7 +26,7 @@ from runtime_support import resolve_runtime_file, resolve_runtime_root, resolve_
 
 ROOT = resolve_runtime_root(__file__)
 GENERATE_SCRIPT = resolve_runtime_file(__file__, "generate-embeddings.js", os.path.join("bus", "generate-embeddings.js"))
-SEARCH_SCRIPT = resolve_runtime_file(__file__, "semantic-search.py", os.path.join("retrieval", "semantic-search.py"))
+SEARCH_SCRIPT = resolve_runtime_file(__file__, "semantic_search.py", os.path.join("retrieval", "semantic_search.py"))
 PYTHON = os.environ.get("AI_MEMORY_PYTHON") or sys.executable or "python"
 
 try:

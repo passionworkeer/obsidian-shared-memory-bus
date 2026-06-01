@@ -37,35 +37,18 @@ import sys, json
 sys.path.insert(0, '${PYTHON_MODULE_PATH}')
 ${pythonCode}
 `;
-  // Python executable: try known paths first, then PATH-resolved
-  const PYTHON_EXE = (() => {
-    if (process.platform === "win32") {
-      // Try common installations first
-      const candidates = [
-        "D:/python/python.exe",
-        "C:/python/python.exe",
-        "py",
-        "python",
-      ];
-      for (const cand of candidates) {
-        const r = spawnSync(cand, ["--version"], { encoding: "utf8" });
-        if (r && r.status === 0) return cand;
-      }
-      return "python3";
-    }
-    const r3 = spawnSync("python3", ["--version"], { encoding: "utf8" });
-    return r3.status === 0 ? "python3" : "python";
-  })();
-  const result = spawnSync(PYTHON_EXE, ["-c", fullCode], {
+  const pythonRuntime = resolvePythonRuntime();
+  const result = spawnSync(pythonRuntime.command, [...pythonRuntime.argsPrefix, "-c", fullCode], {
     encoding: "utf8",
     timeout: 10000,
+    windowsHide: true,
   });
 
-  if (result.status !== 0) {
+  if (result.error || result.status !== 0) {
     const stderr = result.stderr || "";
     const errorMsg = stderr ? `\nPython stderr: ${stderr}` : "";
     throw new Error(
-      `Python subprocess failed with exit code ${result.status}.${errorMsg}`
+      `Python subprocess failed with exit code ${result.status}.${errorMsg || result.error?.message || ""}`
     );
   }
 
@@ -76,6 +59,34 @@ ${pythonCode}
       `Failed to parse Python output as JSON: ${result.stdout}\nError: ${e.message}`
     );
   }
+}
+
+function resolvePythonRuntime() {
+  const candidates = [
+    { command: process.env.AI_MEMORY_PYTHON, argsPrefix: [] },
+    { command: process.env.PYTHON_EXE, argsPrefix: [] },
+    { command: process.env.PYTHON, argsPrefix: [] },
+    { command: "python", argsPrefix: [] },
+    { command: "python3", argsPrefix: [] },
+    ...(process.platform === "win32"
+      ? [
+          { command: "py", argsPrefix: ["-3"] },
+          { command: "py", argsPrefix: [] },
+        ]
+      : []),
+  ].filter((candidate) => candidate.command);
+
+  for (const candidate of candidates) {
+    const result = spawnSync(candidate.command, [...candidate.argsPrefix, "--version"], {
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    if (!result.error && result.status === 0) {
+      return candidate;
+    }
+  }
+
+  return { command: "python", argsPrefix: [] };
 }
 
 /**

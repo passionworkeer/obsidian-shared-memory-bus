@@ -149,8 +149,6 @@ function getDefaultCandidates() {
       path.join(HOME, 'Obsidian Vault'),
       path.join(HOME, 'Desktop', 'Obsidian Vault'),
       path.join(HOME, 'Documents', 'Obsidian Vault'),
-      'E:\\Obsidian Vault',
-      'D:\\Obsidian Vault',
     ];
   }
   if (platform.name === 'darwin') {

@@ -503,6 +503,39 @@ test("ai-memory CLI --workspace dry-run forwards AI_MEMORY_STORE", () => {
   }
 });
 
+test("runtime detection scripts avoid machine-specific fallback paths", () => {
+  const files = [
+    "scripts/store-detect.js",
+    "scripts/vault-detect.js",
+    "scripts/pressure-test-embedding-pool.js",
+    "scripts/env-check.js",
+    "scripts/start-all.ps1",
+    "scripts/validate-schema-sync.js",
+    "scripts/watchdog.ps1",
+    "bus/runtime-platform-runtimes.ps1",
+    "ops/build/build-handoff-pack.js",
+    "ops/check/check-vbs.js",
+    "ops/generate/generate-context.js",
+    "ops/memory/memory-layers-parse.js",
+    "ops/memory/memory-promotion-resolver.js",
+    "ops/memory/memory-promotion-scorer.js",
+    "retrieval/benchmark-backends.py",
+    "retrieval/eval/judgments-generator.js",
+    "shared-mcp/omni-memory-server.js",
+    "tests/cross-language/lsh_equivalence.test.js",
+    "tests/integration/py/search-flow.test.js",
+  ];
+  const offenders = [];
+  for (const file of files) {
+    const text = fs.readFileSync(path.join(REPO_ROOT, file), "utf8");
+    if (/(^|[^A-Za-z])[A-Z]:(?:\\\\|\\|\/)/.test(text)) {
+      offenders.push(file);
+    }
+  }
+
+  assert.deepEqual(offenders, []);
+});
+
 test("PowerShell store-root workflows do not nest canonical stores under legacy vault paths", () => {
   const files = [
     "ops/run/run-memory-dream.ps1",

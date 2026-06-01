@@ -8,7 +8,7 @@
  *
  * Usage:
  *   node ops/memory/memory-promotion-resolver.js [--store-root <path>] [--dry-run] [--verbose]
- *        [--queue <path>]   (default: E:\.ai-memory\queue\promotion-queue.jsonl)
+ *        [--queue <path>]   (default: <AI_MEMORY_STORE>\queue\promotion-queue.jsonl)
  */
 
 import fs from "fs";

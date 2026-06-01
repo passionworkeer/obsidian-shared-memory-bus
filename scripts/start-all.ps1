@@ -47,15 +47,27 @@ if ($nodeVersion) {
     $checks += @{ name = "Node.js"; ok = $false; detail = "not found" }
 }
 
-# Python - try multiple paths
+# Python - prefer configured runtime, then PATH-resolved commands
 $pythonCmd = $null
 $pythonVersion = $null
-$pythonPaths = @("python", "python3", "D:\python\python.exe", "$env:LOCALAPPDATA\Programs\Python\python.exe")
-foreach ($p in $pythonPaths) {
+$pythonCandidates = New-Object System.Collections.Generic.List[object]
+foreach ($envName in @("AI_MEMORY_PYTHON", "PYTHON_EXE", "PYTHON")) {
+    $value = [Environment]::GetEnvironmentVariable($envName)
+    if (-not [string]::IsNullOrWhiteSpace($value)) {
+        $pythonCandidates.Add([pscustomobject]@{ Command = $value; Args = @() }) | Out-Null
+    }
+}
+$pythonCandidates.Add([pscustomobject]@{ Command = "python"; Args = @() }) | Out-Null
+$pythonCandidates.Add([pscustomobject]@{ Command = "python3"; Args = @() }) | Out-Null
+if ($IsWindows -or $env:OS -eq "Windows_NT") {
+    $pythonCandidates.Add([pscustomobject]@{ Command = "py"; Args = @("-3") }) | Out-Null
+    $pythonCandidates.Add([pscustomobject]@{ Command = "py"; Args = @() }) | Out-Null
+}
+foreach ($candidate in $pythonCandidates) {
     try {
-        $v = & $p --version 2>$null
+        $v = & $candidate.Command @($candidate.Args + @("--version")) 2>$null
         if ($v) {
-            $pythonCmd = $p
+            $pythonCmd = ([string[]]@($candidate.Command) + [string[]]$candidate.Args) -join " "
             $pythonVersion = $v
             break
         }

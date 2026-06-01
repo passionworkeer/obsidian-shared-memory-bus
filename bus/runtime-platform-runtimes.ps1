@@ -239,12 +239,7 @@ function Get-SharedPythonExecutableCandidates {
             (Join-Path $userHome "AppData\Local\Programs\Python\Python313\python.exe"),
             (Join-Path $userHome "AppData\Local\Programs\Python\Python312\python.exe"),
             (Join-Path $userHome "AppData\Local\Programs\Python\Python311\python.exe"),
-            (Join-Path $userHome "AppData\Local\Programs\Python\Python310\python.exe"),
-            "D:\python\python.exe",
-            "C:\Python313\python.exe",
-            "C:\Python312\python.exe",
-            "C:\Python311\python.exe",
-            "C:\Python310\python.exe"
+            (Join-Path $userHome "AppData\Local\Programs\Python\Python310\python.exe")
         )) {
             if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
                 $candidates.Add((Get-Item -LiteralPath $candidate).FullName) | Out-Null
