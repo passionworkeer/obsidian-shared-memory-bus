@@ -1,5 +1,6 @@
 import path from "node:path";
 import fs from "node:fs";
+import os from "node:os";
 import { spawn } from "node:child_process";
 
 // ---------------------------------------------------------------------------
@@ -155,7 +156,7 @@ function spawnPython(args, options = {}) {
 // ---------------------------------------------------------------------------
 
 function makeWatchdogScript(pidPath, callbackScript) {
-  const safePidPath = String(pidPath || "/tmp/watchdog.pid").replace(/'/g, "'\\''");
+  const safePidPath = String(pidPath || path.join(os.tmpdir(), "watchdog.pid")).replace(/'/g, "'\\''");
   const safeCallback = String(callbackScript || "echo 'watchdog recovered'").replace(/'/g, "'\\''");
   const intervalSec = 15;
 

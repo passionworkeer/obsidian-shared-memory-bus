@@ -1,12 +1,13 @@
 import path from "node:path";
 import fs from "node:fs";
+import os from "node:os";
 import { spawn, spawnSync } from "node:child_process";
 
 // ---------------------------------------------------------------------------
 // Derived constants
 // ---------------------------------------------------------------------------
 
-const USER_HOME = process.env.USERPROFILE || "";
+const USER_HOME = process.env.USERPROFILE || os.homedir();
 const APP_DATA = process.env.APPDATA || path.join(USER_HOME, "AppData", "Roaming");
 const LOCAL_APPDATA = process.env.LOCALAPPDATA || path.join(USER_HOME, "AppData", "Local");
 
@@ -293,13 +294,22 @@ function resolveFromObsidianConfig() {
 }
 
 function getDefaultVaultCandidates() {
-  return [
+  const candidates = [
     path.join(USER_HOME, "Obsidian Vault"),
     path.join(USER_HOME, "Documents", "Obsidian Vault"),
     path.join(USER_HOME, "Desktop", "Obsidian Vault"),
-    "E:\\Obsidian Vault",
-    "D:\\Obsidian Vault",
   ];
+  for (let i = 67; i <= 90; i++) {
+    const letter = String.fromCharCode(i);
+    const root = `${letter}:\\`;
+    try {
+      fs.accessSync(root, fs.constants.R_OK);
+      candidates.push(path.join(root, "Obsidian Vault"));
+    } catch {
+      // Drive not accessible — skip
+    }
+  }
+  return candidates;
 }
 
 function resolveVaultRoot(options = {}) {
@@ -374,7 +384,7 @@ function detectBestDrive() {
   return { drive: best.letter + ":", path: path.join(best.letter + ":", ".ai-memory"), freeBytes: best.freeBytes };
 }
 
-const DEFAULT_STORE_ROOT = "E:\\.ai-memory";
+const DEFAULT_STORE_ROOT = path.join(USER_HOME || ".", ".ai-memory");
 let cachedStoreRoot = null;
 
 function resolveStoreRoot(options = {}) {

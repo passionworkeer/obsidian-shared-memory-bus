@@ -110,7 +110,7 @@ function checkPythonSchemaConsistency() {
   }
 
   // Use a temp script file to avoid quoting issues on Windows
-  const tmpDir = (process.env.TEMP || process.env.TMP || "").replace(/\\/g, "/") || "/tmp";
+  const tmpDir = (process.env.TEMP || process.env.TMP || require("os").tmpdir()).replace(/\\/g, "/");
   const tmpScript = path.join(tmpDir, `schema_sync_check_${process.pid}.py`);
   const checkPyContent = [
     `import sys`,
@@ -128,14 +128,27 @@ function checkPythonSchemaConsistency() {
     `    sys.exit(2)`,
   ].join("\n");
 
-  const PYTHON_CANDIDATES = [
-    process.env.PYTHON_EXE || process.env.PYTHON || "python",
-    "D:/python/python.exe",
-    "D:/python/python3.exe",
-    "C:/Python312/python.exe",
-    "C:/Python311/python.exe",
-    "C:/Python310/python.exe",
-  ];
+  const PYTHON_CANDIDATES = (() => {
+    const envCmd = process.env.PYTHON_EXE || process.env.PYTHON || process.env.AI_MEMORY_PYTHON;
+    const fromEnv = envCmd ? [envCmd] : [];
+    let runtimeCmd = null;
+    for (const helper of [
+      path.join(ROOT, "python-runtime.js"),
+      path.join(ROOT, "bus", "python-runtime.js"),
+    ]) {
+      if (fs.existsSync(helper)) {
+        try {
+          const { resolvePythonRuntime } = require(helper);
+          const runtime = resolvePythonRuntime();
+          if (runtime && runtime.available) {
+            runtimeCmd = [runtime.command, ...(runtime.argsPrefix || [])].join(" ").trim();
+            break;
+          }
+        } catch {}
+      }
+    }
+    return [...fromEnv, ...(runtimeCmd ? [runtimeCmd] : []), "python", "python3", "py"];
+  })();
 
   // Try to find a working Python
   let pythonExe = null;
