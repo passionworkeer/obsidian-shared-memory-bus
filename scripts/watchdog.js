@@ -16,7 +16,9 @@ if (!callback) {
 }
 
 const pidFile = process.env.AI_MEMORY_WATCHDOG_PID
-  || path.join(os.tmpdir(), `memory-bus-watchdog-${process.pid}.pid`);
+  || (process.env.AI_MEMORY_ROOT
+        ? path.join(process.env.AI_MEMORY_ROOT, "watchdog.pid")
+        : path.join(os.homedir(), ".ai-memory", "watchdog.pid"));
 
 const isWindows = process.platform === "win32";
 const supervisor = isWindows

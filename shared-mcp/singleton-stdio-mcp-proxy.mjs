@@ -821,6 +821,32 @@ async function handleSingleRpc(message) {
 
 const server = http.createServer(async (req, res) => {
   try {
+    // CORS / Origin: allow only same-host loopback to mitigate local web-page
+    // attacks. Health probe and MCP endpoint both require a matching Origin
+    // header; same-origin (no Origin) and loopback variants are accepted.
+    const origin = req.headers.origin;
+    if (origin) {
+      let ok = false;
+      try {
+        const u = new URL(origin);
+        if ((u.hostname === '127.0.0.1' || u.hostname === 'localhost' || u.hostname === '[::1]')
+            && (u.protocol === 'http:' || u.protocol === 'https:')) {
+          ok = true;
+        }
+      } catch { /* malformed Origin */ }
+      if (!ok) {
+        sendJson(res, 403, { error: 'origin-not-allowed' });
+        return;
+      }
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+    }
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
     if (req.method === 'GET' && req.url === healthPath) {
       const healthy =
         initialized && child && !child.killed && child.exitCode === null;
