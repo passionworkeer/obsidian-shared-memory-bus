@@ -62,7 +62,7 @@ Write-Host "[warm-cache] Starting warm (mode=$Mode, timeout=${Timeout}s, max=${M
 
 if ($Mode -eq "manual") {
     # Read JSON objects from stdin, pass through pipeline
-    $pythonCmd | Invoke-Expression
+    & $pythonExe @pythonCmd
 } else {
     & $pythonExe $warmScript --mode $Mode --timeout $Timeout --max-queries $MaxQueries
 }

@@ -55,7 +55,7 @@ def _get_sqlite_cache():
     import os
     store_root = os.environ.get(
         "AI_MEMORY_STORE",
-        os.environ.get("AI_MEMORY_STORE_ROOT", "E:/desktop/.ai-memory"),
+        os.environ.get("AI_MEMORY_STORE_ROOT", os.path.join(os.path.expanduser("~"), ".ai-memory")),
     )
     cache_dir = os.path.join(store_root, "cache")
 
