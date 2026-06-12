@@ -7,42 +7,11 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// ---------------------------------------------------------------------------
-// Stub vault-root so build-memory-layers.js can be loaded without side effects
-// ---------------------------------------------------------------------------
-
-const stubVaultRootPath = path.join(__dirname, "..", "..", "..", "bus", "vault-root.js");
-const vaultRootStub = `
-export function resolveVaultRoot() {
-  return "E:/desktop/Obsidian Vault";
-}
-export function getDefaultVaultCandidates() {
-  return ["E:/desktop/Obsidian Vault"];
-}
-export default { resolveVaultRoot, getDefaultVaultCandidates };
-`;
-
-fs.mkdirSync(path.dirname(stubVaultRootPath), { recursive: true });
-fs.writeFileSync(stubVaultRootPath, vaultRootStub, "utf8");
-
-// ---------------------------------------------------------------------------
-// Stub store-root so build-memory-layers.js can be loaded
-// ---------------------------------------------------------------------------
-
-const stubStoreRootPath = path.join(__dirname, "..", "..", "..", "bus", "store-root.js");
-const storeRootStub = `
-export function resolveStoreRoot() {
-  // Always read env at call time so test beforeEach can override the store root
-  return process.env.AI_MEMORY_STORE ||
-    process.env.AI_MEMORY_STORE_ROOT ||
-    "E:/desktop/.ai-memory";
-}
-export default { resolveStoreRoot };
-`;
-
-// Always write the stub so it gets updated (the file may have been created by a
-// previous run with stale content that ignored AI_MEMORY_STORE)
-fs.writeFileSync(stubStoreRootPath, storeRootStub, "utf8");
+// bus/store-root.js and bus/vault-root.js honour AI_MEMORY_STORE and
+// AI_MEMORY_OBSIDIAN_VAULT env vars, so we just set them here and avoid
+// polluting the production source tree with stub files.
+process.env.AI_MEMORY_STORE = process.env.AI_MEMORY_STORE || path.join(os.tmpdir(), "bml-store");
+process.env.AI_MEMORY_OBSIDIAN_VAULT = process.env.AI_MEMORY_OBSIDIAN_VAULT || path.join(os.tmpdir(), "bml-vault");
 
 // ---------------------------------------------------------------------------
 // Prevent main() from running and inject exports

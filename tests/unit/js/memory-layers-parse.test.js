@@ -7,21 +7,10 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// ---------------------------------------------------------------------------
-// Stub vault-root before the module is loaded
-// ESM Note: require.cache not available in ESM, stubs written to files
-// ---------------------------------------------------------------------------
-const stubVaultRootPath = path.resolve(__dirname, "..", "..", "..", "bus", "vault-root.js");
-const vaultRootStub = `
-export function resolveVaultRoot() { return "E:/desktop/Obsidian Vault"; }
-export function getDefaultVaultCandidates() { return ["E:/desktop/Obsidian Vault"]; }
-export default { resolveVaultRoot, getDefaultVaultCandidates };
-`;
-fs.mkdirSync(path.dirname(stubVaultRootPath), { recursive: true });
-fs.writeFileSync(stubVaultRootPath, vaultRootStub, "utf8");
-
-// ESM Note: Module.prototype._compile patching is not available in ESM
-// The module will need to be imported directly and exports used
+// bus/vault-root.js honours AI_MEMORY_OBSIDIAN_VAULT env var, so we set the
+// env here instead of writing a stub to the production source tree.
+process.env.AI_MEMORY_OBSIDIAN_VAULT = process.env.AI_MEMORY_OBSIDIAN_VAULT
+  || path.join(os.tmpdir(), `vault-parse-${Date.now()}`);
 
 const {
   normalizeSpaces, sha1, sha256, parseTimestamp, classifyScope,

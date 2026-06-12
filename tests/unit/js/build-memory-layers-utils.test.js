@@ -7,48 +7,11 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// ---------------------------------------------------------------------------
-// Stub vault-root so build-memory-layers.js can be loaded without side effects
-// ---------------------------------------------------------------------------
-
-const stubVaultRootPath = path.resolve(__dirname, "..", "..", "..", "bus", "vault-root.js");
-
-// Ensure the bus/vault-root.js stub exists (copy the one used by the main test file)
-const vaultRootStub = `
-export default {
-  resolveVaultRoot() {
-    return "E:/desktop/Obsidian Vault";
-  },
-  getDefaultVaultCandidates() {
-    return ["E:/desktop/Obsidian Vault"];
-  },
-};
-export const resolveVaultRoot = () => "E:/desktop/Obsidian Vault";
-export const getDefaultVaultCandidates = () => ["E:/desktop/Obsidian Vault"];
-`;
-
-if (!fs.existsSync(stubVaultRootPath)) {
-  fs.mkdirSync(path.dirname(stubVaultRootPath), { recursive: true });
-  fs.writeFileSync(stubVaultRootPath, vaultRootStub, "utf8");
-}
-
-// ---------------------------------------------------------------------------
-// Stub store-root so build-memory-layers.js can be loaded
-// ---------------------------------------------------------------------------
-
-const stubStoreRootPath = path.resolve(__dirname, "..", "..", "..", "bus", "store-root.js");
-const storeRootStub = `
-export default {
-  resolveStoreRoot() {
-    return "E:/desktop/.ai-memory";
-  },
-};
-export const resolveStoreRoot = () => "E:/desktop/.ai-memory";
-`;
-
-if (!fs.existsSync(stubStoreRootPath)) {
-  fs.writeFileSync(stubStoreRootPath, storeRootStub, "utf8");
-}
+// bus/store-root.js and bus/vault-root.js honour AI_MEMORY_STORE and
+// AI_MEMORY_OBSIDIAN_VAULT env vars, so we just set them here and avoid
+// polluting the production source tree with stub files.
+process.env.AI_MEMORY_STORE = process.env.AI_MEMORY_STORE || path.join(os.tmpdir(), "bmlutils-store");
+process.env.AI_MEMORY_OBSIDIAN_VAULT = process.env.AI_MEMORY_OBSIDIAN_VAULT || path.join(os.tmpdir(), "bmlutils-vault");
 
 // ESM Note: Module.prototype._compile patching is not available in ESM
 // The module will be imported directly without patching

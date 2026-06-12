@@ -7,24 +7,10 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Ensure the store-root stub exists before mcp-memory-tools.js loads.
-// The stub must exist and use process.env (deferred evaluation) so that
-// beforeEach can override the store root before any test calls memory_*.
-const stubStoreRootPath = path.resolve(__dirname, "..", "..", "..", "bus", "store-root.js");
-const storeRootStub = `
-export function resolveStoreRoot() {
-  return process.env.AI_MEMORY_STORE ||
-    process.env.AI_MEMORY_STORE_ROOT ||
-    "E:/desktop/.ai-memory";
-}
-export default { resolveStoreRoot };
-`;
-fs.writeFileSync(stubStoreRootPath, storeRootStub, "utf8");
-
-// Clear cached modules that capture resolveStoreRoot at load time so the stub
-// is re-evaluated with the correct deferred logic.
-// Note: require.cache is not available in ESM, so we rely on the stub file
-// being written before any dynamic import occurs.
+// bus/store-root.js honours AI_MEMORY_STORE / AI_MEMORY_STORE_ROOT env vars
+// (re-evaluated on every call), so we set the env instead of overwriting the
+// production source file. beforeEach can still override per-test.
+process.env.AI_MEMORY_STORE = process.env.AI_MEMORY_STORE || path.join(os.tmpdir(), "mcp-store");
 
 const {
   memory_boot,

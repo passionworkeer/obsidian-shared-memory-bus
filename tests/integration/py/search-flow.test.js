@@ -30,7 +30,7 @@ const { test, describe } = require("node:test");
 // Constants
 // ---------------------------------------------------------------------------
 
-const PYTHON = "D:/python/python.exe";
+const PYTHON = process.env.PYTHON || (process.platform === "win32" ? "python" : "python3");
 const RETRIEVAL_DIR = path.resolve(__dirname, "../../../retrieval");
 const SEMANTIC_SEARCH_PY = path.join(RETRIEVAL_DIR, "semantic-search.py");
 const PYTHON_MIN_VERSION = [3, 11];

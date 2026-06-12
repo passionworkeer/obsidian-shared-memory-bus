@@ -36,10 +36,24 @@ import sys, json
 sys.path.insert(0, '${PYTHON_MODULE_PATH}')
 ${pythonCode}
 `;
-  // Python executable: use py.exe launcher if available, else absolute path
-  const PYTHON_EXE = process.platform === "win32"
-    ? "D:\\Users\\王健俊\\AppData\\Local\\Programs\\Python\\Python313\\python.exe"
-    : "python";
+  // Python executable: honour $PYTHON first, then try platform-common names.
+  const PYTHON_EXE = (() => {
+    if (process.env.PYTHON) return process.env.PYTHON;
+    if (process.platform === "win32") {
+      const candidates = [
+        "py",
+        "python",
+        "python3",
+      ];
+      for (const cand of candidates) {
+        const r = spawnSync(cand, ["--version"], { encoding: "utf8" });
+        if (r && r.status === 0) return cand;
+      }
+      return "python3";
+    }
+    const r3 = spawnSync("python3", ["--version"], { encoding: "utf8" });
+    return r3.status === 0 ? "python3" : "python";
+  })();
   const result = spawnSync(PYTHON_EXE, ["-c", fullCode], {
     encoding: "utf8",
     timeout: 10000,
