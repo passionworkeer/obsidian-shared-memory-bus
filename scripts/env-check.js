@@ -44,7 +44,8 @@ check('Node.js', () => exe(nodeExe, '--version'));
 
 // Python — try multiple names since 'python' may not be in PATH on Windows
 check('Python', () => {
-  const candidates = [pyExe, 'python.exe', 'D:/python/python.exe', 'py', '-3'];
+  const candidates = [pyExe, 'python.exe', 'py', '-3'];
+  if (process.env.PYTHON) candidates.unshift(process.env.PYTHON);
   const tried = [];
   for (const name of candidates) {
     try {

@@ -2,37 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import fs from "node:fs";
+import os from "node:os";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// ---------------------------------------------------------------------------
-// Stub memory-contract and vault-root before the module is loaded
-// ESM Note: require.cache and module patching not available in ESM
-// These stubs are written to files for the module to find at runtime
-// ---------------------------------------------------------------------------
-
-const stubVaultRootPath = path.resolve(__dirname, "..", "..", "..", "bus", "vault-root.js");
-const vaultRootStub = `
-export function resolveVaultRoot() { return "E:/desktop/Obsidian Vault"; }
-export function getDefaultVaultCandidates() { return ["E:/desktop/Obsidian Vault"]; }
-export default { resolveVaultRoot, getDefaultVaultCandidates };
-`;
-fs.mkdirSync(path.dirname(stubVaultRootPath), { recursive: true });
-fs.writeFileSync(stubVaultRootPath, vaultRootStub, "utf8");
-
-// ---------------------------------------------------------------------------
-// Stub store-root at the path build-handoff-pack.js will find
-// build-handoff-pack.js is in ops/build/, so it looks in ops/bus/
-// ---------------------------------------------------------------------------
-
-const stubStoreRootPath = path.resolve(__dirname, "..", "..", "..", "ops", "bus", "store-root.js");
-fs.mkdirSync(path.dirname(stubStoreRootPath), { recursive: true });
-const storeRootStub = `
-export function resolveStoreRoot() { return "E:/desktop/.ai-memory"; }
-export default { resolveStoreRoot };
-`;
-fs.writeFileSync(stubStoreRootPath, storeRootStub, "utf8");
+// bus/store-root.js and bus/vault-root.js honour AI_MEMORY_STORE and
+// AI_MEMORY_OBSIDIAN_VAULT env vars, so we just set them here and avoid
+// polluting the production source tree with stub files.
+process.env.AI_MEMORY_STORE = process.env.AI_MEMORY_STORE || path.join(os.tmpdir(), "bhp-store");
+process.env.AI_MEMORY_OBSIDIAN_VAULT = process.env.AI_MEMORY_OBSIDIAN_VAULT || path.join(os.tmpdir(), "bhp-vault");
 
 // ---------------------------------------------------------------------------
 // Load the source under test
