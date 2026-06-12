@@ -99,6 +99,7 @@ $UserHome = Get-SharedUserHome
 $AiMemoryRoot = if (-not [string]::IsNullOrWhiteSpace($env:AI_MEMORY_ROOT)) { $env:AI_MEMORY_ROOT } else { $PSScriptRoot }
 $BusScript = Resolve-BusPath -Candidates @("memory-bus.ps1", "bus/memory-bus.ps1")
 $LockPath = Join-Path $AiMemoryRoot "watchdog.lock"
+$WatchdogPidPath = Join-Path $AiMemoryRoot "watchdog.pid"
 $StatePath = Join-Path $AiMemoryRoot "watchdog-state.json"
 $ErrorLogPath = Join-Path $AiMemoryRoot "watchdog-error.log"
 $TraceLogPath = Join-Path $AiMemoryRoot "watchdog-trace.log"

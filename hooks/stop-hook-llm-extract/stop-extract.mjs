@@ -1,7 +1,7 @@
 // stop-extract.mjs — Stop Hook LLM 提取入口（v2，去掉 Obsidian 依赖）
 // 调用方式：Claude Code Stop Hook stdin JSON，字段：cwd, session_id, transcript_path
 
-import { readFileSync, existsSync, mkdirSync, appendFileSync, createReadStream } from 'fs'
+import { readFileSync, existsSync, mkdirSync, appendFileSync, createReadStream, realpathSync } from 'fs'
 import { createInterface } from 'readline'
 import path from 'path'
 import { createRequire } from 'module'
@@ -157,10 +157,21 @@ async function main() {
   const sessionId= process.argv[3] || input.session_id || `unknown_${Date.now()}`
   const transcriptPath = process.argv[4] || input.transcript_path || ''
 
-  // Security: only allow transcripts inside Claude session directory
+  // Security: only allow transcripts inside Claude session directory.
+  // Normalize both sides with path.resolve and fs.realpathSync to prevent
+  // `..` traversal and symlink-based bypasses; reject anything outside.
   const sessionDir = process.env.CLAUDE_SESSION_DIR
     || path.join(process.env.APPDATA || process.env.HOME || '', '.claude', 'sessions')
-  if (!transcriptPath.startsWith(sessionDir) && !transcriptPath.includes(path.join('.claude', 'sessions'))) {
+  const normalizedSession = path.resolve(sessionDir);
+  let realTranscript = transcriptPath;
+  try {
+    realTranscript = realpathSync(transcriptPath);
+  } catch {
+    // non-existent — let the existsSync check below handle it
+  }
+  const insideSession = realTranscript.startsWith(normalizedSession + path.sep)
+    || realTranscript === normalizedSession;
+  if (!insideSession) {
     process.exit(0)
   }
 
