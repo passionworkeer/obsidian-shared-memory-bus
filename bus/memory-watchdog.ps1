@@ -37,11 +37,14 @@ $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [Console]::OutputEncoding = $Utf8NoBom
 
 # --- Register engine event so Release-WatchdogLock fires on ANY exit path ---
-$script:WatchdogLockStream = $null
+# Use $global: so the action scriptblock can see the variable when the
+# engine event fires from a child scope (the original $script: scope
+# silently fails to release the lock on process exit).
+$global:WatchdogLockStream = $null
 try {
     $null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
-        if ($script:WatchdogLockStream) {
-            try { $script:WatchdogLockStream.Dispose() } catch { }
+        if ($global:WatchdogLockStream) {
+            try { $global:WatchdogLockStream.Dispose() } catch { }
         }
         try {
             if ((Test-Path -LiteralPath $LockPath -PathType Leaf)) {
