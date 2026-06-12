@@ -37,7 +37,7 @@ while ($true) {
                 Write-Host "[watchdog] Max restarts reached" -ForegroundColor Red
                 exit 1
             }
-            Invoke-Expression $Callback
+            & $Callback
         }
     }
 }

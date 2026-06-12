@@ -213,23 +213,23 @@ json.dump([vector.tolist() for vector in vectors], sys.stdout)
       }
     }
 
-    // Fallback: per-call spawn
+    // Fallback: per-call spawn. API key passed via stdin JSON to avoid shell-template injection.
     const script = `
 import json
 import sys
 import os
 import urllib.request
-model_id = "${model}"
-api_key = "${apiKey}"
-if not model_id.startswith("models/"):
-    model_id = "models/" + model_id
-# Explicit proxy opener — urllib auto-detection from env vars is unreliable on Windows
 http_proxy = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy") or ""
 https_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or ""
 proxies = {}
 if http_proxy: proxies["http"] = http_proxy
 if https_proxy: proxies["https"] = https_proxy
 _opener = urllib.request.build_opener(urllib.request.ProxyHandler(proxies)) if proxies else urllib.request.build_opener()
+config = json.loads(sys.stdin.readline())
+api_key = config["api_key"]
+model_id = config["model_id"]
+if not model_id.startswith("models/"):
+    model_id = "models/" + model_id
 for line in sys.stdin:
     line = line.strip()
     if not line:
@@ -255,7 +255,9 @@ for line in sys.stdin:
     except Exception as exc:
         print(json.dumps({"ok": False, "err": str(exc)}))
 `;
-    const inputPayload = texts.join("\n") + "\n";
+    const fullModel = model.startsWith("models/") ? model : "models/" + model;
+    const configJson = JSON.stringify({ api_key: apiKey, model_id: fullModel });
+    const inputPayload = configJson + "\n" + texts.join("\n") + "\n";
     return new Promise((resolve, reject) => {
       const child = spawn(pythonRuntime.command, withPythonArgs(pythonRuntime, ["-c", script]), {
         stdio: ["pipe", "pipe", "pipe"],

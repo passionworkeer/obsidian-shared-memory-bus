@@ -340,9 +340,6 @@ async function embedWithPool(options) {
       createdAt: Date.now(),
     });
 
-    const msgType = options.msgType || "EMBED";
-    const apiKey = options.apiKey || "";
-    const geminiModel = options.geminiModel || "gemini-embedding-2";
     const payload = JSON.stringify(Object.assign(
       { type: msgType, id, model, texts },
       msgType === "GEMINI_EMBED" ? { apiKey, geminiModel } : {}

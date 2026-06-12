@@ -1422,7 +1422,7 @@ function startMetricsServer() {
     res.end("Not Found");
   });
   metricsServer.on("error", (err) => { log.error("metrics-server-error", { port, error: err.message }); });
-  metricsServer.listen(port, () => { log.info("metrics-server-started", { port }); });
+  metricsServer.listen(port, "127.0.0.1", () => { log.info("metrics-server-started", { port }); });
 }
 
 // ---------------------------------------------------------------------------
