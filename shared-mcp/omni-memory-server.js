@@ -1441,6 +1441,7 @@ const transport = new StdioServerTransport();
 await server.connect(transport);
 
 // Start metrics refresh interval and HTTP server.
-setInterval(refreshMetricsFromFiles, 60_000);
+const metricsRefreshTimer = setInterval(refreshMetricsFromFiles, 60_000);
+metricsRefreshTimer.unref();
 refreshMetricsFromFiles();
 startMetricsServer();

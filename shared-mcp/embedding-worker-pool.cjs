@@ -37,7 +37,7 @@ const WORKER_REQUEST_TIMEOUT_MS = 120000; // per-request timeout
 // ---------------------------------------------------------------------------
 
 /**
- * @typedef {{ id: number, proc: import('child_process').ChildProcess, state: string, failures: number[], lastUsed: number, pending: number, ipcId: number }} Worker
+ * @typedef {{ id: number, proc: import('child_process').ChildProcess, state: string, failures: number[], lastUsed: number, pending: number, localSeq: number }} Worker
  */
 
 // All pool state lives here — module-level singleton, no global mutation elsewhere
@@ -50,7 +50,6 @@ const pool = {
   pendingRequests: new Map(),
   initialized: false,
   initPromise: null,
-  ipcSeq: 0,
 };
 
 // ---------------------------------------------------------------------------
@@ -98,7 +97,7 @@ function spawnWorker(id, pythonCmd, pythonArgs, env) {
       failures: [],
       lastUsed: 0,
       pending: 0,
-      ipcId: pool.ipcSeq++,
+      localSeq: 0,
     };
 
     const mergedEnv = {
@@ -264,7 +263,7 @@ async function initPool(pythonCmd, pythonArgs, env) {
         failures: [],
         lastUsed: 0,
         pending: 0,
-        ipcId: pool.ipcSeq++,
+        localSeq: 0,
       });
       spawns.push(
         spawnWorker(i, pythonCmd, pythonArgs, env).catch((err) => {
@@ -314,7 +313,7 @@ async function embedWithPool(options) {
     throw Object.assign(new Error("embedding-pool-no-workers"), { code: "POOL_EXHAUSTED" });
   }
 
-  const id = pool.ipcSeq++;
+  const id = `${worker.id}-${worker.localSeq++}`;
   worker.pending += 1;
   worker.lastUsed = Date.now();
 
