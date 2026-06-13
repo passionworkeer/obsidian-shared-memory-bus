@@ -32,15 +32,18 @@ function getDefaultStoreCandidates() {
 }
 
 // ---------------------------------------------------------------------------
-// resolveVaultRoot — DEPRECATED: alias for resolveStoreRoot
+// resolveVaultRoot — delegates to bus/vault-root.js for the canonical impl
 // ---------------------------------------------------------------------------
 
+import { resolveVaultRoot as resolveBusVaultRoot } from "../vault-root.js";
+
 /**
- * @deprecated Use resolveStoreRoot() instead. resolveVaultRoot is kept for
- * backward compatibility only and will be removed in a future version.
+ * Returns the Obsidian vault root resolved from environment variables.
+ * Delegates to bus/vault-root.js so the platform adapter matches the
+ * canonical helper.
  */
-function resolveVaultRoot(options = {}) {
-  return resolveStoreRoot(options);
+function resolveVaultRoot() {
+  return resolveBusVaultRoot();
 }
 
 // ---------------------------------------------------------------------------

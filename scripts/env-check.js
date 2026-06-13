@@ -10,11 +10,8 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createRequire } from 'node:module';
-
-const require = createRequire(import.meta.url);
-const { platform } = require('../bus/platform/index.js');
-const { resolveStoreRoot } = require('../bus/store-root.js');
+import { platform } from '../bus/platform/index.js';
+import { resolveStoreRoot } from '../bus/store-root.js';
 
 const checks = [];
 
