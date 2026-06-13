@@ -14,7 +14,7 @@ import crypto from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 import { createInterface } from "node:readline";
 import assert from "node:assert";
-import { resolveStoreRoot, getProjectsRoot } from "../bus/store-root.js";
+import { resolveStoreRoot, getProjectsRoot } from "../../bus/store-root.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

@@ -15,17 +15,19 @@
  * Run with: node --test tests/integration/js/memory-layers-flow.test.js
  */
 
-"use strict";
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
-const fs   = require("node:fs");
-const path = require("node:path");
-const os   = require("node:os");
-const { spawn } = require("node:child_process");
+import { createTempDir, cleanupTempDir, createTempJsonl, readJsonl } from "../../helpers/setup.js";
 
-const { createTempDir, cleanupTempDir, createTempJsonl, readJsonl } = require("../../helpers/setup");
+import { test, describe, beforeEach, afterEach } from "node:test";
+import assert from "node:assert/strict";
 
-const { test, describe, beforeEach, afterEach } = require("node:test");
-const assert = require("node:assert/strict");
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // ---------------------------------------------------------------------------
 // Shared fixtures

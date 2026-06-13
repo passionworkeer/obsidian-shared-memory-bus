@@ -35,15 +35,20 @@ function getDefaultStoreCandidates() {
 // resolveVaultRoot — delegates to bus/vault-root.js for the canonical impl
 // ---------------------------------------------------------------------------
 
-import { resolveVaultRoot as resolveBusVaultRoot } from "../vault-root.js";
+import { resolveVaultRootChain as resolveBusVaultRootChain, resolveVaultRoot as resolveBusVaultRoot } from "../vault-root.js";
 
 /**
  * Returns the Obsidian vault root resolved from environment variables.
- * Delegates to bus/vault-root.js so the platform adapter matches the
- * canonical helper.
+ * Delegates to bus/vault-root.js via the unified chain. configPath and
+ * vaultRootTxt are intentionally empty so the platform adapter only
+ * walks the env-only branches (matches the pre-chain semantics).
  */
 function resolveVaultRoot() {
-  return resolveBusVaultRoot();
+  return resolveBusVaultRootChain({
+    configPath: null,
+    vaultRootTxt: "",
+    fallback: resolveBusVaultRoot,
+  });
 }
 
 // ---------------------------------------------------------------------------

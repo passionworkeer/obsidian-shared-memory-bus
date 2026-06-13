@@ -213,14 +213,19 @@ json.dump([vector.tolist() for vector in vectors], sys.stdout)
       }
     }
 
-    // Fallback: per-call spawn
+    // Fallback: per-call spawn.
+    // Secrets (api_key, model) and payload are passed via stdin JSON, not heredoc interpolation,
+    // to prevent shell/Python injection from a hostile env var or runtime config.
     const script = `
 import json
 import sys
 import os
 import urllib.request
-model_id = "${model}"
-api_key = "${apiKey}"
+
+payload = json.load(sys.stdin)
+model_id = payload["model"]
+api_key = payload["api_key"]
+texts = payload["texts"]
 if not model_id.startswith("models/"):
     model_id = "models/" + model_id
 # Explicit proxy opener — urllib auto-detection from env vars is unreliable on Windows
@@ -230,19 +235,15 @@ proxies = {}
 if http_proxy: proxies["http"] = http_proxy
 if https_proxy: proxies["https"] = https_proxy
 _opener = urllib.request.build_opener(urllib.request.ProxyHandler(proxies)) if proxies else urllib.request.build_opener()
-for line in sys.stdin:
-    line = line.strip()
-    if not line:
-        continue
-    text = line
+for text in texts:
     url = "https://generativelanguage.googleapis.com/v1beta/" + model_id + ":embedContent?key=" + api_key
     body_model = model_id.replace("models/", "")
-    payload = json.dumps({"model": body_model, "content": {"parts": [{"text": text}]}}).encode("utf-8")
-    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+    body = json.dumps({"model": body_model, "content": {"parts": [{"text": text}]}}).encode("utf-8")
+    req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
     try:
         with _opener.open(req, timeout=60) as resp:
-            body = resp.read().decode("utf-8", errors="replace")
-        parsed = json.loads(body)
+            resp_body = resp.read().decode("utf-8", errors="replace")
+        parsed = json.loads(resp_body)
         emb_list = parsed.get("embeddings") or []
         vals = emb_list[0].get("values") if emb_list else None
         if not vals:
@@ -255,7 +256,7 @@ for line in sys.stdin:
     except Exception as exc:
         print(json.dumps({"ok": False, "err": str(exc)}))
 `;
-    const inputPayload = texts.join("\n") + "\n";
+    const inputPayload = JSON.stringify({ model, api_key: apiKey, texts }) + "\n";
     return new Promise((resolve, reject) => {
       const child = spawn(pythonRuntime.command, withPythonArgs(pythonRuntime, ["-c", script]), {
         stdio: ["pipe", "pipe", "pipe"],

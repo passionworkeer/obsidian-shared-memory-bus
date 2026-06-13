@@ -132,14 +132,12 @@ function acquireLock() {
     const lock = JSON.parse(fs.readFileSync(LOCK_FILE, "utf8"));
     const age  = nowMs() - (lock.start_time || 0);
 
-    if (age < LOCK_TTL) {
+    if (age < LOCK_TTL_MS) {
       // Another run is active — but only abort if it's a DIFFERENT trigger
       if (lock.trigger && lock.trigger !== "manual" && TRIGGER && lock.trigger !== TRIGGER) {
         return { ok: false, reason: "lock-held-by-other", pid: lock.pid, trigger: lock.trigger, age_ms: age };
       }
-      if (age < LOCK_TTL) {
-        return { ok: false, reason: "lock-held", pid: lock.pid, trigger: lock.trigger, age_ms: age };
-      }
+      return { ok: false, reason: "lock-held", pid: lock.pid, trigger: lock.trigger, age_ms: age };
     }
 
     // Lock expired (> 30 min) — take over

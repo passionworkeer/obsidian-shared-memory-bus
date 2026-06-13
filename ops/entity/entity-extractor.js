@@ -24,6 +24,7 @@
 import { fileURLToPath } from "url";
 import path from "path";
 import fs from "fs";
+import { isCjkChar } from "../util/cjk-tokenize.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -44,17 +45,17 @@ const STOPWORDS = new Set([
   // Programming keywords
   "return","print","def","class","import","from","function","const","let","var","async",
   "await","try","catch","throw","finally","switch","case","break","continue","while",
-  "for","if","else","elif","else","yield","raise","pass","global","nonlocal","lambda",
+  "for","if","else","elif","yield","raise","pass","global","nonlocal","lambda",
   "static","public","private","protected","final","abstract","extends","implements",
-  "void","null","undefined","true","false","typeof","instanceof",
+  "void","null","undefined","typeof","instanceof",
   // Common prose filler words
   "step","usage","run","check","find","add","set","list","args","dict","str","int","bool",
   "path","file","name","note","example","option","result","error","warning","info",
-  "returns","raises","yields","self","cls","kwargs","kwargs","args","arg","args",
-  "item","key","value","type","type","type",
+  "returns","raises","yields","self","cls","kwargs","arg",
+  "item","key","value","type",
   // Abstract nouns that appear as subjects but aren't entities
-  "system","system","agent","agents","tool","tools","memory","memory","model","models",
-  "network","networks","training","inference","data","data","content","content",
+  "system","agent","agents","tool","tools","memory","model","models",
+  "network","networks","training","inference","data","content",
   "thing","things","way","ways","time","times","day","days","part","parts","point","points",
   "idea","ideas","fact","facts","sense","question","answer","reason","number","version",
   "people","person","something","nothing","everything","anything","someone","everyone",
@@ -222,7 +223,7 @@ const chineseRaw = [];
 let cur = "";
 let inCJK = false;
 for (const ch of text) {
-  const isCJK = /[\u4e00-\u9fff]/.test(ch);
+  const isCJK = isCjkChar(ch);
   if (isCJK) {
     if (!inCJK) { if (cur) chineseRaw.push(cur); cur = ""; inCJK = true; }
     cur += ch;

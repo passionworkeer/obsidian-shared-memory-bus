@@ -15,7 +15,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { resolveStoreRoot } from "../bus/store-root.js";
+import { resolveStoreRoot } from "../../bus/store-root.js";
 
 function getProjectsRoot(storeRoot) {
   return path.join(storeRoot || resolveStoreRoot(), "projects");
