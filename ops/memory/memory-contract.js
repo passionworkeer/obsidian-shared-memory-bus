@@ -823,23 +823,51 @@ function scorePromotionCandidate(record, options = {}) {
 function detectConflicts(records, options = {}) {
   const { overlapThreshold = 0.70 } = options;
 
-  // Build fingerprints
+  // Build per-record fingerprints once.
   const fingerprints = new Map();
   for (const rec of records) {
     fingerprints.set(rec.id, buildRecordFingerprint(rec));
   }
 
+  // Build inverted index: token → set of record ids containing that token.
+  // A pair with Jaccard overlap ≥ threshold MUST share at least one token,
+  // so this index lets us skip all non-candidates (O(n²) → O(n × avg_cand)).
+  const invertedIndex = new Map();
+  for (const [id, fp] of fingerprints) {
+    for (const token of fp) {
+      let bucket = invertedIndex.get(token);
+      if (!bucket) {
+        bucket = new Set();
+        invertedIndex.set(token, bucket);
+      }
+      bucket.add(id);
+    }
+  }
+
   return records.map((rec) => {
     const myFp = fingerprints.get(rec.id) || [];
-    const conflicts = [];
+    if (myFp.length === 0) {
+      return { id: rec.id, conflicts: [] };
+    }
 
-    for (const other of records) {
-      if (other.id === rec.id) continue;
-      const otherFp = fingerprints.get(other.id) || [];
+    // Collect candidate ids — every record that shares at least one
+    // token with `rec`. Dedupe via Set; exclude self.
+    const candidates = new Set();
+    for (const token of myFp) {
+      const bucket = invertedIndex.get(token);
+      if (!bucket) continue;
+      for (const id of bucket) {
+        if (id !== rec.id) candidates.add(id);
+      }
+    }
+
+    const conflicts = [];
+    for (const otherId of candidates) {
+      const otherFp = fingerprints.get(otherId) || [];
       const overlap = computeFingerprintOverlap(myFp, otherFp);
       if (overlap >= overlapThreshold) {
         conflicts.push({
-          otherId: other.id,
+          otherId,
           overlap: Math.round(overlap * 10000) / 10000,
         });
       }

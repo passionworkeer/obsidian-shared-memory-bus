@@ -37,6 +37,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { safeRealpathWithin } from "../memory/paths-and-io.js";
 
 /**
  * Atomically append a single line to a JSONL file.
@@ -52,10 +53,13 @@ import path from "node:path";
  *
  * @param {string} filePath
  * @param {string|object} line  — JSON-serializable object or pre-serialized string
- * @param {{ createDir?: boolean, fsync?: boolean }} [opts]
+ * @param {{ createDir?: boolean, fsync?: boolean, safeRoot?: string }} [opts]
+ *   - safeRoot: when set, the resolved (realpath) filePath must lie
+ *     within this directory. Refuses writes that would follow a symlink
+ *     out of the safe root. Backward compatible — omit to skip the check.
  */
 function appendLineAtomic(filePath, line, opts = {}) {
-  const { createDir = true, fsync = false } = opts;
+  const { createDir = true, fsync = false, safeRoot = "" } = opts;
 
   const serialized =
     typeof line === "string" ? line : JSON.stringify(line);
@@ -67,6 +71,18 @@ function appendLineAtomic(filePath, line, opts = {}) {
 
   if (createDir && !fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
+  }
+
+  if (safeRoot) {
+    // Re-check after createDir so the parent directory exists for
+    // realpath. The check is cheap; safeRealpathWithin handles missing
+    // parents gracefully by returning null.
+    const validated = safeRealpathWithin(filePath, safeRoot);
+    if (!validated) {
+      throw new Error(
+        `appendLineAtomic: refusing write to ${filePath} (escapes safeRoot ${safeRoot})`
+      );
+    }
   }
 
   if (!fs.existsSync(filePath)) {

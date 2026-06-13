@@ -104,12 +104,21 @@ function readJsonl(filePath) {
  * context.
  */
 function safeRealpathWithin(filePath, safeRoot) {
-  let realPath;
+  // Resolve the parent directory (which must exist) so we can validate
+  // containment even for files that don't exist yet — the write path
+  // is what this guard protects, and realpath on a non-existent file
+  // throws ENOENT.
+  const parentDir = path.dirname(filePath);
+  const filename = path.basename(filePath);
+
+  let realParent;
   try {
-    realPath = fs.realpathSync(filePath);
+    realParent = fs.realpathSync(parentDir);
   } catch {
     return null;
   }
+  const realPath = path.join(realParent, filename);
+
   let realRoot;
   try {
     realRoot = fs.realpathSync(safeRoot);

@@ -351,7 +351,7 @@ async function memory_write({ project = "", cwd = "", facts = [] } = {}) {
       write_mode: "manual",
       t: new Date().toISOString(),
     };
-    atomicMod.appendLineAtomic(jsonlPath, record, { createDir: true });
+    atomicMod.appendLineAtomic(jsonlPath, record, { createDir: true, safeRoot: projectsRoot });
     written.push(record.id);
   }
 
