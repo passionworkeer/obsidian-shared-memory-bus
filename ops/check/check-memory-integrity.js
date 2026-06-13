@@ -1,45 +1,6 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-function fallbackStoreRootHelper() {
-  return {
-    resolveStoreRoot() {
-      return (
-        process.env.AI_MEMORY_STORE ||
-        process.env.AI_MEMORY_STORE_ROOT ||
-        process.env.AI_MEMORY_ROOT ||
-        path.join(os.homedir(), ".ai-memory")
-      );
-    },
-  };
-}
-
-function loadStoreRootHelper() {
-  const candidates = [
-    // Script-local (installed flat layout: ~/.ai-memory/store-root.js)
-    path.join(__dirname, "store-root.js"),
-    // Bus sibling (project layout: ops/check -> ../../bus/)
-    path.join(__dirname, "..", "..", "bus", "store-root.js"),
-    // Sibling bus/ (project layout: ops/ and bus/ are siblings under project root)
-    path.join(__dirname, "..", "bus", "store-root.js"),
-    path.join(__dirname, "bus", "store-root.js"),
-  ];
-
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
-      return import(pathToFileURL(candidate).href);
-    }
-  }
-
-  return fallbackStoreRootHelper();
-}
-
-const storeRootModule = await loadStoreRootHelper();
-const { resolveStoreRoot } = storeRootModule.default || storeRootModule;
+import { resolveStoreRoot } from "../../bus/store-root.js";
 const memoryContractModule = await import("../memory/memory-contract.js");
 const { buildMemoryIntegrityReport } = memoryContractModule;
 

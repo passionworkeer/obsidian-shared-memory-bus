@@ -8,45 +8,12 @@
  *   node entity-backfill.js shared-inbox.jsonl      # process one file
  */
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-function fallbackStoreRootHelper() {
-  return {
-    resolveStoreRoot() {
-      return (
-        process.env.AI_MEMORY_STORE ||
-        process.env.AI_MEMORY_STORE_ROOT ||
-        process.env.AI_MEMORY_ROOT ||
-        path.join(os.homedir(), ".ai-memory")
-      );
-    },
-  };
-}
-
-// Load store-root helper from the installed or project layout.
-async function loadStoreRootHelper() {
-  const candidates = [
-    path.join(__dirname, "store-root.js"),
-    path.join(__dirname, "..", "..", "bus", "store-root.js"),
-    path.join(__dirname, "..", "bus", "store-root.js"),
-    path.join(__dirname, "bus", "store-root.js"),
-  ];
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
-      const mod = await import(pathToFileURL(candidate).href);
-      return mod.default || mod;
-    }
-  }
-  return fallbackStoreRootHelper();
-}
-
-const _storeRootHelper = await loadStoreRootHelper();
-const { resolveStoreRoot } = _storeRootHelper;
+const { resolveStoreRoot } = await import("../bus/store-root.js");
 
 const STORE_ROOT = resolveStoreRoot();
 const STRUCTURED_ROOT = path.join(STORE_ROOT, "structured");
