@@ -185,8 +185,6 @@ function fallbackId(entry, title, content) {
   return crypto.createHash("sha1").update(seed).digest("hex").slice(0, 16);
 }
 
-// buildSearchText is superseded by extractFieldTexts / buildParentSearchText.
-
 /**
  * index.jsonl schema (v2 - field-level):
  * { id, record_id, field: "content"|"fact"|"concept", text, vector, configHash, featureSchemaVersion, contentHash }

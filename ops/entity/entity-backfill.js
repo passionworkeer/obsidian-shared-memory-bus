@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const { resolveStoreRoot } = await import("../bus/store-root.js");
+const { resolveStoreRoot } = await import("../../bus/store-root.js");
 
 const STORE_ROOT = resolveStoreRoot();
 const STRUCTURED_ROOT = path.join(STORE_ROOT, "structured");

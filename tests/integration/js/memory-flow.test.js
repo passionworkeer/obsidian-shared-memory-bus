@@ -6,27 +6,22 @@
  * Run with: node --test tests/integration/js/memory-flow.test.js
  */
 
-"use strict";
-
-const Module = require("module");
-const path = require("path");
-const fs = require("fs");
-const {
+import path from "node:path";
+import fs from "node:fs";
+import {
   createTempDir,
   cleanupTempDir,
   createTempJsonl,
   readJsonl,
-  mockRequireCache,
-  clearMockCache,
-} = require("../../helpers/setup");
-const { SAMPLE_MEMORY_RECORDS } = require("../../helpers/fixtures");
+} from "../../helpers/setup.js";
+import { SAMPLE_MEMORY_RECORDS } from "../../helpers/fixtures.js";
 
 // ---------------------------------------------------------------------------
 // Test suite
 // ---------------------------------------------------------------------------
 
-const { test, describe, beforeEach, afterEach } = require("node:test");
-const assert = require("node:assert/strict");
+import { test, describe, beforeEach, afterEach } from "node:test";
+import assert from "node:assert/strict";
 
 describe("memory flow integration", () => {
   let tempVaultRoot;

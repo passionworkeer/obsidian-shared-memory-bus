@@ -192,6 +192,25 @@ function validateFact(fact) {
   if (fact.confidence != null && (typeof fact.confidence !== "number" || fact.confidence < 0 || fact.confidence > 1)) {
     return "fact.confidence must be between 0 and 1";
   }
+  // Per-array-element length caps prevent unbounded write amplification from
+  // a single mcp_write call.
+  for (const field of ["facts", "decisions", "entities"]) {
+    const arr = fact[field];
+    if (arr !== undefined) {
+      if (!Array.isArray(arr)) return `fact.${field} must be an array`;
+      for (let i = 0; i < arr.length; i++) {
+        const item = arr[i];
+        if (typeof item === "string") {
+          if (item.length > 2000) return `fact.${field}[${i}] must be under 2000 characters`;
+        } else if (item && typeof item === "object") {
+          const serialized = JSON.stringify(item);
+          if (serialized && serialized.length > 2000) {
+            return `fact.${field}[${i}] serialized form must be under 2000 characters`;
+          }
+        }
+      }
+    }
+  }
   return null;
 }
 
@@ -292,6 +311,11 @@ async function memory_write({ project = "", cwd = "", facts = [] } = {}) {
   if (!Array.isArray(facts) || facts.length === 0) {
     return { ok: false, error: "facts[] is required" };
   }
+  // Hard cap on batch size — prevents amplification attacks where a single
+  // mcp_write call appends gigabytes to the JSONL file.
+  if (facts.length > 1000) {
+    return { ok: false, error: `facts[] batch size ${facts.length} exceeds cap of 1000` };
+  }
 
   for (const fact of facts) {
     const error = validateFact(fact);
@@ -304,13 +328,17 @@ async function memory_write({ project = "", cwd = "", facts = [] } = {}) {
   const projectKey = detectProjectKey({ project, cwd });
   const projectsRoot = getProjectsRoot(storeRoot);
   const jsonlPath = path.join(projectsRoot, `${projectKey}.jsonl`);
-  fs.mkdirSync(projectsRoot, { recursive: true });
+
+  const atomicMod = await loadHelper(["ops", "inbox", "inbox-atomic-write.js"]);
+  if (!atomicMod || typeof atomicMod.appendLineAtomic !== "function") {
+    return { ok: false, error: "appendLineAtomic helper unavailable" };
+  }
 
   const written = [];
   for (const fact of facts) {
     const record = {
-      id: `rec_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-      session_id: fact.session_id || `manual_${Date.now()}`,
+      id: `rec_${crypto.randomUUID()}`,
+      session_id: fact.session_id || `manual_${crypto.randomUUID()}`,
       project: projectKey,
       scope: fact.scope || "project",
       content: fact.content,
@@ -323,7 +351,7 @@ async function memory_write({ project = "", cwd = "", facts = [] } = {}) {
       write_mode: "manual",
       t: new Date().toISOString(),
     };
-    fs.appendFileSync(jsonlPath, `${JSON.stringify(record)}\n`, "utf8");
+    atomicMod.appendLineAtomic(jsonlPath, record, { createDir: true });
     written.push(record.id);
   }
 

@@ -485,4 +485,19 @@ function main() {
   info("Done.");
 }
 
-main();
+// Only auto-run when invoked directly as a CLI. When imported (e.g. by
+// unit tests), only the exported symbols are accessible.
+if (import.meta.url === `file:///${process.argv[1]?.replace(/\\/g, "/")}`) {
+  main();
+}
+
+export {
+  getLastAccess,
+  compareEntries,
+  buildConflictGraph,
+  resolveConflicts,
+  resolveQueue,
+  getHumanReviewQueue,
+  applyResolvedPromotions,
+  findRecordSourceFile,
+};
