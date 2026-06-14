@@ -13,27 +13,15 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
 import os from 'node:os';
+import { MCP_SERVERS, getServerPort, resolveBasePort } from './shared-mcp/port-registry.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PROJECT_ROOT = join(__dirname, 'shared-mcp');
 const DEFAULT_STORE_ROOT = join(os.homedir(), '.ai-memory');
-const DEFAULT_BASE_PORT = 9330;
-const configuredBasePort = Number.parseInt(process.env.AI_MEMORY_BASE_PORT || '', 10);
-const BASE_PORT = Number.isFinite(configuredBasePort) && configuredBasePort > 0
-  ? configuredBasePort
-  : DEFAULT_BASE_PORT;
+const BASE_PORT = resolveBasePort();
 
-// MCP servers configuration
-const servers = [
-  { id: 'fetch', port: 9332, command: 'python', args: ['-m', 'mcp_server_fetch'] },
-  { id: 'time', port: 9333, command: 'python', args: ['-m', 'mcp_server_time'] },
-  { id: 'memory', port: 9338, command: 'node', args: ['--experimental-default-type=module', 'omni-memory-server.js'] },
-];
-
-function getServerPort(server) {
-  return BASE_PORT + (server.port - DEFAULT_BASE_PORT);
-}
+// MCP servers configuration lives in shared-mcp/port-registry.js.
 
 // Check if port is in use
 async function isPortInUse(port) {
@@ -97,7 +85,7 @@ function startPowerShellScript(scriptPath, serverId, port) {
 async function main() {
   console.log('Starting AI Memory Bus MCP servers...\n');
 
-  for (const server of servers) {
+  for (const server of MCP_SERVERS) {
     const port = getServerPort(server);
     const inUse = await isPortInUse(port);
 
@@ -122,9 +110,15 @@ async function main() {
   }
 
   console.log('\nMCP servers started!');
-  console.log(`Memory: http://127.0.0.1:${getServerPort(servers.find((server) => server.id === 'memory'))}/mcp`);
-  console.log(`Fetch: http://127.0.0.1:${getServerPort(servers.find((server) => server.id === 'fetch'))}/mcp`);
-  console.log(`Time: http://127.0.0.1:${getServerPort(servers.find((server) => server.id === 'time'))}/mcp`);
+  for (const server of MCP_SERVERS) {
+    if (server.command === 'node' && server.id === 'memory') {
+      console.log(`Memory: http://127.0.0.1:${getServerPort(server)}/mcp`);
+    } else if (server.id === 'fetch') {
+      console.log(`Fetch: http://127.0.0.1:${getServerPort(server)}/mcp`);
+    } else if (server.id === 'time') {
+      console.log(`Time: http://127.0.0.1:${getServerPort(server)}/mcp`);
+    }
+  }
 }
 
 // Run if called directly
