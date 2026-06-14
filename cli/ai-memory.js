@@ -11,6 +11,7 @@ import fs from "node:fs";
 import os from "node:os";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { CRITICAL_PORTS } from "../shared-mcp/port-registry.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -798,8 +799,7 @@ async function runDoctorChecks() {
   }
 
   const portsInUse = [];
-  const criticalPorts = [9331, 9332, 9333, 9334, 9335, 9338];
-  for (const port of criticalPorts) {
+  for (const port of CRITICAL_PORTS) {
     const inUse = await new Promise((resolve) => {
       const server = net.createServer();
       server.once("error", () => { resolve(true); });
@@ -808,10 +808,9 @@ async function runDoctorChecks() {
     });
     if (inUse) portsInUse.push(port);
   }
-  // port list kept in sync with start.js — extend the array there when adding new MCP servers.
   check(
     portsInUse.length === 0,
-    `Shared MCP ports [${criticalPorts.join(", ")}] available (${portsInUse.length} in use: ${portsInUse.join(", ") || "none"})`,
+    `Shared MCP ports [${CRITICAL_PORTS.join(", ")}] available (${portsInUse.length} in use: ${portsInUse.join(", ") || "none"})`,
     portsInUse.length > 0 ? `Stop other services using ports ${portsInUse.join(", ")}` : undefined
   );
 
