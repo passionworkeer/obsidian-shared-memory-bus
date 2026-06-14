@@ -103,6 +103,10 @@ function parseEventEntries() {
 
   for (const fileName of files) {
     const filePath = path.join(EVENTS_ROOT, fileName);
+    if (!safeRealpathWithin(filePath, EVENTS_ROOT)) {
+      process.stderr.write(`[parse-event] skipping path that escapes EVENTS_ROOT: ${filePath}\n`);
+      continue;
+    }
     const lines = readText(filePath).split(/\r?\n/);
     for (const line of lines) {
       if (!line.trim()) {
@@ -153,7 +157,8 @@ async function parseSessionMemoryEntries() {
   const records = [];
 
   const claudeSessionPath = path.join(CLAUDE_HOME, "session-memory", "session-memory.md");
-  if (fs.existsSync(claudeSessionPath)) {
+  const claudeSessionDir = path.dirname(claudeSessionPath);
+  if (fs.existsSync(claudeSessionPath) && safeRealpathWithin(claudeSessionPath, claudeSessionDir)) {
     const content = readText(claudeSessionPath).trim();
     if (content) {
       const stat = fs.statSync(claudeSessionPath);
@@ -190,6 +195,10 @@ async function parseSessionMemoryEntries() {
       .slice(-7);
     for (const fileName of files) {
       const filePath = path.join(openclawMemoryDir, fileName);
+      if (!safeRealpathWithin(filePath, openclawMemoryDir)) {
+        process.stderr.write(`[parse-session] skipping path that escapes openclawMemoryDir: ${filePath}\n`);
+        continue;
+      }
       const content = readText(filePath).trim();
       if (!content) {
         continue;

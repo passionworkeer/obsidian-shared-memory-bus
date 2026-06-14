@@ -23,6 +23,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import readline from "node:readline";
+import { safeRealpathWithin } from "../util/safe-realpath.js";
 
 // ── CLI args ──────────────────────────────────────────────────────────────────
 
@@ -159,7 +160,19 @@ function writeLock(trigger) {
     trigger: trigger || "manual",
     version: 1,
   };
-  fs.writeFileSync(LOCK_FILE, JSON.stringify(lock, null, 2), "utf8");
+  const payload = JSON.stringify(lock, null, 2);
+  try {
+    // Atomic create — fails with EEXIST if another process beat us to it
+    // (closes the TOCTOU window between `existsSync` and `writeFileSync`).
+    fs.writeFileSync(LOCK_FILE, payload, { encoding: "utf8", flag: "wx" });
+  } catch (err) {
+    if (err.code !== "EEXIST") throw err;
+    // Stale-lock takeover path: caller already verified age > LOCK_TTL_MS.
+    // Write to .tmp + rename to overwrite atomically.
+    const tmp = `${LOCK_FILE}.tmp`;
+    fs.writeFileSync(tmp, payload, "utf8");
+    fs.renameSync(tmp, LOCK_FILE);
+  }
   info(`Lock acquired: pid=${lock.pid} trigger=${lock.trigger}`);
   return { ok: true };
 }
@@ -283,7 +296,17 @@ function scanForArchiveEligible() {
 
   const structuredFiles = fs.readdirSync(STRUCT_DIR)
     .filter(f => f.endsWith(".jsonl") && !f.startsWith("archive-"))
-    .map(f => path.join(STRUCT_DIR, f));
+    .map(f => path.join(STRUCT_DIR, f))
+    .filter(fpath => {
+      // SECURITY: skip files whose realpath escapes STRUCT_DIR (e.g. symlink
+      // planted in vault by another app on a synced filesystem). Same guard
+      // as ops/memory/entry-parsers.js parseLayerEntries.
+      if (!safeRealpathWithin(fpath, STRUCT_DIR)) {
+        process.stderr.write(`[archival-scan] skipping path that escapes STRUCT_DIR: ${fpath}\n`);
+        return false;
+      }
+      return true;
+    });
 
   for (const fpath of structuredFiles) {
     const fname = path.basename(fpath);
@@ -370,7 +393,17 @@ function checkTierBudgets() {
 
   const structuredFiles = fs.readdirSync(STRUCT_DIR)
     .filter(f => f.endsWith(".jsonl") && !f.startsWith("archive-"))
-    .map(f => path.join(STRUCT_DIR, f));
+    .map(f => path.join(STRUCT_DIR, f))
+    .filter(fpath => {
+      // SECURITY: skip files whose realpath escapes STRUCT_DIR (e.g. symlink
+      // planted in vault by another app on a synced filesystem). Same guard
+      // as ops/memory/entry-parsers.js parseLayerEntries.
+      if (!safeRealpathWithin(fpath, STRUCT_DIR)) {
+        process.stderr.write(`[archival-scan] skipping path that escapes STRUCT_DIR: ${fpath}\n`);
+        return false;
+      }
+      return true;
+    });
 
   for (const fpath of structuredFiles) {
     for (const rec of parseJsonl(fpath)) {
