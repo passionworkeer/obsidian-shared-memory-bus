@@ -1,7 +1,7 @@
-import crypto from "crypto";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -721,7 +721,7 @@ function buildRecordFingerprint(record) {
   ].filter(Boolean).join(" ")).toLowerCase();
 
   return text
-    .split(/[\s\-_.,;:!?()[\]{}'"#@$%^&*+=|\\\/~`]+/)
+    .split(/[\s\-_.,;:!?()[\]{}'"#@$%^&*+=|\\\\~`]+/)
     .map((t) => t.trim())
     .filter((t) => t.length >= 3)
     .slice(0, 18);

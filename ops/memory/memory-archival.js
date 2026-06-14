@@ -19,10 +19,10 @@
  *   (default) — detect caller from lock file trigger field
  */
 
-import fs from "fs";
-import path from "path";
-import crypto from "crypto";
-import readline from "readline";
+import fs from "node:fs";
+import path from "node:path";
+import crypto from "node:crypto";
+import readline from "node:readline";
 
 // ── CLI args ──────────────────────────────────────────────────────────────────
 

@@ -3,9 +3,9 @@
 // Extracted from memory-layers-parse.js to separate path/I/O concerns from
 // record coercion, entry parsing, and lazy module loading.
 
-import fs from "fs";
-import path from "path";
-import { fileURLToPath, pathToFileURL } from "url";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

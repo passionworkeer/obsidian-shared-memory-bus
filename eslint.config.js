@@ -37,34 +37,15 @@ export default [
     ],
   },
   js.configs.recommended,
+  // Base config applies to all JS files including .cjs.
+  // The .cjs block below overrides sourceType to "commonjs" and removes
+  // ESM-only globals.
   {
-    files: ["**/*.cjs"],
-    languageOptions: {
-      ecmaVersion: 2022,
-      sourceType: "commonjs",
-      globals: {
-        require: "readonly",
-        module: "readonly",
-        exports: "readonly",
-        __dirname: "readonly",
-        __filename: "readonly",
-        process: "readonly",
-        console: "readonly",
-        Buffer: "readonly",
-        setTimeout: "readonly",
-        clearTimeout: "readonly",
-        global: "readonly",
-        globalThis: "readonly",
-      },
-    },
-  },
-  {
-    files: ["**/*.mjs", "**/*.js"],
-    ignores: ["**/*.cjs"],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: "module",
       globals: {
+        // Builtins — available in both ESM and CJS contexts.
         console: "readonly",
         process: "readonly",
         Buffer: "readonly",
@@ -80,6 +61,15 @@ export default [
         TextDecoder: "readonly",
         AbortController: "readonly",
         fetch: "readonly",
+        // `require` is available in CJS and via createRequire in ESM.
+        // Declaring it as a global silences no-undef for .cjs files and
+        // is harmless for .mjs/.js files that don't use it.
+        require: "readonly",
+        module: "readonly",
+        exports: "readonly",
+        __dirname: "readonly",
+        __filename: "readonly",
+        global: "readonly",
       },
     },
     rules: {

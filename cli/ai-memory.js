@@ -4,13 +4,13 @@
  * Usage: ai-memory <command> [options]
  */
 
-import { spawn } from "child_process";
-import net from "net";
-import path from "path";
-import fs from "fs";
-import os from "os";
-import crypto from "crypto";
-import { fileURLToPath } from "url";
+import { spawn } from "node:child_process";
+import net from "node:net";
+import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
+import crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -523,7 +523,7 @@ function resolveScriptPath(scriptPath) {
   }
   // Flat installed layout: strip the leading subdirectory segment.
   // Normalise separators since registry paths always use '/'.
-  const normalised = scriptPath.replace(/[\/\\]+/g, "/");
+  const normalised = scriptPath.replace(/[/\\]+/g, "/");
   const segments = normalised.split("/");
   if (segments.length >= 2) {
     const flat = path.join(AI_MEMORY_ROOT, segments.slice(1).join("/"));

@@ -1,4 +1,4 @@
-import { spawn } from "child_process";
+import { spawn } from "node:child_process";
 import { buildEmbeddingConfigHash, normalizeEmbeddingAdapter } from "./shared-crypto.js";
 
 function normalizeString(value) {

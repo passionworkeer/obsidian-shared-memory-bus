@@ -9,8 +9,8 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "url";
-import { pathToFileURL } from "url";
+import { fileURLToPath } from "node:url";
+import { pathToFileURL } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

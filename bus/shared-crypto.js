@@ -3,7 +3,7 @@
  * Shared cryptographic utilities used across multiple bus modules.
  */
 
-import crypto from "crypto";
+import crypto from "node:crypto";
 
 /**
  * Build a short (16-char hex) config hash from embedding backend parameters.

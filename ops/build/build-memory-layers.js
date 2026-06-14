@@ -6,10 +6,10 @@
 //   - ops/memory-layers-dedup.js    (deduplication + JSONL writing)
 // ---------------------------------------------------------------------------
 
-import fs from "fs";
-import path from "path";
-import { fileURLToPath, pathToFileURL } from "url";
-import { execFileSync } from "child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { execFileSync } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

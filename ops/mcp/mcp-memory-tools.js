@@ -13,8 +13,8 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
-import { fileURLToPath } from "url";
-import { pathToFileURL } from "url";
+import { fileURLToPath } from "node:url";
+import { pathToFileURL } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -98,7 +98,7 @@ function detectProjectKey({ project = "", cwd = "" } = {}) {
     return project.trim();
   }
   if (typeof cwd === "string" && cwd.trim()) {
-    const normalized = cwd.replace(/[\\/]+$/, "");
+    const normalized = cwd.replace(/[/\\]+$/, "");
     const leaf = path.basename(normalized);
     if (leaf) {
       return leaf;

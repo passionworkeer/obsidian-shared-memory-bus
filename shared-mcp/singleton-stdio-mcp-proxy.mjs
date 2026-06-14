@@ -278,7 +278,7 @@ function resolveWindowsCommandPath(commandToken) {
     return '';
   }
 
-  if (/[\\/]/.test(commandToken) || /^[A-Za-z]:/.test(commandToken)) {
+  if (/[/]/.test(commandToken) || /^[A-Za-z]:/.test(commandToken)) {
     return existsSync(commandToken) ? commandToken : '';
   }
 

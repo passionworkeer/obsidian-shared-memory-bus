@@ -3,8 +3,8 @@
 // Extracted from memory-layers-parse.js so callers can import coercion logic
 // without pulling in entry parsers or lazy module loaders.
 
-import crypto from "crypto";
-import fs from "fs";
+import crypto from "node:crypto";
+import fs from "node:fs";
 import { isCjkChar } from "../util/cjk-tokenize.js";
 import { createJsonlStream } from "../util/jsonl-stream.js";
 import { MEMORY_RECORD_SCHEMA_VERSION } from "./memory-contract.js";
@@ -34,7 +34,7 @@ const NON_PROMOTABLE_PROMOTION_TYPES = new Set([
 
 function normalizeSpaces(value) {
   return String(value || "")
-    .replace(/﻿/g, "")   // strip BOM
+    .replace(/\uFEFF/g, "")   // strip BOM
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -234,7 +234,7 @@ function buildMemoryDescription(record) {
   const shortContent = (record.content || "").substring(0, 120).trim();
   const text = firstFact || firstConcept || shortContent;
   // Clean up: remove markdown artifacts, collapse whitespace
-  return text.replace(/[#*`_~\[\]]/g, "").replace(/\s+/g, " ").trim();
+  return text.replace(/[#*`_~[\]]/g, "").replace(/\s+/g, " ").trim();
 }
 
 function computeTier(record) {

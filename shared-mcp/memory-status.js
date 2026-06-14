@@ -244,7 +244,7 @@ export function createMemoryStatus(params) {
     if (fs.existsSync(gitConfig)) {
       try {
         const content = fs.readFileSync(gitConfig, "utf8");
-        const remoteMatch = content.match(/url\s*=\s*.*?[\/:]([^\/]+?)(?:\.git)?$/m);
+        const remoteMatch = content.match(/url\s*=\s*.*?[:/]([^/]+?)(?:\.git)?$/m);
         if (remoteMatch) {
           return remoteMatch[1];
         }

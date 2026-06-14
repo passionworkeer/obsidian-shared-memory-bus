@@ -3,10 +3,10 @@
  * 测试核心模块的完整流程
  */
 
-import path from "path";
-import fs from "fs";
-import os from "os";
-import { fileURLToPath, pathToFileURL } from "url";
+import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
