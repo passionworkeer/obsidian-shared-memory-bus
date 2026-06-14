@@ -28,7 +28,7 @@ const N         = 10;
 // Build a child-entry script to disk so no shell-escaping issues arise.
 // ---------------------------------------------------------------------------
 
-const childScriptPath = path.join(os.tmpdir(), `atomic-write-child-${process.pid}.js`);
+const childScriptPath = path.join(os.tmpdir(), `atomic-write-child-${process.pid}-${Date.now()}.mjs`);
 const appendLineAtomicUrl = pathToFileURL(path.join(PROJECT_ROOT, "ops", "inbox", "inbox-atomic-write.js")).href;
 
 // Use JSON.stringify to safely embed the strings without any escaping risk.
