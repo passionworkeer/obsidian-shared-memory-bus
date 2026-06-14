@@ -148,3 +148,8 @@ jobs:
       - name: Run integration tests
         run: node --test tests/integration/js/*.test.js tests/integration/js/*.test.mjs
         shell: bash
+
+      - name: Run inbox-atomic-write concurrent test
+        shell: bash
+        run: |
+          node --test --test-concurrency=4 tests/unit/js/inbox-atomic-write.test.js
