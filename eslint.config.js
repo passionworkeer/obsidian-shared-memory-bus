@@ -60,6 +60,7 @@ export default [
         TextEncoder: "readonly",
         TextDecoder: "readonly",
         AbortController: "readonly",
+        AbortSignal: "readonly",
         fetch: "readonly",
         // `require` is available in CJS and via createRequire in ESM.
         // Declaring it as a global silences no-undef for .cjs files and
@@ -73,7 +74,12 @@ export default [
       },
     },
     rules: {
-      "no-console": ["error", { allow: ["error", "warn"] }],
+      // no-console is warn rather than error: CLI entry points (e.g. ai-memory.js,
+      // mcp-memory-tools.js CLI) legitimately print to stdout, and forcing them
+      // through a logger just to satisfy a lint rule is ceremony. Server code
+      // should still prefer stderr / structured logging — the warn severity keeps
+      // the rule visible during review so we can migrate producers over time.
+      "no-console": ["warn", { allow: ["error", "warn"] }],
       "no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
       "no-empty": ["error", { allowEmptyCatch: true }],
       "no-var": "error",
