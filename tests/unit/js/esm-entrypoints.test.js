@@ -9,6 +9,33 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 
+// Strip business-specific env vars from child processes by default so a
+// developer machine's `AI_MEMORY_*` / `OBSIDIAN_*` / `VAULT_*` set in `.env`
+// or shell startup does not leak into tested scripts and silently change
+// their resolution order. Tests that need to inject values use `options.env`,
+// which always wins.
+const PASSTHROUGH_ENV = new Set([
+  "PATH", "Path",
+  "HOME", "USERPROFILE",
+  "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE",
+  "TMP", "TEMP", "TMPDIR",
+  "SYSTEMROOT", "WINDIR", "SYSTEMDRIVE",
+  "USER", "USERNAME", "USERDOMAIN",
+  "SHELL", "TZ",
+  "NODE_ENV", "NODE_PATH", "NODE_OPTIONS", "NODE_EXTRA_CA_CERTS",
+  "LANG", "LANGUAGE",
+]);
+const SCRUB_PREFIXES = ["AI_MEMORY_", "OBSIDIAN_", "VAULT_", "CLAUDE_MEM_", "GEMINI_", "OPENAI_", "ANTHROPIC_"];
+
+function scrubEnv(env) {
+  const out = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (PASSTHROUGH_ENV.has(k) || SCRUB_PREFIXES.some((p) => k.startsWith(p))) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
 function makeStructuredRecord(overrides = {}) {
   return {
     schemaVersion: 2,
@@ -46,7 +73,7 @@ function runNode(args, options = {}) {
     encoding: "utf8",
     windowsHide: true,
     env: {
-      ...process.env,
+      ...scrubEnv(process.env),
       ...(options.env || {}),
     },
   });
@@ -495,7 +522,7 @@ test("ai-memory CLI --workspace dry-run forwards AI_MEMORY_STORE", () => {
     const result = runNode(["cli/ai-memory.js", "--workspace", storeRoot, "check", "--dry-run"]);
 
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /ops[\/]check[\/]check-memory-integrity\.js/);
+    assert.match(result.stdout, /ops[/\\]check[/\\]check-memory-integrity\.js/);
     assert.match(result.stdout, /AI_MEMORY_STORE=/);
     assert.match(result.stdout, new RegExp(storeRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   } finally {
