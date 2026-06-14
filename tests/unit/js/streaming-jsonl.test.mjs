@@ -15,7 +15,7 @@ import assert from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "url";
+import { fileURLToPath } from "node:url";
 
 // ESM import: import the module using file URL
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

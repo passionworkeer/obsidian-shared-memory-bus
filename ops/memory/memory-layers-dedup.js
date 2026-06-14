@@ -3,8 +3,8 @@
 // Extracted from ops/build-memory-layers.js (2019 lines)
 // ---------------------------------------------------------------------------
 
-import fs from "fs";
-import path from "path";
+import fs from "node:fs";
+import path from "node:path";
 import {
   readJsonl,
   writeText,

@@ -1,7 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const _thisTestFile = fileURLToPath(import.meta.url);
 const _testDir = path.dirname(_thisTestFile);

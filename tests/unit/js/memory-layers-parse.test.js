@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { fileURLToPath } from "url";
+import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ORIGINAL_AI_MEMORY_STORE = process.env.AI_MEMORY_STORE;
@@ -765,11 +765,19 @@ test("loadKnowledgeGraph: returns real graph object when node:sqlite is availabl
     return;
   }
 
-  const kg = await loadKnowledgeGraph();
-  assert.equal(typeof kg.ingestRecord, "function");
-  assert.equal(typeof kg.stats, "function");
-  assert.equal(typeof kg.close, "function");
-  assert.notEqual(kg.available, false, "KG loader should not silently return an unavailable no-op adapter");
-  assert.equal(kg.stats().entities, 0);
-  kg.close();
+  // Build a KG against a temp store so this test does not collide with
+  // production STORE_ROOT state or with the tests/unit/js/knowledge-graph.test.js
+  // suite (which also writes to a real SQLite database).
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "kg-lazy-"));
+  try {
+    const { KnowledgeGraph } = await import("../../../ops/knowledge/knowledge-graph.js");
+    const kg = new KnowledgeGraph({ vaultRoot: tmp });
+    assert.equal(typeof kg.ingestRecord, "function");
+    assert.equal(typeof kg.stats, "function");
+    assert.equal(typeof kg.close, "function");
+    assert.equal(kg.stats().entities, 0, "fresh tempdir KG should be empty");
+    kg.close();
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });

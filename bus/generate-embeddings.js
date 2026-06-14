@@ -1,8 +1,8 @@
-import { spawn, spawnSync } from "child_process";
-import crypto from "crypto";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+import { spawn, spawnSync } from "node:child_process";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { createEmbeddingProviderRegistry, getProviderHost, buildEmbeddingConfigHash, normalizeEmbeddingAdapter } from "./embedding-provider-registry.js";
 import { resolvePythonRuntime, withPythonArgs } from "./python-runtime.js";
 import { resolveEmbeddingRuntime } from "./runtime-config.js";

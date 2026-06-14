@@ -3,8 +3,8 @@
 // produce structured records. Extracted from memory-layers-parse.js so the
 // top-level module can stay a thin barrel.
 
-import fs from "fs";
-import path from "path";
+import fs from "node:fs";
+import path from "node:path";
 import {
   buildRecord,
   classifyScope,
@@ -29,6 +29,11 @@ function parseInboxEntries() {
     return records;
   }
 
+  // The \[ and \] below are intentional: outside a regex character class
+  // `[]` would open/close a class, so escaping is required to match a
+  // literal `[` / `]`. ESLint's no-useless-escape heuristic doesn't know
+  // this and is suppressed locally.
+  // eslint-disable-next-line no-useless-escape
   const linePattern = /^-\s+\[(?<timestamp>[^\]]+)\]\s+\[(?<project>[^\]]+)\]\s*(?<content>.+)$/;
   const files = fs
     .readdirSync(INBOX_ROOT)

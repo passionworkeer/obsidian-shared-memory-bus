@@ -6,9 +6,9 @@
  * backslashes in string literals are not subject to shell/eval escaping.
  */
 
-import path from "path";
-import fs from "fs";
-import os from "os";
+import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
 import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 

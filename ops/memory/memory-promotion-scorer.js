@@ -15,9 +15,9 @@
  *   node ops/memory/memory-promotion-scorer.js [--store-root <path>] [--dry-run] [--verbose]
  */
 
-import fs from "fs";
-import path from "path";
-import crypto from "crypto";
+import fs from "node:fs";
+import path from "node:path";
+import crypto from "node:crypto";
 
 // ── CLI args ───────────────────────────────────────────────────────────────────
 
@@ -79,7 +79,7 @@ function normalizeSpaces(str = "") {
 function tokenize(text = "") {
   return normalizeSpaces(text)
     .toLowerCase()
-    .split(/[\s\-_.,;:!?()[\]{}'"#@$%^&*+=|\\\/~`]+/)
+    .split(/[\s\-_.,;:!?()[\]{}'"#@$%^&*+=|\\\\~`]+/)
     .filter(Boolean);
 }
 

@@ -3,8 +3,8 @@
 // Extracted from ops/build-memory-layers.js (2019 lines)
 // ---------------------------------------------------------------------------
 
-import fs from "fs";
-import path from "path";
+import fs from "node:fs";
+import path from "node:path";
 const {
   normalizeSpaces,
   sha256,
@@ -421,7 +421,7 @@ function buildMemoryIndex(layers) {
     for (const rec of records.slice(0, 20)) {
       const title = normalizeSpaces(rec.title || rec.id || "(untitled)") || "(untitled)";
       const desc = normalizeSpaces(
-        (rec.description || String(rec.content || "").substring(0, 60)).replace(/[#*`_~\[\]]/g, "")
+        (rec.description || String(rec.content || "").substring(0, 60)).replace(/[#*`_~[\]]/g, "")
       );
       const id = normalizeSpaces(rec.id || "") || "";
       const slug = id.replace(/[^a-zA-Z0-9]/g, "-").substring(0, 20);

@@ -21,9 +21,9 @@
  *   import { extractEntities, extractFromRecord, extractEntitiesFromRecords } from './entity-extractor.js';
  */
 
-import { fileURLToPath } from "url";
-import path from "path";
-import fs from "fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+import fs from "node:fs";
 import { isCjkChar } from "../util/cjk-tokenize.js";
 
 // ---------------------------------------------------------------------------

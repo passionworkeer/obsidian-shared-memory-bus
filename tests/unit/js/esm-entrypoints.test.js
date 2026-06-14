@@ -405,7 +405,7 @@ test("memory-archival.js scans the canonical structured store", () => {
 
     assert.equal(result.status, 0, result.stderr);
     assert.doesNotMatch(result.stdout, /Structured directory not found/);
-    assert.doesNotMatch(result.stdout, /00-System[\\/]ai-memory/);
+    assert.doesNotMatch(result.stdout, /00-System[\/]ai-memory/);
   } finally {
     fs.rmSync(storeRoot, { recursive: true, force: true });
   }
@@ -495,7 +495,7 @@ test("ai-memory CLI --workspace dry-run forwards AI_MEMORY_STORE", () => {
     const result = runNode(["cli/ai-memory.js", "--workspace", storeRoot, "check", "--dry-run"]);
 
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /ops[\\/]check[\\/]check-memory-integrity\.js/);
+    assert.match(result.stdout, /ops[\/]check[\/]check-memory-integrity\.js/);
     assert.match(result.stdout, /AI_MEMORY_STORE=/);
     assert.match(result.stdout, new RegExp(storeRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   } finally {

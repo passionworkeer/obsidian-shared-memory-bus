@@ -1,6 +1,6 @@
-import fs from "fs";
-import path from "path";
-import { fileURLToPath, pathToFileURL } from "url";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { buildGeneratedArtifactMetadata } from "../memory/memory-contract.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
