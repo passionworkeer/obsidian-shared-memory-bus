@@ -6,6 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { safeRealpathWithin } from "../util/safe-realpath.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -90,46 +91,6 @@ function readJsonl(filePath) {
       }
     })
     .filter(Boolean);
-}
-
-/**
- * Verify that `filePath` (after realpath resolution) lies within `safeRoot`.
- * Returns the realpath on success, null on failure (path escapes root, missing,
- * or realpath error). Designed to be cheap and safe to call inside loops.
- *
- * SECURITY: defends against symlink-based file-read amplification. A vault
- * synced via OneDrive / Obsidian Sync / iCloud Drive may contain symlinks
- * planted by other apps; resolving them and checking containment prevents
- * arbitrary host files (e.g. ~/.ssh/id_rsa) from being read into agent
- * context.
- */
-function safeRealpathWithin(filePath, safeRoot) {
-  // Resolve the parent directory (which must exist) so we can validate
-  // containment even for files that don't exist yet — the write path
-  // is what this guard protects, and realpath on a non-existent file
-  // throws ENOENT.
-  const parentDir = path.dirname(filePath);
-  const filename = path.basename(filePath);
-
-  let realParent;
-  try {
-    realParent = fs.realpathSync(parentDir);
-  } catch {
-    return null;
-  }
-  const realPath = path.join(realParent, filename);
-
-  let realRoot;
-  try {
-    realRoot = fs.realpathSync(safeRoot);
-  } catch {
-    return null;
-  }
-  const rootWithSep = realRoot.endsWith(path.sep) ? realRoot : realRoot + path.sep;
-  if (realPath !== realRoot && !realPath.startsWith(rootWithSep)) {
-    return null;
-  }
-  return realPath;
 }
 
 function readText(filePath) {
