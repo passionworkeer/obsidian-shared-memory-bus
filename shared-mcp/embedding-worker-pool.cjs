@@ -85,13 +85,26 @@ function parseIpcResponse(line) {
  */
 function spawnWorker(id, pythonCmd, pythonArgs, env) {
   return new Promise((resolve, reject) => {
+    /** @type {Worker | null} */
+    let worker = null;
+
+    const cleanup = () => {
+      if (worker && worker.proc && !worker.proc.killed) {
+        try {
+          worker.proc.kill("SIGKILL");
+        } catch (_err) {
+          // Process may have already exited; ignore.
+        }
+      }
+    };
+
     const initTimer = setTimeout(() => {
       cleanup();
       reject(new Error(`worker-${id}-init-timeout`));
     }, WORKER_INIT_TIMEOUT_MS);
 
     /** @type {Worker} */
-    const worker = {
+    worker = {
       id,
       proc: null,
       state: "starting",

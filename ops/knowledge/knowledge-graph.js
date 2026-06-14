@@ -111,7 +111,7 @@ class Db {
    * @param {boolean} readOnly
    */
   constructor(dbPath, readOnly = false) {
-    let { DatabaseSync } = require("node:sqlite");
+    const { DatabaseSync } = require("node:sqlite");
     // Note: node:sqlite is a built-in module, keep require for sync usage
     this._db = new DatabaseSync(dbPath, { readOnly });
     this._execWithRetry("PRAGMA journal_mode = WAL");

@@ -152,7 +152,7 @@ function resolveCoreference(text, sentences, candidates) {
 
   // Split into sentences (Chinese 。 or English .)
   const sentBounds = [];
-  let last = 0;
+  const last = 0;
   for (let i = 0; i < text.length; i++) {
     if (/[.。!！?]/.test(text[i])) {
       sentBounds.push(i);
