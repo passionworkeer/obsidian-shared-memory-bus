@@ -10,7 +10,7 @@
 
 export {
   // I/O
-  readJsonl, readText, writeText, ensureDirectory, withFileLock, safeRealpathWithin,
+  readJsonl, readText, writeText, appendText, ensureDirectory, withFileLock, tryWithFileLock, safeRealpathWithin,
   // Path constants
   USER_HOME, OPENCLAW_HOME, CLAUDE_HOME,
   INBOX_ROOT, EVENTS_ROOT, STRUCTURED_ROOT, GENERATED_ROOT, STORE_ROOT, AI_MEMORY_ROOT,

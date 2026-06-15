@@ -105,6 +105,11 @@ function writeText(filePath, content) {
   fs.writeFileSync(filePath, content, "utf8");
 }
 
+function appendText(filePath, content) {
+  ensureDirectory(path.dirname(filePath));
+  fs.appendFileSync(filePath, content, "utf8");
+}
+
 function ensureDirectory(targetPath) {
   if (!fs.existsSync(targetPath)) {
     fs.mkdirSync(targetPath, { recursive: true });
@@ -319,7 +324,7 @@ function tryWithFileLock(filePath, fn) {
 
 export {
   // I/O
-  readJsonl, readText, writeText, ensureDirectory, withFileLock, tryWithFileLock, safeRealpathWithin,
+  readJsonl, readText, writeText, appendText, ensureDirectory, withFileLock, tryWithFileLock, safeRealpathWithin,
   // Path constants
   USER_HOME, OPENCLAW_HOME, CLAUDE_HOME,
   INBOX_ROOT, EVENTS_ROOT, STRUCTURED_ROOT, GENERATED_ROOT, STORE_ROOT, AI_MEMORY_ROOT,
