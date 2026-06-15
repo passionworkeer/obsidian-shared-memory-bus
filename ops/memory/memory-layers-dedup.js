@@ -5,6 +5,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { tryWithFileLock } from "./paths-and-io.js";
 import {
   readJsonl,
   writeText,
@@ -43,13 +44,15 @@ function writeJsonl(filePath, records, options = {}) {
 /**
  * Patch a single record in a JSONL file by id (immutable rewrite).
  * Only rewrites the line matching the given id — other lines untouched.
- * Uses exclusive file lock to prevent concurrent write corruption.
+ * Uses non-blocking tryWithFileLock: if the lock is held by another writer,
+ * degrades to a no-op with a warning (the next call can retry; a torn
+ * read-modify-write on a busy file would be worse than a skipped patch).
  * @param {string} jsonlPath
  * @param {string} recordId
  * @param {object} enriched  — record with entities/facts/concepts added
  */
 function patchJsonlRecord(jsonlPath, recordId, enriched) {
-  withFileLock(jsonlPath, (fd) => {
+  const acquired = tryWithFileLock(jsonlPath, (fd) => {
     const content = fs.readFileSync(jsonlPath, "utf-8");
     let changed = false;
     const patched = content.split("\n").map((line) => {
@@ -89,6 +92,11 @@ function patchJsonlRecord(jsonlPath, recordId, enriched) {
       if (fd >= 0) fs.fsyncSync(fd);  // durability before close (no-op in fallback mode)
     }
   });
+  if (!acquired) {
+    process.stderr.write(
+      `[patchJsonlRecord] lock held on ${jsonlPath}; skipping patch for ${recordId} (next call will retry)\n`
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -205,7 +213,6 @@ function appendDailyLogs(newRecords, dryRun = false) {
     const [year, month] = date.split("-");
     const logDir = path.join(DAILY_LOG_DIR, year, month);
     const logFile = path.join(logDir, `${date}.jsonl`);
-    const tmpFile = `${logFile}.tmp.${process.pid}`;
 
     // Filter out already-logged records (checked under lock)
     const newEntries = recs.map(buildDailyLogEntry);
@@ -238,13 +245,13 @@ function appendDailyLogs(newRecords, dryRun = false) {
       const toAppend = newEntries.filter((e) => !existingIds.has(e.id));
       if (toAppend.length === 0) return;
 
-      // Atomic write: read existing, append to temp, fsync, rename
-      const existingContent = fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : "";
+      // Atomic append: O_APPEND + fd fsync guarantees no torn writes and
+      // POSIX guarantees concurrent appenders won't interleave lines for
+      // sizes <= PIPE_BUF (4 KiB on Linux). Lock + append keeps the
+      // read-modify-write cycle O(new lines) instead of O(whole file).
       const newLines = toAppend.map((e) => JSON.stringify(e)).join("\n") + "\n";
-      fs.writeFileSync(tmpFile, existingContent + newLines, "utf8");
-      fs.fsyncSync(fs.openSync(tmpFile, "r+"));
-      fs.renameSync(tmpFile, logFile);
-      fs.fsyncSync(fd);  // durability of the rename target
+      fs.appendFileSync(logFile, newLines, "utf8");
+      fs.fsyncSync(fd);
       process.stderr.write(`[daily-log] appended ${toAppend.length} entries to ${logFile}\n`);
     });
   }
