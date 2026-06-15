@@ -22,7 +22,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import readline from "node:readline";
 import { safeRealpathWithin } from "../util/safe-realpath.js";
 
 // ── CLI args ──────────────────────────────────────────────────────────────────
@@ -49,7 +48,6 @@ const LOCK_DIR        = path.join(STORE_ROOT, ".lock");
 const LOCK_FILE       = path.join(LOCK_DIR, "archival.lock");
 const MANIFEST_FILE   = path.join(STORE_ROOT, "structured", "archive-manifest.jsonl");
 const STRUCT_DIR      = path.join(STORE_ROOT, "structured");
-const TIER_BUDGET_FILE = path.join(STORE_ROOT, ".config", "tier-budget.json");
 
 const LOCK_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
@@ -161,17 +159,29 @@ function writeLock(trigger) {
     version: 1,
   };
   const payload = JSON.stringify(lock, null, 2);
+  // Atomic create via tmp + rename.  A unique tmp suffix (pid + ts + rand)
+  // prevents stale-takeover races where two processes see EEXIST on the
+  // same target and clobber each other's tmp file.  The rename step is
+  // atomic on POSIX and Windows (same volume), so concurrent readers
+  // never observe a half-written lock file.
+  const tmp = `${LOCK_FILE}.tmp.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}`;
   try {
-    // Atomic create — fails with EEXIST if another process beat us to it
-    // (closes the TOCTOU window between `existsSync` and `writeFileSync`).
-    fs.writeFileSync(LOCK_FILE, payload, { encoding: "utf8", flag: "wx" });
-  } catch (err) {
-    if (err.code !== "EEXIST") throw err;
-    // Stale-lock takeover path: caller already verified age > LOCK_TTL_MS.
-    // Write to .tmp + rename to overwrite atomically.
-    const tmp = `${LOCK_FILE}.tmp`;
+    fs.mkdirSync(LOCK_DIR, { recursive: true });
     fs.writeFileSync(tmp, payload, "utf8");
-    fs.renameSync(tmp, LOCK_FILE);
+    try {
+      fs.renameSync(tmp, LOCK_FILE);
+    } catch (err) {
+      if (err.code !== "EEXIST") throw err;
+      // Another process beat us to the rename — clean up our tmp, then
+      // overwrite via tmp + rename (caller already verified the existing
+      // lock is stale via age > LOCK_TTL_MS).
+      try { fs.unlinkSync(tmp); } catch { /* best-effort */ }
+      fs.writeFileSync(tmp, payload, "utf8");
+      fs.renameSync(tmp, LOCK_FILE);
+    }
+  } catch (err) {
+    try { fs.unlinkSync(tmp); } catch { /* best-effort */ }
+    throw err;
   }
   info(`Lock acquired: pid=${lock.pid} trigger=${lock.trigger}`);
   return { ok: true };
@@ -582,7 +592,7 @@ async function main() {
     // Step 3: Tier budget enforcement
     info("--- Phase 2: Tier budget enforcement ---");
     const { overBudget, report } = checkTierBudgets();
-    for (const [key, ids] of overBudget.entries()) {
+    for (const [, ids] of overBudget.entries()) {
       // Try to find which file(s) contain these IDs
       const structuredFiles = fs.readdirSync(STRUCT_DIR)
         .filter(f => f.endsWith(".jsonl") && !f.startsWith("archive-"))
