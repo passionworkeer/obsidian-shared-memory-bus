@@ -46,7 +46,7 @@ function parseSSE(data, targetId) {
           // Forward server-initiated notifications to stdout
           safeWrite(JSON.stringify(json) + '\n');
         }
-      } catch (e) {
+      } catch {
         // skip malformed lines
       }
     }

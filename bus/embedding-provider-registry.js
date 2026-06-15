@@ -159,8 +159,6 @@ json.dump([vector.tolist() for vector in vectors], sys.stdout)
     });
   }
 
-  const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
-
   async function embedWithGemini(texts, runtime) {
     if (!pythonRuntime.available) {
       throw new Error(`python-runtime-unavailable: ${pythonRuntime.error || "unknown-error"}`);

@@ -7,9 +7,6 @@ import { spawn } from "node:child_process";
 // ---------------------------------------------------------------------------
 
 const USER_HOME = process.env.HOME || "";
-const XDG_CONFIG_HOME = process.env.XDG_CONFIG_HOME || path.join(USER_HOME, ".config");
-const XDG_DATA_HOME = process.env.XDG_DATA_HOME || path.join(USER_HOME, ".local", "share");
-const APP_SUPPORT = path.join(USER_HOME, "Library", "Application Support");
 
 // ---------------------------------------------------------------------------
 // Utility: isDirectory
