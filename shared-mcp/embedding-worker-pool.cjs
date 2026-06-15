@@ -308,7 +308,7 @@ async function initPool(pythonCmd, pythonArgs, env) {
  * @returns {Promise<number[][]>}
  */
 async function embedWithPool(options) {
-  const { texts, model, pythonCmd, pythonArgs, env, apiKey, geminiModel } = options;
+  const { texts, model, pythonCmd, pythonArgs, env } = options;
   const msgType = options.msgType || "EMBED";
 
   await initPool(pythonCmd, pythonArgs, env);
