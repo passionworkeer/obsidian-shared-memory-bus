@@ -28,12 +28,10 @@ const {
   parseSessionMemoryEntries,
   parseTaskMemoryEntries,
   repairStructuredRecord,
-  preserveDreamRecords,
   loadEntityExtractor,
   loadKnowledgeGraph,
   getTargetJsonl,
   normalizeSpaces,
-  getFreshness,
   buildPromotionKey,
   STRUCTURED_ROOT,
   GENERATED_ROOT,
@@ -48,9 +46,6 @@ const {
   GLOBAL_CONTEXT_BODY_MD,
   GLOBAL_CONTEXT_META_JSON,
   sha256,
-  MIN_PROMOTION_CONFIDENCE,
-  DURABLE_SCOPES,
-  NON_PROMOTABLE_PROMOTION_TYPES,
 } = await import("../memory/memory-layers-parse.js");
 
 const {
@@ -59,9 +54,9 @@ const {
   buildLayerSummary,
   buildMemoryIndex,
   GLOBAL_CONTEXT_MD: CTX_GLOBAL_CONTEXT_MD,
-  GLOBAL_CONTEXT_META_JSON: CTX_GLOBAL_CONTEXT_META_JSON,
-  GLOBAL_CONTEXT_BODY_MD: CTX_GLOBAL_CONTEXT_BODY_MD,
 } = await import("../memory/memory-layers-context.js");
+
+const { getFreshness } = await import("../memory/record-coercion.js");
 
 const {
   // Dedup module — deduplication, JSONL writing, daily logs
@@ -69,7 +64,6 @@ const {
   patchJsonlRecord,
   deduplicateSharedInbox,
   appendDailyLogs,
-  DAILY_LOG_DIR,
 } = await import("../memory/memory-layers-dedup.js");
 
 // ---------------------------------------------------------------------------
@@ -102,7 +96,6 @@ const resolveStoreRoot = resolveStoreRootMod.resolveStoreRoot || resolveStoreRoo
 // ---------------------------------------------------------------------------
 
 const {
-  buildGeneratedArtifactMetadata,
   MEMORY_RECORD_SCHEMA_VERSION,
 } = await import("../memory/memory-contract.js");
 
@@ -112,12 +105,12 @@ const {
 
 export {
   normalizeSpaces,
-  getFreshness,
   buildPromotionKey,
   withFileLock,
   deduplicateSharedInbox,
   MEMORY_RECORD_SCHEMA_VERSION,
   loadStoreRootHelper,
+  getFreshness,
 };
 
 // ---------------------------------------------------------------------------
@@ -271,7 +264,6 @@ async function main() {
   // (exact equality with recordCount is not expected since entities may be deduplicated
   // across records, but a dramatic mismatch signals a transaction failure)
   try {
-    const preCommitEntities = 0;
     const statsBefore = knowledgeGraph.stats ? knowledgeGraph.stats() : null;
     const postCommitEntities = statsBefore ? statsBefore.entities : null;
     const expectedEntities = allRecords.filter(
