@@ -250,9 +250,76 @@ function withFileLock(filePath, fn) {
   );
 }
 
+/**
+ * Non-blocking variant of withFileLock.
+ * Attempts to acquire the lock ONCE; if it cannot be obtained immediately,
+ * returns false (without throwing) so the caller can take a degraded path
+ * (e.g. atomic O_APPEND append). On success, runs fn(fd) and returns true.
+ *
+ * @param {string} filePath
+ * @param {function(number): void} fn  - receives the file descriptor
+ * @returns {boolean} true if lock acquired and fn ran; false if lock held
+ */
+function tryWithFileLock(filePath, fn) {
+  const supportsTryLock = typeof fs.tryLockSync === "function";
+  if (!supportsTryLock) {
+    // Fallback path: try the .lock sentinel file exactly once
+    const lockFile = `${filePath}.lock`;
+    try {
+      if (!fs.existsSync(filePath)) fs.writeFileSync(filePath, "", "utf8");
+      const lockFd = fs.openSync(lockFile, "w+");
+      const content = fs.readFileSync(lockFile, "utf8");
+      if (content && content.trim()) {
+        try { fs.closeSync(lockFd); } catch {}
+        return false;
+      }
+      fs.writeFileSync(lockFile, `${process.pid}`, "utf8");
+      try {
+        fn(-1);
+        return true;
+      } finally {
+        try { fs.unlinkSync(lockFile); } catch {}
+        try { fs.closeSync(lockFd); } catch {}
+      }
+    } catch {
+      return false;
+    }
+  }
+
+  // Primary path: a single tryLock attempt
+  let fd = null;
+  try {
+    try {
+      fd = fs.openSync(filePath, "r+");
+    } catch (err) {
+      if (err.code === "ENOENT") {
+        fd = fs.openSync(filePath, "w");
+      } else {
+        return false;
+      }
+    }
+    if (!fs.tryLockSync(fd, "ex")) {
+      try { fs.closeSync(fd); } catch {}
+      return false;
+    }
+    try {
+      fn(fd);
+      return true;
+    } finally {
+      try { fs.unlockSync(fd); } catch {}
+      try { fs.closeSync(fd); } catch {}
+    }
+  } catch {
+    if (fd !== null) {
+      try { fs.closeSync(fd); } catch {}
+    }
+    return false;
+  }
+}
+
 export {
   // I/O
-  readJsonl, readText, writeText, ensureDirectory, withFileLock, safeRealpathWithin,
+  readJsonl, readText, writeText, ensureDirectory, withFileLock, tryWithFileLock, safeRealpathWithin,
   // Path constants
   USER_HOME, OPENCLAW_HOME, CLAUDE_HOME,
   INBOX_ROOT, EVENTS_ROOT, STRUCTURED_ROOT, GENERATED_ROOT, STORE_ROOT, AI_MEMORY_ROOT,
