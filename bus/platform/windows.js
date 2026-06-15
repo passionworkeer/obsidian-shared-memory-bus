@@ -9,7 +9,6 @@ import { spawn, spawnSync } from "node:child_process";
 
 const USER_HOME = process.env.USERPROFILE || "";
 const APP_DATA = process.env.APPDATA || path.join(USER_HOME, "AppData", "Roaming");
-const LOCAL_APPDATA = process.env.LOCALAPPDATA || path.join(USER_HOME, "AppData", "Local");
 
 // ---------------------------------------------------------------------------
 // Env var cache (matches the pattern in omni-memory-server.js)

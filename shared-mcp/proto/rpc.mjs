@@ -188,7 +188,7 @@ export function processChildStdout(chunk) {
 
     try {
       handleChildMessage(JSON.parse(trimmed));
-    } catch (error) {
+    } catch {
       logError(`non-JSON stdout from child: ${trimmed}`);
     }
   }

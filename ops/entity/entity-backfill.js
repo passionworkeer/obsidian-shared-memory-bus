@@ -82,7 +82,7 @@ function backfillFile(filePath, extractor) {
       } else {
         patched.push(line);
       }
-    } catch (err) {
+    } catch {
       errors++;
       patched.push(line);  // preserve original on error
     }

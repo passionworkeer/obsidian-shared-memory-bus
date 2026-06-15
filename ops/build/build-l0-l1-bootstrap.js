@@ -49,7 +49,6 @@ async function buildL0L1Bootstrap(cwd) {
   const L0_FIXED = path.join(storeRoot, "L0-fixed.md")
   const GENERATED = path.join(storeRoot, "generated")
   const L0_BOOTSTRAP = path.join(GENERATED, "L0-bootstrap.md")
-  const BODY_MD = path.join(GENERATED, "GLOBAL-CONTEXT.body.md")
 
   // 1. Read L0-fixed.md
   const L0_content = fs.existsSync(L0_FIXED) ? fs.readFileSync(L0_FIXED, "utf-8") : ""

@@ -287,7 +287,7 @@ function buildGlobalContext(layers) {
   }
 
   // Build meta JSON (immutable — constructed from scratch)
-  const metaSegments = Object.entries(segments).map(([key, seg]) => ({
+  const metaSegments = Object.entries(segments).map(([, seg]) => ({
     name: seg.name,
     scope: seg.scope,
     budget: seg.budget,

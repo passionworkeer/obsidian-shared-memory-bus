@@ -179,7 +179,7 @@ if (args.includes("--dry-run")) {
 let input;
 try {
   input = JSON.parse(fs.readFileSync(0, "utf8").trim());
-} catch (err) {
+} catch {
   console.error("Usage: echo '{...}' | node migrate-schema.js");
   console.error("Or:    node migrate-schema.js --dry-run");
   process.exit(1);
