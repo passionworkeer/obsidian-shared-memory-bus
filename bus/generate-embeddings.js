@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -7,7 +7,7 @@ import { createEmbeddingProviderRegistry, getProviderHost, buildEmbeddingConfigH
 import { resolvePythonRuntime, withPythonArgs } from "./python-runtime.js";
 import { resolveEmbeddingRuntime } from "./runtime-config.js";
 import { resolveStoreRoot } from "./store-root.js";
-import { VECTOR_SCHEMA_VERSION, fnv1a32, buildHashFeatures, buildHashEmbedding } from "./lsh-hash.js";
+import { VECTOR_SCHEMA_VERSION, buildHashEmbedding } from "./lsh-hash.js";
 import { createJsonlStream } from "../ops/util/jsonl-stream.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -61,7 +61,6 @@ const ALLOW_BATCH_FALLBACK = Boolean(EMBED_RUNTIME.allowBatchFallback);
 const ACTIVE_EMBED_PROFILE = String(EMBED_RUNTIME.profileName || "").trim();
 const ACTIVE_EMBED_PROVIDER = String(EMBED_RUNTIME.providerName || "").trim();
 const HASH_MODEL = "hashing-v1";
-const HASH_DIM = 384;
 
 const NOISE_PATTERNS = [
   /^Sender\s*\(/i,
@@ -305,10 +304,7 @@ const EMBEDDING_PROVIDER_REGISTRY = createEmbeddingProviderRegistry({
   hashModel: HASH_MODEL,
 });
 
-// buildDocument is superseded by field-level extraction in collectDocuments.
-function buildDocument(entry) {
-  return null; // intentionally broken — do not use
-}
+// buildDocument was removed (superseded by field-level extraction in collectDocuments).
 
 /**
  * Collect structured records and extract their field-level texts.
@@ -546,8 +542,41 @@ async function loadExistingIndex() {
  * for a personal-memory scale index).
  */
 function writeIndexSnapshot(orderedRecords) {
-  const body = orderedRecords.map((record) => JSON.stringify(record)).join("\n");
-  fs.writeFileSync(INDEX_FILE, body ? `${body}\n` : "", "utf8");
+  // Stream-write each record directly to a tmp file, then rename
+  // atomically over INDEX_FILE. Avoids building one giant in-memory
+  // JSONL string for large indices (e.g. 10k records = ~50-100MB
+  // intermediate). Each per-record write is bounded; peak buffer is
+  // one record + write stream high-water mark, not the whole index.
+  const dir = path.dirname(INDEX_FILE);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  const tmp = `${INDEX_FILE}.tmp.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}`;
+  // createWriteStream (sync fd write loop) is fine here — the
+  // outer batch loop is already async and the fd closes on EOF/end.
+  const fd = fs.openSync(tmp, "w");
+  try {
+    for (const record of orderedRecords) {
+      const line = `${JSON.stringify(record)}\n`;
+      fs.writeSync(fd, line);
+    }
+    fs.closeSync(fd);
+  } catch (err) {
+    // Best-effort cleanup: close fd then unlink tmp so a failed
+    // snapshot doesn't leave a stray file in the embeddings dir.
+    try {
+      fs.closeSync(fd);
+    } catch (_) {
+      /* ignore */
+    }
+    try {
+      fs.unlinkSync(tmp);
+    } catch (_) {
+      /* ignore */
+    }
+    throw err;
+  }
+  fs.renameSync(tmp, INDEX_FILE);
   return orderedRecords;
 }
 
@@ -606,7 +635,6 @@ async function main() {
 
   for (const doc of orderedRecordIds) {
     const storedByField = existingByRecord.get(doc.recordId) || new Map();
-    let allFieldsReusable = true;
 
     for (const [fieldName, fieldText] of Object.entries(doc.fieldTexts)) {
       const entryId = fieldName === "content" ? doc.recordId : `${doc.recordId}__${fieldName}`;
@@ -633,7 +661,6 @@ async function main() {
           featureSchemaVersion: VECTOR_SCHEMA_VERSION,
         });
       } else {
-        allFieldsReusable = false;
         pending.push({ entryId, recordId: doc.recordId, fieldName, text: fieldText, doc });
       }
     }
@@ -664,7 +691,18 @@ async function main() {
   }
 
   if (orderedRecordIds.length === 0) {
-    fs.writeFileSync(INDEX_FILE, "", "utf8");
+    // Atomic tmp+rename: write to a sibling temp file in the same
+    // directory and rename over INDEX_FILE.  The rename is atomic on
+    // POSIX and Windows (same volume), so a kill mid-write never
+    // leaves a half-written or zero-byte index file behind for
+    // downstream readers.
+    const dir = path.dirname(INDEX_FILE);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    const tmp = `${INDEX_FILE}.tmp.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}`;
+    fs.writeFileSync(tmp, "", "utf8");
+    fs.renameSync(tmp, INDEX_FILE);
     console.log("No structured documents found. Wrote empty embeddings index.");
     return;
   }
@@ -750,7 +788,6 @@ export {
   buildParentSearchText,
   hashFieldText,
   fieldTextsUnchanged,
-  buildDocument,
 };
 
 const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === __filename;
