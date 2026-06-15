@@ -49,7 +49,7 @@ try {
   const memoryContractModule = await import("../memory/memory-contract.js");
   STRUCTURED_LAYER_DEFINITIONS = memoryContractModule.STRUCTURED_LAYER_DEFINITIONS;
   isExpectedDerivedDuplicate = memoryContractModule.isExpectedDerivedDuplicate;
-} catch (_err) {
+} catch {
   // Inline fallback — used only when memory-contract.js is unavailable
   STRUCTURED_LAYER_DEFINITIONS = [
     { key: "sharedInbox",        fileName: "shared-inbox.jsonl" },

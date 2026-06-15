@@ -92,7 +92,7 @@ function batchReadWindowsRegistryVars(names) {
     if (!result.error && result.status === 0) {
       raw = String(result.stdout || "").trim();
     }
-  } catch (_e) {
+  } catch {
     return new Map();
   }
 
@@ -107,7 +107,7 @@ function batchReadWindowsRegistryVars(names) {
           WINDOWS_ENV_CACHE.set(name, String(parsed[name]).trim());
         }
       }
-    } catch (_e) {
+    } catch {
       // JSON parse failed, fall through to empty results
     }
   }
@@ -124,7 +124,7 @@ function firstNonEmptyEnv(...names) {
   // Batch-read all non-found names in one PowerShell call
   const notFound = names.filter((n) => !WINDOWS_ENV_CACHE.has(n));
   if (notFound.length > 0) {
-    const cached = batchReadWindowsRegistryVars(notFound);
+    batchReadWindowsRegistryVars(notFound);
     for (const name of names) {
       const cachedVal = WINDOWS_ENV_CACHE.get(name);
       if (cachedVal) return cachedVal;
@@ -190,7 +190,7 @@ function resolvePowerShellCommand() {
       if (!probe.error && probe.status === 0) {
         return candidate;
       }
-    } catch (_error) {
+    } catch {
       // Keep probing fallbacks.
     }
   }

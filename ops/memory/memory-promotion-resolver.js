@@ -41,8 +41,6 @@ if (!STORE_ROOT) {
 const QUEUE_DIR       = path.join(STORE_ROOT, ".ai-memory/queue");
 const STRUCT_DIR      = path.join(STORE_ROOT, "structured");
 const DEFAULT_QUEUE   = path.join(QUEUE_DIR,  "promotion-queue.jsonl");
-const RESOLVED_QUEUE  = path.join(QUEUE_DIR,  "resolved-queue.jsonl");
-const REVIEW_QUEUE    = path.join(QUEUE_DIR,  "human-review-queue.jsonl");
 
 const SCORE_TIE_THRESHOLD = 0.10; // if scores within this range → human review
 
@@ -477,7 +475,6 @@ function main() {
     const applyResult = applyResolvedPromotions(resolvedEntries);
     info(`Applied promotions: ${JSON.stringify(applyResult)}`);
   } else if (DRY_RUN && fs.existsSync(queuePath)) {
-    const allEntries = parseJsonl(queuePath);
     info("[dry-run] Would apply resolved promotions next (skipping applyResolvedPromotions)");
     void applyResolvedPromotions.__dangerousDryRunPlaceholder; // suppress unused warning
   }

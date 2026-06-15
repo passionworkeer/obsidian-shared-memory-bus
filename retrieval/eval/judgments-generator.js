@@ -188,8 +188,6 @@ async function main() {
   const judgments = readJsonl(inputAbs);
   console.log(`[judgments-generator] Loaded ${judgments.length} judgment entries`);
 
-  const ALL_ROUTES = ["auto", "mixed", "durable", "task", "recent", "reference"];
-
   const outputEntries = [];
   let skipped = 0;
   let processed = 0;

@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { buildEmbeddingConfigHash, normalizeEmbeddingAdapter } from "./shared-crypto.js";
+import { COMMON_CODES, DomainError } from "./domain-error.js";
 
 function normalizeString(value) {
   return String(value || "").trim();
@@ -11,7 +12,7 @@ function getProviderHost(baseUrl) {
   }
   try {
     return new URL(baseUrl).host || "";
-  } catch (_error) {
+  } catch {
     return "";
   }
 }
@@ -46,7 +47,10 @@ function createEmbeddingProviderRegistry(options = {}) {
 
   async function embedWithTransformer(texts, runtime) {
     if (!pythonRuntime.available) {
-      throw new Error(`python-runtime-unavailable: ${pythonRuntime.error || "unknown-error"}`);
+      throw new DomainError(
+        COMMON_CODES.EXTERNAL_SERVICE,
+        `python-runtime-unavailable: ${pythonRuntime.error || "unknown-error"}`,
+      );
     }
 
     const pool = await getPool();
@@ -161,13 +165,16 @@ json.dump([vector.tolist() for vector in vectors], sys.stdout)
 
   async function embedWithGemini(texts, runtime) {
     if (!pythonRuntime.available) {
-      throw new Error(`python-runtime-unavailable: ${pythonRuntime.error || "unknown-error"}`);
+      throw new DomainError(
+        COMMON_CODES.EXTERNAL_SERVICE,
+        `python-runtime-unavailable: ${pythonRuntime.error || "unknown-error"}`,
+      );
     }
 
     const apiKey = normalizeString(runtime.apiKey);
     const model = normalizeString(runtime.model || "gemini-embedding-2");
     if (!apiKey) {
-      throw new Error("missing-gemini-api-key");
+      throw new DomainError(COMMON_CODES.INVALID_INPUT, "missing-gemini-api-key");
     }
 
     const pool = await getPool();
@@ -293,13 +300,13 @@ for text in texts:
     const maxRetries = Math.max(0, Number(runtime.maxRetries || 3) || 3);
 
     if (!baseUrl) {
-      throw new Error("missing-openai-base-url");
+      throw new DomainError(COMMON_CODES.INVALID_INPUT, "missing-openai-base-url");
     }
     if (!apiKey) {
-      throw new Error("missing-openai-api-key");
+      throw new DomainError(COMMON_CODES.INVALID_INPUT, "missing-openai-api-key");
     }
     if (typeof fetchImpl !== "function") {
-      throw new Error("fetch-unavailable");
+      throw new DomainError(COMMON_CODES.INTERNAL, "fetch-unavailable");
     }
 
     if (requestDelayMs > 0) {
@@ -353,12 +360,15 @@ for text in texts:
           : [];
 
         if (vectors.length !== texts.length) {
-          throw new Error(`openai-compatible-count-mismatch:${vectors.length}/${texts.length}`);
+          throw new DomainError(
+            COMMON_CODES.EXTERNAL_SERVICE,
+            `openai-compatible-count-mismatch:${vectors.length}/${texts.length}`,
+          );
         }
 
         for (const vector of vectors) {
           if (!Array.isArray(vector) || vector.length === 0) {
-            throw new Error("openai-compatible-empty-vector");
+            throw new DomainError(COMMON_CODES.EXTERNAL_SERVICE, "openai-compatible-empty-vector");
           }
         }
 

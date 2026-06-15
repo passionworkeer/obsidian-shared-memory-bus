@@ -25,9 +25,9 @@ function queryEntity(name, opts = {}) {
    * @param {'outgoing'|'incoming'} dir
    * @param {string} sql
    * @param {any[]} params
-   * @param {string} otherCol
+   * @param {string} _otherCol
    */
-  const runQuery = (dir, sql, params, otherCol) => {
+  const runQuery = (dir, sql, params, _otherCol) => {
     for (const row of this._db.all(sql, ...params)) {
       results.push({
         direction: dir,
@@ -176,7 +176,7 @@ function getEntity(name) {
   const row = this._db.get("SELECT * FROM entities WHERE id = ?", entityId(name));
   if (!row) return null;
   let props = {};
-  try { props = JSON.parse(row.properties || "{}"); } catch (_) { /* corrupt — use {} */ }
+  try { props = JSON.parse(row.properties || "{}"); } catch { /* corrupt — use {} */ }
   return {
     ok: true,
     id: row.id,
@@ -236,7 +236,7 @@ function searchEntities(query, opts = {}) {
   return rows
     .map((row) => {
       let props = {};
-      try { props = JSON.parse(row.properties || "{}"); } catch (_) { /* corrupt */ }
+      try { props = JSON.parse(row.properties || "{}"); } catch { /* corrupt */ }
       return {
         id:         row.id,
         name:       row.name,
@@ -263,7 +263,7 @@ function getEntitiesByType(type) {
     .all("SELECT * FROM entities WHERE type = ? ORDER BY name", type)
     .map((row) => {
       let props = {};
-      try { props = JSON.parse(row.properties || "{}"); } catch (_) { /* corrupt */ }
+      try { props = JSON.parse(row.properties || "{}"); } catch { /* corrupt */ }
       return {
         id:         row.id,
         name:       row.name,

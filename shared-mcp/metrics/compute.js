@@ -303,7 +303,7 @@ async function stopSearchWorker(reason = "search-worker-stop-requested") {
   if (searchWorkerStartupPromise) {
     try {
       await searchWorkerStartupPromise;
-    } catch (_error) {
+    } catch {
       // Startup failure already updates the shared worker state.
     }
   }
@@ -343,7 +343,7 @@ async function stopSearchWorker(reason = "search-worker-stop-requested") {
       child.removeListener("exit", exitHandler);
       try {
         child.kill("SIGKILL");
-      } catch (_error) {
+      } catch {
         // best-effort cleanup only
       }
       resetSearchWorkerState(`${reason}-timeout`);
@@ -525,7 +525,7 @@ function killSearchWorkerOnExit() {
     if (isProcessAlive(searchWorker)) {
       searchWorker.kill();
     }
-  } catch (_error) {
+  } catch {
     // Best-effort cleanup only.
   }
 }

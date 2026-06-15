@@ -134,7 +134,7 @@ function readWindowsEnvironmentVariable(name) {
     if (!result.error && result.status === 0) {
       value = String(result.stdout || "").trim();
     }
-  } catch (_error) {
+  } catch {
     value = "";
   }
 
@@ -566,12 +566,12 @@ function writeIndexSnapshot(orderedRecords) {
     // snapshot doesn't leave a stray file in the embeddings dir.
     try {
       fs.closeSync(fd);
-    } catch (_) {
+    } catch {
       /* ignore */
     }
     try {
       fs.unlinkSync(tmp);
-    } catch (_) {
+    } catch {
       /* ignore */
     }
     throw err;

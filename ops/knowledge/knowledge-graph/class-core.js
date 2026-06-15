@@ -101,7 +101,7 @@ export class KnowledgeGraph {
     const mergedProps = (() => {
       try {
         return existing ? { ...JSON.parse(existing.properties || "{}"), ...properties } : properties;
-      } catch (_) {
+      } catch {
         return properties; // corrupt JSON — discard and use fresh
       }
     })();

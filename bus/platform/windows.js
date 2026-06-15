@@ -45,7 +45,7 @@ function readWindowsEnvironmentVariable(name) {
     if (!result.error && result.status === 0) {
       value = String(result.stdout || "").trim();
     }
-  } catch (_error) {
+  } catch {
     value = "";
   }
 
@@ -117,7 +117,7 @@ function resolvePowerShellCommand() {
     if (!probe.error && probe.status === 0) {
       return "powershell.exe";
     }
-  } catch (_error) {
+  } catch {
     // fall through
   }
   return firstNonEmptyEnv("AI_MEMORY_PWSH") || "powershell.exe";

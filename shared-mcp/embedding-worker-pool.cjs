@@ -92,7 +92,7 @@ function spawnWorker(id, pythonCmd, pythonArgs, env) {
       if (worker && worker.proc && !worker.proc.killed) {
         try {
           worker.proc.kill("SIGKILL");
-        } catch (_err) {
+        } catch {
           // Process may have already exited; ignore.
         }
       }
@@ -309,7 +309,6 @@ async function initPool(pythonCmd, pythonArgs, env) {
  */
 async function embedWithPool(options) {
   const { texts, model, pythonCmd, pythonArgs, env } = options;
-  const msgType = options.msgType || "EMBED";
 
   await initPool(pythonCmd, pythonArgs, env);
 

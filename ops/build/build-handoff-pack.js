@@ -53,7 +53,7 @@ function readJsonl(filePath) {
     }
     try {
       records.push(JSON.parse(line));
-    } catch (_error) {
+    } catch {
     }
   }
   return records;

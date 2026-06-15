@@ -114,7 +114,7 @@ function cloneJsonValue(value, fallback = {}) {
 
   try {
     return JSON.parse(JSON.stringify(value));
-  } catch (_error) {
+  } catch {
     return { ...value };
   }
 }

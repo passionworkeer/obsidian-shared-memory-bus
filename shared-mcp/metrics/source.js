@@ -345,7 +345,7 @@ function refreshMetricsFromFiles({ GENERATED_ROOT, STORE_ROOT, readEmbeddingsSum
           : 0;
       }
     }
-  } catch (_err) {
+  } catch {
     // Non-fatal — metrics refresh failures should not crash the server.
   }
 }

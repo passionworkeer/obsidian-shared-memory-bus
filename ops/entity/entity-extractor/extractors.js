@@ -213,8 +213,7 @@ function extractChineseProjectNames(text) {
  * @returns {{ person_score: number, project_score: number, concept_score: number,
  *             person_signals: string[], project_signals: string[], concept_signals: string[] }}
  */
-export function scoreEntity(name, text, lines) {
-  const lower = name.toLowerCase();
+export function scoreEntity(name, text, _lines) {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
   let personScore = 0;
