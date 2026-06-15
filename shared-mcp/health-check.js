@@ -75,7 +75,6 @@ export function probeStdioMcp(pythonPath, scriptPath, timeoutMs = 10000) {
     });
 
     let stdoutData = "";
-    let stderrData = "";
     let settled = false;
 
     const settle = (ok, error) => {
@@ -88,7 +87,6 @@ export function probeStdioMcp(pythonPath, scriptPath, timeoutMs = 10000) {
     const timer = setTimeout(() => settle(false, "timeout"), timeoutMs);
 
     child.stdout.on("data", (chunk) => { stdoutData += chunk.toString(); });
-    child.stderr.on("data", (chunk) => { stderrData += chunk.toString(); });
 
     child.on("error", (err) => settle(false, err.message));
     child.on("exit", (code) => {

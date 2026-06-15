@@ -254,7 +254,6 @@ async function testInboxConcurrentWrite(concurrency = 10) {
   const { resolveStoreRoot } = await import(path.join(PROJECT_ROOT, "bus", "store-root.js"));
   const storeRoot = resolveStoreRoot();
   const inboxPath = path.join(storeRoot, "inbox", "stress-test.md");
-  const session = `stress-${Date.now()}`;
 
   const script = (id) => `
     const path = require('path');
@@ -425,7 +424,6 @@ async function testMixedConcurrency(concurrency = 50) {
 
 async function testDbLockContention() {
   const label = "DB锁冲突压测 (100次快速连续写入)";
-  const start = now();
   let locked = 0, ok = 0;
 
   const { KnowledgeGraph } = await import(path.join(PROJECT_ROOT, "ops/knowledge/knowledge-graph.js"));

@@ -17,7 +17,6 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
 
 // ── CLI args ───────────────────────────────────────────────────────────────────
 
@@ -63,14 +62,8 @@ const CONFLICT_OVERLAP_THRESHOLD = 0.70;
 
 const log = (...msg) => VERBOSE && console.log("[promotion-scorer]", new Date().toISOString(), ...msg);
 const info = (...msg) => console.log("[promotion-scorer]", ...msg);
-const warn = (...msg) => console.warn("[promotion-scorer] WARNING:", ...msg);
-const err  = (...msg) => console.error("[promotion-scorer] ERROR:", ...msg);
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-
-function sha1(value) {
-  return crypto.createHash("sha1").update(String(value || ""), "utf8").digest("hex");
-}
 
 function normalizeSpaces(str = "") {
   return String(str).replace(/\s+/g, " ").trim();

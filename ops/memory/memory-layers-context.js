@@ -3,15 +3,9 @@
 // Extracted from ops/build-memory-layers.js (2019 lines)
 // ---------------------------------------------------------------------------
 
-import fs from "node:fs";
-import path from "node:path";
 const {
   normalizeSpaces,
-  sha256,
-  getFreshness,
-  getFreshness: getFreshnessParse,  // alias
   STRUCTURED_ROOT,
-  GENERATED_ROOT,
   MEMORY_LAYERS_MD: PARSE_MEMORY_LAYERS_MD,
   MEMORY_LAYERS_JSON: PARSE_MEMORY_LAYERS_JSON,
   GLOBAL_CONTEXT_MD: PARSE_GLOBAL_CONTEXT_MD,

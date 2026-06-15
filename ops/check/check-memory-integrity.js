@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import path from "node:path";
 import { resolveStoreRoot } from "../../bus/store-root.js";
 const memoryContractModule = await import("../memory/memory-contract.js");

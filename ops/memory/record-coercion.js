@@ -477,7 +477,7 @@ function parseStructuredJsonl(filePath, defaults = {}) {
     let payload;
     try {
       payload = JSON.parse(line);
-    } catch (_error) {
+    } catch {
       continue;
     }
 

@@ -233,7 +233,7 @@ export function createMemoryRetrieval(params) {
             maxVerbatimPerResult,
           })
         );
-      } catch (_fallbackError) {
+      } catch {
         if (!params.METRICS.searches_total[normalizedRoute]) {
           params.METRICS.searches_total[normalizedRoute] = {};
         }

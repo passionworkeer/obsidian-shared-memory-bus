@@ -81,7 +81,7 @@ function resolveLatestPythonFromDirectory(rootPath, source) {
     }
 
     return buildRuntime(candidates[0], [], source);
-  } catch (_error) {
+  } catch {
     return null;
   }
 }

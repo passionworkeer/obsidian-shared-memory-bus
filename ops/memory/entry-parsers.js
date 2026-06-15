@@ -115,7 +115,7 @@ function parseEventEntries() {
       let payload;
       try {
         payload = JSON.parse(line);
-      } catch (_error) {
+      } catch {
         continue;
       }
       const tool = normalizeSpaces(payload.tool || "system") || "system";

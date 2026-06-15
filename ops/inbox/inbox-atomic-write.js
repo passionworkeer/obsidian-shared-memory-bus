@@ -113,7 +113,7 @@ function appendLineAtomic(filePath, line, opts = {}) {
         // Clean up our temp file and retry if another process won.
         try {
           fs.unlinkSync(tmp);
-        } catch (_) {
+        } catch {
           /* ignore */
         }
         if (err.code !== "EEXIST") {

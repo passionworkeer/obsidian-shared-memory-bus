@@ -21,7 +21,7 @@ try {
   // Node >= 14.5
   const { AsyncLocalStorage } = require("node:async_hooks");
   _als = new AsyncLocalStorage();
-} catch (_e) {
+} catch {
   // Node < 14.5 — no-op fallback
 }
 

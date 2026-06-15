@@ -99,14 +99,14 @@ export async function runDoctorChecks() {
     } else {
       collector.add(null, "Python availability", "Python not found — some MCP servers may not work");
     }
-  } catch (_) {
+  } catch {
     collector.add(null, "Python availability", "Python not found — some MCP servers may not work");
   }
 
   try {
     const pwsh = await detectPwsh();
     collector.add(Boolean(pwsh), "PowerShell Core (pwsh) available", "Install PowerShell 7+ for best experience");
-  } catch (_) {
+  } catch {
     collector.add(null, "PowerShell Core (pwsh) available", "PowerShell Core not found — pwsh is recommended");
   }
 
@@ -125,7 +125,7 @@ export async function runDoctorChecks() {
       `Vault root exists (${vaultRoot})`,
       "Set AI_MEMORY_OBSIDIAN_VAULT to your Obsidian vault path"
     );
-  } catch (_) {
+  } catch {
     vaultRoot = null;
   }
 

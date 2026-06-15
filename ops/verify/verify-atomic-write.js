@@ -74,7 +74,7 @@ const promises = Array.from({ length: N }, (_, id) =>
 Promise.all(promises)
   .then(results => {
     // Clean up temp script
-    try { fs.unlinkSync(childScriptPath); } catch (_e) { /* ignore */ }
+    try { fs.unlinkSync(childScriptPath); } catch { /* ignore */ }
 
     const allOk = results.every(r => r.code === 0 && r.stderr === "");
     const errors = results.filter(r => r.code !== 0);
@@ -98,7 +98,7 @@ Promise.all(promises)
       console.log("Content (first 500 chars):\n" + content.slice(0, 500));
     }
 
-    try { fs.unlinkSync(inboxPath); } catch (_e) { /* ignore */ }
+    try { fs.unlinkSync(inboxPath); } catch { /* ignore */ }
 
     if (allOk && lines.length === N) {
       console.log("RESULT: PASS — no lines dropped under concurrent load");

@@ -96,7 +96,7 @@ async function main() {
   function log(msg) { if (VERBOSE) console.log(msg); }
   function logDry(msg) { if (DRY_RUN) console.log("[DRY-RUN]", msg); }
 
-  function cp(src, dst, options = {}) {
+  function cp(src, dst, _options = {}) {
     if (!fs.existsSync(src)) {
       log(`  skip  (not found): ${src}`);
       return 0;
@@ -222,7 +222,7 @@ async function main() {
 
   // --- Root files ---
   console.log("\n[2/2] Migrating root files...");
-  for (const [fileName, desc] of rootFiles) {
+  for (const [fileName] of rootFiles) {
     const src = path.join(LEGACY_AI_MEMORY, fileName);
     const dst = path.join(STORE_ROOT, fileName);
     const count = cp(src, dst);

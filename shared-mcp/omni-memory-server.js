@@ -219,7 +219,7 @@ process.on("unhandledRejection", (reason) => {
 process.on("exit", () => {
   try {
     killSearchWorkerOnExit();
-  } catch (_error) {
+  } catch {
     // Best-effort cleanup only.
   }
 });
