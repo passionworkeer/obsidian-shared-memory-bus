@@ -5,6 +5,7 @@
 
 import crypto from "node:crypto";
 import fs from "node:fs";
+import { MS_PER_DAY, MS_PER_WEEK } from "../../bus/time-constants.js";
 import { isCjkChar } from "../util/cjk-tokenize.js";
 import { createJsonlStream } from "../util/jsonl-stream.js";
 import { MEMORY_RECORD_SCHEMA_VERSION } from "./memory-contract.js";
@@ -65,10 +66,10 @@ function getFreshness(isoTimestamp) {
   }
   const ageMs = Date.now() - new Date(isoTimestamp).getTime();
   if (!Number.isFinite(ageMs)) return "unknown";  // guard: invalid date string
-  if (ageMs <= 24 * 60 * 60 * 1000) {
+  if (ageMs <= MS_PER_DAY) {
     return "hot";
   }
-  if (ageMs <= 7 * 24 * 60 * 60 * 1000) {
+  if (ageMs <= MS_PER_WEEK) {
     return "warm";
   }
   return "cold";
