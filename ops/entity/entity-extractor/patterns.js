@@ -1,49 +1,14 @@
 // ops/entity/entity-extractor/patterns.js
 //
-// Shared constants for entity extraction: stopwords, person/project signal
-// patterns (English + Chinese), and the coreference map used to resolve
-// pronouns to canonical entity names.
+// Shared constants for entity extraction: person/project signal patterns
+// (English + Chinese) and the coreference map used to resolve pronouns to
+// canonical entity names. Stopwords live in ../stopwords/index.js — see
+// that module for the per-category data files (english, programming,
+// prose, chinese) that this barrel re-aggregates.
 
-/** @type {Set<string>} */
-export const STOPWORDS = new Set([
-  // Pronouns / articles
-  "the","a","an","and","or","but","in","on","at","to","for","of","with","by","from","as",
-  "is","was","are","were","be","been","being","have","has","had","do","does","did",
-  "will","would","could","should","may","might","must","shall","can","this","that",
-  "these","those","it","its","they","them","their","we","our","you","your","i","my","me",
-  "he","she","his","her","who","what","when","where","why","how","which","if","then",
-  "so","not","no","yes","ok","okay","just","really","very","also","already","still","even",
-  "only","here","there","now","too","up","out","about","like","use","get","got","make",
-  "made","take","put","come","go","see","know","think","true","false","none","new","old",
-  "all","any","some","every","each","more","less","next","last","first","second",
-  // Programming keywords
-  "return","print","def","class","import","from","function","const","let","var","async",
-  "await","try","catch","throw","finally","switch","case","break","continue","while",
-  "for","if","else","elif","yield","raise","pass","global","nonlocal","lambda",
-  "static","public","private","protected","final","abstract","extends","implements",
-  "void","null","undefined","typeof","instanceof",
-  // Common prose filler words
-  "step","usage","run","check","find","add","set","list","args","dict","str","int","bool",
-  "path","file","name","note","example","option","result","error","warning","info",
-  "returns","raises","yields","self","cls","kwargs","arg",
-  "item","key","value","type",
-  // Abstract nouns that appear as subjects but aren't entities
-  "system","agent","agents","tool","tools","memory","model","models",
-  "network","networks","training","inference","data","content",
-  "thing","things","way","ways","time","times","day","days","part","parts","point","points",
-  "idea","ideas","fact","facts","sense","question","answer","reason","number","version",
-  "people","person","something","nothing","everything","anything","someone","everyone",
-  // Tech-abstract that are too generic
-  "stack","layer","mode","test","stop","start","copy","move","source","target",
-  "output","outputs","input","inputs","records","record","entry","entries",
-  // Greetings / filler
-  "hey","hi","hello","thanks","thank","right","let",
-  // Common Chinese stopwords
-  "的","是","在","有","我","你","他","她","它","了","和","与","及","或","不","这","那",
-  "也","还","又","就","但","而","则","因","所","以","为","于","上","下","中","后","前",
-  "里","外","之","其","并","觉","得","能","会","可","要","想","说","看","来","去","用",
-  "把","被","让","给","向","往","prefer","prefers",
-]);
+import { STOPWORDS } from "../stopwords/index.js";
+
+export { STOPWORDS };
 
 // Person signals — things people say/do (formatted strings, {name} replaced at runtime)
 export const PERSON_VERB_PATTERNS = [
