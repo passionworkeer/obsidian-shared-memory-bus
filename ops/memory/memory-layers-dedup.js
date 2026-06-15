@@ -5,18 +5,8 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { tryWithFileLock } from "./paths-and-io.js";
-import {
-  readJsonl,
-  writeText,
-  ensureDirectory,
-  withFileLock,
-  sha256,
-  getFreshness,
-  shouldSkipAsRecentDuplicate,
-  normalizeSpaces,
-  DAILY_LOG_DIR,
-} from "./memory-layers-parse.js";
+import { readJsonl, readText, writeText, appendText, ensureDirectory, withFileLock, tryWithFileLock } from "./paths-and-io.js";
+import { sha256, getFreshness, shouldSkipAsRecentDuplicate, normalizeSpaces, DAILY_LOG_DIR } from "./memory-layers-parse.js";
 
 // ---------------------------------------------------------------------------
 // JSONL writing
@@ -42,61 +32,149 @@ function writeJsonl(filePath, records, options = {}) {
 }
 
 /**
- * Patch a single record in a JSONL file by id (immutable rewrite).
- * Only rewrites the line matching the given id — other lines untouched.
- * Uses non-blocking tryWithFileLock: if the lock is held by another writer,
- * degrades to a no-op with a warning (the next call can retry; a torn
- * read-modify-write on a busy file would be worse than a skipped patch).
+ * Patch a single record in a JSONL file by id (append-only).
+ *
+ * Old behaviour was O(whole file): read file, splice the line matching the
+ * given id, write the entire file back. This was both slow and unsafe under
+ * concurrent writers (torn read-modify-write on a busy file).
+ *
+ * New behaviour is O(1): append a `__patch` envelope to a companion file
+ * `<jsonlPath>.patches.jsonl`. The main JSONL is never rewritten. Consumers
+ * that need the latest state of every record should call `readJsonlWithPatches`
+ * (see memory-layers-parse.js), which merges the patch log onto the base
+ * file with last-wins semantics.
+ *
+ * `tryWithFileLock` is used so the side-file append is atomic even on
+ * filesystems without O_APPEND atomicity guarantees for partial lines.
+ *
  * @param {string} jsonlPath
  * @param {string} recordId
  * @param {object} enriched  — record with entities/facts/concepts added
+ * @returns {boolean} true if patch was written; false if the lock was held
+ *                   and the patch was deferred to the next call
  */
 function patchJsonlRecord(jsonlPath, recordId, enriched) {
-  const acquired = tryWithFileLock(jsonlPath, (fd) => {
-    const content = fs.readFileSync(jsonlPath, "utf-8");
-    let changed = false;
-    const patched = content.split("\n").map((line) => {
-      if (!line.trim()) return line;
-      try {
-        const rec = JSON.parse(line);
-        if (rec.id === recordId) {
-          // Preserve existing facts/concepts if already present; merge new ones
-          const existingFacts = Array.isArray(rec.facts) ? rec.facts : [];
-          const existingConcepts = Array.isArray(rec.concepts) ? rec.concepts : [];
-          const newFacts = Array.isArray(enriched.facts) ? enriched.facts : [];
-          const newConcepts = Array.isArray(enriched.concepts) ? enriched.concepts : [];
+  const patchPath = `${jsonlPath}.patches.jsonl`;
+  const enrichedFacts = Array.isArray(enriched.facts) ? enriched.facts : [];
+  const enrichedConcepts = Array.isArray(enriched.concepts) ? enriched.concepts : [];
+  const enrichedEntities = Array.isArray(enriched.entities) ? enriched.entities : [];
 
-          const seenFacts = new Set(existingFacts.map((f) => typeof f === "string" ? f : f.value));
-          const seenConcepts = new Set(existingConcepts.map((c) => typeof c === "string" ? c : c.value));
-
-          const result = JSON.stringify({
-            ...rec,
-            entities: enriched.entities || rec.entities || [],
-            facts: [
-              ...existingFacts,
-              ...newFacts.filter((f) => !seenFacts.has(typeof f === "string" ? f : f.value)),
-            ],
-            concepts: [
-              ...existingConcepts,
-              ...newConcepts.filter((c) => !seenConcepts.has(typeof c === "string" ? c : c.value)),
-            ],
-          });
-          changed = true;
-          return result;
-        }
-      } catch {}
-      return line;
-    });
-    if (changed) {
-      fs.writeFileSync(jsonlPath, patched.join("\n"), "utf-8");
-      if (fd >= 0) fs.fsyncSync(fd);  // durability before close (no-op in fallback mode)
+  // We still need the existing facts/concepts/entities to merge with new ones
+  // (dedup by string value). A read of the patch log (small, O(patches only))
+  // is dramatically cheaper than a read of the base file.
+  const existingMerged = { facts: new Set(), concepts: new Set() };
+  if (fs.existsSync(patchPath)) {
+    for (const patch of readJsonl(patchPath)) {
+      if (patch.__patch !== recordId) continue;
+      for (const f of patch.facts || []) existingMerged.facts.add(typeof f === "string" ? f : f.value);
+      for (const c of patch.concepts || []) existingMerged.concepts.add(typeof c === "string" ? c : c.value);
     }
+  }
+
+  const seenFacts = existingMerged.facts;
+  const seenConcepts = existingMerged.concepts;
+  const mergedFacts = [
+    ...seenFacts,
+    ...enrichedFacts.filter((f) => !seenFacts.has(typeof f === "string" ? f : f.value)),
+  ];
+  const mergedConcepts = [
+    ...seenConcepts,
+    ...enrichedConcepts.filter((c) => !seenConcepts.has(typeof c === "string" ? c : c.value)),
+  ];
+
+  const payload = JSON.stringify({
+    __patch: recordId,
+    _patchedAt: new Date().toISOString(),
+    entities: enrichedEntities,
+    facts: mergedFacts,
+    concepts: mergedConcepts,
+  }) + "\n";
+
+  const acquired = tryWithFileLock(patchPath, () => {
+    appendText(patchPath, payload);
   });
   if (!acquired) {
     process.stderr.write(
-      `[patchJsonlRecord] lock held on ${jsonlPath}; skipping patch for ${recordId} (next call will retry)\n`
+      `[patchJsonlRecord] lock held on ${patchPath}; skipping patch for ${recordId} (next call will retry)\n`
     );
   }
+  return acquired;
+}
+
+/**
+ * Read a JSONL file merged with its companion `.patches.jsonl` log.
+ * Last-wins by record id. facts/concepts/entities arrays are merged
+ * with dedup (base then patch) so the patch layer does not need to
+ * repeat facts that were already on the base record.
+ *
+ * @param {string} jsonlPath
+ * @returns {object[]}
+ */
+function readJsonlWithPatches(jsonlPath) {
+  const base = readJsonl(jsonlPath);
+  const patchPath = `${jsonlPath}.patches.jsonl`;
+  if (!fs.existsSync(patchPath)) return base;
+
+  const byId = new Map();
+  for (const rec of base) {
+    if (rec && rec.id) byId.set(rec.id, rec);
+  }
+  for (const patch of readJsonl(patchPath)) {
+    if (!patch || !patch.__patch) continue;
+    const id = patch.__patch;
+    const existing = byId.get(id) || { id };
+    byId.set(id, mergePatch(existing, patch));
+  }
+  return Array.from(byId.values());
+}
+
+function mergeRecordValues(base, patch, key) {
+  const baseArr = Array.isArray(base[key]) ? base[key] : [];
+  const patchArr = Array.isArray(patch[key]) ? patch[key] : [];
+  if (patchArr.length === 0) return baseArr;
+  const seen = new Set(baseArr.map((v) => typeof v === "string" ? v : v.value));
+  const result = [...baseArr];
+  for (const item of patchArr) {
+    const key2 = typeof item === "string" ? item : item.value;
+    if (!seen.has(key2)) {
+      result.push(item);
+      seen.add(key2);
+    }
+  }
+  return result;
+}
+
+function mergePatch(base, patch) {
+  return {
+    ...base,
+    entities: mergeRecordValues(base, patch, "entities"),
+    facts: mergeRecordValues(base, patch, "facts"),
+    concepts: mergeRecordValues(base, patch, "concepts"),
+  };
+}
+
+/**
+ * Compact a JSONL file's companion patch log into the base file.
+ * Rewrites the base file in last-wins order; clears the patch log.
+ * Intended to run periodically (e.g. nightly) so the patch log does not
+ * grow unbounded. Safe to run while readers are active — they will see
+ * the pre-compaction state until they re-read.
+ *
+ * @param {string} jsonlPath
+ * @returns {{merged: number, removedPatches: number}}
+ */
+function compactPatches(jsonlPath) {
+  const patchPath = `${jsonlPath}.patches.jsonl`;
+  if (!fs.existsSync(patchPath)) return { merged: 0, removedPatches: 0 };
+
+  const merged = readJsonlWithPatches(jsonlPath);
+  const removedPatches = readJsonl(patchPath).length;
+  const body = merged.length
+    ? merged.map((rec) => JSON.stringify(rec)).join("\n") + "\n"
+    : "";
+  writeText(jsonlPath, body);
+  try { fs.unlinkSync(patchPath); } catch {}
+  return { merged: merged.length, removedPatches };
 }
 
 // ---------------------------------------------------------------------------
@@ -260,6 +338,8 @@ function appendDailyLogs(newRecords, dryRun = false) {
 export {
   writeJsonl,
   patchJsonlRecord,
+  readJsonlWithPatches,
+  compactPatches,
   deduplicateSharedInbox,
   getRecordsByDate,
   buildDailyLogEntry,
