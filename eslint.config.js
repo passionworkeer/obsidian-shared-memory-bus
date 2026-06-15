@@ -74,16 +74,46 @@ export default [
       },
     },
     rules: {
-      // no-console is warn rather than error: CLI entry points (e.g. ai-memory.js,
-      // mcp-memory-tools.js CLI) legitimately print to stdout, and forcing them
-      // through a logger just to satisfy a lint rule is ceremony. Server code
-      // should still prefer stderr / structured logging — the warn severity keeps
-      // the rule visible during review so we can migrate producers over time.
-      "no-console": ["warn", { allow: ["error", "warn"] }],
+      // no-console: error severity so the rule actually blocks
+      // accidental console.log/info calls in PR review.
+      //
+      // Two carve-outs via per-file overrides below:
+      //   - CLI entry points and operational scripts (ops/stress, ops/verify,
+      //     retrieval/eval, scripts under cli/, build/check tools in ops/)
+      //     legitimately print to stdout — they are user-facing.
+      //   - Anything else (bus/, shared-mcp/, library code) must use the
+      //     structured logger (shared-mcp/metrics/source.js) or console.error/
+      //     console.warn only.
+      "no-console": ["error", { allow: ["error", "warn"] }],
       "no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
       "no-empty": ["error", { allowEmptyCatch: true }],
       "no-var": "error",
       "prefer-const": "warn",
+    },
+  },
+  // CLI / operational scripts — console.log/info are legitimate user output.
+  {
+    files: [
+      "cli/**/*.js",
+      "bus/generate-embeddings.js", // CLI embedding index builder (has direct-run check)
+      "ops/stress/**/*.js",
+      "ops/verify/**/*.js",
+      "ops/check/**/*.js",
+      "ops/build/**/*.js",
+      "ops/bench/**/*.js",
+      "ops/adapters/**/*.js",
+      "ops/migrations/**/*.js",
+      "ops/setup/**/*.js",
+      "ops/entity/**/*.js",
+      "ops/memory/memory-archival.js",     // archival CLI script
+      "ops/memory/memory-promotion-resolver.js", // promotion CLI script
+      "ops/memory/memory-promotion-scorer.js",   // promotion CLI script
+      "ops/knowledge/knowledge-graph/cli.js",
+      "retrieval/eval/**/*.js",
+      "shared-mcp/proto/**/*.mjs",
+    ],
+    rules: {
+      "no-console": "off",
     },
   },
 ];
