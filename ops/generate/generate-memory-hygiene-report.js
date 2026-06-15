@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { MS_PER_DAY, MS_PER_WEEK } from "../../bus/time-constants.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -124,8 +125,8 @@ function getFreshnessFromRecord(record) {
   const t = record.t || record.created_at || "";
   const ageMs = Date.now() - parseTimestampMs(t);
   if (!Number.isFinite(ageMs) || ageMs < 0) return "unknown";
-  if (ageMs <= 24 * 60 * 60 * 1000)  return "hot";
-  if (ageMs <= 7 * 24 * 60 * 60 * 1000) return "warm";
+  if (ageMs <= MS_PER_DAY)  return "hot";
+  if (ageMs <= MS_PER_WEEK) return "warm";
   return "cold";
 }
 
