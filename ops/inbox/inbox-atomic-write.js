@@ -42,14 +42,17 @@ import { safeRealpathWithin } from "../memory/paths-and-io.js";
 /**
  * Atomically append a single line to a JSONL file.
  *
- * Uses OS-level O_APPEND (via fs.openSync with flag 'a') which atomically
- * seeks to EOF before writing.  This prevents the interleaved-byte
- * corruption that plain fs.appendFileSync() can suffer under concurrent
- * load on Windows.
+ * Uses O_APPEND (fs.openSync flag 'a') which atomically creates the file
+ * if it does not exist and seeks to EOF before each write. This is the
+ * correct cross-platform primitive for concurrent appends: the OS
+ * guarantees the write happens at EOF under the kernel file lock, so no
+ * lines are dropped or interleaved.
  *
- * The createDir + temp-rename fallback is used when the file does not
- * exist yet, to ensure the parent directory is created and the file
- * appears atomically (no zero-length read-window).
+ * The previous temp-rename strategy for first-write was unsound under
+ * concurrency: fs.renameSync() silently overwrites the destination (it
+ * does NOT throw EEXIST), so concurrent first-writers clobber each other,
+ * and on Windows rename fails with EPERM when the target is open in
+ * another process. O_APPEND avoids both issues.
  *
  * @param {string} filePath
  * @param {string|object} line  — JSON-serializable object or pre-serialized string
@@ -85,58 +88,19 @@ function appendLineAtomic(filePath, line, opts = {}) {
     }
   }
 
-  if (!fs.existsSync(filePath)) {
-    // File does not exist — use temp-rename so the target file
-    // appears fully formed (no zero-length read window for callers
-    // that poll for file existence).
-    // Retry loop handles the race where another process wins the
-    // first-rename, causing EEXIST on subsequent attempts.
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const tmp =
-        filePath +
-        ".tmp." +
-        process.pid +
-        "." +
-        Date.now() +
-        "." +
-        Math.random().toString(36).slice(2);
-      fs.writeFileSync(tmp, content, "utf8");
-      if (fsync) {
-        const fd = fs.openSync(tmp, "r+");
-        fs.fsyncSync(fd);
-        fs.closeSync(fd);
-      }
-      try {
-        fs.renameSync(tmp, filePath);
-        return;
-      } catch (err) {
-        // Clean up our temp file and retry if another process won.
-        try {
-          fs.unlinkSync(tmp);
-        } catch {
-          /* ignore */
-        }
-        if (err.code !== "EEXIST") {
-          throw err;
-        }
-        // Another process just created the file — fall through to
-        // the O_APPEND path below instead of retrying the race.
-        break;
-      }
-    }
-    // File now exists (another process created it) — fall through to
-    // O_APPEND append, which is safe for concurrent use.
-  }
-
-  // File exists — use O_APPEND (via flag 'a') so the OS atomically seeks
-  // to EOF before each write.  This is the correct fix for the
-  // concurrent fs.appendFileSync() race on Windows.
+  // O_APPEND (flag 'a') atomically creates the file if absent and seeks
+  // to EOF before each write. This is safe for concurrent use on both
+  // POSIX (O_APPEND is atomic for writes under PIPE_BUF) and Windows
+  // (FILE_APPEND_DATA). No temp-rename race, no EPERM on locked target.
   const fd = fs.openSync(filePath, "a");
-  fs.writeSync(fd, content);
-  if (fsync) {
-    fs.fsyncSync(fd);
+  try {
+    fs.writeSync(fd, content);
+    if (fsync) {
+      fs.fsyncSync(fd);
+    }
+  } finally {
+    fs.closeSync(fd);
   }
-  fs.closeSync(fd);
 }
 
 // ---------------------------------------------------------------------------

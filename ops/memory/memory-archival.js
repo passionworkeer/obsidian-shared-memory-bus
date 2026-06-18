@@ -123,8 +123,13 @@ function acquireLock() {
   ensureDir(LOCK_DIR);
 
   if (!fs.existsSync(LOCK_FILE)) {
-    // No lock — write ours
-    return writeLock("manual");
+    // No lock — try to create ours atomically (flag 'wx' = O_EXCL).
+    // This closes the TOCTOU window: two processes that both see "no
+    // lock" race to create it, and 'wx' guarantees exactly one winner.
+    const result = writeLock("manual", false);
+    if (result.ok) return result;
+    // Lost the race — another process created the lock between our
+    // existsSync and writeLock. Fall through to re-read it below.
   }
 
   try {
@@ -139,15 +144,25 @@ function acquireLock() {
       return { ok: false, reason: "lock-held", pid: lock.pid, trigger: lock.trigger, age_ms: age };
     }
 
-    // Lock expired (> 30 min) — take over
+    // Lock expired (> 30 min) — take over (force removes stale lock first)
     log(`Lock expired (age=${Math.round(age/60000)}min), taking over.`);
-    return writeLock(TRIGGER || "manual");
+    return writeLock(TRIGGER || "manual", true);
   } catch {
-    return writeLock(TRIGGER || "manual");
+    return writeLock(TRIGGER || "manual", true);
   }
 }
 
-function writeLock(trigger) {
+/**
+ * Write the lock file.
+ *
+ * @param {string} trigger
+ * @param {boolean} [force=false] — when false, uses flag 'wx' (O_EXCL) for
+ *   atomic create-or-fail, closing the TOCTOU window in acquireLock. When
+ *   true (stale-lock takeover), unlinks the existing lock first then uses
+ *   'wx' so two processes racing to take over a stale lock still have
+ *   exactly one winner.
+ */
+function writeLock(trigger, force = false) {
   if (DRY_RUN) {
     log("[dry-run] Would write lock:", { trigger, dry_run: true });
     return { ok: true, dry_run: true };
@@ -159,28 +174,21 @@ function writeLock(trigger) {
     version: 1,
   };
   const payload = JSON.stringify(lock, null, 2);
-  // Atomic create via tmp + rename.  A unique tmp suffix (pid + ts + rand)
-  // prevents stale-takeover races where two processes see EEXIST on the
-  // same target and clobber each other's tmp file.  The rename step is
-  // atomic on POSIX and Windows (same volume), so concurrent readers
-  // never observe a half-written lock file.
-  const tmp = `${LOCK_FILE}.tmp.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}`;
+
+  if (force) {
+    // Remove stale/corrupt lock, then atomic-create. If another process
+    // wins the race between unlink and create, 'wx' fails with EEXIST.
+    try { fs.unlinkSync(LOCK_FILE); } catch { /* best-effort */ }
+  }
+
   try {
-    fs.mkdirSync(LOCK_DIR, { recursive: true });
-    fs.writeFileSync(tmp, payload, "utf8");
-    try {
-      fs.renameSync(tmp, LOCK_FILE);
-    } catch (err) {
-      if (err.code !== "EEXIST") throw err;
-      // Another process beat us to the rename — clean up our tmp, then
-      // overwrite via tmp + rename (caller already verified the existing
-      // lock is stale via age > LOCK_TTL_MS).
-      try { fs.unlinkSync(tmp); } catch { /* best-effort */ }
-      fs.writeFileSync(tmp, payload, "utf8");
-      fs.renameSync(tmp, LOCK_FILE);
-    }
+    fs.writeFileSync(LOCK_FILE, payload, { flag: "wx", encoding: "utf8" });
   } catch (err) {
-    try { fs.unlinkSync(tmp); } catch { /* best-effort */ }
+    if (err.code === "EEXIST") {
+      // Another process won the race — report lock-held so the caller
+      // can re-read and apply TTL/trigger logic.
+      return { ok: false, reason: "lock-held", pid: null };
+    }
     throw err;
   }
   info(`Lock acquired: pid=${lock.pid} trigger=${lock.trigger}`);
