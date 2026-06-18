@@ -52,9 +52,13 @@ retrieval/eval/results.json
 .claude/
 .cursor/
 .vscode/
+.superpowers/
 cursor/
 cursor
 .agents/
+!.agents/
+!.agents/skills/
+!.agents/skills/*.md
 .trae/
 
 # Machine-specific client configs (contain user/environment-specific settings)
