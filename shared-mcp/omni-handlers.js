@@ -15,6 +15,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 
 import { TOOLS } from "./memory-tools.js";
+import { pickTools, pickHandlers } from "./tool-registry.js";
 import { createMemoryRetrieval } from "./memory-retrieval.js";
 import { createMemoryGeneration } from "./memory-generation.js";
 import { createMemoryBridge } from "./memory-bridge.js";
@@ -101,8 +102,22 @@ function createMcpServer() {
   );
 }
 
-function registerMcpRequestHandlers(server, { ALL_HANDLERS, METRICS, log }) {
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+/**
+ * 注册 MCP 请求 handler。
+ *
+ * 新增 toolFilter 参数 (债项 #1 server-split):
+ *   - undefined / null / [] → 全部 29 个工具 (向后兼容,monolithic 模式)
+ *   - readonly string[]     → 只暴露该子集 (4 个独立 server 各自的子集)
+ *
+ * 同时过滤 ListTools 的返回和 CallTool 的可调用范围 ——
+ * 子集之外的工具调用直接返回 tool-not-found,避免误路由。
+ */
+function registerMcpRequestHandlers(server, { ALL_HANDLERS, METRICS, log, toolFilter }) {
+  const exposedTools = pickTools(toolFilter);
+  const exposedHandlers = pickHandlers(ALL_HANDLERS, toolFilter);
+  const allowedNames = new Set(exposedTools.map((t) => t.name));
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: exposedTools }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name } = request.params;
@@ -114,7 +129,13 @@ function registerMcpRequestHandlers(server, { ALL_HANDLERS, METRICS, log }) {
     return await withTrace(traceId, async () => {
       METRICS.mcp_requests_total[name] = (METRICS.mcp_requests_total[name] || 0) + 1;
 
-      const handler = ALL_HANDLERS[name];
+      // 子集外的工具直接拒绝 —— 避免 monolithic handler 表泄漏。
+      if (!allowedNames.has(name)) {
+        log.warn("mcp-tool-not-exposed", { tool: name, traceId });
+        return errorResult(`tool-not-found: ${name}`);
+      }
+
+      const handler = exposedHandlers[name];
       if (!handler) {
         log.warn("mcp-tool-not-found", { tool: name, traceId });
         return errorResult(`tool-not-found: ${name}`);
