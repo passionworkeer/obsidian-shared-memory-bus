@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Local AI Memory Bus architecture</title>
+  <desc id="desc">Bilingual architecture card showing clients, MCP, retrieval, and local store.</desc>
+  <rect width="1600" height="900" fill="#101828"/>
+  <text x="100" y="100" font-family="Arial, sans-serif" font-size="56" font-weight="800" fill="#ffffff">架构：记忆属于本地开发环境</text>
+  <text x="100" y="150" font-family="Arial, sans-serif" font-size="28" fill="#b7d9e8">Architecture: memory belongs to your local development environment</text>
+  <g font-family="Arial, sans-serif">
+    <rect x="170" y="230" width="1260" height="105" rx="20" fill="#1d2939" stroke="#66d9ef" stroke-width="3"/>
+    <text x="800" y="282" text-anchor="middle" font-size="34" font-weight="700" fill="#ffffff">AI Clients</text>
+    <text x="800" y="315" text-anchor="middle" font-size="22" fill="#b7d9e8">Codex · Claude Code · Cursor · Copilot · OpenCode · Trae</text>
+    <rect x="170" y="380" width="1260" height="105" rx="20" fill="#173b4d" stroke="#75f0c8" stroke-width="3"/>
+    <text x="800" y="432" text-anchor="middle" font-size="34" font-weight="700" fill="#ffffff">Shared MCP Layer</text>
+    <text x="800" y="465" text-anchor="middle" font-size="22" fill="#c7fff0">memory:9338 · fetch · time · context7 · playwright</text>
+    <rect x="170" y="530" width="1260" height="105" rx="20" fill="#124559" stroke="#66d9ef" stroke-width="3"/>
+    <text x="800" y="582" text-anchor="middle" font-size="34" font-weight="700" fill="#ffffff">Hybrid Retrieval</text>
+    <text x="800" y="615" text-anchor="middle" font-size="22" fill="#b7d9e8">BM25 · dense vectors · route-aware reranking</text>
+    <rect x="170" y="680" width="1260" height="105" rx="20" fill="#092f3a" stroke="#75f0c8" stroke-width="3"/>
+    <text x="800" y="732" text-anchor="middle" font-size="34" font-weight="700" fill="#ffffff">Local .ai-memory Store</text>
+    <text x="800" y="765" text-anchor="middle" font-size="22" fill="#c7fff0">structured JSONL · generated context · knowledge graph · embeddings</text>
+  </g>
+  <g stroke="#ffffff" stroke-width="5" opacity="0.8">
+    <path d="M800 335V380"/>
+    <path d="M800 485V530"/>
+    <path d="M800 635V680"/>
+  </g>
+</svg>

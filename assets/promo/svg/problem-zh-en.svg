@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">AI tools forget separately</title>
+  <desc id="desc">Bilingual problem card showing isolated AI memory islands.</desc>
+  <rect width="1600" height="900" fill="#f7fbff"/>
+  <text x="100" y="110" font-family="Arial, sans-serif" font-size="58" font-weight="800" fill="#142033">每个工具都在单独失忆</text>
+  <text x="100" y="160" font-family="Arial, sans-serif" font-size="30" fill="#475467">Every AI tool forgets in its own silo</text>
+  <g transform="translate(110 250)">
+    <g>
+      <rect width="300" height="240" rx="24" fill="#ffffff" stroke="#d0d5dd" stroke-width="3"/>
+      <text x="150" y="75" text-anchor="middle" font-family="Arial, sans-serif" font-size="30" font-weight="700" fill="#101828">Codex</text>
+      <text x="150" y="130" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" fill="#667085">上下文 A</text>
+      <text x="150" y="166" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="#98a2b3">context A</text>
+    </g>
+    <g transform="translate(380 0)">
+      <rect width="300" height="240" rx="24" fill="#ffffff" stroke="#d0d5dd" stroke-width="3"/>
+      <text x="150" y="75" text-anchor="middle" font-family="Arial, sans-serif" font-size="30" font-weight="700" fill="#101828">Claude</text>
+      <text x="150" y="130" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" fill="#667085">上下文 B</text>
+      <text x="150" y="166" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="#98a2b3">context B</text>
+    </g>
+    <g transform="translate(760 0)">
+      <rect width="300" height="240" rx="24" fill="#ffffff" stroke="#d0d5dd" stroke-width="3"/>
+      <text x="150" y="75" text-anchor="middle" font-family="Arial, sans-serif" font-size="30" font-weight="700" fill="#101828">Cursor</text>
+      <text x="150" y="130" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" fill="#667085">上下文 C</text>
+      <text x="150" y="166" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="#98a2b3">context C</text>
+    </g>
+    <g transform="translate(1140 0)">
+      <rect width="300" height="240" rx="24" fill="#ffffff" stroke="#d0d5dd" stroke-width="3"/>
+      <text x="150" y="75" text-anchor="middle" font-family="Arial, sans-serif" font-size="30" font-weight="700" fill="#101828">Copilot</text>
+      <text x="150" y="130" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" fill="#667085">上下文 D</text>
+      <text x="150" y="166" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" fill="#98a2b3">context D</text>
+    </g>
+  </g>
+  <path d="M235 610H1365" stroke="#f04438" stroke-width="6" stroke-dasharray="18 18"/>
+  <text x="800" y="690" text-anchor="middle" font-family="Arial, sans-serif" font-size="40" font-weight="800" fill="#b42318">重复解释、重复踩坑、难以交接</text>
+  <text x="800" y="740" text-anchor="middle" font-family="Arial, sans-serif" font-size="28" fill="#667085">Repeated context, repeated mistakes, weak handoff</text>
+</svg>

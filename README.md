@@ -67,6 +67,19 @@ node setup-mcp.js
 
 重启 Claude Code 即可使用共享记忆系统。
 
+### 面向推广和新用户的入口
+
+如果你想快速给别人介绍或自己从零上手，优先看这组中文优先的入口：
+
+| 入口 | 说明 |
+|------|------|
+| [Universal Skill](SKILL.md) | 所有 AI 工具加入共享记忆的统一协议 |
+| [Agent Boot](.agents/skills/AGENT_BOOT.md) | 可复制给任意 AI host 的启动步骤 |
+| [中文快速开始](docs/promotion/QUICKSTART.zh-CN.md) | 面向新用户的安装和验证说明 |
+| [English Quick Start](docs/promotion/QUICKSTART.en.md) | English onboarding guide |
+| [推广长文草稿](docs/promotion/POST.zh-CN.md) | 技术论坛 / 图文发布底稿 |
+| [视频分镜](docs/promotion/VIDEO-STORYBOARD.zh-CN.md) | 60 秒短视频脚本 |
+
 ### MCP 端点
 
 | 服务 | URL |
