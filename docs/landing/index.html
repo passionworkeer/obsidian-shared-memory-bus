@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Local AI Memory Bus · 让所有 AI 工具共享同一个本地记忆</title>
+<meta name="description" content="一个本地优先的共享记忆层 + MCP 服务器。让 Claude Code、Codex、Cursor、Copilot 等所有 AI 工具共享同一份本地记忆。">
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --bg-2: #12121a;
+    --fg: #e8e8f0;
+    --fg-dim: #9999a8;
+    --accent: #7c5cff;
+    --accent-2: #00d4ff;
+    --accent-3: #ff5c8a;
+    --grid: rgba(124, 92, 255, 0.08);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Microsoft YaHei", sans-serif;
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 60px 60px;
+    pointer-events: none;
+    z-index: 0;
+  }
+  body::after {
+    content: '';
+    position: fixed;
+    top: -30%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 1200px;
+    height: 800px;
+    background: radial-gradient(ellipse, var(--accent) 0%, transparent 50%);
+    opacity: 0.15;
+    pointer-events: none;
+    z-index: 0;
+  }
+  main { position: relative; z-index: 1; max-width: 1200px; margin: 0 auto; padding: 80px 24px; }
+
+  /* Hero */
+  .hero {
+    text-align: center;
+    padding: 100px 0 80px;
+  }
+  .hero h1 {
+    font-size: clamp(2.5rem, 6vw, 4.5rem);
+    font-weight: 900;
+    line-height: 1.1;
+    margin-bottom: 24px;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 50%, var(--accent-3) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    letter-spacing: -0.02em;
+  }
+  .hero .tagline {
+    font-size: clamp(1.1rem, 2vw, 1.5rem);
+    color: var(--fg-dim);
+    margin-bottom: 48px;
+    max-width: 720px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    margin-bottom: 48px;
+  }
+  .badge {
+    display: inline-block;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    font-size: 0.85rem;
+    color: var(--fg-dim);
+  }
+  .badge.accent { color: var(--accent-2); border-color: rgba(0, 212, 255, 0.3); }
+  .cta {
+    display: inline-block;
+    padding: 16px 32px;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+    color: #fff;
+    text-decoration: none;
+    border-radius: 12px;
+    font-weight: 700;
+    font-size: 1.05rem;
+    transition: transform 0.2s, box-shadow 0.2s;
+    box-shadow: 0 8px 32px rgba(124, 92, 255, 0.3);
+  }
+  .cta:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 40px rgba(124, 92, 255, 0.5);
+  }
+  .cta.secondary {
+    background: transparent;
+    border: 1px solid var(--fg-dim);
+    box-shadow: none;
+    color: var(--fg);
+    margin-left: 12px;
+  }
+
+  /* Section */
+  section { margin: 80px 0; }
+  h2 {
+    font-size: clamp(1.8rem, 3vw, 2.5rem);
+    margin-bottom: 32px;
+    text-align: center;
+    font-weight: 800;
+  }
+  h2 .accent {
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Problem cards */
+  .problem-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 20px;
+  }
+  .card {
+    background: var(--bg-2);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    padding: 28px;
+    transition: border-color 0.2s, transform 0.2s;
+  }
+  .card:hover {
+    border-color: var(--accent);
+    transform: translateY(-4px);
+  }
+  .card .emoji { font-size: 2rem; margin-bottom: 12px; }
+  .card h3 { font-size: 1.1rem; margin-bottom: 8px; }
+  .card p { color: var(--fg-dim); font-size: 0.95rem; }
+
+  /* Scenarios */
+  .scenarios { display: grid; gap: 24px; }
+  .scenario {
+    background: var(--bg-2);
+    border-left: 4px solid var(--accent);
+    border-radius: 0 12px 12px 0;
+    padding: 24px 28px;
+  }
+  .scenario:nth-child(2) { border-left-color: var(--accent-2); }
+  .scenario:nth-child(3) { border-left-color: var(--accent-3); }
+  .scenario h3 { color: var(--accent); margin-bottom: 8px; font-size: 1.15rem; }
+  .scenario:nth-child(2) h3 { color: var(--accent-2); }
+  .scenario:nth-child(3) h3 { color: var(--accent-3); }
+  .scenario p { color: var(--fg-dim); }
+
+  /* Architecture diagram */
+  .arch {
+    background: var(--bg-2);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    padding: 40px 24px;
+    font-family: "SF Mono", "Cascadia Code", Consolas, monospace;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    overflow-x: auto;
+    color: var(--fg);
+  }
+  .arch .row { display: flex; justify-content: space-between; margin: 4px 0; }
+  .arch .box {
+    background: rgba(124, 92, 255, 0.1);
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    padding: 8px 16px;
+    text-align: center;
+    flex: 1;
+    margin: 0 4px;
+  }
+  .arch .arrow { text-align: center; color: var(--accent-2); padding: 4px 0; }
+
+  /* Stats */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 20px;
+    text-align: center;
+  }
+  .stat {
+    padding: 32px 16px;
+    background: var(--bg-2);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .stat .num {
+    font-size: 2.5rem;
+    font-weight: 900;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .stat .label { color: var(--fg-dim); margin-top: 4px; font-size: 0.9rem; }
+
+  /* Code */
+  pre {
+    background: #000;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 24px;
+    overflow-x: auto;
+    font-family: "SF Mono", "Cascadia Code", Consolas, monospace;
+    font-size: 0.9rem;
+    line-height: 1.6;
+  }
+  pre .comment { color: #6a737d; }
+  pre .cmd { color: var(--accent-2); }
+  pre .string { color: #a5d6ff; }
+
+  /* Footer */
+  footer {
+    text-align: center;
+    padding: 60px 0 30px;
+    color: var(--fg-dim);
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    margin-top: 80px;
+  }
+  footer a { color: var(--accent-2); text-decoration: none; }
+
+  /* Reveal */
+  .reveal { opacity: 0; transform: translateY(20px); transition: opacity 0.6s, transform 0.6s; }
+  .reveal.in { opacity: 1; transform: translateY(0); }
+</style>
+</head>
+<body>
+<main>
+
+  <section class="hero">
+    <h1>让所有 AI 工具<br>共享同一份记忆</h1>
+    <p class="tagline">
+      Local AI Memory Bus 是一个本地优先的共享记忆层 + MCP 服务器。
+      Claude Code、Codex、Cursor、Copilot……<br>
+      一个本地记忆，所有 AI 工具同步读写。
+    </p>
+    <div class="badges">
+      <span class="badge">本地优先</span>
+      <span class="badge accent">MCP 兼容</span>
+      <span class="badge">Node + Python</span>
+      <span class="badge">中英双语</span>
+      <span class="badge">增量更新</span>
+      <span class="badge">无 SaaS 依赖</span>
+    </div>
+    <div>
+      <a class="cta" href="https://github.com/passionworkeer/local-ai-memory-bus#快速开始4-步">立即开始 →</a>
+      <a class="cta secondary" href="https://github.com/passionworkeer/local-ai-memory-bus">View on GitHub</a>
+    </div>
+  </section>
+
+  <section>
+    <h2>它解决了 <span class="accent">什么问题</span></h2>
+    <div class="problem-grid">
+      <div class="card reveal">
+        <div class="emoji">🧠</div>
+        <h3>每个 AI 工具一个记忆</h3>
+        <p>Claude Code、Codex、Cursor 各自存自己的 notes/context。切换工具 = 重新解释项目。</p>
+      </div>
+      <div class="card reveal">
+        <div class="emoji">🔒</div>
+        <h3>云端 SaaS 锁定</h3>
+        <p>不少记忆方案要上传到厂商服务器。隐私顾虑 + 离线不可用。</p>
+      </div>
+      <div class="card reveal">
+        <div class="emoji">🔌</div>
+        <h3>MCP 配置碎片化</h3>
+        <p>每个工具的 mcp.json 格式不一样。安装一次要改 5 个地方。</p>
+      </div>
+      <div class="card reveal">
+        <div class="emoji">🈶</div>
+        <h3>检索中文差</h3>
+        <p>主流 embedding 对中文支持参差。中文项目检索召回率低。</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>什么时候 <span class="accent">用它</span></h2>
+    <div class="scenarios">
+      <div class="scenario reveal">
+        <h3>🌅 场景 A · 跨工具接力</h3>
+        <p>早上用 Claude Code 改了一版 API contract，下午切到 Codex 写 OpenAPI schema —— <b>不用再贴一遍上下文</b>，Codex 直接看到 Claude 早上的设计决策。</p>
+      </div>
+      <div class="scenario reveal">
+        <h3>🌿 场景 B · Obsidian 用户</h3>
+        <p>把 <code>~/.ai-memory/derived/</code>（自动导出的 Markdown）放进 Obsidian vault，<b>在 Obsidian 里编辑就是改 memory</b>。Graph view 自动展示关系。</p>
+      </div>
+      <div class="scenario reveal">
+        <h3>📚 场景 C · 长期项目知识库</h3>
+        <p>5 层记忆模型（L0 Working → L5 Archive）让临时笔记、关键事实、长期知识各归其位，<b>不会因为一个闲聊污染你的项目知识库</b>。</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>架构 <span class="accent">一张图</span></h2>
+    <div class="arch reveal">
+      <div class="row"><div class="box">Claude Code</div><div class="box">Codex</div><div class="box">Cursor</div><div class="box">Copilot</div></div>
+      <div class="arrow">↓ MCP (stdio / HTTP)</div>
+      <div class="row"><div class="box" style="border-color: var(--accent-2)">memory :9338</div><div class="box" style="border-color: var(--accent-2)">context7 :9331</div><div class="box" style="border-color: var(--accent-2)">fetch :9332</div></div>
+      <div class="arrow">↓</div>
+      <div class="row"><div class="box" style="border-color: var(--accent-3)">bus/ (Node + PS)</div><div class="box" style="border-color: var(--accent-3)">ops/ (export + cascade)</div><div class="box" style="border-color: var(--accent-3)">retrieval/ (Python + ANN)</div></div>
+      <div class="arrow">↓</div>
+      <div class="row"><div class="box" style="background: rgba(255,92,138,0.1); border-color: var(--accent-3)">structured/*.jsonl</div><div class="box" style="background: rgba(255,92,138,0.1); border-color: var(--accent-3)">derived/*.md</div><div class="box" style="background: rgba(255,92,138,0.1); border-color: var(--accent-3)">cascade.sqlite3</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>性能 <span class="accent">实测</span></h2>
+    <div class="stats">
+      <div class="stat reveal">
+        <div class="num">30×</div>
+        <div class="label">Dense 评分加速 (hnswlib)</div>
+      </div>
+      <div class="stat reveal">
+        <div class="num">~10ms</div>
+        <div class="label">单条记录增量嵌入</div>
+      </div>
+      <div class="stat reveal">
+        <div class="num">1400+</div>
+        <div class="label">测试用例（99%+ 通过）</div>
+      </div>
+      <div class="stat reveal">
+        <div class="num">59</div>
+        <div class="label">跨语言等价测试</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>4 步 <span class="accent">开始</span></h2>
+    <pre><span class="comment"># 1. 克隆</span>
+<span class="cmd">git clone</span> https://github.com/passionworkeer/local-ai-memory-bus.git
+<span class="cmd">cd</span> obsidian-shared-memory-bus
+
+<span class="comment"># 2. 安装依赖</span>
+<span class="cmd">npm install</span>
+
+<span class="comment"># 3. 启动 MCP 服务器</span>
+<span class="cmd">node start.js</span>            <span class="comment"># 或 Windows 双击 start.bat</span>
+
+<span class="comment"># 4. 配置 Claude Code（自动写入 .claude/mcp_servers.json）</span>
+<span class="cmd">node setup-mcp.js</span></pre>
+    <p style="text-align:center; color: var(--fg-dim); margin-top: 16px;">
+      重启 Claude Code / Codex / Cursor，<br>
+      MCP 工具列表里就会出现 <code style="color: var(--accent-2)">memory_recall</code> /
+      <code style="color: var(--accent-2)">memory_store</code> /
+      <code style="color: var(--accent-2)">memory_search</code>。
+    </p>
+  </section>
+
+  <section>
+    <h2>支持 <span class="accent">的工具</span></h2>
+    <div class="problem-grid">
+      <div class="card reveal"><div class="emoji">⭐</div><h3>Claude Code</h3><p>一级支持 · MCP + 自动 setup-mcp.js</p></div>
+      <div class="card reveal"><div class="emoji">⭐</div><h3>Codex</h3><p>一级支持 · MCP + agent skill</p></div>
+      <div class="card reveal"><div class="emoji">⭐</div><h3>OpenCode</h3><p>一级支持 · MCP + AGENTS.md</p></div>
+      <div class="card reveal"><div class="emoji">✅</div><h3>Cursor</h3><p>MCP 配置</p></div>
+      <div class="card reveal"><div class="emoji">✅</div><h3>VS Code / Copilot</h3><p>MCP + AGENTS.md</p></div>
+      <div class="card reveal"><div class="emoji">✅</div><h3>OpenClaw</h3><p>结构化记忆同步</p></div>
+    </div>
+  </section>
+
+  <footer>
+    <p>本地优先 · 跨工具 · 中英双语 · 跨语言等价 · 增量更新</p>
+    <p style="margin-top: 12px;">
+      <a href="https://github.com/passionworkeer/local-ai-memory-bus">GitHub</a> ·
+      <a href="docs/promotion/QUICKSTART.zh-CN.md">文档</a> ·
+      <a href="https://github.com/passionworkeer/local-ai-memory-bus/blob/main/LICENSE">MIT License</a>
+    </p>
+    <p style="margin-top: 24px; font-size: 0.85rem;">让 AI 工具共享记忆，告别重复解释。</p>
+  </footer>
+
+</main>
+
+<script>
+  // Reveal on scroll
+  const observer = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (e.isIntersecting) {
+        e.target.classList.add('in');
+        observer.unobserve(e.target);
+      }
+    }
+  }, { threshold: 0.1 });
+  document.querySelectorAll('.reveal').forEach((el) => observer.observe(el));
+</script>
+</body>
+</html>
