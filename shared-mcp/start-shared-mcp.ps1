@@ -22,8 +22,43 @@ if (-not $helperPath) {
 
 $manifestPath = Join-Path $root "manifest.json"
 $statePath = Join-Path $root "state.json"
-$logRoot = Join-Path $root "logs"
+$fallbackLogRoot = Join-Path $root "logs"
 $proxyScriptPath = Join-Path $root "singleton-stdio-mcp-proxy.mjs"
+
+# Resolve central log root (~/.ai-memory/logs/), falling back to shared-mcp/logs.
+# Source the standalone helper if available; otherwise use the fallback.
+$logPathHelper = Join-Path $sourceRoot (Join-Path "scripts" "Get-LogPath.ps1")
+$logRoot = $fallbackLogRoot
+if (Test-Path -LiteralPath $logPathHelper -PathType Leaf) {
+    . $logPathHelper
+    try {
+        $centralLogRoot = Get-LogRoot
+        if (-not [string]::IsNullOrWhiteSpace($centralLogRoot) -and (Test-Path -LiteralPath $centralLogRoot -PathType Container)) {
+            $logRoot = $centralLogRoot
+        }
+    } catch {
+        # Fall back to shared-mcp/logs — logging must never block startup.
+    }
+}
+
+# Append a timestamped line to the daily start log. Silently ignores failures.
+function Write-StartupLog {
+    param(
+        [Parameter(Mandatory = $true)][string]$Message,
+        [string]$Level = "INFO"
+    )
+    try {
+        $dailyLogPath = if (Get-Command Get-DailyLogPath -ErrorAction SilentlyContinue) {
+            Get-DailyLogPath -Prefix "start"
+        } else {
+            Join-Path $logRoot ("start-{0}.log" -f (Get-Date -Format "yyyy-MM-dd"))
+        }
+        $line = "[{0}] [{1}] {2}" -f (Get-Date).ToString("o"), $Level, $Message
+        Add-Content -Path $dailyLogPath -Value $line -Encoding UTF8
+    } catch {
+        # Logging must never crash the caller.
+    }
+}
 $stateMutexName = Get-SharedMutexName -BaseName "AiMcpStateV1"
 
 function Ensure-Directory {
@@ -861,6 +896,7 @@ function Clean-StateFile {
 }
 
 try {
+    Write-StartupLog -Message "shared-mcp startup begin (PID=$PID, logRoot=$logRoot)"
     $state = Read-State
 
     # Clean zombie PID entries before starting servers.
@@ -1077,8 +1113,36 @@ try {
     Write-State -State $state
     $results | ConvertTo-Json -Depth 6
     if (@($results | Where-Object { @("started", "already-running", "adopted") -notcontains [string]$_.status }).Count -gt 0) {
+        Write-StartupLog -Message "shared-mcp startup completed with failures" -Level "WARN"
         exit 1
     }
+    Write-StartupLog -Message "shared-mcp startup completed successfully"
+} catch {
+    # Write crash log with full exception details so users never see a blank window.
+    try {
+        $crashLogPath = if (Get-Command Get-CrashLogPath -ErrorAction SilentlyContinue) {
+            Get-CrashLogPath
+        } else {
+            Join-Path $logRoot ("crash-{0}.log" -f (Get-Date -Format "yyyy-MM-ddTHH-mm-ss"))
+        }
+        $crashContent = @(
+            "=== Crash Report ===",
+            "Timestamp: $(Get-Date -Format 'o')",
+            "PID: $PID",
+            "Script: $($MyInvocation.MyCommand.Path)",
+            "Error: $($_.Exception.Message)",
+            "Type: $($_.Exception.GetType().FullName)",
+            "",
+            "ScriptStackTrace:",
+            "$($_.ScriptStackTrace)"
+        ) -join "`n"
+        Add-Content -Path $crashLogPath -Value $crashContent -Encoding UTF8
+        Write-StartupLog -Message "CRASH: $($_.Exception.Message)" -Level "CRASH"
+        Write-Error "[shared-mcp] Startup failed. Crash log: $crashLogPath"
+    } catch {
+        Write-Error "[shared-mcp] Startup failed: $($_.Exception.Message)"
+    }
+    exit 1
 } finally {
     if ($mutexAcquired) {
         try {

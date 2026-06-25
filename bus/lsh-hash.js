@@ -10,6 +10,8 @@
  * full embeddings rebuild so all stored vectors use the same fingerprint.
  */
 
+import { pathToFileURL } from "node:url";
+
 /** @type {number} */
 const VECTOR_SCHEMA_VERSION = 1;
 
@@ -121,3 +123,34 @@ export {
   buildHashFeatures,
   buildHashEmbedding,
 };
+
+// CLI entry point for cross-language bridge verification.
+// Invoked when this file is run directly via `node bus/lsh-hash.js`.
+// Usage: node bus/lsh-hash.js --text "hello world"
+// Outputs a single JSON line: {"version":1,"features":[...],"embedding_dim":384,"embedding_nonzero_count":N}
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const cliArgs = process.argv.slice(2);
+  const textFlagIndex = cliArgs.indexOf("--text");
+  const cliText =
+    textFlagIndex !== -1 && cliArgs[textFlagIndex + 1] !== undefined
+      ? cliArgs[textFlagIndex + 1]
+      : "";
+
+  const cliFeatures = buildHashFeatures(cliText);
+  const cliEmbedding = buildHashEmbedding(cliText, 384);
+  let cliNonzeroCount = 0;
+  for (const value of cliEmbedding) {
+    if (value !== 0) {
+      cliNonzeroCount += 1;
+    }
+  }
+
+  process.stdout.write(
+    JSON.stringify({
+      version: VECTOR_SCHEMA_VERSION,
+      features: cliFeatures,
+      embedding_dim: 384,
+      embedding_nonzero_count: cliNonzeroCount,
+    }) + "\n"
+  );
+}
