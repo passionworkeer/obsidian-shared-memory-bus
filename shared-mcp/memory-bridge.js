@@ -12,6 +12,11 @@
 
 import fs from "node:fs";
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const BLACKBOARD_QUERY_SCRIPT = fileURLToPath(
+  new URL("./scripts/blackboard_query.py", import.meta.url),
+);
 
 function jsonResult(payload) {
   return {
@@ -202,53 +207,19 @@ export function createMemoryBridge(params) {
       return { ok: false, error: `python-runtime-unavailable: ${PYTHON.error || "unknown-error"}` };
     }
 
-    // NOTE: Inline -c string is intentional — avoids a temp file on disk.
-    // Debug tip: to inspect, add `print("DEBUG:", payload)` before json.load().
-    const script = `
-import json
-import sqlite3
-import sys
-
-payload = json.load(sys.stdin)
-db = sqlite3.connect(payload["db"], timeout=5)
-db.row_factory = sqlite3.Row
-
-try:
-    if payload["op"] == "query":
-        states = [str(item).strip().upper() for item in payload.get("states", []) if str(item).strip()]
-        where = ""
-        params = []
-        if states:
-            where = " WHERE state IN ({})".format(",".join("?" for _ in states))
-            params.extend(states)
-        params.append(max(1, int(payload.get("limit", 10))))
-        sql = "SELECT id, repo, issue_number, issue_title, state, assigned_agent, processor, updated_at FROM tasks{} ORDER BY updated_at DESC LIMIT ?".format(where)
-        rows = [dict(row) for row in db.execute(sql, params)]
-        print(json.dumps({"ok": True, "rows": rows}, ensure_ascii=False))
-    elif payload["op"] == "insert":
-        repo = str(payload["repo"]).strip()
-        issue_number = int(payload["issue_number"])
-        assigned_agent = str(payload.get("assigned_agent") or "intel").strip() or "intel"
-        issue_title = str(payload.get("issue_title") or "{}#{}".format(repo, issue_number)).strip()
-        cursor = db.execute(
-            "INSERT INTO tasks (repo, issue_number, assigned_agent, issue_title, state) VALUES (?, ?, ?, ?, ?)",
-            (repo, issue_number, assigned_agent, issue_title, 'PENDING'),
-        )
-        db.commit()
-        print(json.dumps({"ok": True, "insertedId": cursor.lastrowid}, ensure_ascii=False))
-    else:
-        print(json.dumps({"ok": False, "error": "unsupported-op"}, ensure_ascii=False))
-finally:
-    db.close()
-`;
-
-    const result = await spawnProcess(PYTHON.command, withPythonArgs(PYTHON, ["-c", script]), {
-      env: PYTHON_SPAWN_ENV,
-      input: JSON.stringify({
-        ...payload,
-        db: BLACKBOARD_DB_PATH,
-      }),
-    });
+    // Payload is passed via stdin (same contract as the former inline -c string).
+    // The .py reads JSON from stdin and prints a single JSON line on stdout.
+    const result = await spawnProcess(
+      PYTHON.command,
+      withPythonArgs(PYTHON, [BLACKBOARD_QUERY_SCRIPT]),
+      {
+        env: PYTHON_SPAWN_ENV,
+        input: JSON.stringify({
+          ...payload,
+          db: BLACKBOARD_DB_PATH,
+        }),
+      },
+    );
 
     if (result.code !== 0) {
       return {
