@@ -329,15 +329,20 @@ function detectBestDrive() {
 const DEFAULT_STORE_ROOT = path.join(os.homedir(), ".ai-memory");
 let cachedStoreRoot = null;
 
+import { resolveStoreRoot as resolveBusStoreRoot } from "../store-root.js";
+
 function resolveStoreRoot(options = {}) {
   if (cachedStoreRoot && !options.refresh) return cachedStoreRoot;
 
-  for (const envKey of ["AI_MEMORY_STORE", "AI_MEMORY_STORE_ROOT", "AI_MEMORY_ROOT"]) {
-    const candidate = (process.env[envKey] || "").trim();
-    if (candidate) {
-      cachedStoreRoot = path.resolve(candidate);
-      return cachedStoreRoot;
-    }
+  // Delegate to the unified bus/store-root.js so the adapter matches the
+  // canonical resolution (explicit env > vault bridge > AI_MEMORY_ROOT >
+  // default). Mirror Python's retrieval/runtime_support.py:resolve_store_root.
+  // Windows-only extra: when no env / vault resolves, prefer the drive with
+  // the most free space for the default store location.
+  const resolved = resolveBusStoreRoot();
+  if (resolved && resolved !== DEFAULT_STORE_ROOT) {
+    cachedStoreRoot = path.resolve(resolved);
+    return cachedStoreRoot;
   }
 
   const best = detectBestDrive();

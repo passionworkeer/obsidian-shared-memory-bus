@@ -127,6 +127,26 @@ function ensureDirectory(targetPath) {
  * @param {string} filePath
  * @param {function(number): void} fn  - receives the file descriptor
  */
+/**
+ * Synchronous bounded backoff for withFileLock retry loops.
+ *
+ * TRADE-OFF: Node's main thread has no non-spinning synchronous sleep —
+ * Atomics.wait is forbidden on the main thread and setTimeout is async.
+ * withFileLock is synchronous by contract (callers pass a sync fn(fd)
+ * callback and expect the write complete when it returns), so we busy-wait.
+ * This only fires under lock contention and is bounded to MAX_RETRIES=3 with
+ * exponential backoff (100/200/400ms) — at most ~700ms on one core.
+ * Converting withFileLock to async would remove the spin but is a breaking
+ * change for all callers (memory-layers-dedup.js + 3 test files); tracked as
+ * P2 tech debt. Do not add new sync callers without weighing this.
+ */
+function syncBackoff(delayMs) {
+  const start = Date.now();
+  while (Date.now() - start < delayMs) {
+    /* bounded spin — documented trade-off above */
+  }
+}
+
 function withFileLock(filePath, fn) {
   const MAX_RETRIES = 3;
   const BASE_DELAY_MS = 100;
@@ -140,11 +160,6 @@ function withFileLock(filePath, fn) {
     const lockFile = `${filePath}.lock`;
     let lockFd = null;
     let attempt = 0;
-
-    const wait = (delay) => {
-      const start = Date.now();
-      while (Date.now() - start < delay) { /* spin */ }
-    };
 
     while (attempt < MAX_RETRIES) {
       attempt++;
@@ -162,7 +177,7 @@ function withFileLock(filePath, fn) {
           fs.closeSync(lockFd);
           lockFd = null;
           if (attempt < MAX_RETRIES) {
-            wait(BASE_DELAY_MS * Math.pow(2, attempt - 1));
+            syncBackoff(BASE_DELAY_MS * Math.pow(2, attempt - 1));
           }
           continue;
         }
@@ -187,7 +202,7 @@ function withFileLock(filePath, fn) {
           try { fs.closeSync(lockFd); } catch {}
         }
         lockFd = null;
-        wait(BASE_DELAY_MS * Math.pow(2, attempt - 1));
+        syncBackoff(BASE_DELAY_MS * Math.pow(2, attempt - 1));
       }
     }
     throw new Error(`[withFileLock] could not acquire lock on ${filePath}: lock held after ${MAX_RETRIES} retries`);
@@ -214,9 +229,7 @@ function withFileLock(filePath, fn) {
         try { fs.closeSync(fd); } catch {}
         fd = null;
         if (attempt < MAX_RETRIES) {
-          const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1);
-          const start = Date.now();
-          while (Date.now() - start < delay) { /* spin */ }
+          syncBackoff(BASE_DELAY_MS * Math.pow(2, attempt - 1));
         }
       }
     } catch (err) {
@@ -244,9 +257,7 @@ function withFileLock(filePath, fn) {
       }
       try { if (fd) fs.closeSync(fd); } catch {}
       fd = null;
-      const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1);
-      const start = Date.now();
-      while (Date.now() - start < delay) { /* spin */ }
+      syncBackoff(BASE_DELAY_MS * Math.pow(2, attempt - 1));
     }
   }
 

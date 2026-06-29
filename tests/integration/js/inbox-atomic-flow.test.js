@@ -15,7 +15,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { createTempDir, cleanupTempDir } from "../../helpers/setup.js";
 
@@ -84,14 +84,23 @@ describe("inbox atomic flow integration", () => {
 
   // -------------------------------------------------------------------------
   // Scenario 2: Concurrent 20-process append — no dropped lines
-  // Skip in CI (flaky on GitHub Actions virtualized filesystem) and Windows
+  //
+  // Previously skipped on Windows and GitHub Actions. The root cause was NOT
+  // the atomic-write implementation — it was a portability bug in this test's
+  // child-process harness: the spawned `-e` script did
+  //   await import(<bare-windows-path>)
+  // and Node's ESM loader rejects raw Windows paths ("E:\\...") with
+  // ERR_UNSUPPORTED_ESM_URL_SCHEME. Converting the script path to a file://
+  // URL via pathToFileURL() makes the harness cross-platform, so the test
+  // now runs (and passes) on Windows locally and in CI.
   // -------------------------------------------------------------------------
-  const concurrentTest = (process.env.GITHUB_ACTIONS || process.platform === "win32") ? test.skip : test;
+  const concurrentTest = test;
   concurrentTest("concurrent 20 child processes each append one line — zero dropped lines", async () => {
     const file = path.join(testDir, "concurrent-20.jsonl");
     const N = 20;
 
     const scriptPath = path.join(__dirname, "../../../ops/inbox/inbox-atomic-write.js");
+    const scriptUrl = pathToFileURL(scriptPath).href;
     const promises = Array.from({ length: N }, (_, i) =>
       new Promise((resolve) => {
         const child = spawn(
@@ -100,7 +109,7 @@ describe("inbox atomic flow integration", () => {
             "-e",
             `
             (async () => {
-              const { appendLineAtomic } = await import(${JSON.stringify(scriptPath)});
+              const { appendLineAtomic } = await import(${JSON.stringify(scriptUrl)});
               const file = ${JSON.stringify(file)};
               try {
                 appendLineAtomic(file, { id: "p" + ${i}, pid: process.pid, seq: ${i} });
@@ -177,10 +186,10 @@ describe("inbox atomic flow integration", () => {
 
   // -------------------------------------------------------------------------
   // Stress: interleaved sequential + concurrent writes
-  // Skip in CI (flaky on GitHub Actions virtualized filesystem) and Windows
-  // (uses the same race pattern as Scenario 2)
+  // (Previously skipped on Windows + CI for the same harness portability
+  // reason as Scenario 2 — now fixed via pathToFileURL.)
   // -------------------------------------------------------------------------
-  const mixedTest = (process.env.GITHUB_ACTIONS || process.platform === "win32") ? test.skip : test;
+  const mixedTest = test;
   mixedTest("mixed sequential and concurrent writes — all records present, no corruption", async () => {
     const { appendLineAtomic } = await import("../../../ops/inbox/inbox-atomic-write.js");
     const file = path.join(testDir, "mixed.jsonl");
@@ -193,6 +202,7 @@ describe("inbox atomic flow integration", () => {
     // Concurrently append 15 more
     const N = 15;
     const scriptPath = path.join(__dirname, "../../../ops/inbox/inbox-atomic-write.js");
+    const scriptUrl = pathToFileURL(scriptPath).href;
     const promises = Array.from({ length: N }, (_, i) =>
       new Promise((resolve) => {
         spawn(
@@ -201,7 +211,7 @@ describe("inbox atomic flow integration", () => {
             "-e",
             `
             (async () => {
-              const { appendLineAtomic } = await import(${JSON.stringify(scriptPath)});
+              const { appendLineAtomic } = await import(${JSON.stringify(scriptUrl)});
               appendLineAtomic(${JSON.stringify(file)}, { id: "par-${i}", type: "parallel" });
             })();
             `,

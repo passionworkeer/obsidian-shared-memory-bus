@@ -5,7 +5,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { readJsonl, readText, writeText, appendText, ensureDirectory, withFileLock, tryWithFileLock } from "./paths-and-io.js";
+import { readJsonl, writeText, appendText, ensureDirectory, withFileLock, tryWithFileLock } from "./paths-and-io.js";
 import { sha256, getFreshness, shouldSkipAsRecentDuplicate, normalizeSpaces, DAILY_LOG_DIR } from "./memory-layers-parse.js";
 
 // ---------------------------------------------------------------------------
@@ -271,6 +271,27 @@ function buildDailyLogEntry(record) {
 }
 
 /**
+ * Stream-extracts the set of `id` values from a daily JSONL log without
+ * materialising a split array or JSON.parsing every line. Returns Set<id>.
+ * Pure reader — does not mutate the file. Returns empty Set if absent.
+ *
+ * WHY regex over JSON.parse-per-line: dedup only needs the `id` field, so a
+ * single stateless scan avoids constructing per-line objects and a temporary
+ * line array, lowering the constant factor of the unavoidable O(file) pass.
+ */
+function scanExistingIds(logFile) {
+  if (!fs.existsSync(logFile)) return new Set();
+  const buf = fs.readFileSync(logFile, "utf8");
+  const ids = new Set();
+  // Match "id":"<value>" — value is any char not a double-quote or backslash.
+  // buildDailyLogEntry always serialises id as a JSON string, so this is safe.
+  const re = /"id"\s*:\s*"([^"\\]*)"/g;
+  let m;
+  while ((m = re.exec(buf)) !== null) ids.add(m[1]);
+  return ids;
+}
+
+/**
  * Appends new records to daily log files (logs/YYYY/MM/YYYY-MM-DD.jsonl).
  * Only appends records from today and yesterday — never rewrites history.
  * Uses exclusive file lock around the full read-modify-write cycle.
@@ -305,28 +326,30 @@ function appendDailyLogs(newRecords, dryRun = false) {
     // Ensure log directory exists before any file I/O
     ensureDirectory(logDir);
 
-    // Exclusive lock guards the entire read-modify-write cycle
+    // Exclusive lock guards the read-dedup-append cycle.
+    // WHY scan-and-append (not pure append-only): dedup contract requires
+    // detecting ids already written by prior calls in this same daily file.
+    // Pure append-only would emit duplicate lines on repeated builds; we keep
+    // O(file) id scan but avoid readFileSync+split+JSON.parse double-buffering
+    // by streaming the buffer once with a single id-extracting regex.
     withFileLock(logFile, (fd) => {
-      // Read existing entry IDs under lock to detect duplicates
-      const existingIds = new Set();
-      if (fs.existsSync(logFile)) {
-        const existing = fs.readFileSync(logFile, "utf8").split(/\r?\n/).filter((l) => l.trim());
-        for (const line of existing) {
-          try {
-            existingIds.add(JSON.parse(line).id);
-          } catch {
-            // skip malformed lines
-          }
-        }
-      }
+      const existingIds = scanExistingIds(logFile);
 
-      const toAppend = newEntries.filter((e) => !existingIds.has(e.id));
+      // In-memory dedup of the incoming batch first — pure O(new entries),
+      // no file I/O — so only genuinely new ids trigger the file scan filter.
+      const seenNow = new Set();
+      const toAppend = [];
+      for (const entry of newEntries) {
+        if (seenNow.has(entry.id) || existingIds.has(entry.id)) continue;
+        seenNow.add(entry.id);
+        toAppend.push(entry);
+      }
       if (toAppend.length === 0) return;
 
       // Atomic append: O_APPEND + fd fsync guarantees no torn writes and
       // POSIX guarantees concurrent appenders won't interleave lines for
-      // sizes <= PIPE_BUF (4 KiB on Linux). Lock + append keeps the
-      // read-modify-write cycle O(new lines) instead of O(whole file).
+      // sizes <= PIPE_BUF (4 KiB on Linux). Lock + append keeps the write
+      // phase O(new lines) regardless of file size.
       const newLines = toAppend.map((e) => JSON.stringify(e)).join("\n") + "\n";
       fs.appendFileSync(logFile, newLines, "utf8");
       fs.fsyncSync(fd);

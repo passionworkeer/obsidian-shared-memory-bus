@@ -9,6 +9,44 @@
 - Use matching skills from .claude/skills, .agents/skills, skills/, and .agents/skills/ when available.
 <!-- SHARED-MEMORY-BUS:END -->
 
+## MCP 接入 / MCP Onboarding
+
+This project shares local MCP servers (HTTP streamable, `127.0.0.1:<port>/mcp`). Register them with any MCP-capable agent in one command:
+
+```bash
+node setup-mcp.js                       # all known agents
+node setup-mcp.js --target=<agent|all>  # one or several (comma-separated)
+node setup-mcp.js --dry-run             # preview, write nothing
+node setup-mcp.js --help                # list supported targets
+```
+
+Supported targets: `claude`, `cursor`, `kiro`, `windsurf`, `cline`, `roo`, `goose`, `qoder`, `all`. If an agent's config file is absent, the script prints the exact path + JSON/YAML snippet to add manually — it never errors out.
+
+### Shared MCP endpoints
+
+| Server | URL | Purpose |
+|--------|-----|---------|
+| memory | http://127.0.0.1:9338/mcp | Unified shared memory (search/write, isolated search worker) |
+| fetch | http://127.0.0.1:9332/mcp | Stateless URL fetch |
+| time | http://127.0.0.1:9333/mcp | Timezone/time utilities |
+| context7 | http://127.0.0.1:9331/mcp | Documentation/code search |
+| playwright | http://127.0.0.1:9337/mcp | Browser automation (optional) |
+
+Full manifest: `shared-mcp/manifest.json`. Host `127.0.0.1`, path `/mcp`.
+
+### Per-agent notes (one line each)
+
+- **Claude Desktop** — `claude_desktop_config.json`, `mcpServers.<id> = { url }`.
+- **Cursor** — `~/.cursor/mcp.json`, `mcpServers.<id> = { url }`.
+- **Kiro** — `~/.kiro/settings/mcp.json`, supports `{ url }` for streamable-http.
+- **Windsurf** — `~/.codeium/windsurf/mcp_config.json`, `{ url }`.
+- **Cline** — VS Code globalStorage `.../saoudrizwan.claude-dev/settings/cline_mcp_settings.json`, `{ url }`.
+- **Roo Code** — VS Code globalStorage `.../rooveterinaryinc.roo-cline/settings/mcp_settings.json`, `{ url }`.
+- **Goose** — `~/.config/goose/config.yaml` `extensions` block, `type: remote` + `url` (or `goose configure`).
+- **Qoder** — on-disk path unverified upstream; script prints a hint, configure via UI "MCP → + Add" if needed.
+
+To add a new agent: append one entry to `AGENT_REGISTRY` in `setup-mcp.js` — nothing else changes.
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 

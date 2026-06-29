@@ -29,11 +29,12 @@ import {
   clearRestartTimer,
   ensureInitialized,
   handleSingleRpc,
+  isAllowedMcpHost,
   readJsonBody,
   sendJson,
   sendAccepted,
-  scheduleRestart,
 } from './proto/rpc.mjs';
+import { scheduleRestart } from './proto/restart.mjs';
 import { killTree } from './proto/child-process.mjs';
 
 if (!stdioCommand) {
@@ -85,6 +86,18 @@ const server = http.createServer(async (req, res) => {
     if (req.method !== 'POST') {
       sendJson(res, 405, {
         error: 'Method not allowed',
+      });
+      return;
+    }
+
+    if (!isAllowedMcpHost(req.headers.host)) {
+      sendJson(res, 403, {
+        jsonrpc: '2.0',
+        id: null,
+        error: {
+          code: -32000,
+          message: 'Forbidden: host header is not loopback',
+        },
       });
       return;
     }

@@ -198,6 +198,26 @@ class TestPathResolution:
         monkeypatch.setenv("AI_MEMORY_STORE_ROOT", str(tmp_path / "store-root"))
         assert resolve_store_root() == (tmp_path / "store-root").resolve()
 
+    def test_resolve_store_root_bridges_to_vault_when_no_store_env(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("AI_MEMORY_STORE", raising=False)
+        monkeypatch.delenv("AI_MEMORY_STORE_ROOT", raising=False)
+        monkeypatch.delenv("AI_MEMORY_ROOT", raising=False)
+        vault = tmp_path / "vault"
+        (vault / "00-System" / "ai-memory").mkdir(parents=True)
+        monkeypatch.setenv("AI_MEMORY_OBSIDIAN_VAULT", str(vault))
+        assert resolve_store_root() == (vault / "00-System" / "ai-memory").resolve()
+
+    def test_resolve_store_root_vault_beats_legacy_ai_memory_root(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("AI_MEMORY_STORE", raising=False)
+        monkeypatch.delenv("AI_MEMORY_STORE_ROOT", raising=False)
+        vault = tmp_path / "vault"
+        (vault / "00-System" / "ai-memory").mkdir(parents=True)
+        monkeypatch.setenv("AI_MEMORY_OBSIDIAN_VAULT", str(vault))
+        legacy = tmp_path / "legacy-store"
+        legacy.mkdir()
+        monkeypatch.setenv("AI_MEMORY_ROOT", str(legacy))
+        assert resolve_store_root() == (vault / "00-System" / "ai-memory").resolve()
+
     def test_resolve_runtime_root_candidates_empty(self):
         with patch.dict(os.environ, {}, clear=True):
             candidates = resolve_runtime_root_candidates()

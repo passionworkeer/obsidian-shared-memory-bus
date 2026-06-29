@@ -10,7 +10,6 @@ import os from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DomainError, COMMON_CODES } from "../../bus/domain-error.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -202,56 +201,43 @@ test("Embedding Provider Registry — list/get/embedBatch surface", async () => 
 // ============================================================================
 // Test 12: Memory Status Handler
 // ============================================================================
-test("Memory Status Handler — handleMemoryStatus/handleGetMemoryOverview/handleMemoryWakeUp/loadTaskRecords", async () => {
+test("Memory Status — handlers contract + memory_wake_up behavior on empty vault", async () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-status-"));
   try {
     const { createMemoryStatus } = await import(toFileUrl(path.join(REPO_ROOT, "shared-mcp/memory-status.js")));
+    const { handlers } = createMemoryStatus({ VAULT_ROOT: tmpRoot });
 
-    const status = createMemoryStatus();
-    const statusResult = await status.handleMemoryStatus({});
-    assert.notEqual(statusResult, null, "Status returns result");
+    // Contract: factory exposes the three documented handlers.
+    // Renaming or removing any of these must fail the test loudly (no silent skip).
+    assert.equal(typeof handlers.memory_status, "function", "memory_status handler exists");
+    assert.equal(typeof handlers.get_memory_overview, "function", "get_memory_overview handler exists");
+    assert.equal(typeof handlers.memory_wake_up, "function", "memory_wake_up handler exists");
 
-    const overviewResult = await status.handleGetMemoryOverview({});
-    assert.notEqual(overviewResult, null, "Overview returns result");
-
-    const wakeupResult = await status.handleMemoryWakeUp({});
-    assert.notEqual(wakeupResult, null, "WakeUp returns result");
-
-    const taskRecords = await status.loadTaskRecords();
-    assert.ok(Array.isArray(taskRecords), "Task records returns array");
-  } catch (err) {
-    // Mirror original semantics: missing optional surface is tolerated as "test skipped"
-    if (err instanceof DomainError && err.code === COMMON_CODES.NOT_FOUND) {
-      return;
-    }
-    // TypeError for "not a function" on missing optional handler — treat as tolerated skip
-    if (err && err.name === "TypeError") {
-      return;
-    }
-    throw new DomainError(COMMON_CODES.INTERNAL, "Memory Status Handler test failed", { cause: err });
+    // Behavior: memory_wake_up reads only local files via resolveStoreDir/readOptionalJson
+    // (no param-supplied readers), so it must return a real result on an empty vault
+    // rather than throwing. memory_status is NOT invoked here because it depends on a
+    // full set of param-supplied reader functions that a smoke test cannot construct.
+    const wakeupResult = await handlers.memory_wake_up({});
+    assert.notEqual(wakeupResult, null, "memory_wake_up returns a result on empty vault");
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
 });
 // ============================================================================
 // Test 13: Memory Bridge Handler
 // ============================================================================
-test("Memory Bridge Handler — handleReadSharedMemory/handleListSharedMemory", async () => {
-  try {
-    const { createMemoryBridge } = await import(toFileUrl(path.join(REPO_ROOT, "shared-mcp/memory-bridge.js")));
+test("Memory Bridge — factory exposes claude_mem/blackboard handlers", async () => {
+  const { createMemoryBridge } = await import(toFileUrl(path.join(REPO_ROOT, "shared-mcp/memory-bridge.js")));
+  const { handlers } = createMemoryBridge({});
 
-    const bridge = createMemoryBridge({});
-    const readResult = await bridge.handleReadSharedMemory({ path: "test", limit: 10 });
-    assert.notEqual(readResult, null, "Read returns result");
-
-    const listResult = await bridge.handleListSharedMemory({ path: "/" });
-    assert.notEqual(listResult, null, "List returns result");
-  } catch (err) {
-    // Mirror original semantics: missing optional surface is tolerated as "test skipped"
-    if (err instanceof DomainError && err.code === COMMON_CODES.NOT_FOUND) {
-      return;
-    }
-    // TypeError for "not a function" on missing optional handler — treat as tolerated skip
-    if (err && err.name === "TypeError") {
-      return;
-    }
-    throw new DomainError(COMMON_CODES.INTERNAL, "Memory Bridge Handler test failed", { cause: err });
-  }
+  // Contract: factory exposes the four documented handlers. These require external
+  // deps (claude_mem HTTP, blackboard Python DB) so they are not invoked here, but
+  // their presence is asserted so a rename/removal breaks the build loudly instead
+  // of silently passing. (Previous version of this test referenced handleReadShared
+  // Memory / handleListSharedMemory, which never existed in this module — a fake
+  // green masked by a catch-all TypeError swallow.)
+  assert.equal(typeof handlers.query_claude_mem, "function", "query_claude_mem handler exists");
+  assert.equal(typeof handlers.insert_claude_mem, "function", "insert_claude_mem handler exists");
+  assert.equal(typeof handlers.get_blackboard_tasks, "function", "get_blackboard_tasks handler exists");
+  assert.equal(typeof handlers.write_blackboard_task, "function", "write_blackboard_task handler exists");
 });

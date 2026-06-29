@@ -17,6 +17,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { TOOLS } from "./memory-tools.js";
+import { resolveStoreRoot as resolveCanonicalStoreRoot } from "../bus/store-root.js";
 
 const SEARCH_ROUTE_VALUES = new Set(["auto", "mixed", "durable", "task", "recent", "reference"]);
 
@@ -38,21 +39,29 @@ function errorResult(message) {
 }
 
 function resolveStoreRootParam(params = {}) {
-  return (
+  // Explicit store params (caller override) win first.
+  const explicitStore =
     params.STORE_ROOT ||
     params.MEMORY_STORE_ROOT ||
     params.storeRoot ||
     params.memoryStoreRoot ||
     params.AI_MEMORY_STORE ||
-    params.AI_MEMORY_STORE_ROOT ||
-    params.AI_MEMORY_ROOT ||
-    process.env.AI_MEMORY_STORE ||
-    process.env.AI_MEMORY_STORE_ROOT ||
-    process.env.AI_MEMORY_ROOT ||
-    params.VAULT_ROOT ||
-    params.vaultRoot ||
-    path.join(process.env.USERPROFILE || process.env.HOME || ".", ".ai-memory")
-  );
+    params.AI_MEMORY_STORE_ROOT;
+  if (explicitStore) return explicitStore;
+  // Canonical resolution vault-bridges to the Obsidian vault's ai-memory when
+  // no store env is set. Must take priority over the legacy AI_MEMORY_ROOT hint,
+  // otherwise the server reads an empty ~/.ai-memory instead of the real vault
+  // data (consistent with bus/store-root.js priority).
+  try {
+    return resolveCanonicalStoreRoot();
+  } catch {
+    return (
+      params.AI_MEMORY_ROOT ||
+      params.VAULT_ROOT ||
+      params.vaultRoot ||
+      path.join(process.env.USERPROFILE || process.env.HOME || ".", ".ai-memory")
+    );
+  }
 }
 
 function spawnProcess(executable, args, options = {}) {

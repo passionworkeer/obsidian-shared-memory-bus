@@ -100,6 +100,53 @@ export function resolveVaultRootChain({
   return fallback();
 }
 
+// Obsidian config file locations per platform (mirrors Python
+// platform.py:get_obsidian_config_candidates). Used to discover vaults the
+// user has actually opened in Obsidian, which may live on any drive — not
+// just the hard-coded default candidates below.
+function getObsidianConfigCandidates() {
+  const home = homedir();
+  const candidates = [];
+  if (nonEmptyEnv("APPDATA")) {
+    candidates.push(path.join(nonEmptyEnv("APPDATA"), "obsidian", "obsidian.json"));
+  }
+  candidates.push(path.join(home, "Library", "Application Support", "obsidian", "obsidian.json"));
+  const xdg = nonEmptyEnv("XDG_CONFIG_HOME") || path.join(home, ".config");
+  candidates.push(path.join(xdg, "obsidian", "obsidian.json"));
+  return candidates;
+}
+
+// Mirror Python resolve_from_obsidian_config(): read obsidian.json, pick the
+// most recently used open vault. Returns "" when no vault is recorded.
+// Exported so bus/store-root.js can vault-bridge to a real (any-drive) vault.
+export function resolveFromObsidianConfig() {
+  for (const configPath of getObsidianConfigCandidates()) {
+    if (!fs.existsSync(configPath)) continue;
+    let payload;
+    try {
+      payload = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    } catch {
+      continue;
+    }
+    const vaultsObj = (payload && payload.vaults) || {};
+    const vaults = [];
+    for (const rawEntry of Object.values(vaultsObj)) {
+      const v = String((rawEntry && rawEntry.path) || "").trim();
+      if (!v || !fs.existsSync(v)) continue;
+      vaults.push({
+        path: path.resolve(v),
+        open: !!(rawEntry && rawEntry.open),
+        ts: Number((rawEntry && rawEntry.ts) || 0),
+      });
+    }
+    if (vaults.length === 0) continue;
+    const byRecent = vaults.sort((a, b) => b.ts - a.ts);
+    const openVault = byRecent.find((item) => item.open);
+    return (openVault || byRecent[0]).path;
+  }
+  return "";
+}
+
 // Default *vault* candidates — these are common Obsidian vault locations.
 // They do NOT include the data store root or the Obsidian config directory.
 export function getDefaultVaultCandidates() {

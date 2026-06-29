@@ -243,12 +243,24 @@ def resolve_vault_root() -> Path:
 def resolve_store_root() -> Path:
     """Resolve the canonical .ai-memory store root.
 
-    The store is the data plane. Obsidian vault variables are deliberately not
-    part of this resolution chain; they are only for legacy import/overlay use.
+    Priority: explicit store env > vault bridge > AI_MEMORY_ROOT (legacy) > default.
+    The vault bridge makes the Obsidian vault's ``00-System/ai-memory`` the
+    canonical store when it exists, so retrieval reads real data without any
+    extra config. CLAUDE.md sets Obsidian as the canonical long-term memory;
+    this code now matches that intent.
     """
-    candidate = first_non_empty_env("AI_MEMORY_STORE", "AI_MEMORY_STORE_ROOT", "AI_MEMORY_ROOT")
-    if candidate:
-        return Path(candidate).expanduser().resolve()
+    explicit = first_non_empty_env("AI_MEMORY_STORE", "AI_MEMORY_STORE_ROOT")
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    try:
+        vault_ai_memory = resolve_vault_root() / "00-System" / "ai-memory"
+        if vault_ai_memory.is_dir():
+            return vault_ai_memory.resolve()
+    except RuntimeError:
+        pass
+    legacy_root = first_non_empty_env("AI_MEMORY_ROOT")
+    if legacy_root:
+        return Path(legacy_root).expanduser().resolve()
     return get_default_store_root().expanduser().resolve()
 
 
