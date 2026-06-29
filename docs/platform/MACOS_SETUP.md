@@ -52,8 +52,8 @@ If ports are in use, stop the conflicting process before installing.
 
 ```bash
 # If using git:
-git clone https://github.com/your-org/local-ai-memory-bus.git
-cd local-ai-memory-bus
+git clone https://github.com/your-org/obsidian-shared-memory-bus.git
+cd obsidian-shared-memory-bus
 
 # Or download and extract the release archive
 ```

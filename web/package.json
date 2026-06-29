@@ -1,9 +1,9 @@
 {
-  "name": "local-ai-memory-bus-web",
+  "name": "yt-web",
   "private": true,
   "version": "3.1.0",
   "type": "module",
-  "description": "Landing page for Local AI Memory Bus (React + Vite)",
+  "description": "Landing page for yt (React + Vite)",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

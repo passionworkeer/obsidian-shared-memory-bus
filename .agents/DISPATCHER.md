@@ -61,7 +61,7 @@ version: 1
 
 ## 项目一句话 (TL;DR)
 
-**Local AI Memory Bus** · 让多个 AI 工具共享同一个本地记忆。
+**yt** · 让多个 AI 工具共享同一个本地记忆。
 技术栈: Node.js + Python + PowerShell · 主入口 MCP 服务器 · 跨语言 hash 等价。
 
 ## 必读

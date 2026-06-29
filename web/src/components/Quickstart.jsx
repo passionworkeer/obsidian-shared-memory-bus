@@ -5,7 +5,7 @@ const STEPS = [
   {
     num: 1,
     title: "克隆仓库",
-    cmd: "git clone https://github.com/passionworkeer/local-ai-memory-bus.git\ncd local-ai-memory-bus",
+    cmd: "git clone https://github.com/passionworkeer/obsidian-shared-memory-bus.git\ncd obsidian-shared-memory-bus",
     note: null
   },
   {

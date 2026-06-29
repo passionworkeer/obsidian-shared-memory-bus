@@ -2,6 +2,7 @@
 tests/
 docs/
 PROJECT_ANALYSIS.md
+tech-debt-roadmap.md
 
 # CI / IDE / index / VCS
 .github/

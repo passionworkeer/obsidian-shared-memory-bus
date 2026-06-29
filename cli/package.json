@@ -2,7 +2,7 @@
   "name": "ai-memory-cli",
   "version": "1.0.0",
   "type": "module",
-  "description": "Unified CLI for Local AI Memory Bus",
+  "description": "Unified CLI for yt",
   "bin": {
     "ai-memory": "./ai-memory.js"
   },

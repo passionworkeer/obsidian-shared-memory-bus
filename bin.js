@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * local-ai-memory-bus — unified CLI entry for npx.
+ * yt-memory-bus — unified CLI entry for npx.
  *
  * Usage:
- *   npx local-ai-memory-bus                 start the MCP memory server (default)
- *   npx local-ai-memory-bus start           ...same as above
- *   npx local-ai-memory-bus setup [--target=<agent|all>]   configure AI agents
- *   npx local-ai-memory-bus <init|doctor|status|sync|watch|help>   delegate to ai-memory CLI
- *   npx local-ai-memory-bus --version
+ *   npx yt-memory-bus                 start the MCP memory server (default)
+ *   npx yt-memory-bus start           ...same as above
+ *   npx yt-memory-bus setup [--target=<agent|all>]   configure AI agents
+ *   npx yt-memory-bus <init|doctor|status|sync|watch|help>   delegate to ai-memory CLI
+ *   npx yt-memory-bus --version
  *
  * This is a thin dispatcher. Heavy logic lives in start.js / setup-mcp.js / cli/.
  */
@@ -44,7 +44,7 @@ if (rawArgs.includes("--version") || rawArgs.includes("-v")) {
 
 if (rawArgs.includes("--help") || rawArgs.includes("-h") || cmd === "help") {
   process.stdout.write(
-    `local-ai-memory-bus v${pkg.version}\n` +
+    `yt-memory-bus v${pkg.version}\n` +
       `Multi-agent shared local memory (MCP).\n\n` +
       `Commands:\n` +
       `  start                  Start the MCP memory server (default)\n` +
@@ -75,7 +75,7 @@ switch (cmd) {
       runNode("cli/ai-memory.js", [cmd, ...rest]);
     } else {
       process.stderr.write(
-        `Unknown command: ${cmd}\nRun "local-ai-memory-bus help" for usage.\n`,
+        `Unknown command: ${cmd}\nRun "yt-memory-bus help" for usage.\n`,
       );
       process.exit(2);
     }

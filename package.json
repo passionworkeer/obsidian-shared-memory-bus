@@ -1,16 +1,17 @@
 {
-  "name": "local-ai-memory-bus",
+  "name": "yt-memory-bus",
   "version": "3.1.0",
-  "description": "Portable local-first shared memory bus for multi-agent AI setups",
+  "description": "yt — local-first shared memory bus for multi-agent AI (Obsidian-backed)",
   "type": "module",
   "bin": {
-    "local-ai-memory-bus": "./bin.js"
+    "yt": "./bin.js"
   },
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/passionworkeer/local-ai-memory-bus"
+    "url": "https://github.com/passionworkeer/obsidian-shared-memory-bus"
   },
+  "homepage": "https://github.com/passionworkeer/obsidian-shared-memory-bus#readme",
   "workspaces": [
     "shared-mcp"
   ],
@@ -54,7 +55,7 @@
     "claude",
     "codex"
   ],
-  "author": " passionworkeer",
+  "author": "passionworkeer",
   "bugs": {
     "url": "https://github.com/passionworkeer/obsidian-shared-memory-bus/issues"
   },

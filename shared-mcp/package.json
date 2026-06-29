@@ -1,17 +1,17 @@
 {
-  "name": "local-ai-memory-bus-mcp",
+  "name": "yt-mcp",
   "version": "3.1.0",
-  "description": "Shared MCP server for local-ai-memory-bus — memory and utility tools",
+  "description": "Shared MCP server for yt — memory and utility tools",
   "license": "MIT",
   "private": true,
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "https://github.com/passionworkeer/local-ai-memory-bus"
+    "url": "https://github.com/passionworkeer/obsidian-shared-memory-bus"
   },
-  "author": " passionworkeer",
+  "author": "passionworkeer",
   "bugs": {
-    "url": "https://github.com/passionworkeer/local-ai-memory-bus/issues"
+    "url": "https://github.com/passionworkeer/obsidian-shared-memory-bus/issues"
   },
   "keywords": [
     "mcp",

@@ -1,4 +1,4 @@
-# Local AI Memory Bus · 让多个 AI 工具共享同一个本地记忆
+# yt · 让多个 AI 工具共享同一个本地记忆
 
 > 一句话：**Claude Code、Codex、Cursor、Copilot 等所有 AI 工具共用同一份本地记忆，不再重复解释上下文。**
 
@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/passionworkeer/local-ai-memory-bus/actions/workflows/test.yml"><img src="https://github.com/passionworkeer/local-ai-memory-bus/actions/workflows/test.yml/badge.svg" alt="Test CI"></a>
+  <a href="https://github.com/passionworkeer/obsidian-shared-memory-bus/actions/workflows/test.yml"><img src="https://github.com/passionworkeer/obsidian-shared-memory-bus/actions/workflows/test.yml/badge.svg" alt="Test CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
   <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js-%3E%3D18-brightgreen" alt="Node 18+"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/Python-3.10+-orange" alt="Python 3.10+"></a>
@@ -20,7 +20,7 @@
   <img src="https://img.shields.io/badge/MCP-compatible-purple" alt="MCP">
   <img src="https://img.shields.io/badge/local--first-%E2%9C%93-success" alt="Local-first">
   <img src="https://img.shields.io/badge/no--SaaS-%E2%9C%93-success" alt="No SaaS">
-  <img src="https://img.shields.io/github/stars/passionworkeer/local-ai-memory-bus?style=social" alt="Stars">
+  <img src="https://img.shields.io/github/stars/passionworkeer/obsidian-shared-memory-bus?style=social" alt="Stars">
 </p>
 
 ---
@@ -34,7 +34,7 @@
 | **MCP 配置碎片化** | 每个工具的 mcp.json 格式不一样 | 安装一次要改 5 个地方 |
 | **检索中文差** | 主流 embedding 对中文支持参差 | 中文项目检索召回率低 |
 
-**Local AI Memory Bus 一次解决四件事**：
+**yt 一次解决四件事**：
 
 1. **共享同一份**本地持久化记忆（JSONL + 向量索引）
 2. **本地优先**，数据存在 `~/.ai-memory`，不上云
@@ -119,7 +119,7 @@
 
 ```bash
 # 1. 克隆
-git clone https://github.com/passionworkeer/local-ai-memory-bus.git
+git clone https://github.com/passionworkeer/obsidian-shared-memory-bus.git
 cd obsidian-shared-memory-bus
 
 # 2. 安装依赖

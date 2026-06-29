@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Support
-    url: https://github.com/passionworkeer/local-ai-memory-bus/blob/main/SUPPORT.md
+    url: https://github.com/passionworkeer/obsidian-shared-memory-bus/blob/main/SUPPORT.md
     about: Start here for setup questions, troubleshooting, and expected support paths.
   - name: Security
-    url: https://github.com/passionworkeer/local-ai-memory-bus/blob/main/SECURITY.md
+    url: https://github.com/passionworkeer/obsidian-shared-memory-bus/blob/main/SECURITY.md
     about: Do not post sensitive vulnerability details publicly.

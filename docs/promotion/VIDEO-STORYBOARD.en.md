@@ -24,7 +24,7 @@ Visual: All tools connect to one local memory bus.
 
 Voiceover:
 
-> Local AI Memory Bus lets multiple AI coding tools share one local memory layer.
+> yt lets multiple AI coding tools share one local memory layer.
 
 ### 30-45s: Architecture
 

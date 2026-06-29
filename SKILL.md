@@ -1,10 +1,10 @@
 ---
-name: local-ai-memory-bus
-description: Chinese-first universal skill for joining the Local AI Memory Bus from any AI coding tool.
+name: yt-memory-bus
+description: Chinese-first universal skill for joining yt from any AI coding tool.
 version: 3.1.0
 ---
 
-# Local AI Memory Bus Universal Skill
+# yt Universal Skill
 
 > 中文优先：让 Codex、Claude Code、Cursor、Copilot、OpenCode、Trae 等 AI 工具共享同一个本地记忆层。
 >

@@ -53,7 +53,7 @@ outputs:
 
 ### tweet_thread (5-7 条)
 
-1. (hook) "Local AI Memory Bus v3.2.0 released 🚀"
+1. (hook) "yt v3.2.0 released 🚀"
 2. (headline) "最大变化: 一句话"
 3. (visual stat) "性能: 30× 加速 / 1400+ 测试"
 4. (use case) "现在你可以: ..."

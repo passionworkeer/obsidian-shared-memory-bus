@@ -1,4 +1,4 @@
-# Local AI Memory Bus Quick Start
+# yt Quick Start
 
 > Share one local memory layer across Codex, Claude Code, Cursor, Copilot, OpenCode, Trae, and other AI coding tools.
 
@@ -13,7 +13,7 @@ Use this if you often repeat the same project context to different AI coding too
 
 ## 30-Second Explanation
 
-Local AI Memory Bus does three things:
+yt does three things:
 
 1. Stores durable memory in a local `.ai-memory` store.
 2. Exposes shared MCP endpoints so multiple AI tools can read and search it.
@@ -78,7 +78,7 @@ If MCP is unavailable, agents can still read:
 
 ## One-Line Pitch
 
-Local AI Memory Bus is a local-first shared memory layer that lets multiple AI coding tools share context, retrieve past decisions, and hand off work across tools.
+yt is a local-first shared memory layer that lets multiple AI coding tools share context, retrieve past decisions, and hand off work across tools.
 
 ## Next
 

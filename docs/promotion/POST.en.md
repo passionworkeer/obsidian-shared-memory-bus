@@ -12,7 +12,7 @@ If you use more than one AI coding tool, you probably know the pain:
 
 Codex helped you reason through the architecture, but Claude Code does not know that tomorrow. Cursor helps debug a bug, but Copilot does not know which ideas were already rejected. A week later, every tool feels like it is meeting the project for the first time.
 
-Local AI Memory Bus is my attempt to fix that with a local-first shared memory layer.
+yt is my attempt to fix that with a local-first shared memory layer.
 
 ## The Problem
 
@@ -24,7 +24,7 @@ Most AI coding tools remember in silos. That creates three issues:
 
 ## The Solution
 
-Local AI Memory Bus gives multiple tools a shared local memory layer:
+yt gives multiple tools a shared local memory layer:
 
 1. A canonical `.ai-memory` store on your machine.
 2. Shared MCP endpoints for memory, retrieval, and utility services.
@@ -86,4 +86,4 @@ This is currently best for power users who:
 
 The more AI coding tools we use, the more important it becomes for memory to belong to the local development environment.
 
-Local AI Memory Bus is a step in that direction: shared, searchable, local, and tool-agnostic.
+yt is a step in that direction: shared, searchable, local, and tool-agnostic.

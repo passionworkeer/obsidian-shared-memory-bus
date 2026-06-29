@@ -1,6 +1,6 @@
 # 多 Agent 接入指南
 
-local-ai-memory-bus 通过 **MCP 协议**接入 AI 编程工具。MCP 已是 2026 年事实标准（SDK 月下载 97M），本项目支持 **8 个主流 Agent 零适配接入**——只需一条命令写入各 Agent 的 MCP 配置。
+yt 通过 **MCP 协议**接入 AI 编程工具。MCP 已是 2026 年事实标准（SDK 月下载 97M），本项目支持 **8 个主流 Agent 零适配接入**——只需一条命令写入各 Agent 的 MCP 配置。
 
 ---
 
