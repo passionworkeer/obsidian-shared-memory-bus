@@ -106,7 +106,10 @@ NOISE_PATTERNS = [
     re.compile(r"^\[(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s", re.I),
     re.compile(r"^Run your Session Startup", re.I),
 ]
-STRUCTURED_FILES = [
+# Canonical structured-file list lives in shared/structured-files.json (single
+# source shared with ops/memory/memory-archival.js). Loaded at import with a
+# literal fallback so retrieval/ still works standalone if the JSON is absent.
+_STRUCTURED_FILES_FALLBACK = [
     "shared-inbox.jsonl",
     "session-memory.jsonl",
     "shared-events.jsonl",
@@ -118,6 +121,23 @@ STRUCTURED_FILES = [
     "openclaw-jobs.jsonl",
     "openclaw-journal.jsonl",
 ]
+
+
+def _load_structured_files() -> List[str]:
+    try:
+        _here = os.path.dirname(os.path.abspath(__file__))
+        _path = os.path.join(_here, "..", "shared", "structured-files.json")
+        with open(_path, "r", encoding="utf-8") as _fh:
+            _data = json.load(_fh)
+        files = _data.get("files") if isinstance(_data, dict) else None
+        if isinstance(files, list) and files:
+            return [str(f) for f in files]
+    except Exception as exc:  # noqa: BLE001 — degrade to fallback, never crash import
+        logger.warning("structured-files.json load failed, using fallback: %s", exc)
+    return list(_STRUCTURED_FILES_FALLBACK)
+
+
+STRUCTURED_FILES = _load_structured_files()
 DURABLE_SCOPES = {"user", "feedback", "project", "reference"}
 ROUTE_VALUES = {"auto", "mixed", "durable", "task", "recent", "reference"}
 KNOWN_LAYERS = ("durable", "session", "event", "task")
