@@ -14,11 +14,14 @@ without loading the entire file into memory. Three classes are offered:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, Generator, Iterator, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 class StreamingIndexReader:
@@ -40,15 +43,33 @@ class StreamingIndexReader:
         self._file_handle = None
         self._started = False
 
+    def __enter__(self) -> "StreamingIndexReader":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        # Unconditional close on every exit path (normal, break, exception).
+        # Re-raises are not suppressed — the original exception (if any) propagates.
+        self._close_handle()
+
+    def _close_handle(self) -> None:
+        """Idempotently close the file handle if open."""
+        handle = getattr(self, "_file_handle", None)
+        if handle is None:
+            return
+        try:
+            if not handle.closed:
+                handle.close()
+        except OSError as exc:
+            logger.warning("Failed to close %s: %s", self.file_path, exc, exc_info=True)
+        except Exception:  # noqa: BLE001 - close must never raise
+            logger.warning("Failed to close %s", self.file_path, exc_info=True)
+        finally:
+            self._file_handle = None
+
     def __iter__(self) -> "StreamingIndexReader":
         """Return self as an iterator (implements the iterator protocol)."""
         # Close previous file handle if still open from a prior pass
-        if self._file_handle is not None:
-            try:
-                self._file_handle.close()
-            except Exception:
-                pass
-            self._file_handle = None
+        self._close_handle()
 
         if self.file_path.exists():
             self._file_handle = open(self.file_path, "r", encoding="utf-8", errors="replace")
@@ -73,20 +94,15 @@ class StreamingIndexReader:
             try:
                 line = next(self._lines)
             except StopIteration:
-                if self._file_handle is not None:
-                    try:
-                        self._file_handle.close()
-                    except Exception:
-                        pass
-                    self._file_handle = None
+                self._close_handle()
                 raise
             if not line:
                 continue
             try:
                 return json.loads(line)
-            except json.JSONDecodeError:
-                # Skip malformed lines without crashing
-                pass
+            except json.JSONDecodeError as exc:
+                # Skip malformed lines without crashing the whole stream
+                logger.debug("Skipping malformed line in %s: %s", self.file_path, exc)
 
     def iterate(self) -> Generator[Dict, None, None]:
         """Return a standalone generator (each call = independent pass)."""
@@ -99,8 +115,8 @@ class StreamingIndexReader:
                     continue
                 try:
                     yield json.loads(line)
-                except json.JSONDecodeError:
-                    pass
+                except json.JSONDecodeError as exc:
+                    logger.debug("Skipping malformed line in %s: %s", self.file_path, exc)
 
 
 class StreamingIndex:
@@ -287,9 +303,22 @@ class StreamingIndexWithIndex:
                             # Store (byte_offset, line_length) for direct file access
                             line_len = len(line)
                             self._index[record_id] = (offset, line_len)
-                    except json.JSONDecodeError:
-                        pass
-        except Exception:
+                    except json.JSONDecodeError as exc:
+                        logger.debug("Skipping malformed line in %s: %s", self.file_path, exc)
+        except OSError as exc:
+            # Whole-source-file loss: do not silently fall back to streaming.
+            logger.warning(
+                "Index build failed for %s, falling back to streaming: %s",
+                self.file_path, exc, exc_info=True,
+            )
+            self._fallback_to_streaming = True
+            self._streaming_index = StreamingIndex(str(self.file_path))
+            self._index = None
+        except Exception:  # noqa: BLE001 - surface the failure loudly
+            logger.warning(
+                "Index build failed for %s, falling back to streaming",
+                self.file_path, exc_info=True,
+            )
             self._fallback_to_streaming = True
             self._streaming_index = StreamingIndex(str(self.file_path))
             self._index = None
@@ -326,8 +355,12 @@ class StreamingIndexWithIndex:
                 if line:
                     record = json.loads(line.strip())
                     return record
-        except Exception:
-            pass
+        except json.JSONDecodeError as exc:
+            logger.warning("Malformed record in %s at %s: %s", self.file_path, key, exc, exc_info=True)
+        except OSError as exc:
+            logger.warning("Failed to read %s at %s: %s", self.file_path, key, exc, exc_info=True)
+        except Exception:  # noqa: BLE001 - lookup failure returns None but is logged
+            logger.warning("Index lookup failed for %s in %s", key, self.file_path, exc_info=True)
         return None
 
     def get_embedding(self, record_id: str) -> Optional[List[float]]:

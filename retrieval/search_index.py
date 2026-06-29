@@ -10,11 +10,15 @@ from __future__ import annotations
 import datetime
 import hashlib
 import json
+import logging
 import os
 import re
 import sys
 import time as time_module
-from typing import Dict, List
+from pathlib import Path
+from typing import Dict, List, Tuple
+
+logger = logging.getLogger(__name__)
 
 from search_ranking import (
     tokenize,
@@ -86,7 +90,6 @@ def invalidate_embeddings_cache() -> None:
     _INDEX_CACHE["loaded_at"] = 0.0
     _INDEX_CACHE["signature"] = ""
 
-    from search_ranking import _QUERY_EMBEDDING_CACHE
     _QUERY_EMBEDDING_CACHE.clear()
     _SEARCH_RESULT_CACHE.clear()
 
@@ -99,22 +102,44 @@ def build_file_stamp(file_path: str) -> str:
     if not os.path.exists(file_path):
         return "__missing__"
     try:
-        with open(file_path, "rb") as handle:
-            body = handle.read()
-        return f"{os.path.basename(file_path)}:{hashlib.sha1(body).hexdigest()}:{len(body)}"
-    except Exception:
-        return f"{os.path.basename(file_path)}:__unreadable__"
+        st = os.stat(file_path)
+        return f"{Path(file_path).name}:{st.st_mtime_ns}:{st.st_size}"
+    except OSError as exc:
+        logger.warning("build_file_stamp stat failed for %s: %s", file_path, exc)
+        return f"{Path(file_path).name}:__unreadable__"
+
+
+# Module-level memo: dedup build_file_stamp calls within a short TTL window.
+# Keyed by absolute path, value is (stamp, computed_at). Prevents N×M stat
+# amplification when build_structured_signature / build_embeddings_signature
+# are invoked multiple times per request (e.g. once in execute_search for
+# cache key, again in load_entries/load_embeddings_index for invalidation).
+_SIGNATURE_MEMO: Dict[str, Tuple[str, float]] = {}
+_SIGNATURE_MEMO_TTL = 1.0  # seconds
+
+
+def _memoized_file_stamp(file_path: str) -> str:
+    now = time_module.time()
+    cached = _SIGNATURE_MEMO.get(file_path)
+    if cached is not None and (now - cached[1]) < _SIGNATURE_MEMO_TTL:
+        return cached[0]
+    stamp = build_file_stamp(file_path)
+    _SIGNATURE_MEMO[file_path] = (stamp, now)
+    return stamp
 
 
 def build_structured_signature() -> str:
     if not os.path.isdir(STRUCTURED_DIR):
         return "__missing__"
-    parts = [build_file_stamp(os.path.join(STRUCTURED_DIR, file_name)) for file_name in STRUCTURED_FILES]
+    parts = [
+        _memoized_file_stamp(os.path.join(STRUCTURED_DIR, file_name))
+        for file_name in STRUCTURED_FILES
+    ]
     return "|".join(parts) if parts else "__empty__"
 
 
 def build_embeddings_signature() -> str:
-    return build_file_stamp(EMBEDDINGS_INDEX)
+    return _memoized_file_stamp(EMBEDDINGS_INDEX)
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +295,8 @@ def _load_entries_uncached(structured_dir: str) -> List[dict]:
                         continue
                     try:
                         payload = json.loads(line)
-                    except Exception:
+                    except json.JSONDecodeError as exc:
+                        logger.debug("skipping malformed JSON line in %s: %s", file_path, exc)
                         continue
                     if _SCHEMA_VALIDATION_AVAILABLE:
                         valid, errors = validate_record(payload)
@@ -280,7 +306,11 @@ def _load_entries_uncached(structured_dir: str) -> List[dict]:
                         if entry["id"] not in seen_ids:
                             seen_ids.add(entry["id"])
                             entries.append(entry)
-        except Exception:
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("failed to load structured file %s: %s", file_path, exc, exc_info=True)
+            continue
+        except Exception as exc:
+            logger.warning("unexpected error loading structured file %s: %s", file_path, exc, exc_info=True)
             continue
 
     return entries
@@ -332,12 +362,17 @@ def _load_embeddings_index_uncached(embeddings_index: str) -> Dict[str, dict]:
                     continue
                 try:
                     payload = json.loads(line)
-                except Exception:
+                except json.JSONDecodeError as exc:
+                    logger.debug("skipping malformed JSON line in %s: %s", embeddings_index, exc)
                     continue
                 record_id = str(payload.get("id", "")).strip()
                 if record_id and isinstance(payload.get("embedding"), list):
                     records[record_id] = payload
-    except Exception:
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("failed to load embeddings index %s: %s", embeddings_index, exc, exc_info=True)
+        return {}
+    except Exception as exc:
+        logger.warning("unexpected error loading embeddings index %s: %s", embeddings_index, exc, exc_info=True)
         return {}
     return records
 
