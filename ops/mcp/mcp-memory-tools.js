@@ -15,8 +15,18 @@ import os from "node:os";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { pathToFileURL } from "node:url";
+import { resolveStoreRoot as canonicalResolveStoreRoot } from "../../bus/store-root.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Per-field cap applied at both write (validateFact) and read (buildBootContext)
+// so the two stay in sync. Exported so other modules (e.g. callers of
+// readJsonl for non-boot purposes) can apply the same bound.
+const MAX_FACT_FIELD_CHARS = 2000;
+
+// Hard cap on the assembled boot-context string. Legacy JSONL may contain
+// huge records; the boot prompt must stay bounded regardless of source size.
+const MAX_BOOT_CONTEXT_CHARS = 32 * 1024;
 
 async function loadHelper(relativeParts) {
   const candidates = [
@@ -33,43 +43,22 @@ async function loadHelper(relativeParts) {
   return null;
 }
 
-function loadStoreRootHelper() {
-  return loadHelper(["bus", "store-root.js"]);
-}
-
 function loadBm25Helper() {
   return loadHelper(["bus", "bm25.js"]);
 }
 
-// Cache helpers at call-time, not module-load-time, so test env vars can override.
-// eslint-disable-next-line consistent-return
-async function resolveStoreHelpers() {
-  const helper = await loadStoreRootHelper();
-  if (helper) {
-    return helper;
-  }
-  return {
-    resolveStoreRoot() {
-      return (
-        process.env.AI_MEMORY_STORE ||
-        process.env.AI_MEMORY_STORE_ROOT ||
-        process.env.AI_MEMORY_ROOT ||
-        path.join(os.homedir(), ".ai-memory")
-      );
-    },
-  };
-}
-
+// Cache the canonical resolver at call-time so tests can override process.env
+// before the first call.
 let _storeRootResolver = null;
 async function getStoreRootResolver() {
-  if (!_storeRootResolver) _storeRootResolver = await resolveStoreHelpers();
+  if (!_storeRootResolver) _storeRootResolver = canonicalResolveStoreRoot;
   return _storeRootResolver;
 }
 
 // Resolve store root lazily so tests can override process.env before the first call.
 async function resolveStoreRoot() {
-  const helpers = await getStoreRootResolver();
-  return helpers.resolveStoreRoot();
+  const resolve = await getStoreRootResolver();
+  return resolve();
 }
 
 function getProjectsRoot(storeRoot) {
@@ -93,9 +82,22 @@ function sha256(value) {
   return crypto.createHash("sha256").update(String(value || ""), "utf8").digest("hex");
 }
 
+// Defense-in-depth against path traversal: a caller-supplied project key is
+// joined into `${projectsRoot}/${key}.jsonl`. Reject anything containing a
+// path separator or consisting only of dot-segments so the key can never
+// escape projectsRoot. safeRealpathWithin remains the final backstop, but
+// this fails fast and does not rely on filesystem validation. Legitimate
+// keys (CJK, hyphens, underscores) are unaffected.
+function sanitizeProjectKey(raw) {
+  if (!raw || /[/\\]/.test(raw)) return "";
+  if (raw === "." || raw === "..") return "";
+  return raw;
+}
+
 function detectProjectKey({ project = "", cwd = "" } = {}) {
   if (typeof project === "string" && project.trim()) {
-    return project.trim();
+    const key = sanitizeProjectKey(project.trim());
+    if (key) return key;
   }
   if (typeof cwd === "string" && cwd.trim()) {
     const normalized = cwd.replace(/[/\\]+$/, "");
@@ -130,26 +132,56 @@ function readProjectFacts(projectKey, { limit = 20, storeRoot } = {}) {
   return readJsonl(jsonlPath).filter((record) => !record.extraction_failed).reverse().slice(0, limit);
 }
 
+// Sanitize a single fact value before splicing it into the boot prompt.
+// Whitelist + per-field truncate + backtick-fence strip prevents prompt
+// injection from legacy or attacker-written JSONL records. We TRUNCATE,
+// not reject, so oversized legacy records never break boot.
+function sanitizeBootField(raw) {
+  const str = String(raw == null ? "" : raw);
+  return str.replace(/```/g, "").slice(0, MAX_FACT_FIELD_CHARS);
+}
+
 function buildBootContext(globalMd, facts, projectKey) {
-  const lines = ["# Memory Context", "", "## Global", globalMd || "(no global.md yet)"];
+  const lines = ["# Memory Context", "", "## Global", sanitizeBootField(globalMd || "(no global.md yet)")];
 
   lines.push("");
-  lines.push(`## Project: ${projectKey}`);
-  if (facts.length === 0) {
+  // projectKey is derived locally (detectProjectKey), not attacker-controlled,
+  // but String() it defensively anyway.
+  lines.push(`## Project: ${String(projectKey || "")}`);
+  if (!facts || facts.length === 0) {
     lines.push("(no project facts yet)");
     return lines.join("\n");
   }
 
   for (const fact of facts) {
-    const date = String(fact.t || "").slice(0, 10) || "?";
-    const content = fact.content || (Array.isArray(fact.facts) ? fact.facts[0] : "") || "(empty)";
+    if (!fact || typeof fact !== "object") continue;
+    // Whitelist: only t, content (or facts[0] fallback), decisions. Any other
+    // field name an attacker wrote into the JSONL is dropped.
+    const date = sanitizeBootField(String(fact.t || "")).slice(0, 10) || "?";
+    let content;
+    if (typeof fact.content === "string" && fact.content.length > 0) {
+      content = sanitizeBootField(fact.content);
+    } else if (Array.isArray(fact.facts) && fact.facts.length > 0) {
+      content = sanitizeBootField(fact.facts[0]);
+    } else {
+      content = "(empty)";
+    }
     lines.push(`- [${date}] ${content}`);
-    for (const decision of Array.isArray(fact.decisions) ? fact.decisions : []) {
-      lines.push(`  -> ${decision}`);
+    if (Array.isArray(fact.decisions)) {
+      for (const decision of fact.decisions) {
+        if (decision == null) continue;
+        lines.push(`  -> ${sanitizeBootField(decision)}`);
+      }
     }
   }
 
-  return lines.join("\n");
+  let assembled = lines.join("\n");
+  // Total cap: bound the assembled boot prompt regardless of how many facts or
+  // how large each was. Truncate-not-reject keeps boot alive on legacy data.
+  if (assembled.length > MAX_BOOT_CONTEXT_CHARS) {
+    assembled = `${assembled.slice(0, MAX_BOOT_CONTEXT_CHARS)}\n[... truncated: boot context exceeds ${MAX_BOOT_CONTEXT_CHARS} chars]`;
+  }
+  return assembled;
 }
 
 function collectSearchDocuments(projectKey, storeRoot) {
@@ -186,7 +218,7 @@ function collectSearchDocuments(projectKey, storeRoot) {
 function validateFact(fact) {
   if (!fact || typeof fact !== "object") return "fact must be an object";
   if (!fact.content || typeof fact.content !== "string") return "fact.content (string) is required";
-  if (fact.content.length > 2000) return "fact.content must be under 2000 characters";
+  if (fact.content.length > MAX_FACT_FIELD_CHARS) return `fact.content must be under ${MAX_FACT_FIELD_CHARS} characters`;
   if (fact.scope && !VALID_SCOPES.has(fact.scope)) return `fact.scope must be one of ${Array.from(VALID_SCOPES).join(", ")}`;
   if (fact.session_type && !VALID_TYPES.has(fact.session_type)) return `fact.session_type must be one of ${Array.from(VALID_TYPES).join(", ")}`;
   if (fact.confidence != null && (typeof fact.confidence !== "number" || fact.confidence < 0 || fact.confidence > 1)) {
@@ -201,11 +233,11 @@ function validateFact(fact) {
       for (let i = 0; i < arr.length; i++) {
         const item = arr[i];
         if (typeof item === "string") {
-          if (item.length > 2000) return `fact.${field}[${i}] must be under 2000 characters`;
+          if (item.length > MAX_FACT_FIELD_CHARS) return `fact.${field}[${i}] must be under ${MAX_FACT_FIELD_CHARS} characters`;
         } else if (item && typeof item === "object") {
           const serialized = JSON.stringify(item);
-          if (serialized && serialized.length > 2000) {
-            return `fact.${field}[${i}] serialized form must be under 2000 characters`;
+          if (serialized && serialized.length > MAX_FACT_FIELD_CHARS) {
+            return `fact.${field}[${i}] serialized form must be under ${MAX_FACT_FIELD_CHARS} characters`;
           }
         }
       }
@@ -363,7 +395,7 @@ async function memory_write({ project = "", cwd = "", facts = [] } = {}) {
   };
 }
 
-export { memory_boot, memory_search, memory_query, memory_write };
+export { memory_boot, memory_search, memory_query, memory_write, MAX_FACT_FIELD_CHARS };
 
 // CLI entry point - only runs when executed directly
 async function runCli() {

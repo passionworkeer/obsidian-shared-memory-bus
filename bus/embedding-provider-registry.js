@@ -39,7 +39,14 @@ function createEmbeddingProviderRegistry(options = {}) {
     if (_pool) return _pool;
     try {
       _pool = require("../shared-mcp/embedding-worker-pool.cjs");
-    } catch {
+    } catch (err) {
+      // Surface the require failure so missing/circular shared-mcp isn't
+      // silently masked — callers (embedWithTransformer / embedWithGemini)
+      // fall back to per-call spawn when null is returned.
+      console.warn(
+        "[embedding-registry] worker pool unavailable, falling back to per-call spawn:",
+        err && err.message ? err.message : String(err),
+      );
       return null;
     }
     return _pool;
