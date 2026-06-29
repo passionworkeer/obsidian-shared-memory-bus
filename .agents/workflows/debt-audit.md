@@ -16,7 +16,7 @@ outputs:
 
 ## 用途
 
-把 `tech-debt-roadmap.md` 的抽象条目**映射到具体代码位置**, 给 reviewer 一个可操作清单。
+把 `docs/internal/tech-debt-roadmap.md` 的抽象条目**映射到具体代码位置**, 给 reviewer 一个可操作清单。
 
 ## 审计维度
 
@@ -38,7 +38,7 @@ outputs:
 2. git diff 范围
 3. 维度扫描 (每个维度 = 一个并行 subagent)
 4. 严重度投票 (3 票 ≥ 2 票为采纳)
-5. 输出 markdown_report 到 PROJECT_ANALYSIS.md
+5. 输出 markdown_report 到 docs/internal/PROJECT_ANALYSIS.md
 ```
 
 ## 输出格式
@@ -60,7 +60,7 @@ outputs:
 2. 跑 `git log --oneline -20` 找 since 锚点
 3. 启多 subagent (每个维度一个)
 4. 合并结果 + 加权评分
-5. 写报告到 `PROJECT_ANALYSIS.md` 顶部
+5. 写报告到 `docs/internal/PROJECT_ANALYSIS.md` 顶部
 
 ## 反模式
 

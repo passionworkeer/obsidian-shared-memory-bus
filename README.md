@@ -300,8 +300,6 @@ obsidian-shared-memory-bus/
 | [docs/architecture/DATA-FLOW.md](docs/architecture/DATA-FLOW.md) | 数据流图 |
 | [docs/guides/LOGGING.md](docs/guides/LOGGING.md) | 中央日志规范 |
 | [docs/guides/API_REFERENCE.md](docs/guides/API_REFERENCE.md) | MCP 工具 API |
-| [PROJECT_ANALYSIS.md](PROJECT_ANALYSIS.md) | 项目差分审计报告 |
-| [tech-debt-roadmap.md](tech-debt-roadmap.md) | 技术债路线图 |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 常见问题 |
 
 ---

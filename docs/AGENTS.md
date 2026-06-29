@@ -14,8 +14,6 @@
 
 1. [CLAUDE.md](../CLAUDE.md) — 分支策略、提交信息规范、代码质量约束
 2. [docs/ARCHITECTURE.md](ARCHITECTURE.md) — 系统架构
-3. [tech-debt-roadmap.md](../tech-debt-roadmap.md) — 当前活跃技术债清单
-4. [PROJECT_ANALYSIS.md](../PROJECT_ANALYSIS.md) — 差分审计报告（最近一次）
 
 ---
 
