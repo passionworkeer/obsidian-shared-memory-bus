@@ -36,12 +36,15 @@ if _PARENT_DIR not in sys.path:
 import argparse
 import datetime
 import json
+import logging
 import math
 import os
 import re
 import sys
 import time as time_module
 from typing import Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Imports from submodules (split from this file)
