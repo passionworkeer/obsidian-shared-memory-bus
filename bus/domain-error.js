@@ -14,9 +14,12 @@
  *   - One of the COMMON_CODES below, or a domain-specific extension.
  *   - Never localized; the message is the human-readable surface.
  *
- * Adoption: this module is introduced as infrastructure only. Existing
- * `throw new Error(...)` sites are NOT migrated in the same sweep —
- * that is a quarterly task tracked in PROJECT_ANALYSIS.md.
+ * Adoption: this module is currently scoped to the embedding-provider
+ * subsystem. As of 2026-06-29 there are 5 production call sites (in
+ * bus/embedding-providers/{openai-compatible,gemini,transformer}-provider.js
+ * and bus/embedding-provider-registry.js) plus 1 test. Broader migration of
+ * `throw new Error(...)` sites to DomainError is out of scope for the
+ * current wave and is tracked separately.
  */
 
 export const COMMON_CODES = Object.freeze({
