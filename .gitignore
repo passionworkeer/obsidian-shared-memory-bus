@@ -3,6 +3,9 @@
 .env.*
 *.env
 
+# Internal strategy/planning docs (author-only, not for public release)
+docs/internal/
+
 # Generated startup scripts (contain user-specific absolute paths)
 shared-mcp/startup/
 

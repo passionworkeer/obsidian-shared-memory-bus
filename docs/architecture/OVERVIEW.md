@@ -49,7 +49,7 @@ The system follows a **layered plane architecture** with four distinct planes:
 ## Directory Structure
 
 ```
-local-ai-memory-bus/
+obsidian-shared-memory-bus/
 ├── bus/                     # Core bus runtime (PowerShell scripts)
 │   ├── memory-bus.ps1       # Memory write/filter/distribute engine
 │   ├── memory-watchdog.ps1   # Background sync watchdog

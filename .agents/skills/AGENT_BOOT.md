@@ -1,8 +1,8 @@
 # Shared Memory Bus Agent Boot
 
-中文：这是所有 AI 工具接入 Local AI Memory Bus 的最小启动协议。
+中文：这是所有 AI 工具接入 yt 的最小启动协议。
 
-English: This is the minimum startup protocol for any AI tool joining Local AI Memory Bus.
+English: This is the minimum startup protocol for any AI tool joining yt.
 
 ## 1. Identify The Project
 

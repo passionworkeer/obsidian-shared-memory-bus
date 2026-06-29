@@ -1,4 +1,4 @@
-# Local AI Memory Bus 快速开始
+# yt 快速开始
 
 > 让 Codex、Claude Code、Cursor、Copilot、OpenCode、Trae 共享同一份本地记忆。
 
@@ -15,7 +15,7 @@
 
 ## 30 秒理解
 
-Local AI Memory Bus 做三件事：
+yt 做三件事：
 
 1. 把长期记忆放在本地 `.ai-memory` store。
 2. 通过共享 MCP 端点给多个 AI 工具读取和检索。
@@ -82,11 +82,11 @@ memory_status()
 
 中文：
 
-> Local AI Memory Bus 是一个本地优先的 AI 记忆总线，让多个 AI 编程工具共享上下文、检索历史决策，并在工具之间顺滑交接任务。
+> yt 是一个本地优先的 AI 记忆总线，让多个 AI 编程工具共享上下文、检索历史决策，并在工具之间顺滑交接任务。
 
 英文：
 
-> Local AI Memory Bus is a local-first shared memory layer that lets multiple AI coding tools share context, retrieve past decisions, and hand off work across tools.
+> yt is a local-first shared memory layer that lets multiple AI coding tools share context, retrieve past decisions, and hand off work across tools.
 
 ## 下一步
 

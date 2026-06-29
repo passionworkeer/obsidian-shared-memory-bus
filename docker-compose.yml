@@ -1,5 +1,5 @@
 # =============================================================================
-# docker-compose.yml — Local AI Memory Bus Full Stack
+# docker-compose.yml — yt Full Stack
 # =============================================================================
 # Starts all MCP servers (fetch, time, memory) with persistent .ai-memory store.
 #
@@ -19,8 +19,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: local-ai-memory-bus:latest
-    container_name: local-ai-memory-bus
+    image: yt-memory-bus:latest
+    container_name: yt-memory-bus
     restart: unless-stopped
     ports:
       - "9338:9338"  # Memory MCP server
@@ -48,8 +48,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.retrieval
-    image: local-ai-memory-bus-retrieval:latest
-    container_name: local-ai-memory-bus-retrieval
+    image: yt-memory-bus-retrieval:latest
+    container_name: yt-memory-bus-retrieval
     restart: unless-stopped
     volumes:
       - ai-memory-store:/root/.ai-memory

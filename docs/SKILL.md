@@ -1,5 +1,5 @@
 ---
-name: local-ai-memory-bus
+name: yt-memory-bus
 description: Unified shared memory bus for all AI agents
 version: 2.0.0
 ---
@@ -28,7 +28,7 @@ version: 2.0.0
 
 **Full bootstrap sequence (copy-paste for any platform):**
 ```bash
-cd /path/to/local-ai-memory-bus && \
+cd /path/to/obsidian-shared-memory-bus && \
   node -e "console.log('Platform:', require('./bus/platform/index.js').platform.name)" && \
   node -e "console.log('Store:', require('./bus/store-root.js').resolveStoreRoot())" && \
   node ops/generate-context.js

@@ -9,7 +9,7 @@
 ```powershell
 # 1. 克隆项目
 git clone <repo-url>
-cd local-ai-memory-bus
+cd obsidian-shared-memory-bus
 
 # 2. 一键启动所有服务
 .\scripts\start-all.ps1
@@ -23,7 +23,7 @@ cd local-ai-memory-bus
 ```bash
 # 1. 克隆项目
 git clone <repo-url>
-cd local-ai-memory-bus
+cd obsidian-shared-memory-bus
 
 # 2. 一键启动
 pwsh ./scripts/start-all.ps1
@@ -96,7 +96,7 @@ start-all.ps1 会自动：
 
 ## 记忆文件位置
 
-- **本地存储**: `E:\desktop\.ai-memory\` (或 `~/.ai-memory/`)
+- **本地存储**: `~/.ai-memory/`
 
 ### 目录结构
 

@@ -1,4 +1,4 @@
-# Local AI Memory Bus · One local memory, every AI tool
+# yt · One local memory, every AI tool
 
 > **One line**: Claude Code, Codex, Cursor, Copilot and other AI tools share a single local memory backend — stop re-explaining your project context.
 
@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/passionworkeer/local-ai-memory-bus/actions/workflows/test.yml"><img src="https://github.com/passionworkeer/local-ai-memory-bus/actions/workflows/test.yml/badge.svg" alt="Test CI"></a>
+  <a href="https://github.com/passionworkeer/obsidian-shared-memory-bus/actions/workflows/test.yml"><img src="https://github.com/passionworkeer/obsidian-shared-memory-bus/actions/workflows/test.yml/badge.svg" alt="Test CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
   <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js-%3E%3D18-brightgreen" alt="Node 18+"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/Python-3.10+-orange" alt="Python 3.10+"></a>
@@ -18,7 +18,7 @@
   <img src="https://img.shields.io/badge/Docker-ready-blue" alt="Docker">
   <img src="https://img.shields.io/badge/MCP-compatible-purple" alt="MCP">
   <img src="https://img.shields.io/badge/local--first-%E2%9C%93-success" alt="Local-first">
-  <img src="https://img.shields.io/github/stars/passionworkeer/local-ai-memory-bus?style=social" alt="Stars">
+  <img src="https://img.shields.io/github/stars/passionworkeer/obsidian-shared-memory-bus?style=social" alt="Stars">
 </p>
 
 ---
@@ -67,7 +67,7 @@ The 5-layer memory model (L0 Working → L5 Archive) keeps temporary notes, key 
 
 ```bash
 # 1. Clone
-git clone https://github.com/passionworkeer/local-ai-memory-bus.git
+git clone https://github.com/passionworkeer/obsidian-shared-memory-bus.git
 cd obsidian-shared-memory-bus
 
 # 2. Install

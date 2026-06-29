@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
-  <title id="title">Local AI Memory Bus architecture</title>
+  <title id="title">yt architecture</title>
   <desc id="desc">Bilingual architecture card showing clients, MCP, retrieval, and local store.</desc>
   <rect width="1600" height="900" fill="#101828"/>
   <text x="100" y="100" font-family="Arial, sans-serif" font-size="56" font-weight="800" fill="#ffffff">架构：记忆属于本地开发环境</text>

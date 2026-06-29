@@ -1,11 +1,11 @@
 # =============================================================================
-# Dockerfile — Local AI Memory Bus
+# Dockerfile — yt
 # =============================================================================
 # Multi-stage build: base (Python retrieval) + Node MCP server
 # Usage:
-#   docker build -t local-ai-memory-bus .
+#   docker build -t yt-memory-bus .
 #   docker run --rm -v ~/.ai-memory:/root/.ai-memory -p 9338:9338 \
-#     -e AI_MEMORY_ROOT=/root/.ai-memory local-ai-memory-bus
+#     -e AI_MEMORY_ROOT=/root/.ai-memory yt-memory-bus
 # =============================================================================
 
 FROM python:3.12-slim AS python-deps
