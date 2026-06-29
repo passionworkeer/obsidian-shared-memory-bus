@@ -3,6 +3,9 @@
   "version": "3.1.0",
   "description": "Portable local-first shared memory bus for multi-agent AI setups",
   "type": "module",
+  "bin": {
+    "local-ai-memory-bus": "./bin.js"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -31,11 +34,25 @@
     "test:integration": "node --test --test-concurrency=1 --experimental-test-isolation=none tests/integration/js/*.{test.js,test.mjs}",
     "test:e2e": "node --test --test-concurrency=1 --test-timeout=60000 tests/e2e/*.test.mjs",
     "test:concurrent": "node --test --test-concurrency=4 tests/unit/js/inbox-atomic-write.test.js",
-    "test:all": "node --test --test-concurrency=1 --experimental-test-isolation=none tests/unit/js/*.test.js tests/unit/js/*.test.mjs && node --test --test-concurrency=1 --experimental-test-isolation=none tests/integration/js/*.test.mjs && npm run test:e2e && pytest tests/unit/py/ tests/cross-language/ -v",
+    "test:all": "node --test --test-concurrency=1 --experimental-test-isolation=none tests/unit/js/*.test.js tests/unit/js/*.test.mjs && npm run test:concurrent && node --test --test-concurrency=1 --experimental-test-isolation=none tests/integration/js/*.test.mjs && npm run test:e2e && pytest tests/unit/py/ tests/cross-language/ -v",
     "test:full": "node scripts/test-all.js"
   },
   "keywords": [
-    "ai-memory"
+    "mcp",
+    "model-context-protocol",
+    "agent",
+    "memory",
+    "ai-memory",
+    "obsidian",
+    "local-first",
+    "rag",
+    "retrieval",
+    "hybrid-search",
+    "multi-agent",
+    "shared-memory",
+    "context",
+    "claude",
+    "codex"
   ],
   "author": " passionworkeer",
   "bugs": {

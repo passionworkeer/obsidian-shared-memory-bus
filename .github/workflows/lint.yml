@@ -23,15 +23,14 @@ jobs:
         run: npm install --prefix shared-mcp eslint
 
       - name: ESLint
-        # TODO: remove || true once ESLint config migrates to flat config (eslint.config.js)
-        # — current .eslintrc.cjs is incompatible with ESLint 10.
-        run: npx eslint shared-mcp/*.js cli/*.js bus/*.js ops/*.js retrieval/*.js --ignore-pattern node_modules/ --ignore-pattern dist/ || true
+        # Flat config (eslint.config.js) is active; ESLint 10 ignores .eslintrc.cjs.
+        run: npx eslint shared-mcp/*.js cli/*.js bus/*.js ops/**/*.js retrieval/*.js --ignore-pattern node_modules/ --ignore-pattern dist/
 
       - name: Coverage baseline
         run: |
           cd shared-mcp
           npm install
-          npx c8 --exclude='**/node_modules/**' --reporter=text --report-dir=../coverage npx eslint shared-mcp/*.js --ignore-pattern node_modules/ || true
+          npx c8 --exclude='**/node_modules/**' --reporter=text --report-dir=../coverage npx eslint shared-mcp/*.js --ignore-pattern node_modules/
         continue-on-error: true
 
       - name: Security audit

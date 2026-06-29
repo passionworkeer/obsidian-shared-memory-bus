@@ -121,6 +121,17 @@ export function teardownChild(reason) {
   killTree(currentChild.pid);
 }
 
+// Pure decision helper: whether a child that exited with the given code/signal
+// should be considered restart-eligible. Currently all exits are retryable;
+// the per-process max-attempts cap lives in restart.mjs. Exposed as a testable
+// seam so callers/tests can reason about the policy without spawning subprocesses.
+export function shouldRestart(exitCode, _signal = null, _opts = {}) {
+  // signal is intentionally unused for now; opts reserved for future policy
+  // (e.g. treating a clean SIGTERM-based shutdown as terminal). Kept in
+  // signature so the public helper is stable if policy is added later.
+  return true;
+}
+
 export function handleChildExit(code, signal) {
   // Reject all pending requests with a clear error so callers know why
   for (const [id, pending] of pendingRequests) {
@@ -132,7 +143,9 @@ export function handleChildExit(code, signal) {
   const reason = `child exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`;
   logError(reason);
   teardownChild(reason);
-  scheduleRestart(reason);
+  if (shouldRestart(code, signal)) {
+    scheduleRestart(reason);
+  }
 }
 
 import { scheduleRestart } from './restart.mjs';

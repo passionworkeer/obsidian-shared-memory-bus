@@ -1,4 +1,6 @@
 import process from 'node:process';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { setStdioCommand } from './windows-shim.mjs';
 
 // ----- Argument parsing -----
@@ -46,10 +48,20 @@ export const encodedEnvJson = args.get('env-json-b64');
 export const childExtraEnv = encodedEnvJson
   ? JSON.parse(Buffer.from(encodedEnvJson, 'base64').toString('utf8'))
   : {};
-// MCP protocol version: "2024-11-05"
-// Hardcoded in 4 places: manifest.json, start-shared-mcp.ps1 (2x), singleton-stdio-mcp-proxy.mjs (here).
-// Must update all 4 files together when the MCP protocol version changes.
-export const defaultProtocolVersion = args.get('protocol-version') || '2024-11-05';
+// MCP protocol version: read from manifest.json (single source of truth).
+// Override order: CLI arg (`--protocol-version`) > manifest.json > hardcoded fallback.
+// Other places that still hardcode this literal (start-shared-mcp.ps1, singleton-stdio-mcp-proxy.mjs)
+// are out of scope for this sweep and will be reconciled later.
+const MANIFEST_PROTOCOL_VERSION = (() => {
+  try {
+    const manifestUrl = new URL('../manifest.json', import.meta.url);
+    const manifest = JSON.parse(fs.readFileSync(fileURLToPath(manifestUrl), 'utf8'));
+    return manifest?.protocolVersion || '2024-11-05';
+  } catch {
+    return '2024-11-05';
+  }
+})();
+export const defaultProtocolVersion = args.get('protocol-version') || MANIFEST_PROTOCOL_VERSION;
 export const startupTimeoutMs = Number(args.get('startup-timeout-ms') || 30000);
 export const requestTimeoutMs = Number(args.get('request-timeout-ms') || 120000);
 
@@ -66,6 +78,8 @@ export let shuttingDown = false;
 export let restartTimer = null;
 export let nextRequestId = 1;
 export const pendingRequests = new Map();
+export const MAX_INFLIGHT = Number(args.get('max-inflight')) || 256;
+export let activeInflight = 0;
 
 export function setChild(v) { child = v; }
 export function setChildBuffer(v) { childBuffer = v; }
@@ -75,6 +89,8 @@ export function setInitResponse(v) { initResponse = v; }
 export function setInitPromise(v) { initPromise = v; }
 export function setShuttingDown(v) { shuttingDown = v; }
 export function setRestartTimer(v) { restartTimer = v; }
+export function setNextRequestId(v) { nextRequestId = v; }
+export function setActiveInflight(v) { activeInflight = v; }
 export function bumpNextRequestId() { nextRequestId += 1; return nextRequestId; }
 
 // ----- Logging -----
@@ -124,6 +140,7 @@ export function rejectAllPending(errorMessage) {
     pending.reject(new Error(errorMessage));
   }
   pendingRequests.clear();
+  activeInflight = 0;
 }
 
 // ----- RPC primitives -----
@@ -135,12 +152,20 @@ export function sendRawRequest(message, timeoutMs = requestTimeoutMs) {
 
   const requestId = String(message.id);
 
+  if (activeInflight >= MAX_INFLIGHT) {
+    return Promise.reject(
+      new Error(`RPC inflight limit exceeded (max ${MAX_INFLIGHT})`),
+    );
+  }
+
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       pendingRequests.delete(requestId);
+      if (activeInflight > 0) activeInflight -= 1;
       reject(new Error(`request timed out after ${timeoutMs}ms`));
     }, timeoutMs);
 
+    activeInflight += 1;
     pendingRequests.set(requestId, { resolve, reject, timeout });
     child.stdin.write(`${JSON.stringify(message)}\n`, 'utf8');
   });
@@ -163,6 +188,7 @@ export function handleChildMessage(message) {
     const pending = pendingRequests.get(String(message.id));
     pendingRequests.delete(String(message.id));
     clearTimeout(pending.timeout);
+    if (activeInflight > 0) activeInflight -= 1;
     pending.resolve(message);
     return;
   }
@@ -192,6 +218,19 @@ export function processChildStdout(chunk) {
       logError(`non-JSON stdout from child: ${trimmed}`);
     }
   }
+}
+
+// Defense against DNS-rebinding and cross-origin CSRF: refuse any HTTP
+// request whose Host header does not identify the loopback interface this
+// server is bound to. Browser fetches always send Host; if a malicious page
+// DNS-rebinds evil.com to 127.0.0.1, its Host header is still evil.com and
+// fails this check. Non-browser clients (desktop agents, curl, stdio MCP)
+// connect to 127.0.0.1 directly and pass. Bearer-token auth is a future
+// hardening layer for same-origin local-process threats.
+export function isAllowedMcpHost(hostHeader) {
+  return /^(?:127\.0\.0\.1|\[::1\]|localhost)(?::\d+)?$/i.test(
+    String(hostHeader || "").trim(),
+  );
 }
 
 export async function forwardRequest(message) {
