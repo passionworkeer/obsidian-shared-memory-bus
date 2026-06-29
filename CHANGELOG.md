@@ -2,6 +2,43 @@
 
 All notable changes to this project should be documented here.
 
+## 2026-06-28
+
+### Changed — Architecture (A1: store/vault unification)
+- Canonical memory store is now the Obsidian vault's `00-System/ai-memory` (matches CLAUDE.md: "Canonical long-term memory lives in Obsidian"). Both `resolve_store_root` (Python `retrieval/runtime_support.py`) and `resolveStoreRoot` (Node `bus/store-root.js`) vault-bridge when no `AI_MEMORY_STORE` is set. Priority: `AI_MEMORY_STORE > vault/00-System/ai-memory > AI_MEMORY_ROOT > ~/.ai-memory`.
+- New `resolveFromObsidianConfig` in `bus/vault-root.js` reads Obsidian's `obsidian.json` to discover vaults on any drive (Python parity; Node previously only checked home-dir candidates).
+- Retrieval now reads real vault data by default (zero env config); pure-file `.ai-memory` is fallback only (CI / no-vault machines).
+
+### Added — Multi-agent integration (A3)
+- `setup-mcp.js --target=<claude|cursor|kiro|windsurf|cline|roo|goose|qoder|all|a,b>` configures 8 AI agents. `AGENT_REGISTRY` mapping — one line per new agent. `--dry-run`, `--help`.
+- `AGENTS.md` MCP integration section (recognized by Kiro/Trae/Goose/Cline/Roo/Continue).
+
+### Fixed — Windows startup (live end-to-end testing uncovered 4 fatal bugs that tests missed)
+- `shared-mcp/proto/windows-shim.mjs`: `spawnSync` import moved from `node:fs` to `node:child_process` (memory server was crashing on startup).
+- `shared-mcp/singleton-stdio-mcp-proxy.mjs`: `scheduleRestart` import moved from `rpc.mjs` to `restart.mjs`.
+- `start.js`: no longer forces `AI_MEMORY_STORE=~/.ai-memory` (was bypassing the vault bridge, pointing the server at an empty store).
+- `shared-mcp/memory-retrieval.js`: store resolution unified to canonical `resolveStoreRoot` (vault bridge), removing a stale independent copy.
+
+### Added — Retrieval quality
+- RRF (Reciprocal Rank Fusion) in `retrieval/search_ranking.py` (default `weighted`, opt-in via `AI_MEMORY_FUSION=rrf`). Rank derived from existing scores, no upstream changes.
+- NDCG benchmark at `retrieval/eval/ndcg_benchmark.py` (NDCG@5 / Recall@10 / MRR, reuses `judgments.jsonl`).
+- Optional cross-encoder rerank (`AI_MEMORY_RERANK=local`, default off) in `search_ranking.py` — bge-reranker-v2-m3, graceful degradation when `sentence_transformers`/model unavailable.
+
+### Added — Packaging & docs
+- `bin.js` unified CLI entry: `npx local-ai-memory-bus [start|setup|init|doctor|status|help]`.
+- `package.json` `bin` + 15 keywords; `.npmignore` (packed size **537 kB / 403 files**, down from 7.3 MB / 6083).
+- README rewritten (A1 vault / A3 8 agents / search_shared_memory vs memory_search / RRF / differentiation vs mem0/Zep). New `docs/guides/INTEGRATION.md`. Updated `docs/ARCHITECTURE.md`, `docs/architecture/DATA-FLOW.md`, `docs/reference/MCP-TOOLS.md`.
+- Landing Page upgraded to React+Vite (`web/src/` + `web/dist/`): interactive architecture diagram, L0-L5 layers, 8-agent tabs, copy-toasts. Old static HTML backed up to `web/legacy-html/`.
+
+### Added — Promotion
+- `docs/promotion/article.md` — community article (~2350 words, differentiation vs mem0/Zep, honest limitations).
+- `docs/promotion/video-script.md` — 4.5-minute demo script (storyboard + narration, real `search_shared_memory` output).
+
+### Verified
+- `npm test`: 718 passed / 0 regressions.
+- End-to-end MCP: `search_shared_memory` returns real vault data (entryCount 143, 3 results, score 1.015).
+
+
 ## 2026-04-10
 
 ### Fixed

@@ -1,4 +1,5 @@
-import { spawnSync, existsSync, readFileSync, writeFileSync, accessSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync, writeFileSync, accessSync } from 'node:fs';
 import { dirname, join, normalize } from 'node:path';
 import process from 'node:process';
 

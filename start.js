@@ -12,13 +12,11 @@ import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
-import os from 'node:os';
 import { MCP_SERVERS, getServerPort, resolveBasePort } from './shared-mcp/port-registry.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PROJECT_ROOT = join(__dirname, 'shared-mcp');
-const DEFAULT_STORE_ROOT = join(os.homedir(), '.ai-memory');
 const BASE_PORT = resolveBasePort();
 
 // MCP servers configuration lives in shared-mcp/port-registry.js.
@@ -45,8 +43,14 @@ function startSingletonProxy(serverId, port, stdioCommand) {
   const env = {
     ...process.env,
     AI_MEMORY_ROOT: process.env.AI_MEMORY_ROOT || __dirname,
-    AI_MEMORY_STORE: process.env.AI_MEMORY_STORE || process.env.AI_MEMORY_STORE_ROOT || DEFAULT_STORE_ROOT,
   };
+  // Only forward explicit store env vars. Do NOT force ~/.ai-memory (the old
+  // DEFAULT_STORE_ROOT fallback) — that would bypass resolveStoreRoot()'s vault
+  // bridge and point the server at an empty store. When no store is set
+  // explicitly, resolveStoreRoot() bridges to the Obsidian vault's
+  // 00-System/ai-memory (canonical location per CLAUDE.md).
+  if (process.env.AI_MEMORY_STORE) env.AI_MEMORY_STORE = process.env.AI_MEMORY_STORE;
+  if (process.env.AI_MEMORY_STORE_ROOT) env.AI_MEMORY_STORE_ROOT = process.env.AI_MEMORY_STORE_ROOT;
 
   const child = spawn('node', [
     proxyScript,

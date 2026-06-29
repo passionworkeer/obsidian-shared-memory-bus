@@ -56,18 +56,15 @@ function resolveVaultRoot() {
 const DEFAULT_STORE_ROOT = path.join(USER_HOME, ".ai-memory");
 let cachedStoreRoot = null;
 
+import { resolveStoreRoot as resolveBusStoreRoot } from "../store-root.js";
+
 function resolveStoreRoot(options = {}) {
   if (cachedStoreRoot && !options.refresh) return cachedStoreRoot;
 
-  for (const envKey of ["AI_MEMORY_STORE", "AI_MEMORY_STORE_ROOT", "AI_MEMORY_ROOT"]) {
-    const candidate = (process.env[envKey] || "").trim();
-    if (candidate) {
-      cachedStoreRoot = path.resolve(candidate);
-      return cachedStoreRoot;
-    }
-  }
-
-  cachedStoreRoot = DEFAULT_STORE_ROOT;
+  // Delegate to the unified bus/store-root.js so the adapter matches the
+  // canonical resolution (explicit env > vault bridge > AI_MEMORY_ROOT >
+  // default). Mirror Python's retrieval/runtime_support.py:resolve_store_root.
+  cachedStoreRoot = path.resolve(resolveBusStoreRoot() || DEFAULT_STORE_ROOT);
   return cachedStoreRoot;
 }
 

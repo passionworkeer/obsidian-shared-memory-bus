@@ -1,236 +1,251 @@
-# 项目深度分析报告（差分审计）
+# 项目深度分析报告（全量逐行审计）
 
-**分析日期**: 2026-06-15
-**对比基线**: 2026-06-14 差分审计（已附末"基线"章节）
-**项目版本**: local-ai-memory-bus v3.1.0
-**项目类型**: Node.js ESM (>=18) — 7936 symbols, 12938 relationships
-**审计方法**: 5 个 expert agents 差异审计（不复做基线） + 2 派辩论
+**分析日期**: 2026-06-28
+**对比基线**: 2026-06-15 差分审计
+**项目版本**: local-ai-memory-bus (obsidian-shared-memory-bus) v3.1.0
+**项目类型**: 本地优先多 agent 共享记忆总线 — Node.js ESM (>=18) + Python 检索，~54,000 行（JS ~37,500 + Python ~16,200）
+**审计方法**: 5 个 expert agents 全量逐行扫描（架构/安全/性能/测试/代码质量）+ 乐观派/批判派辩论 + 协调者裁决
+**审计深度**: 每个 agent 深入读 12-15 个核心文件真实代码，全部发现带 file:line 证据
 
 ---
 
 ## 📊 综合评分
 
-| 维度 | 2026-06-14 | 2026-06-15 | 变化 | 主导因素 |
+| 维度 | 2026-06-15 | 2026-06-28 | 变化 | 主导因素 |
 |------|------------|------------|------|---------|
-| 架构 | 7.5 | **7.8** | +0.3 | 3 god 拆 + 端口 SoT 落地 + 时长常量收敛 |
-| 安全 | 8.5 (虚高) | **8.8** | +0.3 | writeLock TOCTOU + 空文件写原子 + getFreshness barrel 修 |
-| 性能 | 7.0 | **7.6** | +0.6 | appendDailyLogs O_APPEND + writeIndexSnapshot 流式 + tryWithFileLock |
-| 代码质量 | 7.2 | **7.4** | +0.2 | unused -28 + 时长去重 + barrel 全透传验证 |
-| 测试 | 6.8 (含 2 红) | **7.3** | +0.5 | 113/113 绿 + 0 fail + 0 测试模块补齐继承；3 新子目录无专属测试 |
-| **加权综合** | **7.6 / 采信 7.2** | **7.55** | **+0.35** | LOW 债系统性收敛，结构性推进 |
+| 架构 | 7.8 | **7.0** | ↓0.8 | 新发现：JS↔Python 双真源漂移已现、bus→shared-mcp 反向依赖 |
+| 安全 | 8.8 *(虚高)* | **6.5** | ↓2.3 | S1（MCP 零鉴权）历史搁置项被重新定性为**可利用漏洞**；评分下修至真实水位 |
+| 性能 | 7.6 | **6.0** | ↓1.6 | 新发现：每次 search 全量读文件算 SHA-1 签名、dense/MMR 纯 Python cosine 全表扫描；13b 已修部分抵消 |
+| 测试 | 7.3 | **6.5** | ↓0.8 | 新发现：MCP 通信层 ~1350 行零测试、e2e 假绿（T2 历史未修确认） |
+| 代码质量 | 7.4 | **7.0** | ↓0.4 | 新发现：withFileLock 忙等自旋（双人确认）、Python except 吞错 60 处、跨语言常量重复 |
+| **加权综合** | **7.55** | **6.5** | **↓1.05** | 审计深度提升暴露深层问题 + 历史搁置项累积 |
 
-> 批判派采信 7.55（基线 7.6 + 真实净 +0.0）：3 god 拆 + 3 个 O(whole file) 全消除 + 4 项 LOW 安全全修都实在，但乐观派把"barrel dead exports 误估修正"当成绩算分不公。
-
----
-
-## ✅ 真修了（17 项中 11 项）
-
-| # | 项 | 证据（file:line） | 提交/原因 |
-|---|----|------------------|----------|
-| 1 | **CRITICAL** Gemini heredoc 注入 | `bus/embedding-provider-registry.js:217-258` 改 stdin JSON；`shared-mcp/memory-bridge.js:195-251` 无密钥字面量 | 多 commit |
-| 2a | HIGH mcp_write 写侧硬化 | `ops/mcp/mcp-memory-tools.js:310-364` 限长 1000 + 元素 2000 + UUID + `appendLineAtomic({safeRoot})` | — |
-| 3 | HIGH JSONL realpath + @include 防护 | `ops/memory/paths-and-io.js:96-133` `safeRealpathWithin`；`entry-parsers.js:46-51, 382-410` 容器检查 + 绝对路径拒绝 | — |
-| 4 | LOCK_TTL undefined | `ops/memory/memory-archival.js:53,135` 统一为 `LOCK_TTL_MS` | — |
-| 5a | stress test 未定义函数 | `ops/stress/stress-test-concurrent.js` 6 处 `resolveStoreRoot` | — |
-| 5b | 4 份 CJS 死测试 | `tests/integration/js/{inbox-atomic-flow,kg-integration,memory-flow,memory-layers-flow}.test.js` 转 ESM；glob `*.{test.js,test.mjs}` | — |
-| 6 | resolveVaultRoot CLI/adapter 分歧 | `bus/vault-root.js:55-101` 新 chain；platform/* delegate | — |
-| 7 | ops/bus/store-root.js 副本 | 目录已删 | `53767f3` |
-| 9 | node: 前缀 + 根级 lint | `eslint.config.js` flat config；`lint:root` 0 errors | `d85db88` |
-| 11 | 4 个 0 测试模块 | `tests/unit/js/{knowledge-graph(210),memory-archival(242),promotion-resolver(282),promotion-scorer(256)}.test.js` 总 990 行 | — |
-| 13a | detectConflicts O(n²) | `ops/memory/memory-contract.js:823-878` 反向索引 | `5a525b4` |
-| A1 | memory-layers-parse.js god module | 1185→48 行 barrel + 4 拆 | `fd6e276` |
-| A2 | omni-memory-server.js god module | 1444→277 行 + 7 sibling | `fd6e276` |
+> ⚠️ **评分下降解读**：本次下降**主因不是项目退步**，而是 (a) 本次为"扫每一行"的全量审计（上次为差分审计），(b) S1 这个历史搁置项被重新定性。核心数据层防护（crypto 零自研、safeRealpath 防符号链接逃逸、O_APPEND 原子写）仍然扎实，13b/13c 等历史性能债已实际偿还。
 
 ---
 
-## ❌ 未修（17 项中 5 项）
+## 🔴 P0 — 严重问题（立即修，本周，两派共识）
 
-| # | 项 | 状态 |
-|---|----|------|
-| 5c | mcp-e2e 死代码 | `tests/e2e/mcp-e2e.test.mjs:194,213` 重复 `testStoreRoot`；`:381,386` `process.exit()`；`package.json` 无 `test:e2e` |
-| 5d | jsonl.test.mjs:296 伪 concurrent | 仍顺序 `for` 循环，名字叫"concurrent" |
-| 8 | logger 3 种风格 | `no-console` 降级到 warn；`DomainError` 未引入；结构化 logger 仅 2 个消费者 |
-| 10 | CI `\|\| true` 短路 | `.github/workflows/lint.yml` 仍 `\|\| true`；4 步 `if: false` 永久禁用 |
-| 12 | Windows atomic write skip | `tests/integration/js/inbox-atomic-flow.test.js:89,183` `if (process.platform === "win32") skip`；项目自定位 Windows 优先但跳过 |
-| 13b | patchJsonlRecord 全文件重写 | `ops/memory/memory-layers-dedup.js:51-92` 仍 readFileSync + writeFileSync |
-| 13c | writeIndexSnapshot per-batch | `bus/generate-embeddings.js:548-552, 725` 仍非 tmp+rename，每 batch 全量序列化 |
-| 15 | entity-extractor STOPWORDS | `ops/entity/entity-extractor.js:34-72` 仍数据/算法混合；`"type","type","type"` 重复 |
-| F | 孤儿注释 | `bus/generate-embeddings.js:308` `buildDocument() return null`（故意写坏） |
+### 1. MCP 端点零鉴权 + 无 Origin/CORS 校验（最危险，可被任意网页利用）
+
+- **位置**: `shared-mcp/proto/rpc.mjs:270`（`handleSingleRpc`→`forwardRequest`）、`shared-mcp/singleton-stdio-mcp-proxy.mjs:44-132`、5 端点 9331/9332/9333/9337/9338
+- **类型**: 越权访问 / CSRF / DNS-rebinding / 本机进程劫持
+- **机制**: 所有 `/mcp` 端点只校验 `req.url === mcpPath` + POST 方法，**无任何 token、Origin/Host 校验、CORS 限制**。对比 `shared-mcp/metrics/server.js:43-50` 已有 Bearer 鉴权，证明团队知道怎么做却没在主端点做。
+- **攻击场景**:
+  - (a) 用户访问任意恶意网页 → 浏览器 JS 向 `http://127.0.0.1:9338/mcp` 发 `memory_search`/`memory_query` → **读全部记忆库**（含 token、密钥、个人笔记）→ 数据外泄
+  - (b) DNS-rebinding：网页把自身域解析到 127.0.0.1 绕过同源策略
+  - (c) `memory_write` 写入投毒记忆 → 下次 agent 启动被 prompt-injection 劫持
+  - (d) 本机任意非特权进程（恶意 npm/Obsidian 插件）静默读写
+- **证据**: `rpc.mjs:297` `if (Object.prototype.hasOwnProperty.call(message,'id')) { return forwardRequest(message); }` — 无 caller 校验
+- **历史**: 2026-06-15 报告 HIGH #4 已记录为"mcp_write 缺 caller 身份——下个 feature 的尾巴"，**被搁置至今**
+- **严重度**: 🔴 高（对本地优先工具，本机网页/进程是最现实威胁面，零交互触发）
+- **修复方案**:
+  1. `handleSingleRpc` 前加中间件：强制校验 `Origin`/`Host` ∈ {`127.0.0.1`, `localhost`}（挡跨站）
+  2. 启动时生成随机 token，非-`initialize` 请求必须带 `Authorization: Bearer`（挡本机其他进程）
+  3. 返回 `Access-Control-Allow-Origin: null` + 拒绝非-`OPTIONS` 跨域
+- **工时**: 90 分钟
+- **裁决**: ✅ 两派一致 P0（批判派/乐观派均判立即修）
+
+### 2. e2e 测试"吞 TypeError 即过"——假绿，破坏信任基石
+
+- **位置**: `tests/e2e/mcp-e2e.test.mjs:246-254`
+- **机制**: catch 块把 `TypeError`（"not a function"）和 `NOT_FOUND` 都当 "test skipped" 静默 return → **handler 完全坏掉也显示 PASS**。整个 e2e 文件 13 个用例几乎都是 `assert.notEqual(result, null)` 级别存在性检查，非行为断言。名为 e2e 实为 smoke。
+- **严重度**: 🔴 高（使 S1 等所有修复的回归保障失效，"绿了≠对"）
+- **修复方案**: 区分"环境未就绪可 skip"与"代码 bug 必 fail"；补真实读写往返断言
+- **工时**: 30 分钟
+- **裁决**: ✅ 两派一致 P0
+
+### 3. `withFileLock` 忙等待自旋（CPU 100% 满载）— 双人独立确认
+
+- **位置**: `ops/memory/paths-and-io.js:146,219,249`
+- **机制**: `const wait = (delay) => { const start = Date.now(); while (Date.now() - start < delay) {} }` 空循环退避。Node 单线程下锁定期间整个进程阻塞，多 agent 并发写入时打满一个 CPU 核。
+- **证据**: 性能 agent 与代码质量 agent **独立发现同一行**，高置信
+- **严重度**: 🔴 高（并发写入链路 CPU 雪崩，可与缓存击穿形成 CPU+I/O 双重恶化）
+- **修复方案**: 改 `Atomics.wait`（SharedArrayBuffer）或 `setTimeout` 轮询
+- **工时**: 15 分钟
+- **裁决**: ✅ 两派一致修（批判派 P0 / 乐观派 P1），极低成本
+
+### 4. `memory_write` 的 `project` 键无白名单（路径穿越，纵深防御）
+
+- **位置**: `ops/mcp/mcp-memory-tools.js:95-107`（`detectProjectKey`）、`:329` `path.join(projectsRoot, \`${projectKey}.jsonl\`)`
+- **机制**: `project` 取自入参 `project.trim()` 直接拼路径，**key 无字符白名单**。攻击者传 `project="..\\..\\..\\..\\Windows\\Temp\\evil"` 即可写到 projectsRoot 之外（Windows `\` 不被 basename 处理）。需配合 S1，且 `appendLineAtomic` 的 `safeRoot` 可能拦截——但纵深防御必须补。
+- **修复方案**: `:327` 后加 `if (!/^[A-Za-z0-9._-]{1,64}$/.test(projectKey)) return {ok:false, error:"invalid project"};`
+- **工时**: 15 分钟
+- **裁决**: ✅ 两派一致修（S1 已 P0，顺手关第二道门）
+
+> **P0 合计工时：约 150 分钟**。全部为两派共识，无争议。
 
 ---
 
-## 🆕 新发现问题（5 agents 共 13 项）
+## 🟡 P1 — 中等问题（本迭代修）
 
-### HIGH（必须修）
+### 5. JSONL 流式解析信任外部记录（间接 prompt-injection 通道）
 
-1. **parseEventEntries / parseSessionMemoryEntries 漏 realpath**（安全 agent）
-   - 位置：`ops/memory/entry-parsers.js:92-150, 184-220`
-   - 与 #3 同样攻击面（vault symlink → agent prompt 注入），但修复时只覆盖了 `parseLayerEntries` 一个分支
-   - **PR 描述应改为"部分修"**
+- **位置**: `ops/util/jsonl-stream.js:26`、`ops/mcp/mcp-memory-tools.js:119,144-148`
+- **机制**: 记忆库 `.jsonl` 含攻击者写入的记录，`record.content`/`facts` 被 `buildBootContext` 直接拼入注入 agent 上下文的字符串 → 与 S1 联动构成"网页写污染 → AI 执行"链
+- **修复方案**: 读出后白名单字段（`{id,content,facts,decisions,t,project}`），丢弃未知键 + 限制单行长度
+- **工时**: 25 分钟
+- **裁决**: 协调者采纳批判派（S1 修复后补出口纵深，成本低）
 
-2. **memory-layers-dedup.js:224-244 patch log 同样 O(whole file)**（性能 agent）
-   - 与 13b 同根因，dedup 流程每次 patch 都全文件 read+write
-   - 高频调用路径
+### 6. 每次 search 全量读 10 文件 + 算 SHA-1 签名（搜索热路径）
 
-### MEDIUM（建议修）
+- **位置**: `retrieval/search_index.py:98-113`，调用点 `semantic_search.py:788-789`
+- **机制**: `build_structured_signature` 对 10 个 STRUCTURED_FILES 各读全量字节 + SHA-1，发生在搜索结果缓存命中检查**之前**。结构化层 10-50MB 时单次 search 光算签名就读 50-100MB；stdio 单进程串行下多 agent 并发全串过此开销。
+- **修复方案（采纳乐观派"先验证痛感"）**:
+  1. 用 `(mtime_ns, size)` 做第一道指纹，命中失败再回退 SHA-1
+  2. 签名结果加进程内 TTL 缓存（如 5s），避免高频并发重复计算
+- **工时**: 60-90 分钟
+- **裁决**: P1（批判派 P1 / 乐观派 P2）。架构缺陷当修，但采纳乐观派增量方案而非全量重写
 
-3. **memory-archival.js:284 STRUCT_DIR readdir 无 realpath**（安全 agent）
-4. **mcp_write 缺 caller 身份**（安全 agent）— #2 留作下个 feature 的尾巴
-5. **cli/ai-memory.js:801 端口硬编码 vs start.js BASE_PORT 偏移不一致**（架构 agent）
-6. **cli/ai-memory.js 反从 889→919 变长**（架构 agent）— god module 拆到一半停
-7. **barrel re-export 引入 8 个 dead exports**（代码质量 agent）— `record-coercion.js` + `paths-and-io.js` 拆分时全量透传
-8. **3 个文件仍 >800 行**（代码质量 agent）— cli/ai-memory.js 919 / memory-contract.js 907 / entity-extractor.js 815 / knowledge-graph.js 889
-9. **no-console 降级到 warn 让 #8 失去约束力**（代码质量 agent）
-10. **withFileLock 串行阻塞**（性能 agent）— `memory-layers-dedup.js:53,88`
-11. **generate-embeddings.js:725 批次内全量序列化**（性能 agent）
+### 7. Python `except Exception: pass` 60 处吞错（索引/缓存失败静默）
 
-### LOW（可选）
+- **位置**: `retrieval/search_index.py:57,105,273,283,335,340`、`search_cache.py:90,104,144`、`streaming_index.py:49,79,292,329`、`search_ranking.py:159,712` 等（实际 60 处，多于初审 38）
+- **机制**: 如 `_load_entries_uncached` 文件读取出错 `except Exception: continue` 静默跳过 → 索引可能空却无告警，召回率=0 无日志，极难定位
+- **修复方案**: 区分预期错误（JSONDecodeError→skip 合理）与意外错误（IOError/Permission→`sys.stderr.write` 或 re-raise）；**聚焦索引/缓存层，非全部 60 处**
+- **工时**: 90 分钟
+- **裁决**: P1（批判派 P1 / 乐观派 P3）。部分采纳——聚焦非 best-effort 的关键路径
 
-12. **writeLock TOCTOU**（安全 agent）— `memory-archival.js:151-165`，非原子 `existsSync + writeFileSync`
-13. **generate-embeddings.js:667 空文件写非原子**（性能 agent）
-14. **stress test CJS/ESM 混用**（测试 agent）
-15. **embedding-worker-pool.cjs:311 apiKey/geminiModel 死变量**（代码质量 agent）
-16. **structured logger 仅 2 个消费者**（架构 agent）
-17. **record-coercion.js 拆分后新增 24h/7d 时长常量重复**（架构 agent）
-18. **86 个真 unused vars**（代码质量 agent）— 含 8 个 barrel dead + GEMINI_BASE_URL/HASH_DIM 真死代码
+### 8. `STRUCTURED_FILES` 跨语言重复定义（双真源漂移的具体定时炸弹）
+
+- **位置**: `ops/memory/memory-archival.js:225-236` vs `retrieval/search_ranking.py:98-109`
+- **机制**: 同一份 10 个 jsonl 文件名列表 JS/Python 各写一份，新增数据源时极易漏改一侧 → 归档扫不到或检索缺数据
+- **修复方案**: 单一来源（`store-root/config/structured-files.json`，两端启动读取）或至少加一致性测试断言
+- **工时**: 40 分钟
+- **裁决**: P1（A1 双真源的便宜子集，先修这个具体例）
+
+### 9. 并发写入测试默认不跑（核心 invariant 无回归保护）
+
+- **位置**: `package.json` — `test:concurrent`（concurrency=4）未纳入 `test:all`/`test:full`
+- **机制**: 原子写入是记忆总线核心 invariant，但默认全量跑串行单线程无法暴露竞态
+- **修复方案**: 把 `test:concurrent` 纳入 `test:all`
+- **工时**: 10 分钟
+- **裁决**: P1（CI 流程修复，极低成本）
+
+> **P1 合计工时：约 225-255 分钟**
 
 ---
 
-## 🔴 当前 CI 状态
+## 🟢 P2 — 优化建议（下迭代，等痛感/规模验证）
 
-```
-npm test → 675 测试，673 通过 / 2 失败
-```
+### 10. dense/MMR 纯 Python 全表扫描 + 384 维逐元素 cosine
 
-### 失败 1: `verify-atomic-write.js runs as an ESM CLI` (esm-entrypoints.test.js:476)
+- **位置**: `retrieval/search_ranking.py:262-277,426,923-986`
+- **机制**: 每次 query 对整个 embeddings index 全表遍历 + 纯 Python cosine；MMR 是 O(top_k×N) 次纯 Python 384 维循环，且 `mmr_rerank` 又重扫全表把候选 embedding 全捞进内存
+- **修复方案**: numpy 批量 dot（矩阵乘）；MMR 只捞 top_candidates 的 embedding
+- **工时**: 90-120 分钟
+- **裁决**: P2（采纳乐观派：N<1k 当前可接受，等向量规模破 5k 再投入）
 
-**根因**：`ops/verify/verify-atomic-write.js:31` 把生成的 child 脚本写到 `os.tmpdir()` 下的 `atomic-write-child-${pid}.js`。该路径无父 `package.json`、扩展名是 `.js`，Node v22 触发 `[MODULE_TYPELESS_PACKAGE_JSON] Warning: ... Reparsing as ES module ...` 写入 stderr。
+### 11. MCP 通信层 ~1350 行零测试
 
-**触发**：`verify-atomic-write.js:79` `results.every(r => r.code === 0 && r.stderr === "")` — 10 行全部写入成功（10/10），但 stderr 含 Node warning → allOk=false → exit 1。
+- **位置**: `shared-mcp/proto/rpc.mjs`、`proto/child-process.mjs`、`proto/restart.mjs`、`singleton-stdio-mcp-proxy.mjs`、`omni-*.js`
+- **机制**: 协议解析边界错误（半包、超大消息、畸形 JSON）会让整个 MCP 总线静默挂死；restart.mjs 崩溃恢复无保护
+- **工时**: 180-240 分钟（分批补）
+- **裁决**: P2（渐进补；S1 鉴权路径可先在 P0 用集成测试覆盖）
 
-**修法**：child 脚本改 `.mjs` 扩展名（1 行）。
+### 12. bus 反向依赖 shared-mcp
 
-### 失败 2: `ai-memory CLI --workspace dry-run forwards AI_MEMORY_STORE` (esm-entrypoints.test.js:492)
+- **位置**: `bus/embedding-provider-registry.js:41` `require("../shared-mcp/embedding-worker-pool.cjs")`
+- **机制**: 核心层 lazy-require 上层，try/catch 静默吞 import 失败 → `bus` 无法脱离 MCP 层独立测试/复用
+- **修复方案**: worker-pool 下沉到 `bus/` 或依赖注入
+- **工时**: 120 分钟
+- **裁决**: P2（架构异味，当前可工作，非运行时风险）
 
-**根因**：用户 shell 中 `AI_MEMORY_ROOT=C:\Users\wang\.ai-memory`（来自本地 `.env`）泄漏到测试子进程。`cli/ai-memory.js:519-536` 的 `resolveScriptPath` 用 `AI_MEMORY_ROOT` 拼路径，得到 `C:\Users\wang\.ai-memory\ops/check/check-memory-integrity.js`（在用户机器上不存在）。
+### 13. StreamingIndexReader 文件句柄泄漏
 
-**触发**：`runNode` (`tests/unit/js/esm-entrypoints.test.js:43-53`) 默认 `env: { ...process.env, ...(options.env || {}) }` 透传环境变量，未隔离 `AI_MEMORY_*`。
+- **位置**: `retrieval/streaming_index.py:54,66`
+- **机制**: `open()` 非 `with`，调用方提前 break 或异常则句柄泄漏
+- **工时**: 40 分钟
+- **裁决**: P2（采纳乐观派：进程短生命周期，泄漏到 OOM 前已重启，监控即可）
 
-**修法（2 种）**：
-- 治标：测试调用点加 `options.env: { AI_MEMORY_ROOT: REPO_ROOT }`
-- **治本（批判派主张）**：改 `runNode` 默认 `env: scrub(process.env, AI_MEMORY_*)` 隔离业务 env
+### 14. MCP 单例子进程串行瓶颈
+
+- **位置**: `shared-mcp/proto/rpc.mjs:60-78,145,157`
+- **机制**: 多 agent 并发经单 stdin 串行，单次慢请求/崩溃重启拖垮所有等待者；`pendingRequests` 无上限
+- **工时**: 180 分钟
+- **裁决**: P2（单用户场景几乎触不到，采纳乐观派）
+
+---
+
+## ⚪ P3 — 监控/暂不修（低 ROI 或前置条件强）
+
+| # | 问题 | 位置 | 裁决理由 |
+|---|------|------|---------|
+| 15 | JS↔Python 配置双真源大重构（A1） | `bus/runtime-config.js:24-83` vs `retrieval/runtime_support.py:54-99` | 240min 大重构，"漂移存在但未爆 bug"；先修 #8 单源问题，等真爆 bug 再统一 |
+| 16 | redact 自定义正则 ReDoS | `ops/redact/redaction.py:78-109` | env 默认空，需配置层被攻破才触发，前置条件强 |
+| 17 | `clone_json_payload` 双重 JSON 序列化 | `retrieval/search_cache.py:194-196` | 开销可接受，P1 修复后再评估 |
+| 18 | `acquireLock` EEXIST 覆盖破坏原子性 | `ops/memory/memory-archival.js:172-181` | 多触发源并发归档才暴露，下迭代 |
+| 19 | `__import__("datetime")` 反模式 | `retrieval/search_ranking.py:709-710` | 微开销+可读性，顺手修 10min |
+| 20 | platform/index.js 非真 lazy import | `bus/platform/index.js:11-13` | 加载浪费但不影响正确性 |
+| 21 | BM25 缓存被签名失效联动击穿 | `retrieval/search_ranking.py:216-227` | 依赖 #6，#6 修后收敛 |
 
 ---
 
 ## ⚔️ 辩论结论
 
-### 共识（双方同意）
+### 两派共识（4 项，无争议）
+- **S1 MCP 零鉴权**：DNS-rebinding 是客观威胁，90min 成本低 → **P0**
+- **T2 e2e 假绿**：破坏测试信任契约 → **P0**
+- **P6/Q1 withFileLock spin**：双人确认真 bug，15min → **修**
+- **S2 project 键白名单**：15min 纵深防御 → **修**
 
-- CRITICAL + 2 HIGH 真修了，价值真实
-- 2 个 CI 失败本周必修
-- `parseEventEntries` / `parseSessionMemoryEntries` / `memory-archival.js:284` 3 处 realpath 漏修是 follow-up 必做
-- `mcp-e2e` 死代码、`logger` 风格统一、`Windows atomic write` 重新评估是下个迭代不可拖
-- `cli/ai-memory.js` 919 行下个迭代拆
+### 主要分歧与裁决
 
-### 分歧
+| 议题 | 批判派 | 乐观派 | 协调者裁决 |
+|------|--------|--------|-----------|
+| S4 JSONL 信任 | P0（链式终端） | P3（本地信任边界） | **P1** — S1 修复后补出口纵深，成本低 |
+| P1 签名风暴 | P1（用户痛点） | P2（先埋点验证） | **P1** — 架构缺陷当修，采纳乐观派增量方案（mtime 指纹+TTL） |
+| P2 dense/MMR cosine | P1 | P2（过度工程） | **P2** — 采纳乐观派，等向量规模破 5k |
+| A1 双真源大重构 | P1 | P3（理论整洁） | **P3** — 先修 #8 子集，等真爆 bug |
+| Q2 except 吞错 | P1（60 处） | P3（部分合理） | **P1** — 聚焦索引/缓存层非全部 |
 
-| 议题 | 乐观派 | 批判派 | **本报告采信** |
-|------|--------|--------|---------------|
-| 2 测试红 | "5 行小修" | "runNode 设计缺陷，治本改默认 env scrub" | **批判派** — runNode 默认透传 `process.env` 是反模式，未来 5+ 处会重蹈覆辙 |
-| realpath 漏修 | "follow-up 即可" | "#3 修复不彻底，PR 描述应改为部分修" | **批判派** — 文档已宣称"已防护"，是诚信问题 |
-| barrel dead exports | "拆 1185→48 是大胜，dead exports 是兼容代价" | "拆分方法错误，consumer 视角是净负值" | **折中** — barrel 兼容有价值，但 8 个 dead exports 30 分钟内应清掉 |
-| 拆分 cli/ai-memory.js | "先观察再拆" | "919 行还超 800，下个迭代必拆" | **批判派** — `omni-memory-server.js` 1444→277 行的拆分能力已验证 |
-| patchJsonlRecord | "未触发用户可见问题，premature optimization" | "断电时是数据丢失风险" | **折中** — 季度性优化，但需加 bench 监控 |
-| 加权分 7.6 | 真实进展 | 含维度虚高（安全 8.5 / 测试 6.8），真实 ~7.2 | **批判派** — 在 PR 描述里写"安全 8.5"会被审计挑战 |
+### 最终建议（修复路线图）
 
-### 最终建议（按优先级）
+```
+第 1 周（P0，~150min）: S1 → T2 → P6/Q1 → S2
+   └─ 先修 T2 让测试可信，再修 S1/S2 安全，最后 P6 spin
+第 1-2 周（P1，~225min）: #5 S4 → #8 STRUCTURED_FILES → #9 并发测试 → #6 签名 → #7 except
+第 3 周+（P2）: #10 cosine → #11 MCP 测试 → #12 反向依赖 → #13 句柄 → #14 单例
+监控待办（P3）: #15 双真源 / #16-21
+```
 
-#### 本周必做（≤1-2 天，治本不是修 bug）
-
-1. **改 `runNode` 默认 env scrub** — `tests/unit/js/esm-entrypoints.test.js:43-53` 默认 `env: { ...scrub(process.env, ['AI_MEMORY_*','OBSIDIAN_*','VAULT_*']), PATH, HOME, LANG, NODE_*, TMPDIR, TEMP, SYSTEMROOT }`。**修法 1 处，2 红测试在所有调用点自动恢复绿。**
-2. **修 `verify-atomic-write.js:31` child script 路径** — 改 `path.join(os.tmpdir(), 'atomic-write-child-${pid}.mjs')`（1 行）。或保险起见：写到 `inboxDir` 内部而非 tmpdir，避免子目录权限问题。
-3. **补 3 处 realpath 校验** — `entry-parsers.js:92-150, 184-220`（`parseEventEntries` + `parseSessionMemoryEntries`）和 `memory-archival.js:284`（STRUCT_DIR readdir）。**这是 #3 修复的不彻底，文档须同步改为"部分修"**。
-4. **修 writeLock TOCTOU** — `ops/memory/memory-archival.js:151-165` 改 `writeFileSync(path, pid, { flag: 'wx' })`（Node 18+ 原子创建）。
-5. **清 8 个 barrel dead exports** — `record-coercion.js` + `paths-and-io.js` 中 8 个无 consumer 的 symbol：`grep -rn "symbolName" .` 确认无引用后删。
-
-**合计：~6-8 小时，覆盖 1 CI 红、3 个新 HIGH/MEDIUM、1 个诚信问题。**
-
-#### 下个迭代（30 天）
-
-1. `tests/e2e/mcp-e2e.test.mjs` 改写为 `node:test`，接入 `npm run test:e2e` 和 `test:all`（解决 e2e = 0% 覆盖的诚信问题）
-2. `cli/ai-memory.js` 919 → 拆 `<400` 行（按子命令 `cli/commands/*.js`）
-3. 引入 `DomainError(code, message, cause)` 统一错误信封 + `no-console` 升回 `error`
-4. CI Windows runner 加 `inbox-atomic-write.test.js` 并发分支（解决 Windows-first 定位的诚信问题）
-5. `omni-metrics.js` 937 行评估是否拆 `metrics-source` vs `metrics-compute`
-6. 端口列表对齐 `cli/ai-memory.js:801` vs `start.js` BASE_PORT 偏移
-
-#### 季度性（60+ 天）
-
-1. `patchJsonlRecord` + patch log 改 append-only + 周期 compact（`#13b` + `新增#1`）
-2. `writeIndexSnapshot` 改 tmp+rename + 批次内增量
-3. STOPWORDS 拆 `ops/entity/stopwords/*.js` 按域分组
-4. `withFileLock` 引入 try-lock + 队列化
-5. 性能 profiling（clinic.js / 0x 跑真实工作流）后再决定
-
-#### 不做（明确拒绝）
-
-- 8 个 barrel dead exports 之外的"全部 86 个 unused vars 一并清理" — 性价比低，季度性任务
-- `mcp_write` callerId 协议 — 留作下个 feature 一起设计
-- `#15` STOPWORDS 之外的 entity-extractor 815 行大拆 — 工作量大收益小
+**核心论点**：批判派提醒"安全不能等下迭代"是对的——S1 的 90min 修复成本是事故成本（密钥泄露+记忆污染+AI 劫持）的数千倍；乐观派提醒"先验证痛感再投入大重构"也对——P2/A1 在当前单用户/小规模下非痛点。**协调者折中：P0 全修、P1 选高 ROI、P2/P3 推迟并埋监控。**
 
 ---
 
-## 📈 历史对比
+## 🔄 历史对比（2026-06-15 → 2026-06-28）
 
-### 2026-06-13 基线（首版）
+### ✅ 历史问题已实际修复（项目在进步）
+- **13b patchJsonlRecord 全文件重写** → commit `fd06721` 已优化为 **O(1) append-only**（性能 agent 确认）
+- Gemini heredoc 注入 → 改 stdin JSON（持续有效）
+- mcp_write 写侧硬化 + realpath 防护（持续有效）
+- 3 个 god module 拆分 + barrel 重构（持续有效）
 
-- 加权分 6.6
-- 1 CRITICAL + 3 HIGH 未修
-- 8 个 god/超长文件
-- 3 处 store-root 重复
-- 2 个 O(n²) 热路径
-- 0 TODO/FIXME
-- 最近 5 commit 全是路径语义/去重
+### ❌ 历史已发现但搁置/未修（本次升级）
+- **S1 MCP 零鉴权** — 2026-06-15 标为"下个 feature 尾巴" → **本次升级为 P0 可利用漏洞**（最大教训：安全债搁置会被重新定性）
+- **T2 e2e 假绿** — 2026-06-15 未修 → 确认仍存（`mcp-e2e.test.mjs:246-254`）
+- **CI `|| true` 短路** — 仍存（`.github/workflows/lint.yml`）
+- **Windows atomic write skip** — 仍存（项目自定位 Windows 优先却跳过）
 
-### 2026-06-14 差分（本次）
+### 🆕 本次新发现（历史审计未覆盖，因审计深度提升）
+- P1 签名风暴、P2 纯 Python cosine、Q1 withFileLock spin（双人确认）、Q2 except 吞错 60 处、T1 MCP 通信层零测试、A1 双真源漂移、Q5 STRUCTURED_FILES 跨语言重复、#5 StreamingIndex 句柄泄漏
 
-- 加权分 7.6（批判派采信 ~7.2）
-- 1 CRITICAL + 2 HIGH 已修；**1 个 HIGH 是 #3 漏修需 follow-up**（新发现）
-- 8 god 文件 → 6 god 文件（拆了 2 个；cli/ai-memory.js 反而变长）
-- 0 store-root 重复
-- 1 个 O(n²) 已修（detectConflicts），**1 个仍 O(n²) + 1 个新增 O(whole file)**
-- 4 个 0 测试模块补齐 990 行测试
-- 86 个真 unused vars（含 8 个拆分副作用）
-- **CI 仍 2 红**（基线报告未提及，但已存在）
-- 最近 5 commit: detectConflicts 37x 加速 + 真实 lint 修复 + 2 god 拆分 + node: builtin 统一 + vault/store path 语义
-
-### 趋势
-
-**结构性推进**: 5 个基线"路径语义/去重"commit → 本次"性能 37x + 关键安全修复 + 2 个 god 拆分 + 测试盲区补齐"。**活跃维护 + 真有结构性推进**。
-
-**核心债务**: 从"路径/常量/日志三件大事"收敛到"端口/常量/日志/拆分"四件可批处理项。但**新增 2 类**:
-- 拆分副作用（barrel dead exports + 反向引入时长常量重复）
-- 测试环境隔离设计缺陷（runNode 默认透传 env）
+> **关键洞察**：本次评分下降**主因是审计从"差分"升级为"逐行全量"**，暴露了上次未触及的深层问题（性能热路径、Python 错误处理、跨语言真源）。项目核心防护层（crypto/realpath/atomic write）仍然扎实，但 **S1 这类搁置的安全债是真实风险，必须立即偿还**。
 
 ---
 
-## 🔍 审计方法学
+## 🌟 审计亮点（项目做得好的地方）
 
-| 阶段 | 工具/方法 | 耗时 |
-|------|---------|------|
-| 1. 5 agents 差异审计 | 5 个 general-purpose agent 并行，基线 = PROJECT_ANALYSIS.md (2026-06-13) | ~3-4 min 各 |
-| 2. 2 派辩论 | 乐观派 + 批判派 平行 | ~1-2 min 各 |
-| 3. 报告整合 | 主 agent 手动综合 7 个 agent 输出 | — |
-
-每个 agent 都被指示：
-- 不读 `node_modules / .git / dist / build / cache / .gitnexus / .pytest_cache / .claude / .github / .deepeval / generated`
-- 用 Read/Grep/Glob/Bash
-- 引用具体 file:line
-- 不输出"通用最佳实践"建议
-- 输出 Markdown 结构化报告
-- **以 2026-06-13 基线为锚点，做差异审计而非重做基线**
+- **加密零自研**：只用 `crypto.createHash`/`randomUUID`，无危险自研密码学
+- **路径遍历防护成熟**：`safeRealpathWithin`（`ops/util/safe-realpath.js:21-48`）正确对 parent+root 双 realpath，防 symlink 逃逸读 `~/.ssh/id_rsa`
+- **原子写入正确**：`appendLineAtomic` 用 OS 级 `O_APPEND`（`inbox-atomic-write.js:134-139`）解决 Windows 并发写撕裂；`patchJsonlRecord` O(1) append-only + companion patch log
+- **子进程安全**：`spawnPowerShell`/`spawnNode` 一律 `shell:false`，所有 `listen()` 显式绑 `127.0.0.1`（无 `0.0.0.0`）
+- **流式索引零内存**：`StreamingIndex` 真 generator（`streaming_index.py:24-103`）逐行 yield
+- **双层缓存 + 断路器/背压基础设施齐全**：SQLite WAL + LRU TTL + circuit_breaker 已接入 dense 路径
+- **测试基线大且全绿**：722 JS + 624 Python + 42 集成，核心数据层（crypto/vault-root/bm25/lsh/redaction/circuit-breaker）覆盖扎实
+- **文档密度高**：每个模块顶部有 DESIGN PRINCIPLES + ADR 引用，注释解释 WHY
+- **供应链干净**：运行时依赖仅 eslint，无 postinstall，无 eval/new Function/动态 require
 
 ---
 
-*报告由 DeepAnalysis 生成 | 5 agents 差异审计 + 2 派辩论*
-*下次建议间隔：30 天（覆盖本次"下个迭代"清单后再做基线对比）*
+*报告由 DeepAnalysis 生成（2026-06-28）| 5 agents 全量逐行扫描 + 2 派辩论 + 协调者裁决*
+*5 份分项报告：架构 7.0 / 安全 6.5 / 性能 6.0 / 测试 6.5 / 代码质量 7.0 | 加权综合 6.5*

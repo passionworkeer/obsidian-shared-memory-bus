@@ -12,10 +12,19 @@
 
 ## 1. 数据存储位置
 
+> **A1 变更（2026-06）：store/vault 统一。** Canonical 数据源现在是 Obsidian vault 的 `00-System/ai-memory`，不再是 `~/.ai-memory`。store 根的解析优先级（Python `retrieval/runtime_support.py:resolve_store_root:243-264` 与 Node `bus/store-root.js:resolveStoreRoot:62-82` 一致）：
+>
+> ```
+> AI_MEMORY_STORE > vault/00-System/ai-memory > AI_MEMORY_ROOT > ~/.ai-memory
+> ```
+>
+> vault 由 `resolveFromObsidianConfig` 自动发现（读 Obsidian 的 `obsidian.json`，选最近打开的 vault，可发现任意盘的 vault）。当 vault 不存在时（CI runner、无 Obsidian 机器），纯文件 `~/.ai-memory` 才作为回退。下方所有路径相对于解析出的 store 根（正常情况即 `vault/00-System/ai-memory`）。
+
 ### 1.1 目录结构
 
 ```
-E:\.ai-memory\                          # 默认存储根目录
+<resolved store root>/                  # 默认 = vault 的 00-System/ai-memory（canonical）
+                                          # 回退顺序见上方优先级链
 ├── inbox/                              # 各工具的收件箱
 ├── structured/                          # 结构化记忆文件（JSONL格式）
 │   ├── shared-inbox.jsonl              # 跨工具共享收件箱
@@ -157,11 +166,15 @@ Write-TypedDurableJsonl -PromotionQueue $promotionCandidates -TargetPath $dreamI
 Agent 查询请求
   → search_shared_memory MCP 工具
     → omni-memory-server.js
-      → requestSearchWorker() → Python 检索引擎
-        → 返回混合搜索结果
+      → embedding-worker-pool.cjs (warm worker pool)
+        → 复用常驻 Python semantic_search.py 进程
+          → 读 canonical store（默认 vault/00-System/ai-memory/structured）
+            → 返回混合搜索结果
 ```
 
-**代码**: `shared-mcp/memory-retrieval.js`
+> 检索读 canonical store。store 根由 `resolveStoreRoot` 解析（`bus/store-root.js:62-82`），优先桥接 vault 的 `00-System/ai-memory`，不再默认 `~/.ai-memory`。worker pool 复用常驻 Python 进程，避免每次冷启动。
+
+**代码**: `shared-mcp/memory-retrieval.js`, `shared-mcp/embedding-worker-pool.cjs`
 
 ### 3.2 Python 检索引擎 - 三阶段管道
 
@@ -339,9 +352,10 @@ Sync-AllSources {
 │   - search_shared_memory│    │  ~/.trae/                                │
 │   - memory_boot        │    │                                         │
 │   + more              │    └─────────────────────────────────────────┘
-└────────────┬────────────┘
+┌─────────────────────┬──────────────┘
              │
-             │ stdio (Python worker)
+             │ warm worker pool (embedding-worker-pool.cjs)
+             │   复用常驻 Python semantic_search.py 进程
              ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                     PYTHON RETRIEVAL LAYER                                  │
@@ -351,9 +365,11 @@ Sync-AllSources {
 │    └── 缓存: query-embedding + result                                       │
 └────────────┬────────────────────────────────────────────────────────────────┘
              │
+             │ resolve_store_root 桥接（store = vault/00-System/ai-memory）
              ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                     LOCAL .AI-MEMORY STORE                                   │
+│              CANONICAL STORE (默认 = Obsidian vault/00-System/ai-memory)      │
+│  回退链: AI_MEMORY_STORE > vault > AI_MEMORY_ROOT > ~/.ai-memory              │
 │                                                                              │
 │  structured/*.jsonl          ← 结构化记录                                   │
 │  generated/*.json             ← 生成制品                                    │

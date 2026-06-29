@@ -33,7 +33,21 @@ function parseInboxEntries() {
   // `[]` would open/close a class, so escaping is required to match a
   // literal `[` / `]`. ESLint's no-useless-escape heuristic doesn't know
   // this and is suppressed locally.
-  // eslint-disable-next-line no-useless-escape
+  // SECURITY: reject if the directory itself is a symlink escaping INBOX_ROOT.
+  // A vault synced via OneDrive/Obsidian Sync may contain a directory symlink
+  // planted by another app; realpath-ing the parent prevents enumeration of
+  // the attacker's chosen target before readdirSync runs.
+  let realInboxRoot = INBOX_ROOT;
+  try {
+    realInboxRoot = fs.realpathSync(INBOX_ROOT);
+  } catch {
+    return records;
+  }
+  if (realInboxRoot !== INBOX_ROOT) {
+    process.stderr.write(`[parse-inbox] INBOX_ROOT is a symlink, skipping: ${INBOX_ROOT} -> ${realInboxRoot}\n`);
+    return records;
+  }
+
   const linePattern = /^-\s+\[(?<timestamp>[^\]]+)\]\s+\[(?<project>[^\]]+)\]\s*(?<content>.+)$/;
   const files = fs
     .readdirSync(INBOX_ROOT)
@@ -92,6 +106,19 @@ function parseInboxEntries() {
 function parseEventEntries() {
   const records = [];
   if (!fs.existsSync(EVENTS_ROOT)) {
+    return records;
+  }
+
+  // SECURITY: reject if the directory itself is a symlink escaping EVENTS_ROOT.
+  // See parseInboxEntries for the rationale.
+  let realEventsRoot = EVENTS_ROOT;
+  try {
+    realEventsRoot = fs.realpathSync(EVENTS_ROOT);
+  } catch {
+    return records;
+  }
+  if (realEventsRoot !== EVENTS_ROOT) {
+    process.stderr.write(`[parse-event] EVENTS_ROOT is a symlink, skipping: ${EVENTS_ROOT} -> ${realEventsRoot}\n`);
     return records;
   }
 
@@ -187,7 +214,18 @@ async function parseSessionMemoryEntries() {
   }
 
   const openclawMemoryDir = path.join(OPENCLAW_HOME, "workspace", "memory");
-  if (fs.existsSync(openclawMemoryDir)) {
+
+  // SECURITY: reject if the directory itself is a symlink escaping its root.
+  // See parseInboxEntries for the rationale.
+  let realOpenclawDir = openclawMemoryDir;
+  try {
+    realOpenclawDir = fs.realpathSync(openclawMemoryDir);
+  } catch {
+    // ignore — existsSync below will skip the block if the path is now missing
+  }
+  if (realOpenclawDir !== openclawMemoryDir) {
+    process.stderr.write(`[parse-session] openclawMemoryDir is a symlink, skipping: ${openclawMemoryDir} -> ${realOpenclawDir}\n`);
+  } else if (fs.existsSync(openclawMemoryDir)) {
     const files = fs
       .readdirSync(openclawMemoryDir)
       .filter((fileName) => /^\d{4}-\d{2}-\d{2}\.md$/u.test(fileName))

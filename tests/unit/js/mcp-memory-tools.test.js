@@ -92,4 +92,20 @@ describe("mcp-memory-tools", () => {
     assert.equal(full.results.length, 1);
     assert.ok(full.results[0].content_hash);
   });
+
+  test("memory_write rejects path-traversal project keys (defense-in-depth)", async () => {
+    const writeResult = await memory_write({
+      project: "..\\..\\..\\..\\evil",
+      facts: [{ content: "must not escape projectsRoot", session_type: "note" }],
+    });
+
+    assert.equal(writeResult.ok, true);
+    assert.equal(writeResult.project, "default");
+
+    const defaultPath = path.join(tempRoot, "projects", "default.jsonl");
+    assert.ok(fs.existsSync(defaultPath), "fallback wrote to default.jsonl");
+
+    const escapedPath = path.join(tempRoot, "evil.jsonl");
+    assert.ok(!fs.existsSync(escapedPath), "must not write escaped traversal target");
+  });
 });

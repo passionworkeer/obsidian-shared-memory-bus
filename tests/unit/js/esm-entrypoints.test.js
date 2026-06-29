@@ -233,11 +233,19 @@ test("platform adapters treat AI_MEMORY_ROOT as the store root, not a parent", a
     AI_MEMORY_STORE: process.env.AI_MEMORY_STORE,
     AI_MEMORY_STORE_ROOT: process.env.AI_MEMORY_STORE_ROOT,
     AI_MEMORY_ROOT: process.env.AI_MEMORY_ROOT,
+    APPDATA: process.env.APPDATA,
+    XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
   };
   try {
     delete process.env.AI_MEMORY_STORE;
     delete process.env.AI_MEMORY_STORE_ROOT;
     process.env.AI_MEMORY_ROOT = storeRoot;
+    // Isolate the vault bridge: point Obsidian config lookup at the tmp storeRoot
+    // (no obsidian.json there) so resolveFromObsidianConfig finds no vault and the
+    // legacy AI_MEMORY_ROOT wins. Without this the real machine's Obsidian vault
+    // would bridge and override AI_MEMORY_ROOT.
+    process.env.APPDATA = storeRoot;
+    process.env.XDG_CONFIG_HOME = storeRoot;
 
     const { getWindowsAdapter, getDarwinAdapter, getLinuxAdapter } = await import("../../../bus/platform/index.js");
     for (const getAdapter of [getWindowsAdapter, getDarwinAdapter, getLinuxAdapter]) {
