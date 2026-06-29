@@ -75,6 +75,16 @@ def _resolve_enabled() -> bool:
     return raw not in ("0", "false", "no", "off")
 
 
+# Guards for env-sourced custom patterns (AI_MEMORY_REDACTION_CUSTOM_PATTERNS).
+# Env regexes are user-controlled input; without guards a valid-but-catastrophic
+# pattern (e.g. (a+)+) can cause exponential backtracking on tool payloads.
+MAX_CUSTOM_PATTERN_LEN = 200
+# Heuristic: a quantifier (* + ?) applied to a group whose last token is itself
+# a quantifier — the textbook ReDoS signature. Conservative: false positives
+# just cause a pattern to be rejected (logged), not a runtime hang.
+_REDOX_NESTED_QUANTIFIER = re.compile(r"\([^()]*[*+?][^()]*\)[+*]")
+
+
 def _resolve_custom_patterns() -> List[Tuple[str, re.Pattern, str]]:
     """Parse AI_MEMORY_REDACTION_CUSTOM_PATTERNS env var.
 
@@ -101,6 +111,20 @@ def _resolve_custom_patterns() -> List[Tuple[str, re.Pattern, str]]:
         if not name or not pattern_str:
             continue
         try:
+            if len(pattern_str) > MAX_CUSTOM_PATTERN_LEN:
+                import sys as _sys
+                _sys.stderr.write(
+                    f"[redaction] skipped overlong custom pattern '{name}' "
+                    f"(>{MAX_CUSTOM_PATTERN_LEN} chars)\n"
+                )
+                continue
+            if _REDOX_NESTED_QUANTIFIER.search(pattern_str):
+                import sys as _sys
+                _sys.stderr.write(
+                    f"[redaction] skipped custom pattern '{name}' "
+                    f"(nested-quantifier ReDoS heuristic)\n"
+                )
+                continue
             compiled = re.compile(pattern_str)
             results.append((name, compiled, f"[REDACTED_{name.upper()}]"))
         except re.error as exc:
