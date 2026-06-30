@@ -4,6 +4,14 @@
  * Pure JS BM25 search (k1=1.5, b=0.75). No npm dependencies.
  * Handles both Latin and CJK text.
  *
+ * CROSS-LANGUAGE NOTE: This is the LOCAL fallback BM25 used by ops/mcp tools.
+ * The canonical hybrid retrieval path runs in Python (retrieval/search_ranking.py,
+ * jieba tokenization). The two implementations are NOT rank-aligned — different
+ * tokenizers (JS unigram+bigram vs Python jieba) yield different tf/idf even with
+ * matching k1/b. Do not expect identical ordering between this and the Python
+ * `bm25`/`hybrid` modes; this module is intentionally a lightweight offline
+ * lookup, not a mirror of the Python ranking pipeline.
+ *
  * Usage:
  *   import { search } from './bm25.js';
  *   const results = search(docs, query, { topK: 10 });

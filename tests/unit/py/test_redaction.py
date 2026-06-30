@@ -119,6 +119,43 @@ class TestUrlAuthPattern:
             assert URL_WITH_AUTH.search(url), f"URL_WITH_AUTH pattern failed on: {url}"
 
 
+class TestBearerAndQueryKeyPatterns:
+    """Gemini keys (?key=AIza...) and Bearer tokens must be redacted so secrets
+    never enter the memory bus / index files."""
+
+    def setup_method(self):
+        REDACTION_CONFIG.reset()
+
+    def test_bearer_token_redacted(self):
+        result = redact_sensitive(
+            "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.sig",
+            mode="tools",
+        )
+        assert "[REDACTED_BEARER_TOKEN]" in result
+        assert "eyJhbGci" not in result
+
+    def test_gemini_query_key_redacted(self):
+        result = redact_sensitive(
+            "GET https://generativelanguage.googleapis.com/v1beta/models?key=AIzaSyA1B2C3D4E5F6G7H8I9J0KLMNOP",
+            mode="tools",
+        )
+        assert "[REDACTED_URL_QUERY_KEY]" in result
+        assert "AIzaSyA1B2C3" not in result
+
+    def test_access_token_query_param_redacted(self):
+        result = redact_sensitive(
+            "curl 'https://api.example.com/data?access_token=ya29.aabc123def456ghi789'",
+            mode="tools",
+        )
+        assert "[REDACTED_URL_QUERY_KEY]" in result
+        assert "ya29" not in result
+
+    def test_bearer_too_short_not_redacted(self):
+        # Below the 16-char minimum — avoid false positives on short tokens.
+        result = redact_sensitive("Bearer short", mode="tools")
+        assert "[REDACTED_BEARER_TOKEN]" not in result
+
+
 # ---------------------------------------------------------------------------
 # Redaction Function Tests
 # ---------------------------------------------------------------------------

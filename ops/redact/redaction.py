@@ -49,16 +49,28 @@ PHONE = re.compile(r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b")
 # URLs with embedded credentials: https://user:pass@example.com
 URL_WITH_AUTH = re.compile(r"https?://[\w-]+:[\w-]+@")
 
+# Authorization Bearer tokens: "Authorization: Bearer eyJhbGci..." / "Bearer mfp_..."
+# Single character class + linear quantifier (no nested quantifiers) -> ReDoS-safe.
+BEARER_TOKEN = re.compile(r"Bearer\s+[A-Za-z0-9_\-\.]{16,}", re.I)
+
+# Credentials in URL query strings: "https://.../?key=AIza..." / "?api_key=..." /
+# "?access_token=..." / "?sig=...". Common for Gemini keys (AIza...) and signed URLs.
+# The value class is a single alternation-free set -> linear, ReDoS-safe.
+URL_QUERY_KEY = re.compile(r"[?&](?:api[_-]?key|key|access_token|sig)=[A-Za-z0-9_\-\.%]{8,}", re.I)
+
 # Built-in pattern registry: (name, regex, placeholder_in_tools_mode)
 # Order matters: URL_WITH_AUTH must come before EMAIL so that "user:pass@host"
 # is stripped before EMAIL can match "pass@host" in the leftover text.
+# BEARER_TOKEN and URL_QUERY_KEY are credential-bearing, run before EMAIL too.
 BUILTIN_PATTERNS: List[Tuple[str, re.Pattern, str]] = [
-    ("URL_AUTH",     URL_WITH_AUTH,   "[REDACTED_URL_AUTH]"),
-    ("CREDIT_CARD",  CREDIT_CARD,     "[REDACTED_CREDIT_CARD]"),
-    ("SSN",          SSN,             "[REDACTED_SSN]"),
-    ("API_KEY",      API_KEY,         "[REDACTED_API_KEY]"),
-    ("EMAIL",        EMAIL,           "[REDACTED_EMAIL]"),
-    ("PHONE",        PHONE,           "[REDACTED_PHONE]"),
+    ("URL_AUTH",       URL_WITH_AUTH,    "[REDACTED_URL_AUTH]"),
+    ("URL_QUERY_KEY",  URL_QUERY_KEY,    "[REDACTED_URL_QUERY_KEY]"),
+    ("BEARER_TOKEN",   BEARER_TOKEN,     "[REDACTED_BEARER_TOKEN]"),
+    ("CREDIT_CARD",    CREDIT_CARD,      "[REDACTED_CREDIT_CARD]"),
+    ("SSN",            SSN,              "[REDACTED_SSN]"),
+    ("API_KEY",        API_KEY,          "[REDACTED_API_KEY]"),
+    ("EMAIL",          EMAIL,            "[REDACTED_EMAIL]"),
+    ("PHONE",          PHONE,            "[REDACTED_PHONE]"),
 ]
 
 # ---------------------------------------------------------------------------

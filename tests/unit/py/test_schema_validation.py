@@ -371,12 +371,14 @@ class TestValidatePromotionMetadataVersion:
         errors = validate_promotion_metadata(promotion)
         assert "unknown-promotion-version:2" in errors
 
-    def test_version_none_allowed(self):
-        """version=None is allowed (field not required)."""
+    def test_version_missing_rejected(self):
+        """Missing version is rejected — mirrors JS validatePromotionMetadata,
+        where `promotion.version !== 1` errors on undefined. Previously Python
+        silently allowed missing version, diverging from JS integrity reports."""
         promotion = _make_promotion()
         del promotion["version"]
         errors = validate_promotion_metadata(promotion)
-        assert not any("promotion-version" in e for e in errors)
+        assert any("unknown-promotion-version" in e for e in errors)
 
 
 class TestValidatePromotionMetadataDurableType:

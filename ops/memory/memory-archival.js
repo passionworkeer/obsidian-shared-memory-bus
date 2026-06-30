@@ -128,9 +128,9 @@ async function getAppendLineAtomic() {
  * @param {string} filePath
  * @param {object} obj
  */
-async function appendJsonl(filePath, obj) {
+async function appendJsonl(filePath, obj, opts = {}) {
   const appendLineAtomic = await getAppendLineAtomic();
-  appendLineAtomic(filePath, obj, { createDir: true });
+  appendLineAtomic(filePath, obj, { createDir: true, ...opts });
 }
 
 function ensureDir(dir) {
@@ -248,7 +248,7 @@ async function writeManifestEntry(record, reason, trigger) {
     content_hash: record.content_hash || sha256(JSON.stringify(record.content || "")),
     line_in_source: findRecordLine(record),
   };
-  await appendJsonl(MANIFEST_FILE, entry);
+  await appendJsonl(MANIFEST_FILE, entry, { fsync: true });
   return entry;
 }
 
@@ -306,8 +306,9 @@ async function archiveRecordsFromFile(filePath, toArchiveIds) {
       info(`[dry-run] Would archive ${archived} records from ${path.basename(filePath)}`);
     } else {
       ensureDir(path.dirname(filePath));
-      fs.writeFileSync(filePath + ".tmp", kept.join("\n") + "\n", "utf8");
-      fs.renameSync(filePath + ".tmp", filePath);
+      const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
+      fs.writeFileSync(tmpPath, kept.join("\n") + "\n", "utf8");
+      fs.renameSync(tmpPath, filePath);
       info(`Archived ${archived} records from ${path.basename(filePath)}`);
     }
   }
@@ -586,8 +587,9 @@ function simplifyMemory(filePath) {
     if (DRY_RUN) {
       info(`[dry-run] Would simplify ${simplified} records in ${path.basename(filePath)}`);
     } else {
-      fs.writeFileSync(filePath + ".tmp", kept.map(r => JSON.stringify(r)).join("\n") + "\n", "utf8");
-      fs.renameSync(filePath + ".tmp", filePath);
+      const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
+      fs.writeFileSync(tmpPath, kept.map(r => JSON.stringify(r)).join("\n") + "\n", "utf8");
+      fs.renameSync(tmpPath, filePath);
       info(`Simplified ${simplified} records in ${path.basename(filePath)}`);
     }
   }

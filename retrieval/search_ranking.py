@@ -305,7 +305,12 @@ def cosine_similarity(left: Iterable[float], right: Iterable[float]) -> float:
         right_norm += right_value * right_value
     if left_norm <= 0 or right_norm <= 0:
         return 0.0
-    return numerator / math.sqrt(left_norm * right_norm)
+    result = numerator / math.sqrt(left_norm * right_norm)
+    # Guard against NaN/Inf from degenerate/abnormal embeddings
+    # (e.g. provider returning non-finite values). Non-finite results
+    # must not leak downstream where `score <= 0` would treat NaN as a
+    # high score and pollute top-k.
+    return result if math.isfinite(result) else 0.0
 
 
 def cosine_similarity_batch(query_vec, matrix) -> List[float]:

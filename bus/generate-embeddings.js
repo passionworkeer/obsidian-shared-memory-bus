@@ -112,6 +112,12 @@ function readWindowsEnvironmentVariable(name) {
   if (process.platform !== "win32") {
     return "";
   }
+  // Defensive: env-var names are an allowlist of identifiers. Reject anything
+  // else so a future caller can't inject PowerShell via a crafted name — the
+  // name is interpolated into a `powershell -Command` string below.
+  if (!/^[A-Za-z0-9_]+$/.test(String(name || ""))) {
+    return "";
+  }
   if (WINDOWS_ENV_CACHE.has(name)) {
     return WINDOWS_ENV_CACHE.get(name);
   }
