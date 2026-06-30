@@ -147,6 +147,29 @@ function syncBackoff(delayMs) {
   }
 }
 
+/**
+ * Detect a stale .lock sentinel whose owner process has died, so the lock can
+ * be reclaimed instead of blocking forever. signal-0 is a cross-platform
+ * liveness probe (throws ESRCH/EPERM if the pid is gone). A false positive
+ * (pid reused) only causes us to keep waiting, which is the safe direction.
+ */
+function isStaleLock(lockFile) {
+  let pidStr;
+  try {
+    pidStr = fs.readFileSync(lockFile, "utf8").trim();
+  } catch {
+    return false;
+  }
+  const pid = Number(pidStr);
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return false; // owner still alive
+  } catch {
+    return true; // owner dead → stale
+  }
+}
+
 function withFileLock(filePath, fn) {
   const MAX_RETRIES = 3;
   const BASE_DELAY_MS = 100;
@@ -155,8 +178,12 @@ function withFileLock(filePath, fn) {
   const supportsTryLock = typeof fs.tryLockSync === "function";
 
   if (!supportsTryLock) {
-    // Fallback: use a cross-process lock file (.lock suffix) as semaphore.
-    // The lock is advisory — all concurrent writers must cooperate.
+    // Cross-process advisory lock via O_EXCL atomic create (.lock sentinel).
+    // "wx" = O_CREAT | O_EXCL: the open either creates the file (we hold the
+    // lock) or throws EEXIST (another process holds it). This closes the
+    // TOCTOU window of the previous "w+" approach, which truncated the lock
+    // file on every attempt so that all contenders read it as empty and all
+    // entered the critical section.
     const lockFile = `${filePath}.lock`;
     let lockFd = null;
     let attempt = 0;
@@ -168,40 +195,39 @@ function withFileLock(filePath, fn) {
         if (!fs.existsSync(filePath)) {
           fs.writeFileSync(filePath, "", "utf8");
         }
-        // Try to create/open the lock file exclusively
-        lockFd = fs.openSync(lockFile, "w+");
-        // If the lock file is non-empty, another process holds the lock
-        const content = fs.readFileSync(lockFile, "utf8");
-        if (content && content.trim()) {
-          // Another process holds the lock
-          fs.closeSync(lockFd);
-          lockFd = null;
-          if (attempt < MAX_RETRIES) {
-            syncBackoff(BASE_DELAY_MS * Math.pow(2, attempt - 1));
+        try {
+          lockFd = fs.openSync(lockFile, "wx");
+        } catch (openErr) {
+          if (openErr && openErr.code === "EEXIST") {
+            // Lock held — reclaim if the owner process is dead (stale lock).
+            if (isStaleLock(lockFile)) {
+              try { fs.unlinkSync(lockFile); } catch {}
+            } else if (attempt < MAX_RETRIES) {
+              syncBackoff(BASE_DELAY_MS * Math.pow(2, attempt - 1));
+            }
+            continue;
           }
-          continue;
+          throw openErr;
         }
-        // Write PID as lock token
-        fs.writeFileSync(lockFile, `${process.pid}`, "utf8");
+        // Acquired — record PID so other processes can detect stale locks.
+        try { fs.writeSync(lockFd, `${process.pid}`, 0, "utf8"); } catch {}
         try {
           fn(-1);  // no valid fd in fallback mode
           return;
         } finally {
+          try { fs.closeSync(lockFd); } catch {}
           try { fs.unlinkSync(lockFile); } catch {}
-          if (lockFd !== null) {
-            try { fs.closeSync(lockFd); } catch {}
-          }
         }
       } catch (err) {
+        if (lockFd !== null) {
+          try { fs.closeSync(lockFd); } catch {}
+        }
+        lockFd = null;
         if (attempt >= MAX_RETRIES) {
           throw new Error(
             `[withFileLock] could not acquire lock on ${filePath} after ${MAX_RETRIES} attempts: ${err.message}`
           );
         }
-        if (lockFd !== null) {
-          try { fs.closeSync(lockFd); } catch {}
-        }
-        lockFd = null;
         syncBackoff(BASE_DELAY_MS * Math.pow(2, attempt - 1));
       }
     }
@@ -279,25 +305,32 @@ function withFileLock(filePath, fn) {
 function tryWithFileLock(filePath, fn) {
   const supportsTryLock = typeof fs.tryLockSync === "function";
   if (!supportsTryLock) {
-    // Fallback path: try the .lock sentinel file exactly once
+    // Non-blocking variant: one O_EXCL attempt on the .lock sentinel.
     const lockFile = `${filePath}.lock`;
+    let lockFd = null;
     try {
       if (!fs.existsSync(filePath)) fs.writeFileSync(filePath, "", "utf8");
-      const lockFd = fs.openSync(lockFile, "w+");
-      const content = fs.readFileSync(lockFile, "utf8");
-      if (content && content.trim()) {
-        try { fs.closeSync(lockFd); } catch {}
-        return false;
+      try {
+        lockFd = fs.openSync(lockFile, "wx");
+      } catch (openErr) {
+        if (openErr && openErr.code === "EEXIST" && isStaleLock(lockFile)) {
+          // Stale lock from a crashed owner — reclaim and retry once.
+          try { fs.unlinkSync(lockFile); } catch {}
+          lockFd = fs.openSync(lockFile, "wx");
+        } else {
+          return false;
+        }
       }
-      fs.writeFileSync(lockFile, `${process.pid}`, "utf8");
+      try { fs.writeSync(lockFd, `${process.pid}`, 0, "utf8"); } catch {}
       try {
         fn(-1);
         return true;
       } finally {
-        try { fs.unlinkSync(lockFile); } catch {}
         try { fs.closeSync(lockFd); } catch {}
+        try { fs.unlinkSync(lockFile); } catch {}
       }
     } catch {
+      if (lockFd !== null) { try { fs.closeSync(lockFd); } catch {} }
       return false;
     }
   }

@@ -43,12 +43,21 @@ WORKDIR /app
 # Install Node dependencies
 RUN npm install --omit=dev 2>/dev/null || true
 
-# Default env
-ENV AI_MEMORY_ROOT=/root/.ai-memory
+# Create non-root user and grant ownership of writable paths.
+# python:3.12-slim is Debian-based -> useradd (not alpine adduser).
+RUN useradd -r -u 10001 -m -d /home/app app \
+    && mkdir -p /home/app/.ai-memory \
+    && chown -R app:app /app /home/app
+
+# Default env (container paths under the non-root user's writable home)
+ENV AI_MEMORY_ROOT=/home/app/.ai-memory
 ENV AI_MEMORY_EMBED_BACKEND=hash
-ENV AI_MEMORY_STORE=/root/.ai-memory
+ENV AI_MEMORY_STORE=/home/app/.ai-memory
 
 EXPOSE 9338
+
+# Drop root privileges for the runtime process
+USER app
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \

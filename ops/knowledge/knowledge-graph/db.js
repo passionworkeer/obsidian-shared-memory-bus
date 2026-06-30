@@ -111,7 +111,9 @@ export class Db {
     this._execWithRetry("PRAGMA busy_timeout = 10000");
   }
 
-  /** Retry an exec up to 3 times with 50ms backoff on SQLITE_BUSY. */
+  /** Retry an exec up to 3 times on SQLITE_BUSY. The busy_timeout PRAGMA
+   * (10s) makes SQLite wait efficiently at the C level, so on contention we
+   * retry without a JS-level busy spin — that would block the event loop. */
   _execWithRetry(sql, maxRetries = 3) {
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
@@ -119,10 +121,7 @@ export class Db {
         return;
       } catch (err) {
         if (attempt < maxRetries - 1 && err.code === "ERR_SQLITE_ERROR" && err.errstr && err.errstr.includes("locked")) {
-          // Sleep synchronously using a spin loop (Node SQLite is sync, no setTimeout available here)
-          const end = Date.now() + 50 * Math.pow(2, attempt);
-          while (Date.now() < end) { /* spin */ }
-          continue;
+          continue; // busy_timeout performs the actual waiting on retry
         }
         throw err;
       }

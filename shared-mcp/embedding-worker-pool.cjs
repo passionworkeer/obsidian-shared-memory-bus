@@ -31,6 +31,7 @@ const FAILURE_WINDOW_MS = 30000;     // ... within this window
 const BACKPRESSURE_LIMIT = 50;        // reject when pending >= this
 const WORKER_INIT_TIMEOUT_MS = 30000; // wait for "READY" signal
 const WORKER_REQUEST_TIMEOUT_MS = 120000; // per-request timeout
+const MAX_STDOUT_BUFFER = 16 * 1024 * 1024; // bound per-worker stdout buffer (OOM guard)
 
 // ---------------------------------------------------------------------------
 // Worker state
@@ -51,6 +52,8 @@ const pool = {
   initialized: false,
   initPromise: null,
   ipcSeq: 0,
+  spawnArgs: null,   // last spawn params, used to respawn retired workers
+  _respawning: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -137,6 +140,14 @@ function spawnWorker(id, pythonCmd, pythonArgs, env) {
 
     proc.stdout.on("data", (chunk) => {
       stdoutBuf += chunk.toString();
+      // Bound the buffer: a runaway worker emitting output without newlines
+      // must not OOM the parent process.
+      if (stdoutBuf.length > MAX_STDOUT_BUFFER) {
+        console.error(`[embedding-pool:${id}] stdout buffer overflow (${stdoutBuf.length} bytes), killing worker`);
+        stdoutBuf = "";
+        cleanup();
+        return;
+      }
       // Drain complete lines
       let newline;
       while ((newline = stdoutBuf.indexOf("\n")) !== -1) {
@@ -157,24 +168,16 @@ function spawnWorker(id, pythonCmd, pythonArgs, env) {
     proc.on("error", (err) => {
       clearTimeout(initTimer);
       recordFailure(worker);
-      // Wake up any pending requests with the error
-      const pending = [...pool.pendingRequests.entries()];
-      pool.pendingRequests.clear();
-      for (const [, d] of pending) {
-        d.reject(Object.assign(new Error(`worker-${id}-process-error: ${err.message}`), { code: "WORKER_PROCESS_ERROR" }));
-      }
+      // Reject only this worker's pending requests — pool.pendingRequests is
+      // shared, so clearing it all would reject sibling workers' in-flight work.
+      rejectPendingForWorker(worker, `worker-${id}-process-error: ${err.message}`, "WORKER_PROCESS_ERROR");
       removeWorker(worker);
     });
 
     proc.on("close", (code) => {
       clearTimeout(initTimer);
       worker.state = "dead";
-      // Wake pending requests
-      const pending = [...pool.pendingRequests.entries()];
-      pool.pendingRequests.clear();
-      for (const [, d] of pending) {
-        d.reject(Object.assign(new Error(`worker-${id}-exit-${code}`), { code: "WORKER_EXITED" }));
-      }
+      rejectPendingForWorker(worker, `worker-${id}-exit-${code}`, "WORKER_EXITED");
       removeWorker(worker);
     });
 
@@ -211,6 +214,50 @@ function spawnWorker(id, pythonCmd, pythonArgs, env) {
   });
 }
 
+/**
+ * Reject only the pending requests owned by `worker` (not the whole pool).
+ * pool.pendingRequests is shared across workers, so a single worker dying
+ * must not reject sibling workers' in-flight requests.
+ */
+function rejectPendingForWorker(worker, message, code) {
+  for (const [reqId, d] of [...pool.pendingRequests.entries()]) {
+    if (d.worker === worker) {
+      pool.pendingRequests.delete(reqId);
+      worker.pending = Math.max(0, worker.pending - 1);
+      d.reject(Object.assign(new Error(message), { code }));
+    }
+  }
+}
+
+/**
+ * Top up the pool after a worker is removed, so the healthy set does not
+ * monotonically shrink to zero over long runs. No-op during initialization
+ * or when already at target size. Fire-and-forget; respawn failures are logged.
+ */
+function maybeRespawn() {
+  if (!pool.spawnArgs || !pool.initialized || pool._respawning) return;
+  const target = Math.max(1, Math.min(DEFAULT_POOL_SIZE, 8));
+  if (pool.workers.length >= target) return;
+  pool._respawning = true;
+  const { pythonCmd, pythonArgs, env } = pool.spawnArgs;
+  const slot = pool.ipcSeq++;
+  pool.workers.push({
+    id: slot, proc: null, state: "spawning",
+    failures: [], lastUsed: 0, pending: 0, ipcId: pool.ipcSeq++,
+  });
+  spawnWorker(slot, pythonCmd, pythonArgs, env)
+    .then((w) => {
+      pool.healthy.add(w);
+      console.error(`[embedding-pool] worker-${slot} respawned`);
+    })
+    .catch((err) => {
+      console.error(`[embedding-pool] worker-${slot} respawn failed:`, err.message);
+      const idx = pool.workers.findIndex((x) => x.id === slot && x.state === "spawning");
+      if (idx !== -1) pool.workers.splice(idx, 1);
+    })
+    .finally(() => { pool._respawning = false; });
+}
+
 /** @param {Worker} worker */
 function recordFailure(worker) {
   const now = Date.now();
@@ -237,6 +284,8 @@ function removeWorker(worker) {
   if (worker.proc && !worker.proc.killed) {
     worker.proc.kill();
   }
+  // Top up the pool so the healthy set does not shrink to zero over time.
+  maybeRespawn();
 }
 
 // ---------------------------------------------------------------------------
@@ -266,6 +315,7 @@ async function initPool(pythonCmd, pythonArgs, env) {
   if (pool.initialized) return;
   if (pool.initPromise) return pool.initPromise;
 
+  pool.spawnArgs = { pythonCmd, pythonArgs, env };
   pool.initPromise = (async () => {
     const size = Math.max(1, Math.min(DEFAULT_POOL_SIZE, 8));
     const spawns = [];
@@ -297,6 +347,16 @@ async function initPool(pythonCmd, pythonArgs, env) {
     pool.initialized = true;
     console.error(`[embedding-pool] initialized ${alive.length}/${size} workers`);
   })();
+
+  // On failure, reset state so a later call can retry instead of returning
+  // the same rejected promise forever (e.g. after a transient Python env issue).
+  pool.initPromise = pool.initPromise.catch((err) => {
+    pool.initialized = false;
+    pool.initPromise = null;
+    pool.workers = [];
+    pool.healthy = new Set();
+    throw err;
+  });
 
   return pool.initPromise;
 }
@@ -341,6 +401,7 @@ async function embedWithPool(options) {
     }, WORKER_REQUEST_TIMEOUT_MS);
 
     pool.pendingRequests.set(id, {
+      worker,
       resolve: (data) => {
         clearTimeout(timer);
         resolve(data);
@@ -388,6 +449,15 @@ import json
 import sys
 import os
 import time
+import re
+
+# Redact API keys / bearer tokens from any string before it reaches stderr,
+# which the parent forwards to process logs (project rule: secrets never enter
+# memory files / logs). Gemini carries the key in the URL (?key=...).
+def _redact(s):
+    s = re.sub(r"([?&](?:api[_-]?key|key|access_token|sig)=)[^&\\s\\\"\\']+", r"\\1REDACTED", str(s))
+    s = re.sub(r"(Bearer\\s+)[A-Za-z0-9_\\-\\.]{8,}", r"\\1REDACTED", s)
+    return s
 
 # Ensure unbuffered output so parent sees results immediately
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -471,7 +541,7 @@ while True:
                 url = "https://generativelanguage.googleapis.com/v1beta/" + model_id + ":embedContent?key=" + api_key
                 body_model = model_id.replace("models/", "")
                 payload = json.dumps({"model": body_model, "content": {"parts": [{"text": text}]}}).encode("utf-8")
-                sys.stderr.write("[gemini] url: " + url[:80] + " body: " + str(payload)[:100] + "\\n")
+                sys.stderr.write("[gemini] url: " + _redact(url)[:120] + " body: " + _redact(str(payload))[:120] + "\\n")
                 sys.stderr.flush()
                 req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
                 with get_proxy_opener().open(req, timeout=60) as resp:
@@ -489,12 +559,12 @@ while True:
                     results.append(vals if vals else None)
             except urllib.error.HTTPError as exc:
                 err_body = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
-                sys.stderr.write("[gemini] HTTPError " + str(exc.code) + " body: " + err_body[:300] + "\\n")
+                sys.stderr.write("[gemini] HTTPError " + str(exc.code) + " body: " + _redact(err_body)[:300] + "\\n")
                 sys.stderr.flush()
                 results.append(None)
             except Exception as exc:
                 err_detail = str(exc)
-                sys.stderr.write("[gemini] error: " + err_detail + "\\n")
+                sys.stderr.write("[gemini] error: " + _redact(err_detail) + "\\n")
                 sys.stderr.flush()
                 results.append(None)
         ok_results = [r for r in results if r is not None]

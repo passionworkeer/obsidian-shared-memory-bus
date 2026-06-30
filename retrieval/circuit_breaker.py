@@ -100,11 +100,17 @@ class CircuitBreaker:
                     self._total_calls_in_half_open = 0
                     state_changed = True
 
-            # State transition: half-open → open (too many failures in half-open)
+            # Half-open admission control: once the allowed probe budget is
+            # exhausted, reject NEW calls without forcing the circuit back open.
+            # The half-open → open transition must be driven only by an actual
+            # call FAILURE (handled in the except branch below). Tripping here
+            # would kill in-flight recovery probes under concurrency and
+            # re-open a service that may be recovering.
             if self._state == CircuitState.HALF_OPEN:
                 if self._total_calls_in_half_open >= self.half_open_max_calls:
-                    self._trip(now)
-                    state_changed = True
+                    retry_after = max(0.0, self.recovery_timeout - (now - self._last_failure_time))
+                    return CircuitOpen(name=self.name, since=self._last_failure_time, retry_after=retry_after), \
+                        f"circuit-open:{self.name}"
 
             # Fail fast: circuit is open
             if self._state == CircuitState.OPEN:
@@ -134,6 +140,13 @@ class CircuitBreaker:
                     self._slow_call_count += 1
                     self._last_slow_time = time.monotonic()
                     self._check_slow_ratio()
+                else:
+                    # Decay the slow-call counter on a fast success so that
+                    # slow_ratio reflects recent behavior instead of growing
+                    # monotonically over the process lifetime (which would
+                    # cause spurious trips long after a transient slowdown).
+                    if self._slow_call_count > 0:
+                        self._slow_call_count -= 1
                 return result, None
 
         except Exception as exc:  # noqa: BLE001

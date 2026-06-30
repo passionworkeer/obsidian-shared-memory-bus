@@ -8,8 +8,9 @@ import importlib.util
 import json
 import os
 import sys
+import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 # Dynamically import the sibling platform.py module (avoids stdlib name collision
 # and works whether or not retrieval/ is a package with __init__.py).
@@ -35,7 +36,8 @@ IS_MACOS = _get_platform_name() == "darwin"
 is_windows = _is_windows_fn
 get_platform_name = _get_platform_name
 get_default_store_root = _get_default_store_root
-_WINDOWS_ENV_CACHE: Dict[str, str] = {}
+_WINDOWS_ENV_CACHE: Dict[str, Tuple[str, float]] = {}
+_WINDOWS_ENV_CACHE_TTL_S = 60.0  # re-read registry env (e.g. rotated API keys) after this
 EMBEDDING_RUNTIME_RESERVED_KEYS = {
     "activeProfile",
     "activeProvider",
@@ -117,9 +119,12 @@ def merge_config_blocks(*blocks: object) -> Dict[str, object]:
 def read_windows_environment_variable(name: str) -> str:
     if not IS_WINDOWS:
         return ""
+    now = time.time()
     cached = _WINDOWS_ENV_CACHE.get(name)
     if cached is not None:
-        return cached
+        value, ts = cached
+        if now - ts < _WINDOWS_ENV_CACHE_TTL_S:
+            return value
     value = ""
     try:
         import winreg  # type: ignore
@@ -139,7 +144,7 @@ def read_windows_environment_variable(name: str) -> str:
                 break
     except Exception:
         value = ""
-    _WINDOWS_ENV_CACHE[name] = value
+    _WINDOWS_ENV_CACHE[name] = (value, now)
     return value
 
 

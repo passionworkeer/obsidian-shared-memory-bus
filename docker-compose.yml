@@ -23,14 +23,15 @@ services:
     container_name: yt-memory-bus
     restart: unless-stopped
     ports:
-      - "9338:9338"  # Memory MCP server
-      - "9090:9090"  # Metrics endpoint
+      # Bind to loopback only — the MCP server is for local tooling, not public exposure.
+      - "127.0.0.1:9338:9338"  # Memory MCP server
+      - "127.0.0.1:9090:9090"  # Metrics endpoint
     volumes:
-      # Mount host .ai-memory store into the container
-      - ai-memory-store:/root/.ai-memory
+      # Mount host .ai-memory store into the container (non-root writable path)
+      - ai-memory-store:/home/app/.ai-memory
     environment:
-      AI_MEMORY_ROOT: /root/.ai-memory
-      AI_MEMORY_STORE: /root/.ai-memory
+      AI_MEMORY_ROOT: /home/app/.ai-memory
+      AI_MEMORY_STORE: /home/app/.ai-memory
       AI_MEMORY_EMBED_BACKEND: hash
       # Python runtime for semantic search
       AI_MEMORY_PYTHON: /usr/bin/python3
