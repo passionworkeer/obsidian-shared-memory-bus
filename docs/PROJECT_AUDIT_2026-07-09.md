@@ -346,6 +346,7 @@ process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet
 - **位置**: `.github/workflows/release.yml` 调 `npx changelogen@latest` → `|| true`
 - **现实**: `CHANGELOG.md` 是日期标题,无 `[3.1.0]` 段,`changelogen` 无法解析。`v3.1.0` 标签从未打。
 - **修复**: Keep-a-Changelog 风格改造 CHANGELOG,或删 release.yml 改手动 tag
+- ✅ 已修复 (commit 314cdcf): 删除 `.github/workflows/release.yml`,新增 `docs/RELEASE.md` 描述手动 tag + GitHub Release UI 流程
 
 ### 4.2 High
 
@@ -357,9 +358,11 @@ process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet
 - **位置**: `lint.yml` vs `test.yml` vs `tests.yml` 三文件共存,README badge 指向 `test.yml`
 - **风险**: 哪个是规范?不知。
 - **修复**: 保留其一,删除其余
+- ✅ 已修复 (commit 2e77449): 删 `tests.yml`(与 `test.yml` 职责完全重叠,是旧版简化);保留 `test.yml`(矩阵更全,badge 已指向)和 `lint.yml`(含 audit/shell syntax 等 test.yml 没有的职责)
 
 #### D-HIGH-3 — `.github/workflows/test.yml` 与 `tests.yml` 重复
 - 同 D-HIGH-2
+- ✅ 已修复 (commit 2e77449): 详见 D-HIGH-2
 
 #### D-HIGH-4 — `ops/run/run-memory-dream.ps1` 等 3 个 PowerShell 脚本无任何调用
 - **位置**: `ops/run/{run-memory-dream.ps1, run-minimax-mcp.ps1, run-pressure-test.ps1}`
@@ -393,13 +396,16 @@ process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet
 | D-MED-10 | `AGENTS.md` GitNexus 块无自动验证脚本 |
 | D-MED-11 | `bin.js:20` 读根 package.json vs `cli/ai-memory.js` 读 cli package.json,版本号分裂 |
 | D-MED-12 | `.env.example` 文档说端口在 `start.js`,实际在 `shared-mcp/port-registry.js` |
-| D-MED-13 | `OBSIDIAN_VAULT_ROOT` 在 `.env.example` 但代码不用 |
+| D-MED-13 | `OBSIDIAN_VAULT_ROOT` 在 `.env.example` 但代码不用(audit 描述不准确,见下) |
 | D-MED-14 | 4 个 build 脚本仍搜已删的 `ops/bus/` 路径(同 I-LOW-2) |
+
+- D-MED-12 ✅ 已修复 (commit b7b6b01): `.env.example` 端口段注释改为指向 `shared-mcp/port-registry.js`,标注 single source of truth
+- D-MED-13 ✅ 已修复 (commit b7b6b01): audit 描述"代码不用"与实际不符——`OBSIDIAN_VAULT_ROOT` 在 `bus/vault-root.js` / `retrieval/runtime_support.py` / `shared-mcp/omni-memory-server.js` / `scripts/vault-detect.js` 仍被消费,且 `tests/unit/js/vault-root.test.js` 有专项测试。改为把段落标题从 "deprecated / Not used" 改为 "backward compat",并标注与 `AI_MEMORY_OBSIDIAN_VAULT` 的回退优先级(不删 env 行,避免破坏 vault 解析)
 
 ### 4.4 Low(摘要)
 
 - CHANGELOG 缺 `## [3.1.0]` 段标题
-- README badge 指向 `test.yml` 而非 `tests.yml`
+- README badge 指向 `test.yml` 而非 `tests.yml`(已随 tests.yml 删除而一致,见 D-HIGH-2)
 - `docs/landing/index.html` 14.6 KB orphan(Vite 前版本)
 - `.npmignore` 含 `tech-debt-roadmap.md` / `PROJECT_ANALYSIS.md` 死规则(已删)
 - `.gitignore` 第 27 行 `web/` 规则与实际不符(实际被 track)
