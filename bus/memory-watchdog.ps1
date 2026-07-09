@@ -115,6 +115,7 @@ $StructuredRoot = Join-SharedPath @($VaultRoot, "structured")
 $BlackboardDaemonScript = Resolve-BusPath -Candidates @("obsidian-blackboard-daemon.js", "ops/daemon/obsidian-blackboard-daemon.js")
 $MD_PATH = Join-Path $VaultRoot "02-KB\WORKING.md"
 $OpenClawSyncScript = Resolve-BusPath -Candidates @("sync-openclaw-to-obsidian.js", "ops/sync/sync-openclaw-to-obsidian.js")
+# 上方脚本当前未实现 — Resolve-BusPath 会返回 $null,Invoke-OpenClawStructuredSync 会记录 openclaw.skipped 等待脚本落地 (见 docs/PROJECT_AUDIT_*.md §I-HIGH-2)
 $BuildHandoffPackScript = Resolve-BusPath -Candidates @("build-handoff-pack.js", "ops/build/build-handoff-pack.js")
 
 # ============================================================================
