@@ -325,7 +325,7 @@ process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet
 
 ### 4.1 Critical
 
-#### D-CRIT-1 — ESLint 版本不一致 ✅ 已修复 (commit 后续)
+#### D-CRIT-1 — ESLint 版本不一致 ✅ 已修复 (commit fded3e5)
 - **位置**: `package.json:67` 声明 `"eslint": "^10.2.0"`
 - **现实**: `shared-mcp/package.json` 实际用 `^8.57.1`,CI 跑的是 `npx eslint@8` 老版本
 - **风险**: CI 假装跑 v10 实际跑 v8,行为差异从未被发现
@@ -338,7 +338,7 @@ process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet
 - **风险**: 首次运行直接 `ReferenceError: require is not defined`
 - **修复**: 改 `.cjs` 后缀,或转 ESM
 
-#### D-CRIT-3 — 跨包版本漂移 ✅ 已修复 (commit 后续)
+#### D-CRIT-3 — 跨包版本漂移 ✅ 已修复 (commit bc8197d)
 - **位置**: `cli/package.json` v1.0.0,根/shared-mcp/web v3.1.0
 - **下游**: `bin.js:20` 读根 package.json → 3.1.0;`npx ai-memory` 走 `cli/ai-memory.js` → 1.0.0,版本号分裂
 - **修复**: 同步到 3.1.0 或拆出版本语义
@@ -391,7 +391,7 @@ process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet
 | D-MED-6 | `ops/cleanup/` 空目录无 `.gitkeep` |
 | D-MED-7 | `docs/internal/` 空目录无 `.gitkeep` |
 | D-MED-8 | `cli/package.json` 缺 `license: "MIT"` ✅ 已修复 (与 D-CRIT-3 同 commit) |
-| D-MED-9 | `package.json` 的 `eslint` 在 dependencies 而非 devDependencies ✅ 已修复 (commit 后续) |
+| D-MED-9 | `package.json` 的 `eslint` 在 dependencies 而非 devDependencies ✅ 已修复 (commit fa1573c) |
 | D-MED-10 | `AGENTS.md` GitNexus 块无自动验证脚本 |
 | D-MED-11 | `bin.js:20` 读根 package.json vs `cli/ai-memory.js` 读 cli package.json,版本号分裂 ✅ 已修复 (与 D-CRIT-3 同 commit) |
 | D-MED-12 | `.env.example` 文档说端口在 `start.js`,实际在 `shared-mcp/port-registry.js` |
