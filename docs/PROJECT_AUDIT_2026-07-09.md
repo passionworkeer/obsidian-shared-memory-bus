@@ -382,7 +382,7 @@ try { ... } catch { console.log("[cache-warm] skipped: warm_strategy.py not foun
 |---|---|
 | D-MED-1 | `web/shot.py` 含硬编码本地路径 |
 | D-MED-2 | `docker-compose.yml` 与 `Dockerfile` 端口/卷不一致 |
-| D-MED-3 | `start.js` vs `setup-mcp.js` 端口表分歧(README 列 5 个,manifest 6 个,缺 9334/9335) |
+| D-MED-3 | `start.js` vs `setup-mcp.js` 端口表分歧(README 列 5 个,manifest 6 个,缺 9334/9335) ✅ 已修复 (README 注释指向 port-registry.js) |
 | D-MED-4 | `_gen_fixture.js` 在 `.npmignore` 中,生成的 fixture 482 KB 仍在 npm 包 |
 | D-MED-5 | 三 lockfile 漂移(root / shared-mcp / web) |
 | D-MED-6 | `ops/cleanup/` 空目录无 `.gitkeep` |
