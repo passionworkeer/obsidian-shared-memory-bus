@@ -346,6 +346,7 @@ process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet
 - **位置**: `.github/workflows/release.yml` 调 `npx changelogen@latest` → `|| true`
 - **现实**: `CHANGELOG.md` 是日期标题,无 `[3.1.0]` 段,`changelogen` 无法解析。`v3.1.0` 标签从未打。
 - **修复**: Keep-a-Changelog 风格改造 CHANGELOG,或删 release.yml 改手动 tag
+- ✅ 已修复 (commit 314cdcf): 删除 `.github/workflows/release.yml`,新增 `docs/RELEASE.md` 描述手动 tag + GitHub Release UI 流程
 
 ### 4.2 High
 
