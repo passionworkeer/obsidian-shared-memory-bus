@@ -132,7 +132,7 @@ node start.js
 node setup-mcp.js
 ```
 
-**重启 Claude Code / Codex / Cursor**，MCP 工具列表里就会多出 `memory_recall` / `memory_store` / `memory_search` 等。
+**重启 Claude Code / Codex / Cursor**，MCP 工具列表里就会多出 `memory_search` / `search_shared_memory` / `memory_write` 等。
 
 完整中文引导：[docs/promotion/QUICKSTART.zh-CN.md](docs/promotion/QUICKSTART.zh-CN.md)
 

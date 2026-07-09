@@ -8,10 +8,11 @@ responsibilities:
   - 标记过期 / 被替代的条目为 archive
   - 触发 cross-tool promotion (当一条 memory 在 ≥ 3 个工具中重复出现)
 tools:
-  - memory_recall
   - memory_search
-  - memory_promote
-  - memory_archive
+  - search_shared_memory
+  - memory_query
+  - memory_write
+  # 内部 workflow(非 MCP 工具): memory_promote / memory_archive 由本角色按 docs/MEMORY-TIERING.md 决策,落库走 memory_write
 delegates_to:
   - shared-memory-triage
 outputs:
