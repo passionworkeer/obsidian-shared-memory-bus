@@ -146,8 +146,8 @@ const AGENT_REGISTRY = {
   qoder: {
     name: 'Qoder',
     docUrl: 'https://docs.qoder.com/user-guide/chat/model-context-protocol',
-    // TODO: verify Qoder config file path/format (2026-06). Official docs route
-    // through UI "+ Add"; on-disk path not confirmed. Hint-only, no auto-write.
+    // Qoder 官方仅通过 UI "+ Add" 写入 MCP 配置; on-disk 路径尚未经官方文档确认。
+    // 当前为 hint-only,无自动写入; 见 docs/PROJECT_AUDIT_*.md §I-LOW-5。
     configPath: () => ({ any: [join(homedir(), '.qoder', 'mcp.json')] }),
     format: 'json-mcpServers',
     httpEntryShape: 'url-bare',
