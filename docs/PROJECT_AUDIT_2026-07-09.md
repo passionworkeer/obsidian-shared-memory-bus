@@ -325,11 +325,12 @@ process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet
 
 ### 4.1 Critical
 
-#### D-CRIT-1 — ESLint 版本不一致
+#### D-CRIT-1 — ESLint 版本不一致 ✅ 已修复 (commit 后续)
 - **位置**: `package.json:67` 声明 `"eslint": "^10.2.0"`
 - **现实**: `shared-mcp/package.json` 实际用 `^8.57.1`,CI 跑的是 `npx eslint@8` 老版本
 - **风险**: CI 假装跑 v10 实际跑 v8,行为差异从未被发现
 - **修复**: 选定 v8 或 v10,在 root + 所有子包统一
+- **修复结果**: shared-mcp devDependencies 升 ^10.2.0,与根一致;共享根 eslint.config.js flat config
 
 #### D-CRIT-2 — `ops/build/validate-schema-sync.js` 是 CJS 但项目是 ESM
 - **位置**: `ops/build/validate-schema-sync.js`(需复核后确认)
