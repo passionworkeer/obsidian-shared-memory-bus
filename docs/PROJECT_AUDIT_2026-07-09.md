@@ -358,9 +358,11 @@ process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet
 - **位置**: `lint.yml` vs `test.yml` vs `tests.yml` 三文件共存,README badge 指向 `test.yml`
 - **风险**: 哪个是规范?不知。
 - **修复**: 保留其一,删除其余
+- ✅ 已修复 (commit 2e77449): 删 `tests.yml`(与 `test.yml` 职责完全重叠,是旧版简化);保留 `test.yml`(矩阵更全,badge 已指向)和 `lint.yml`(含 audit/shell syntax 等 test.yml 没有的职责)
 
 #### D-HIGH-3 — `.github/workflows/test.yml` 与 `tests.yml` 重复
 - 同 D-HIGH-2
+- ✅ 已修复 (commit 2e77449): 详见 D-HIGH-2
 
 #### D-HIGH-4 — `ops/run/run-memory-dream.ps1` 等 3 个 PowerShell 脚本无任何调用
 - **位置**: `ops/run/{run-memory-dream.ps1, run-minimax-mcp.ps1, run-pressure-test.ps1}`
@@ -400,7 +402,7 @@ process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet
 ### 4.4 Low(摘要)
 
 - CHANGELOG 缺 `## [3.1.0]` 段标题
-- README badge 指向 `test.yml` 而非 `tests.yml`
+- README badge 指向 `test.yml` 而非 `tests.yml`(已随 tests.yml 删除而一致,见 D-HIGH-2)
 - `docs/landing/index.html` 14.6 KB orphan(Vite 前版本)
 - `.npmignore` 含 `tech-debt-roadmap.md` / `PROJECT_ANALYSIS.md` 死规则(已删)
 - `.gitignore` 第 27 行 `web/` 规则与实际不符(实际被 track)
