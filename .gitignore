@@ -67,6 +67,9 @@ cursor
 opencode.json
 c8rc.json
 
+# Git worktrees (created by Agent tool, never commit)
+.worktrees/
+
 # Template .config (duplicate of config/, use config/ instead)
 templates/.memory/.config/
 SUPPORT.md
