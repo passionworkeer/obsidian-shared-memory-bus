@@ -140,7 +140,7 @@ _REDOX_NESTED_QUANTIFIER = re.compile(r"\([^()]*[*+?][^()]*\)[+*]")
 
 ### 2.3 Medium
 
-#### I-MED-1 — `migrateRecordFromV2ToV3` 是 stub
+#### I-MED-1 — `migrateRecordFromV2ToV3` 是 stub ✅ 已修复 (改 throw 而非静默 no-op)
 - **位置**: `ops/adapters/migrate-schema.js:96-104`
 ```javascript
 function migrateRecordFromV2ToV3(record) {
