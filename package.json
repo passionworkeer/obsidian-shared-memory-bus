@@ -63,7 +63,8 @@
     "node": ">=18",
     "powershell": ">=7"
   },
-  "dependencies": {
+  "dependencies": {},
+  "devDependencies": {
     "eslint": "^10.2.0"
   }
 }
