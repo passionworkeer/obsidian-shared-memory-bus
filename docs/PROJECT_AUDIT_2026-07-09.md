@@ -396,8 +396,11 @@ process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet
 | D-MED-10 | `AGENTS.md` GitNexus 块无自动验证脚本 |
 | D-MED-11 | `bin.js:20` 读根 package.json vs `cli/ai-memory.js` 读 cli package.json,版本号分裂 |
 | D-MED-12 | `.env.example` 文档说端口在 `start.js`,实际在 `shared-mcp/port-registry.js` |
-| D-MED-13 | `OBSIDIAN_VAULT_ROOT` 在 `.env.example` 但代码不用 |
+| D-MED-13 | `OBSIDIAN_VAULT_ROOT` 在 `.env.example` 但代码不用(audit 描述不准确,见下) |
 | D-MED-14 | 4 个 build 脚本仍搜已删的 `ops/bus/` 路径(同 I-LOW-2) |
+
+- D-MED-12 ✅ 已修复 (commit b7b6b01): `.env.example` 端口段注释改为指向 `shared-mcp/port-registry.js`,标注 single source of truth
+- D-MED-13 ✅ 已修复 (commit b7b6b01): audit 描述"代码不用"与实际不符——`OBSIDIAN_VAULT_ROOT` 在 `bus/vault-root.js` / `retrieval/runtime_support.py` / `shared-mcp/omni-memory-server.js` / `scripts/vault-detect.js` 仍被消费,且 `tests/unit/js/vault-root.test.js` 有专项测试。改为把段落标题从 "deprecated / Not used" 改为 "backward compat",并标注与 `AI_MEMORY_OBSIDIAN_VAULT` 的回退优先级(不删 env 行,避免破坏 vault 解析)
 
 ### 4.4 Low(摘要)
 
