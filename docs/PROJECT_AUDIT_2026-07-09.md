@@ -431,9 +431,11 @@ process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet
 
 ## 6. 建议执行顺序
 
+> **更新 (2026-07-09):** Wave 1 已全部修复完成,见 git log `fc502aa` 起每条独立 commit。
+
 按"用户感知影响 × 修复成本"排序:
 
-### Wave 1 — 用户文档/契约错误(半天)
+### Wave 1 — 用户文档/契约错误(半天) ✅ 已完成
 1. I-CRIT-1: 替换 `memory_recall` / `memory_store` → 真实工具名
 2. I-CRIT-2: 全局 grep `tech-debt-roadmap|PROJECT_ANALYSIS` 删引用
 3. I-HIGH-2: 删 `ops/sync-openclaw*` 引用
