@@ -66,7 +66,7 @@ Invoke-Expression $Callback
 
 ### 1.3 Medium
 
-#### S-MED-1 — `shared-mcp/metrics/server.js` HTTP listen 未指定 host
+#### S-MED-1 — `shared-mcp/metrics/server.js` HTTP listen 未指定 host ✅ 已修复 (显式 127.0.0.1)
 - **位置**: `shared-mcp/metrics/server.js:~100`
 - **风险**: `server.listen(port, ...)` 无 `host` 参数 → Node 17+ 默认监听 `::`(全部接口),违反 `docker-compose.yml:27-28` 的 loopback 假设
 - **修复**: 显式传 `'127.0.0.1'`(或 `'::1'`)
