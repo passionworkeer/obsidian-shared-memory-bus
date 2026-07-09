@@ -325,11 +325,12 @@ process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet
 
 ### 4.1 Critical
 
-#### D-CRIT-1 — ESLint 版本不一致
+#### D-CRIT-1 — ESLint 版本不一致 ✅ 已修复 (commit fded3e5)
 - **位置**: `package.json:67` 声明 `"eslint": "^10.2.0"`
 - **现实**: `shared-mcp/package.json` 实际用 `^8.57.1`,CI 跑的是 `npx eslint@8` 老版本
 - **风险**: CI 假装跑 v10 实际跑 v8,行为差异从未被发现
 - **修复**: 选定 v8 或 v10,在 root + 所有子包统一
+- **修复结果**: shared-mcp devDependencies 升 ^10.2.0,与根一致;共享根 eslint.config.js flat config
 
 #### D-CRIT-2 — `ops/build/validate-schema-sync.js` 是 CJS 但项目是 ESM
 - **位置**: `ops/build/validate-schema-sync.js`(需复核后确认)
@@ -337,10 +338,11 @@ process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet
 - **风险**: 首次运行直接 `ReferenceError: require is not defined`
 - **修复**: 改 `.cjs` 后缀,或转 ESM
 
-#### D-CRIT-3 — 跨包版本漂移
+#### D-CRIT-3 — 跨包版本漂移 ✅ 已修复 (commit bc8197d)
 - **位置**: `cli/package.json` v1.0.0,根/shared-mcp/web v3.1.0
 - **下游**: `bin.js:20` 读根 package.json → 3.1.0;`npx ai-memory` 走 `cli/ai-memory.js` → 1.0.0,版本号分裂
 - **修复**: 同步到 3.1.0 或拆出版本语义
+- **修复结果**: cli/package.json version 同步到 3.1.0,顺手补 license: MIT(D-MED-8)
 
 #### D-CRIT-4 — Release workflow 自 yt 重命名后已死
 - **位置**: `.github/workflows/release.yml` 调 `npx changelogen@latest` → `|| true`
@@ -391,10 +393,10 @@ process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet
 | D-MED-5 | 三 lockfile 漂移(root / shared-mcp / web) |
 | D-MED-6 | `ops/cleanup/` 空目录无 `.gitkeep` |
 | D-MED-7 | `docs/internal/` 空目录无 `.gitkeep` |
-| D-MED-8 | `cli/package.json` 缺 `license: "MIT"` |
-| D-MED-9 | `package.json` 的 `eslint` 在 dependencies 而非 devDependencies |
+| D-MED-8 | `cli/package.json` 缺 `license: "MIT"` ✅ 已修复 (与 D-CRIT-3 同 commit) |
+| D-MED-9 | `package.json` 的 `eslint` 在 dependencies 而非 devDependencies ✅ 已修复 (commit fa1573c) |
 | D-MED-10 | `AGENTS.md` GitNexus 块无自动验证脚本 |
-| D-MED-11 | `bin.js:20` 读根 package.json vs `cli/ai-memory.js` 读 cli package.json,版本号分裂 |
+| D-MED-11 | `bin.js:20` 读根 package.json vs `cli/ai-memory.js` 读 cli package.json,版本号分裂 ✅ 已修复 (与 D-CRIT-3 同 commit) |
 | D-MED-12 | `.env.example` 文档说端口在 `start.js`,实际在 `shared-mcp/port-registry.js` |
 | D-MED-13 | `OBSIDIAN_VAULT_ROOT` 在 `.env.example` 但代码不用(audit 描述不准确,见下) |
 | D-MED-14 | 4 个 build 脚本仍搜已删的 `ops/bus/` 路径(同 I-LOW-2) |
