@@ -391,7 +391,7 @@ process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet
 | D-MED-6 | `ops/cleanup/` 空目录无 `.gitkeep` |
 | D-MED-7 | `docs/internal/` 空目录无 `.gitkeep` |
 | D-MED-8 | `cli/package.json` 缺 `license: "MIT"` ✅ 已修复 (与 D-CRIT-3 同 commit) |
-| D-MED-9 | `package.json` 的 `eslint` 在 dependencies 而非 devDependencies |
+| D-MED-9 | `package.json` 的 `eslint` 在 dependencies 而非 devDependencies ✅ 已修复 (commit 后续) |
 | D-MED-10 | `AGENTS.md` GitNexus 块无自动验证脚本 |
 | D-MED-11 | `bin.js:20` 读根 package.json vs `cli/ai-memory.js` 读 cli package.json,版本号分裂 ✅ 已修复 (与 D-CRIT-3 同 commit) |
 | D-MED-12 | `.env.example` 文档说端口在 `start.js`,实际在 `shared-mcp/port-registry.js` |
