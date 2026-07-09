@@ -184,7 +184,7 @@ function migrateRecordFromV2ToV3(record) {
 - **位置**: `specs/lsh-fixture.json`、grep `lsh-fixture` 在 `tests/` 下零结果
 - **修复**: 写消费测试,或停止 track 改用 git-lfs
 
-#### I-LOW-5 — `setup-mcp.js:149` 仍有未完成 TODO
+#### I-LOW-5 — `setup-mcp.js:149` 仍有未完成 TODO ✅ 已修复 (改非 TODO 注释,指向 audit)
 - **位置**: `setup-mcp.js:149` — `// TODO: verify Qoder config file path/format (2026-06)...`
 - **现实**: Qoder 在 `AGENT_REGISTRY` 中标记 `unverified: true`
 - **修复**: 完成 Qoder 验证,或从注册表删除 Qoder
