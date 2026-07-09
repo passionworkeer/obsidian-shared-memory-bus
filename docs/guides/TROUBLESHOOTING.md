@@ -410,6 +410,8 @@ Check:
 If needed, run:
 
 ```powershell
+# 注意: ops/sync-openclaw-to-obsidian.js 当前尚未实现; 此命令不会工作
+# 参见 docs/PROJECT_AUDIT_2026-07-09.md §I-HIGH-2
 node .\ops\sync-openclaw-to-obsidian.js
 ```
 
