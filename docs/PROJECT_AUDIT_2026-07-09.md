@@ -151,11 +151,11 @@ function migrateRecordFromV2ToV3(record) {
 - **下游**: `listMigrationPaths()` 仍把它列为可用路径,`--dry-run` 会误导用户
 - **修复**: 删除该函数,或实现 v3 schema 转换
 
-#### I-MED-2 — `ops/cleanup/` 目录为空但被 git 跟踪
+#### I-MED-2 — `ops/cleanup/` 目录为空但被 git 跟踪 ⚠️ 部分修复 (ops/cleanup/ 实际不空; 含 cleanup-inbox.ps1)
 - **位置**: `ops/cleanup/`
 - **修复**: 加 `.gitkeep`,或 `git rm --cached`
 
-#### I-MED-3 — `docs/internal/` 目录为空但被跟踪
+#### I-MED-3 — `docs/internal/` 目录为空但被跟踪 ✅ 已修复 (加 .gitkeep)
 - **位置**: `docs/internal/`
 - **关联**: `.agents/workflows/debt-audit.md` 要求 agent 写 `docs/internal/PROJECT_ANALYSIS.md` — 输出会被 `.npmignore` 忽略
 - **修复**: 同上,加 `.gitkeep` 或删除
