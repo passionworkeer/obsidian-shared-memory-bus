@@ -119,7 +119,7 @@ _REDOX_NESTED_QUANTIFIER = re.compile(r"\([^()]*[*+?][^()]*\)[+*]")
 - **实际工具**(`shared-mcp/tool-registry.js`): `search_shared_memory`、`memory_search`、`memory_query`、`memory_write`、`memory_boot`、`memory_wake_up`...
 - **修复**: 全文 grep `memory_recall|memory_store` 并替换为实际工具名;角色定义中 `memory_promote` / `memory_archive` 是角色内部概念,需在工具定义里补出或改成「内部 workflow」说明
 
-#### I-CRIT-2 — `tech-debt-roadmap.md` / `PROJECT_ANALYSIS.md` 在 7+ 处被引用但文件已删除
+#### I-CRIT-2 — `tech-debt-roadmap.md` / `PROJECT_ANALYSIS.md` 在 7+ 处被引用但文件已删除 ✅ 已修复 (commit 后续)
 - **位置**: `.agents/DISPATCHER.md:71-72`、`.agents/workflows/debt-audit.md:19,41,63`、`docs/AGENTS.md:98,131`、`docs/architecture/integrations/EVEROS-INSPIRED.md:5,214`、`.npmignore:4-5`
 - **历史**: commit `be42516` 将其移出 repo(私有化)
 - **修复**: 删除所有引用,或 `.npmignore` 留注释说明
