@@ -55,7 +55,7 @@ version: 1
 3. **绝不**改 schema-registry.json 而不跑 generate-schemas.js
 4. **绝不** push 到 main — 必须 PR 到 develop
 5. **绝不**给用户报告 "测试通过" 但其实没跑 — 跑完把命令贴出来
-6. **绝不**给已废弃代码加新功能 — 先 review tech-debt-roadmap.md
+6. **绝不**给已废弃代码加新功能 — 先 review `git log --oneline -- docs/PROJECT_AUDIT_*.md` 找最近审计报告
 
 ---
 
@@ -68,5 +68,4 @@ version: 1
 
 - `CLAUDE.md` · 分支 + 提交 + 代码规范
 - `docs/ARCHITECTURE.md` · 系统架构
-- `tech-debt-roadmap.md` · 当前活跃技术债
-- `PROJECT_ANALYSIS.md` · 最近审计报告
+- 最近一次审计: 查 `docs/PROJECT_AUDIT_*.md` (e.g. `docs/PROJECT_AUDIT_2026-07-09.md`)

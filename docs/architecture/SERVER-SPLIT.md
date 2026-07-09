@@ -3,7 +3,7 @@
 > English: Architecture record for splitting the 1447-line monolithic `omni-memory-server.js` into a thin entrypoint plus sibling modules.
 > 中文：本文记录 `omni-memory-server.js` 从 1447 行单体拆分为 thin entrypoint + 多个 sibling 模块的设计与现状。
 >
-> 关联文档：`tech-debt-roadmap.md` 债项 #1 · `docs/architecture/OVERVIEW.md`
+> 关联文档：拆分债项详情见最近一次 `docs/PROJECT_AUDIT_*.md` §I-HIGH-1 · `docs/architecture/OVERVIEW.md`
 
 ---
 
@@ -11,7 +11,7 @@
 
 `shared-mcp/omni-memory-server.js` 是 obsidian-shared-memory-bus 的核心 MCP 入口，承担了 manifest 加载、IPC 协议、HTTP 代理、结构化日志、子进程 spawn、embedding worker、health check、trace manager、Python 检索、Prometheus metrics、config parser、MCP server 主循环等十余种职责。拆分前它是一个 **1447 行的 God Server**，所有 32 个 MCP 工具注册在同一个进程里，任何一处改动都要在一个巨型文件里定位上下文。
 
-本次拆分（对应 `tech-debt-roadmap.md` 债项 #1）将其精简为 **约 278 行的 thin entrypoint**，仅负责：
+本次拆分（对应 `docs/PROJECT_AUDIT_*.md` §I-HIGH-1）将其精简为 **约 278 行的 thin entrypoint**，仅负责：
 
 - 装配 sibling 模块导出的 helper（`omni-store` / `omni-platform-helpers` / `omni-handlers` / `omni-metrics`）；
 - 解析运行时脚本路径与路径常量；
@@ -296,7 +296,7 @@ export {
 
 ## 7. 未来演进
 
-本次拆分完成的是 `tech-debt-roadmap.md` 债项 #1 的 **PR-1.1 ~ PR-1.2 + PR-1.4（兼容层 + 文档）**：把单体拆成 thin entrypoint + sibling 模块，但仍是**单进程**。roadmap §1.2 的 **PR-1.3** 提出下一步——把 server 主体进一步拆为 **4 个独立进程**，实现真正的进程隔离。
+本次拆分完成的是 `docs/PROJECT_AUDIT_*.md` §I-HIGH-1 的 **PR-1.1 ~ PR-1.2 + PR-1.4（兼容层 + 文档）**：把单体拆成 thin entrypoint + sibling 模块，但仍是**单进程**。roadmap §1.2 的 **PR-1.3** 提出下一步——把 server 主体进一步拆为 **4 个独立进程**，实现真正的进程隔离。
 
 ### 7.1 目标：4-server 独立拆分
 
@@ -344,13 +344,13 @@ export {
 - `omni-memory-server.js` 退化为「all-in-one 兼容入口」（≤ 100 行），新用户走 4 个独立 server，旧用户继续用兼容层；
 - 每个 server 独立 `npm test:unit` 通过，CI 跑两套测试（拆分版 + monolithic）。
 
-> 详见 `tech-debt-roadmap.md` §1.2（PR 拆分清单）、§1.3（目标代码骨架）、§3 Phase 1 W2-W4 周次计划。
+> 详见 `docs/PROJECT_AUDIT_*.md` §I-HIGH-1（PR 拆分清单）、§I-HIGH-1 §1.3（目标代码骨架）、§3 Phase 1 W2-W4 周次计划。
 
 ---
 
 ## 8. 回滚 Checklist
 
-参考 `tech-debt-roadmap.md` §1.4 与 §5（回滚策略）。拆分已落地，以下 checklist 用于在后续演进（4-server 拆分）出现问题时回退到当前 thin-entrypoint 状态或更早的 monolith 状态。
+参考 `docs/PROJECT_AUDIT_*.md` §I-HIGH-1 §1.4 与 §5（回滚策略）。拆分已落地，以下 checklist 用于在后续演进（4-server 拆分）出现问题时回退到当前 thin-entrypoint 状态或更早的 monolith 状态。
 
 ### 8.1 Tag 与版本
 
