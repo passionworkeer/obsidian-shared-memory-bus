@@ -193,10 +193,11 @@ function migrateRecordFromV2ToV3(record) {
 - **位置**: `_gen_fixture.js:16`、`docs/AGENTS.md:32`
 - **修复**: 实现或删除引用
 
-#### I-LOW-7 — `ops/build/build-memory-layers.js:331-337` 永久性 skip
+#### I-LOW-7 — `ops/build/build-memory-layers.js:331-337` 永久性 skip ✅ 已修复 (替换为单条 skip 日志,删孤儿 catch)
 ```javascript
 // Phase 2: warm SQLite search result cache with recent queries from generated artifacts.
-try { ... } catch { console.log("[cache-warm] skipped: warm_strategy.py not found"); }
+// 见 docs/PROJECT_AUDIT_*.md §I-LOW-7: retrieval/cache/warm_strategy.py 未实现,跳过 warm-up。
+process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet\n");
 ```
 - **修复**: 实现 `retrieval/cache/warm_strategy.py` 或删除该段
 

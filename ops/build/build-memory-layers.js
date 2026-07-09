@@ -329,30 +329,8 @@ async function main() {
   }
 
   // Phase 2: warm SQLite search result cache with recent queries from generated artifacts.
-  try {
-    const storeRoot = resolveStoreRoot();
-    const cacheDir = path.join(storeRoot, "cache");
-    const pyScript = path.join(__dirname, "..", "..", "retrieval", "cache", "warm_strategy.py");
-    if (!fs.existsSync(pyScript)) {
-      process.stderr.write(`[cache-warm] skipped: warm_strategy.py not found at ${pyScript}\n`);
-    } else {
-      const python = process.env.AI_MEMORY_PYTHON || "python";
-      const raw = execFileSync(
-        python,
-        [pyScript, "--mode", "auto", "--max-queries", "10", "--cache-dir", cacheDir],
-        {
-          encoding: "utf8",
-          timeout: 15000,
-          windowsHide: true,
-          cwd: path.join(__dirname, "..", ".."),
-          env: { ...process.env, AI_MEMORY_STORE: storeRoot },
-        }
-      ).trim();
-      process.stderr.write(`[cache-warm] ${raw || "warm complete (auto mode)"}\n`);
-    }
-  } catch (e) {
-    process.stderr.write(`[cache-warm] skipped: ${e.message}\n`);
-  }
+  // 见 docs/PROJECT_AUDIT_*.md §I-LOW-7: retrieval/cache/warm_strategy.py 未实现,跳过 warm-up。
+  process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet\n");
 
   process.stdout.write(
     JSON.stringify(
