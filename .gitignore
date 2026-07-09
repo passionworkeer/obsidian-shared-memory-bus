@@ -22,7 +22,6 @@ __pycache__/
 .venv/
 ops/__pycache__/
 retrieval/__pycache__/
-retrieval/cache/__pycache__/
 *.egg-info/
 .pytest_cache/
 
@@ -89,10 +88,6 @@ interview/
 imported/
 /inbox/
 agents.json
-
-# Test-generated stubs (kept until ops/bus/ is permanently empty)
-# (was: legacy duplicate of bus/store-root.js, removed in v3.1.1)
-# ops/bus/
 
 # Debug/test scratch files
 _test_*.py
