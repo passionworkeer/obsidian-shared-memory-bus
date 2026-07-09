@@ -439,7 +439,7 @@ process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet
 
 ## 6. 建议执行顺序
 
-> **更新 (2026-07-09):** Wave 1 已全部修复完成,见 git log `fc502aa` 起每条独立 commit。
+> **更新 (2026-07-09):** Wave 1 + Wave 2 已全部修复完成。Wave 1 见 git log `fc502aa` 起每条独立 commit;Wave 2 见 merge `0e8f359` (B) + `072deed` (A)。
 
 按"用户感知影响 × 修复成本"排序:
 
@@ -450,14 +450,14 @@ process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet
 4. I-MED-1: 删 `migrateRecordFromV2ToV3` stub
 5. D-MED-3 + 端口表统一: 改 README + AGENTS.md 用 `port-registry.js`
 
-### Wave 2 — CI/版本一致性(1 天)
-1. D-CRIT-1: ESLint 版本统一
-2. D-CRIT-3 + D-MED-11: 同步 cli → 3.1.0
-3. D-CRIT-4: CHANGELOG Keep-a-Changelog 化 或 删 release.yml
-4. D-HIGH-2/3: 合并 lint / test workflows
-5. D-MED-9: `eslint` 移 devDependencies
+### Wave 2 — CI/版本一致性(1 天) ✅ 已完成 (commits fded3e5..7510398,merge 072deed/0e8f359)
+1. D-CRIT-1: ESLint 版本统一 ✅
+2. D-CRIT-3 + D-MED-11: 同步 cli → 3.1.0 ✅
+3. D-CRIT-4: CHANGELOG Keep-a-Changelog 化 或 删 release.yml ✅
+4. D-HIGH-2/3: 合并 lint / test workflows ✅
+5. D-MED-9: `eslint` 移 devDependencies ✅
 
-### Wave 3 — 安全(1–2 天)
+### Wave 3 — 安全(1–2 天) ⏳ 启动中
 1. S-CRIT-1: `yaml.safe_load` 全局
 2. S-HIGH-1: `scripts/watchdog.ps1` 拆参
 3. S-HIGH-3: SSRF allowlist
