@@ -2,6 +2,23 @@
 
 All notable changes to this project should be documented here.
 
+## 2026-07-10 (Round 2)
+
+### Fixed — 9 个独立 PR 收尾 Wave 4/5 + 杂项
+- **PR16** (commit `da3b4bc`): I-HIGH-1 stage 2 — `port-registry.js` 加 `SPLIT_MEMORY_SERVER_PORTS` (retrieval/bridge/dream/mgmt:9339-9341),扩展 `CRITICAL_PORTS`。完整 4-server 独立进程拆分留作 future PR (改动量级 1500+ 行),本 PR 仅预留端口不冲突。
+- **PR15** (commit `0b9e5b3`): Q-HIGH-6 跨语言 hash parity — 实测 Python + Node 在 ASCII-only 输入下 SHA-1 输出**完全一致**(`e9e06904388700cb`, `fe398c9c8d4bc7ba`, `c47b2ee4718c14c7`)。Audit 描述失实:keys 顺序一致 → 序列化字节序列相同 → hash 相同。`tests/unit/js/shared-crypto.test.js` 新增 3 个 pinned parity test 防 drift。
+- **PR14** (commit `e8c797f`): Q-HIGH-10 trace id 跨 Node→Python — `setCurrentTraceId` 与 `withTrace` 同步镜像 `process.env.AI_MEMORY_TRACE_ID`,Python 子进程通过 `os.environ` 自动读取跨边界 trace id。
+- **PR13** (commit `31dce00`): Q-HIGH-5 审计描述失实 — 重排一个 fact 后 `fieldHashes[fieldName]` 改变 → 缓存正确失效,是 intended behavior 不是 bug。Audit 文档标 ⚠️ 失实。
+- **PR12** (commit `77d1102`): Q-HIGH-2 partial-write 设计意图文档化 — 每个 batch 内 `writeIndexSnapshot` 走 tmp+rename atomic,有意的渐进可见性优化,注释说明 risk / reward 不实施代码改动。
+- **PR11 step 3** (commit `b63ce02`): Q-HIGH-1 大文件拆分 — `loadExistingIndex` 50 行 IO streaming 抽到 `bus/generate-embeddings-load.js`,主文件 795→728 行。
+- **PR11 step 2** (commit `3702de5`): Q-HIGH-1 大文件拆分 — `buildWorkerScript()` 145 行 Python template 抽到 `shared-mcp/embedding-worker-script.cjs`,`shared-mcp/embedding-worker-pool.cjs` 658→509 行。
+- **PR10** (commit `796c9f4`): Q-CRIT-4 partial — `bus/embedding-provider-registry.js` 抽 `spawnPythonWorker()` helper,transformer 与 gemini 两条 per-call path 共享 spawn/stderr drain/proxy env 4 行;Python 脚本提升到模块级 constants (PER_CALL_SENTENCE_TRANSFORMER_SCRIPT / PER_CALL_GEMINI_SCRIPT)。
+- **PR9** (commit `03a2dcf`): I-LOW-2/3/4/6 + Q-MED-1/7/10 审计失实标注 — 6 项 audit 描述与代码现状不符 (e.g. `bus/memory-promotion-scorer.js` 已删除、`web/shot.py` 路径是作者 dev 机配置、`bus/` 全量 grep `var` 0 命中、4 脚本走的是多路径合法 fallback 不是已删的 `ops/bus/`)。
+
+### Verified
+- `npm test`: 813 passed / 2 pre-existing failures (Python ENOENT, unrelated)
+- 8 个新独立 commit (PR9 文档化 + PR10-PR16 代码改动) 全部可独立 revert
+
 ## 2026-07-10
 
 ### Fixed — Audit 复核 + 7 个独立 PR (Issue 重对账)

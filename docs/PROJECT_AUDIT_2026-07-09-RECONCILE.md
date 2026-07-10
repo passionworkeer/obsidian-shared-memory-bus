@@ -203,4 +203,28 @@
 **仍留待独立 PR (按本次复核)**: Q-CRIT-4, Q-HIGH-1 余下文件, Q-HIGH-2, Q-HIGH-5, Q-HIGH-6 (失准), Q-HIGH-10 (失准), I-HIGH-1 完整 4-server 拆分, Q-MED-3/8/10 等。
 **审计失准无需 PR**(已记录): Q-HIGH-6, Q-HIGH-10, Q-MED-1, Q-MED-7, I-MED-2, S-MED-6, I-LOW-6。
 
-详细见 CHANGELOG.md 2026-07-10 段。
+详细见 CHANGELOG.md 2026-07-10 段 (Round 2)。
+
+---
+
+## 8. 后续进展 (2026-07-10 Round 2)
+
+基于 §7 PR 后的状态,本会话额外交付 **9 个独立 PR**:
+
+| PR | Commit | 项目 | 复核判定 |
+|---|---|---|---|
+| PR8 | (无 commit) | Q-MED cleanup II (Q-MED-3/7/8/10) | 4 项审计失准/无需改,文档化 |
+| PR9 | `03a2dcf` | I-LOW-2/3/4/6 + Q-MED-1/7/10 标审计失实 | 6 项 audit 描述与现状不符 |
+| PR10 | `796c9f4` | Q-CRIT-4 partial spawnPythonWorker helper + script constants | 真遗留 (transformer/gemini 重复 ~50 行 spawn) |
+| PR11 step 2 | `3702de5` | embedding-worker-script.cjs 抽 Python template | 真遗留 (658 行拆分 -149 行) |
+| PR11 step 3 | `b63ce02` | generate-embeddings-load.js 抽 IO streaming | 真遗留 (795→728 行) |
+| PR12 | `77d1102` | Q-HIGH-2 partial-write 设计文档化 | 文档化 (atomic tmp+rename 已安全) |
+| PR13 | `31dce00` | Q-HIGH-5 审计失实标注 | 描述失实 (缓存 key 用 hash,重排正确失效) |
+| PR14 | `e8c797f` | Q-HIGH-10 trace id 镜像 env | 真遗留 (跨进程 IPC 边界) |
+| PR15 | `0b9e5b3` | Q-HIGH-6 cross-language hash parity 锁值 test | 描述失实 (实测已对齐,测试防 drift) |
+| PR16 | `da3b4bc` | I-HIGH-1 stage 2 port-registry 加 9339-9341 | 真预留 (4-server split 端口) |
+
+**仍留待独立 PR (按本次复核)**: 完整 4-server 进程拆分 (~1500 行,留作 I-HIGH-1 final stage)
+**审计失准已清理 (Round 2)**: Q-HIGH-2 / Q-HIGH-5 / I-LOW-2 / I-LOW-3 / I-LOW-6 / Q-MED-1 / Q-MED-3 / Q-MED-7 / Q-MED-10
+
+详细见 CHANGELOG.md 2026-07-10 Round 2 段。
