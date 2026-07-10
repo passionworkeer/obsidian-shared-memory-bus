@@ -82,6 +82,11 @@ function buildHandlerRegistry(sharedParams, mcpMemoryHandlers) {
     mcpMemoryHandlers,
   ]) {
     for (const [name, handler] of Object.entries(source)) {
+      // Q-HIGH-8: 同名 handler 必须显式抛错,避免后注册 source 静默覆盖前者。
+      // 调用方依赖同名 handler 的"latest wins"语义时,这里会把冲突暴露给启动期。
+      if (Object.prototype.hasOwnProperty.call(ALL_HANDLERS, name)) {
+        throw new Error(`duplicate MCP handler registration: ${name}`);
+      }
       ALL_HANDLERS[name] = handler;
     }
   }
