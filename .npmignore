@@ -24,7 +24,6 @@ cache/
 # Landing page + screenshots (project showcase, not runtime)
 web/
 assets/
-_gen_fixture.js
 
 # Build artifacts
 *.tgz

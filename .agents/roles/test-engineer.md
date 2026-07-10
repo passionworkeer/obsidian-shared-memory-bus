@@ -5,12 +5,10 @@ version: 1
 responsibilities:
   - 给新代码补 unit test (tests/unit/js|py/)
   - 修间歇性失败 (flaky) 测试
-  - 维护跨语言等价测试基线 (specs/lsh-fixture.json)
+  - 维护跨语言等价测试基线 (tests/cross-language/)
   - 提 PR 之前跑 npm run test:all, 报告失败
 tools:
   - tests/
-  - specs/lsh-fixture.json
-  - _gen_fixture.js
 delegates_to:
   - test-runner
   - debt-audit (看测试覆盖)
@@ -42,9 +40,8 @@ outputs:
 任何 `bus/lsh-hash.js` 改动必须:
 
 1. 同步改 `retrieval/lsh_utils.py`
-2. 跑 `node _gen_fixture.js` 重生 `specs/lsh-fixture.json`
-3. 跑 `npm run test:cross` + `pytest tests/unit/py/test_lsh_utils.py -v`
-4. 跑 diff 报告 (见 `retrieval/eval/`)
+2. 跑 `npm run test:cross` + `pytest tests/unit/py/test_lsh_utils.py -v`
+3. 跑 diff 报告 (见 `retrieval/eval/`)
 
 ## 反模式
 
