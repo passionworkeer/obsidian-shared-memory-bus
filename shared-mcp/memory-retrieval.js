@@ -355,8 +355,10 @@ Only include records that are genuinely relevant. Return fewer than max_results 
 
     if (!apiKey) {
       const fallback = ids.slice(0, maxResults);
+      // Q-CRIT-3: degraded: true 标记 LLM 不可用,调用方可区分"系统猜"和"用户/LLM 选择"
       return jsonResult({
         ok: true,
+        degraded: true,
         fallback: true,
         selected: fallback.map((id) => ({ id, reason: "LLM unavailable, returning by original order" })),
         reasoning:
@@ -409,6 +411,7 @@ Only include records that are genuinely relevant. Return fewer than max_results 
       const fallbackIds = ids.slice(0, maxResults);
       return jsonResult({
         ok: true,
+        degraded: true,
         fallback: true,
         selected: fallbackIds.map((id) => ({ id, reason: `LLM call failed: ${err.message}` })),
         reasoning: `LLM call failed (${err.message}). Returned top N by original order.`,
@@ -439,6 +442,7 @@ Only include records that are genuinely relevant. Return fewer than max_results 
       const fallbackIds = ids.slice(0, maxResults);
       return jsonResult({
         ok: true,
+        degraded: true,
         fallback: true,
         selected: fallbackIds.map((id) => ({ id, reason: "LLM response was not parseable" })),
         reasoning: `LLM returned unparseable response. Returned top N by original order.\n\nRaw: ${llmResponse.slice(0, 300)}`,

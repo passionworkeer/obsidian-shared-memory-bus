@@ -224,7 +224,7 @@ process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet
 - **现实**: 无 mtime 缓存,Prometheus scrape + 60 s tick 双重触发
 - **修复**: mtime-keyed 缓存,3 秒 TTL
 
-#### Q-CRIT-3 — `handleRefineMemorySelection` 4 条静默降级路径无 `degraded` 标记
+#### Q-CRIT-3 — `handleRefineMemorySelection` 4 条静默降级路径无 `degraded` 标记 ✅ 已修复 (3 条 fallback 路径加 degraded: true)
 - **位置**: `shared-mcp/memory-retrieval.js:278-458`
 - **4 条路径**: 无 key / fetch 失败 / JSON 解析失败 / `selected` 为空 → 都回退到"按原始顺序取前 N"
 - **风险**: 调用方无法区分"用户选择"和"系统猜"
