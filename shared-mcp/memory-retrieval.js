@@ -18,6 +18,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { TOOLS } from "./memory-tools.js";
 import { resolveStoreRoot as resolveCanonicalStoreRoot } from "../bus/store-root.js";
+import { validateMcpInput } from "./omni-platform-helpers.js";
 
 const SEARCH_ROUTE_VALUES = new Set(["auto", "mixed", "durable", "task", "recent", "reference"]);
 
@@ -181,6 +182,8 @@ export function createMemoryRetrieval(params) {
   // ---------------------------------------------------------------------------
 
   async function handleSearchSharedMemory(args) {
+    try { validateMcpInput(args, { idsField: "ids", metadataField: "metadata" }); }
+    catch (e) { return errorResult(e.message); }
     const query = String(args.query || "").trim();
     if (!query) {
       return errorResult("query is required");

@@ -82,7 +82,7 @@ _REDOX_NESTED_QUANTIFIER = re.compile(r"\([^()]*[*+?][^()]*\)[+*]")
 - **风险**: 只覆盖 `(a+)+`,不覆盖 `(a|a)+` / `a*a*` 等指数级回溯
 - **修复**: 用 `regex` 库(`timeout=` kwarg)或对每个 pattern 套 `signal.alarm`
 
-#### S-MED-3 — MCP 字符串入参无长度上限
+#### S-MED-3 — MCP 字符串入参无长度上限 ✅ 已修复 (validateMcpInput 在 memory-retrieval.js 入口 + helper 在 omni-platform-helpers.js)
 - **位置**: `shared-mcp/memory-retrieval.js`、`memory-bridge.js`、`memory-embeddings.js`
 - **风险**: `query` / `name` / `content` / `metadata` 等入参无 cap,1 GB 字符串直接进 Python worker stdin 或 SQL `LIKE`
 - **修复**: 字符串 ≤ 64 KB,`ids` ≤ 100,`metadata` 嵌套 ≤ 5 层,加 per-principal 配额
