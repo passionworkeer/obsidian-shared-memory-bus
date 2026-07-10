@@ -10,6 +10,7 @@ import { resolveStoreRoot } from "./store-root.js";
 import { VECTOR_SCHEMA_VERSION, buildHashEmbedding } from "./lsh-hash.js";
 import { createJsonlStream } from "../ops/util/jsonl-stream.js";
 import { NOISE_PATTERNS, isNoise as isNoiseHelper } from "./text-noise.js";
+import { loadExistingIndex } from "./generate-embeddings-load.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -458,74 +459,6 @@ function collectDocuments() {
   return documents;
 }
 
-/**
- * Load the existing index.jsonl (v1 or v2 format).
- *
- * Returns a Map keyed by entry_id (sub-entry id).  Each value is the parsed
- * index record with an added `fieldTexts` dict derived from its `contentHash`
- * map for the reuse check.
- *
- * v2 records (with record_id/field) are preferred; legacy v1 records
- * (one entry per record_id, no record_id/field) are also loaded and treated
- * as having field="content".
- */
-/**
- * Load the existing index.jsonl (v1 or v2 format) using streaming.
- * Never loads the entire file into memory — iterates one record at a time.
- *
- * Returns a Map keyed by entry_id (sub-entry id).  Each value is the parsed
- * index record with an added `fieldTexts` dict derived from its `contentHash`
- * map for the reuse check.
- *
- * v2 records (with record_id/field) are preferred; legacy v1 records
- * (one entry per record_id, no record_id/field) are also loaded and treated
- * as having field="content".
- */
-async function loadExistingIndex() {
-  const existing = new Map();
-  if (!fs.existsSync(INDEX_FILE)) {
-    return existing;
-  }
-
-  for await (const record of createJsonlStream(INDEX_FILE)) {
-    if (!record || !record.id) {
-      continue;
-    }
-    try {
-      const entryId = String(record.id).trim();
-
-      // Reconstruct fieldTexts from the stored record:
-      // v2: record has { record_id, field, text, contentHash: { fieldName -> hash } }
-      // v1 (legacy): no record_id/field — treat as { field: "content", text: record.text || record.search_text }
-      if (record.record_id !== undefined && record.field !== undefined) {
-        // v2 format — contentHash is { fieldName -> hash }
-        const fieldTexts = {};
-        if (record.contentHash && typeof record.contentHash === "object" && !Array.isArray(record.contentHash)) {
-          for (const [fname, h] of Object.entries(record.contentHash)) {
-            fieldTexts[fname] = String(h || "");
-          }
-        } else if (typeof record.contentHash === "string") {
-          // Legacy single-hash string: treat as content field
-          fieldTexts.content = String(record.contentHash);
-        }
-        existing.set(entryId, { ...record, fieldTexts });
-      } else {
-        // v1 legacy format — one entry per record_id with a single contentHash
-        const recordId = entryId;
-        const fieldTexts = {};
-        if (record.contentHash && typeof record.contentHash === "string") {
-          fieldTexts.content = String(record.contentHash);
-        }
-        existing.set(entryId, { ...record, fieldTexts, record_id: recordId, field: "content" });
-      }
-    } catch (err) {
-      // Ignore malformed lines and continue rebuilding.
-      console.error(`[generate-embeddings] JSON parse error in index load (skipping line): ${err.message}`);
-    }
-  }
-
-  return existing;
-}
 
 /**
  * Write all field-level records to index.jsonl (v2 format).
@@ -605,7 +538,7 @@ async function main() {
   ensureDirectory(EMBEDDINGS_DIR);
 
   const documents = collectDocuments();
-  const existing = await loadExistingIndex();
+  const existing = await loadExistingIndex(INDEX_FILE);
   const preferredBackend = normalizeEmbeddingAdapter(EMBED_ADAPTER, MODEL) || "hash";
   const preferredModelName = preferredBackend === "hash" ? HASH_MODEL : MODEL;
   const preferredConfigHash = buildEmbeddingConfigHash({
