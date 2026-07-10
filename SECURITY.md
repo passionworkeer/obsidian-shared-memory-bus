@@ -29,6 +29,23 @@ When using this project:
 - Regularly update dependencies to receive security patches
 - Review the memory store permissions for your use case
 
+## Local Attack Surface
+
+This project runs as a local-first service. Be aware of the following
+behaviors before installing:
+
+- **HTTP MCP endpoints (ports 9331–9338) bind to `127.0.0.1` only** and are
+  not reachable from the LAN. The `/metrics` endpoint on port `9090` is
+  loopback-only as well. CORS is restricted to same-host loopback origins
+  (verified by `isAllowedMcpHost` in `shared-mcp/proto/rpc.mjs`).
+- **Windows install registers an auto-start watchdog**
+  (`AI Memory Watchdog.vbs` in the user's Startup folder) so the memory
+  bus survives reboots. Uninstall via `npm run uninstall` or remove the
+  Startup shortcut manually if you do not want persistent startup.
+- **API keys (e.g. Gemini) are read from `AI_MEMORY_EMBED_API_KEY` /
+  `runtime.json` and passed to the embedded Python worker via stdin**.
+  They are never written to logs or the on-disk store.
+
 ## Dependencies
 
 This project depends on:

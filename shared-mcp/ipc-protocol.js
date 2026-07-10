@@ -16,13 +16,16 @@ export const IPC_ACTIONS = {
   TIMELINE: "timeline",
 };
 
+// JSON-RPC 2.0 server-error range (-32000 to -32099) reserved for
+// implementation-defined errors. Pick stable codes so MCP clients that
+// branch on numeric code can dispatch cleanly.
 export const IPC_ERROR_CODES = {
-  WORKER_UNAVAILABLE: "SEARCH_WORKER_UNAVAILABLE",
-  CIRCUIT_OPEN: "SEARCH_WORKER_CIRCUIT_OPEN",
-  BACKPRESSURE: "SEARCH_WORKER_BACKPRESSURE",
-  TIMEOUT: "SEARCH_WORKER_TIMEOUT",
-  MALFORMED_REQUEST: "MALFORMED_REQUEST",
-  INTERNAL_ERROR: "INTERNAL_ERROR",
+  WORKER_UNAVAILABLE: -32001,
+  CIRCUIT_OPEN: -32002,
+  BACKPRESSURE: -32003,
+  TIMEOUT: -32004,
+  MALFORMED_REQUEST: -32600, // JSON-RPC 2.0 standard: Invalid Request
+  INTERNAL_ERROR: -32603,    // JSON-RPC 2.0 standard: Internal error
 };
 
 /**
