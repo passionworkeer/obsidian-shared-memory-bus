@@ -13,6 +13,7 @@
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { spawnProcess } from "./proto/child-process.mjs";
+import { DomainError, MCP_CODES } from "./mcp-domain-error.js";
 
 const BLACKBOARD_QUERY_SCRIPT = fileURLToPath(
   new URL("./scripts/blackboard_query.py", import.meta.url),
@@ -123,14 +124,21 @@ export function createMemoryBridge(params) {
     try {
       u = new URL(rawBase);
     } catch {
-      throw new Error(`bridge.invalid-base-url: ${String(rawBase).slice(0, 64)} is not a valid URL`);
+      throw new DomainError(
+        MCP_CODES.INVALID_INPUT,
+        `bridge.invalid-base-url: ${String(rawBase).slice(0, 64)} is not a valid URL`,
+      );
     }
     if (MEM_BRIDGE_REQUIRE_HTTPS && u.protocol !== "https:") {
-      throw new Error(`bridge.insecure-base-url: ${u.protocol} not allowed (require https)`);
+      throw new DomainError(
+        MCP_CODES.INVALID_INPUT,
+        `bridge.insecure-base-url: ${u.protocol} not allowed (require https)`,
+      );
     }
     const host = u.hostname.toLowerCase();
     if (!MEM_BRIDGE_ALLOWED_HOSTS.has(host)) {
-      throw new Error(
+      throw new DomainError(
+        MCP_CODES.BRIDGE_UNREACHABLE,
         `bridge.host-not-allowed: ${host} (configure AI_MEMORY_BRIDGE_ALLOWED_HOSTS to permit)`,
       );
     }
