@@ -136,10 +136,14 @@ _REDOX_NESTED_QUANTIFIER = re.compile(r"\([^()]*[*+?][^()]*\)[+*]")
 - **下游影响**: `pickTools` (tool-registry.js:75-80) 死代码,`if (!allowedNames.has(name))` (omni-handlers.js:132-135) 永真
 - **修复**: 二选一:(a) 真正实施 server-split,或 (b) 删除 `toolFilter` / `pickTools` / `SERVER_DEFINITIONS` 死代码,改文档说"monolithic by design"
 
-#### I-HIGH-2 — `ops/sync-openclaw.js` / `ops/sync-openclaw-to-obsidian.js` 4+ 处引用但文件不存在 ✅ 已修复 (标记 + 注释,未实现)
+#### I-HIGH-2 — `ops/sync-openclaw.js` / `ops/sync-openclaw-to-obsidian.js` 4+ 处引用但文件不存在 ✅ 已修复 (2026-07-10, sync-openclaw-to-obsidian.js 实施 + 路径修复)
 - **位置**: `docs/ARCHITECTURE.md:288`、`docs/architecture/DATA-FLOW.md:404`、`bus/memory-watchdog.ps1:117`、`bus/watchdog/Watchdog-Sync.ps1:121`
-- **下游影响**: `bus/memory-watchdog.ps1:117` 的 `OpenClawSyncScript` 解析会静默 no-op,用户期待同步但实际不工作
-- **修复**: 实现 OpenClaw 同步,或删除所有引用
+- **修复 (2026-07-10)**: `ops/sync/sync-openclaw-to-obsidian.js` (531 行) 实际**已存在并实施**——audit 标的"未实现"是过时的(老路径 `ops/sync-openclaw.js` 仍不存在,但 watchdog 已切到新路径 `ops/sync/sync-openclaw-to-obsidian.js`)。
+  - 修补 1: 加 ESM `__dirname` shim (`__filename = fileURLToPath(import.meta.url); __dirname = path.dirname(__filename)`)
+  - 修补 2: 修 vault-root.js / python-runtime.js 候选路径(原 `path.join(__dirname, "bus", ...)` 错到 `ops/sync/bus/...`,正确是 `../../bus/...`)
+  - 修补 3: `import(candidate)` → `import(pathToFileURL(candidate).href)` 修 Windows ESM specifier 问题
+  - 验证: `node -e "import('./ops/sync/sync-openclaw-to-obsidian.js')"` 成功,`{ ok: true, counts: {...}, files: [...] }`
+  - 守护测试: `tests/unit/js/sync-openclaw-import.test.js` (2 case)
 
 ### 2.3 Medium
 
