@@ -2,17 +2,29 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { spawnSync } from "child_process";
+import { pathToFileURL, fileURLToPath } from "url";
+
+// ESM __dirname shim (I-HIGH-2 fix: this file uses `import` syntax but
+// references __dirname; on Node ESM __dirname is undefined, so derive
+// from import.meta.url).
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 function loadVaultRootHelper() {
+  // I-HIGH-2 fix: candidates must resolve relative to project root.
+  // File lives at ops/sync/, vault-root.js lives at bus/vault-root.js
+  // (relative from project root). Try the most likely path first.
   const candidates = [
-    path.join(__dirname, "vault-root.js"),
+    path.join(__dirname, "..", "..", "bus", "vault-root.js"),
     path.join(__dirname, "..", "bus", "vault-root.js"),
-    path.join(__dirname, "bus", "vault-root.js"),
+    path.join(__dirname, "vault-root.js"),
   ];
 
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
-      return import(candidate);
+      // Windows: path.join gives "bus\vault-root.js" which is not a valid
+      // ES module specifier. Convert to file URL for cross-platform import.
+      return import(pathToFileURL(candidate).href);
     }
   }
 
@@ -22,10 +34,10 @@ function loadVaultRootHelper() {
 const vaultRootModule = await loadVaultRootHelper();
 const { resolveVaultRoot } = vaultRootModule;
 
-const pythonRuntimePath = fs.existsSync(path.join(__dirname, "python-runtime.js"))
-  ? path.join(__dirname, "python-runtime.js")
-  : path.join(__dirname, "..", "bus", "python-runtime.js");
-const pythonRuntimeModule = await import(pythonRuntimePath);
+const pythonRuntimePath = fs.existsSync(path.join(__dirname, "..", "..", "bus", "python-runtime.js"))
+  ? path.join(__dirname, "..", "..", "bus", "python-runtime.js")
+  : path.join(__dirname, "python-runtime.js");
+const pythonRuntimeModule = await import(pathToFileURL(pythonRuntimePath).href);
 const { resolvePythonRuntime, withPythonArgs } = pythonRuntimeModule;
 const memoryContractModule = await import("../memory/memory-contract.js");
 const { MEMORY_RECORD_SCHEMA_VERSION } = memoryContractModule;
