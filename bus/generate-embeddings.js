@@ -9,6 +9,7 @@ import { resolveEmbeddingRuntime } from "./runtime-config.js";
 import { resolveStoreRoot } from "./store-root.js";
 import { VECTOR_SCHEMA_VERSION, buildHashEmbedding } from "./lsh-hash.js";
 import { createJsonlStream } from "../ops/util/jsonl-stream.js";
+import { NOISE_PATTERNS, isNoise as isNoiseHelper } from "./text-noise.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -62,17 +63,10 @@ const ACTIVE_EMBED_PROFILE = String(EMBED_RUNTIME.profileName || "").trim();
 const ACTIVE_EMBED_PROVIDER = String(EMBED_RUNTIME.providerName || "").trim();
 const HASH_MODEL = "hashing-v1";
 
-const NOISE_PATTERNS = [
-  /^Sender\s*\(/i,
-  /^System:/i,
-  /^Subagent Context/i,
-  /^\[Subagent Context\]/i,
-  /^Exec completed/i,
-  /^Exec failed/i,
-  /^A new session was started/i,
-  /^\[(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s/i,
-  /^Run your Session Startup/i,
-];
+// Q-HIGH-1 partial split: NOISE_PATTERNS lives in bus/text-noise.js for reuse.
+// Re-exported below as a local symbol so legacy callers (and tests
+// asserting on the const list) still work without touching them.
+const _NOISE_PATTERNS = NOISE_PATTERNS;
 
 function firstNonEmptyEnv(...names) {
   for (const name of names) {
@@ -178,11 +172,7 @@ function sleep(ms) {
 }
 
 function isNoise(text) {
-  const normalized = normalizeSpaces(text);
-  if (!normalized || normalized.length < 5) {
-    return true;
-  }
-  return NOISE_PATTERNS.some((pattern) => pattern.test(normalized));
+  return isNoiseHelper(text, normalizeSpaces);
 }
 
 function fallbackId(entry, title, content) {
