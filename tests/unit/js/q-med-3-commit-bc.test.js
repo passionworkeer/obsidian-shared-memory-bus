@@ -1,11 +1,14 @@
 /**
- * Q-MED-3 Commit B — 守护 shared-mcp/{memory-bridge,memory-embeddings,
- * memory-generation,memory-retrieval}.js 7 处 user-facing throw 站点
- * 已迁移到 DomainError,带稳定 MCP_CODES code。
+ * Q-MED-3 Commit B + C — 守护:
+ *   Commit B: shared-mcp/{memory-bridge,memory-embeddings,memory-generation,
+ *     memory-retrieval}.js 中 9 处 user-facing throw 站点已迁移到
+ *     DomainError,带稳定 MCP_CODES code。
+ *   Commit C: omni-handlers.js:registerMcpRequestHandlers 的 catch 块
+ *     把 throw 出去的 error 通过 mcpErrorResult 翻译为带 code 的 MCP
+ *     wire shape。
  *
- * 这 7 处 throw 一旦回退到 `throw new Error`,后续 catch 块升级到
- * mcpErrorResult (Commit C) 时会把它们降级为 INTERNAL ——
- * 因此守护要锁死 throw 形式。
+ * 任何一处回退,后续 catch 块会把 DomainError 当 Error 兜底为 INTERNAL,
+ * user-facing code 字段丢失 ——— 因此守护要锁死 import + catch 形式。
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -98,4 +101,31 @@ test("targeted files import DomainError + MCP_CODES from mcp-domain-error.js", (
       `${file} must import MCP_CODES from ./mcp-domain-error.js`,
     );
   }
+});
+
+// ---------------------------------------------------------------------------
+// Commit C — omni-handlers.js catch 块升级守护
+// ---------------------------------------------------------------------------
+
+test("omni-handlers.js: imports mcpErrorResult from ./mcp-domain-error.js", () => {
+  const source = readSource("omni-handlers.js");
+  assert.match(
+    source,
+    /import\s*\{[^}]*\bmcpErrorResult\b[^}]*\}\s*from\s*["']\.\/mcp-domain-error\.js["']/,
+    "omni-handlers.js must import mcpErrorResult from ./mcp-domain-error.js",
+  );
+});
+
+test("omni-handlers.js: CallTool catch 用 mcpErrorResult(error) 而非裸 errorResult(message)", () => {
+  const source = readSource("omni-handlers.js");
+  assert.match(
+    source,
+    /mcpErrorResult\(\s*error\s*\)/,
+    "catch block must call mcpErrorResult(error) to translate thrown error to wire payload",
+  );
+  assert.doesNotMatch(
+    source,
+    /return\s+errorResult\(error\s+instanceof\s+Error\s+\?[^)]+\)\s*;/,
+    "legacy single-arg errorResult(error.message) form must be removed",
+  );
 });

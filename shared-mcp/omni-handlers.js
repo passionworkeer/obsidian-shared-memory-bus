@@ -22,6 +22,7 @@ import { createMemoryBridge } from "./memory-bridge.js";
 import { createMemoryStatus } from "./memory-status.js";
 import { createMemoryEmbeddings } from "./memory-embeddings.js";
 import { generateTraceId, withTrace } from "./metrics/structured-logger.js";
+import { mcpErrorResult } from "./mcp-domain-error.js";
 
 import { resolveRuntimePath } from "./omni-platform-helpers.js";
 
@@ -173,7 +174,11 @@ function registerMcpRequestHandlers(server, { ALL_HANDLERS, METRICS, log, toolFi
         return result;
       } catch (error) {
         log.error("mcp-request-error", { tool: name, traceId, error: error instanceof Error ? error.message : String(error) });
-        return errorResult(error instanceof Error ? error.message : String(error));
+        // Q-MED-3 (PR18) micro-upgrade + Commit C: DomainError 上的稳定
+        // .code 通过 mcpErrorResult 透传到 MCP wire;普通 Error 仍兜底为
+        // INTERNAL 并保留 message。
+        const payload = mcpErrorResult(error).error;
+        return errorResult(payload.error, payload.code);
       }
     });
   });
