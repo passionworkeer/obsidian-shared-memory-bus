@@ -52,7 +52,7 @@ param(... [string]$CallbackExe, [string[]]$CallbackArgs = @(), ...)
 - **风险**: `iex` 等价于 `eval`。当前唯一调用方是 `package.json:26` 的静态命令,但接口形态是真实注入 sink。
 - **修复**: 在注册时把 `$Callback` 拆成可执行文件 + 参数列表,运行时 `& exe @args`。
 
-#### S-HIGH-2 — PowerShell `-Command` 字符串插值
+#### S-HIGH-2 — PowerShell `-Command` 字符串插值 ⚠️ 已不存在 (代码已统一走 -EncodedCommand)
 - **位置**: `ops/run/run-minimax-mcp.ps1`、`ops/run/run-memory-dream.ps1`、`bus/memory-bus.ps1`(多行 `-Command "..."`-style 调用)
 - **风险**: 用户控制的环境变量 / 参数若进入 `-Command` 字符串插值,可能注入任意 PowerShell
 - **修复**: 全部改为 `-File script.ps1 -Arg1 ... -Arg2 ...` 参数化调用
