@@ -228,3 +228,69 @@
 **审计失准已清理 (Round 2)**: Q-HIGH-2 / Q-HIGH-5 / I-LOW-2 / I-LOW-3 / I-LOW-6 / Q-MED-1 / Q-MED-3 / Q-MED-7 / Q-MED-10
 
 详细见 CHANGELOG.md 2026-07-10 Round 2 段。
+
+---
+
+## 9. 后续进展 (2026-07-10 Round 3)
+
+基于 §7 + §8 PR 后的状态,本会话交付 **2 个独立 PR**(PR17 含 7 个子 commit,PR18 含 1 个 commit),完成 RECONCILE §8 末尾"仍留待独立 PR: 完整 4-server 进程拆分 (~1500 行,留作 I-HIGH-1 final stage)":
+
+| PR | Commits | 项目 | 复核判定 |
+|---|---|---|---|
+| **PR17** | `9702753` `b018202` `5c2135b` `d665e5d` `c31272f` `b96dd36` `6c7ebf8` | I-HIGH-1 stage 3 完整 4-server 进程拆分 (7 子 commit) | **真遗留 — 已完成**。1500 行新代码,默认 split 4 进程,monolithic 兼容 |
+| **PR18** | `6aa2b99` | Q-MED-3 范围描述 + `errorResult` 透传 `code` 升级 | **真遗留 — 部分完成** (1 处微升级 + 1 份范围文档,完整统一 ~285 行留后续 wave) |
+
+### 9.1 PR17 7 个子 commit 详情
+
+| # | Commit | 范围 | 行数 |
+|---|---|---|---|
+| 1 | `9702753` | `shared-mcp/port-registry.js` — `MCP_SERVERS` 4+1 条 (memory-* split + legacy memory) | +39 / -14 |
+| 2 | `b018202` | `shared-mcp/manifest.json` — 拆 1 条 memory 为 4+1 条 server,各带 stdioEnv | +68 / -5 |
+| 3 | `5c2135b` | 新增 `shared-mcp/spawn-plan.js` + `start.js` 改造用 `resolveSpawnPlan` 决策 | +116 / -15 |
+| 4 | `d665e5d` | `shared-mcp/omni-memory-server.js` — split 模式 `process.title` 区分 4 进程 | +11 |
+| 5 | `c31272f` | `shared-mcp/start-shared-mcp.ps1` — `Resolve-StdioEnvironment` 改 `-like "memory-*"` + 注入 mode/metrics port | +16 / -1 |
+| 6 | `b96dd36` | 新增 `shared-mcp/mcp-process-manager.js` (spawn + health + restart + circuit breaker) | +238 (新文件) |
+| 7 | `6c7ebf8` | 新单测 6 个文件 59 case 守护 stage 3 契约 | +631 (新文件) |
+
+### 9.2 PR18 范围决策
+
+Q-MED-3 的"30 处 throw + 4 套风格并存"是 **真遗留**,不是审计失准:
+- 审计 RECONCILE §7 (Round 1) 把它标 ✅ 真遗留
+- 审计 RECONCILE §8 (Round 2) PR8 又把它归类"审计失准/无需改" — **该判定部分失准**
+
+本次复核确认 Q-MED-3 仍真实存在,但完整改造 (~285 行) 风险/收益不对等。采取"最小微升级 + 文档化"折中:
+- ✅ 完成:`errorResult(message, code)` 透传 code (1 处, ~25 行)
+- ✅ 完成:`docs/reference/q-med-3-status.md` 范围描述 (90 行) + 7 个 code 白名单 + 后续 wave 立项指南
+- ⏸️ 留后续 wave: 引入 `mcp-domain-error.js` + 替换 5-6 处 user-facing throw + CallTool catch 透传 code (~285 行,3 个独立 commit 划分见 `docs/reference/q-med-3-status.md` §5)
+
+### 9.3 仍留待独立 PR (按本次复核)
+
+| 项 | 范围 | 行数 | 风险 |
+|---|---|---:|---|
+| Q-MED-3 完整统一 (PR18 续) | 引入 `mcp-domain-error.js` + 替换 30 处 throw | ~285 | 中 — 需逐工具核对错误传播 |
+| Q-CRIT-4 根因 | per-call spawn 降级路径 | ~150 | 中 — Python 冷启动 3-8s |
+| Q-HIGH-1 大文件余下 | 3 文件拆 8+ | ~400 | 高 — 量大,需先发设计稿 |
+| Q-HIGH-2 main() O(N²) | main 重构 | ~200 | 中 |
+| Q-HIGH-5 fact_i 键策略 | 改键策略 | ~80 | 低 |
+| I-HIGH-2 sync-openclaw | 实施 OpenClaw 适配器 | ~500+ | 高 — 非 1 commit 工作 |
+| I-LOW-3 / I-LOW-4 fixture | 放回 npm 或删 tracked | ~50 | 低 |
+| Q-MED-8 `_gen_fixture.js` | 删 .npmignore 行 | ~5 | 低 |
+| Q-MED-10 `var` 散落 | grep 全量后决定 | ~? | 低 |
+
+### 9.4 审计失准已清理 (Round 3 累计)
+
+Q-HIGH-6, Q-HIGH-10, Q-MED-1, Q-MED-7, Q-MED-3 (部分), I-MED-2, S-MED-6, I-LOW-6, I-LOW-2, I-LOW-3, Q-HIGH-5, Q-MED-3 (部分)。
+
+### 9.5 端到端手测 checklist (PR17)
+
+```bash
+# 默认 split 模式:4 进程
+node start.js
+# 期望: [memory-retrieval] 9338 / [memory-bridge] 9339 / [memory-dream] 9340 / [memory-mgmt] 9341
+
+# 回退 monolithic 兼容模式
+AI_MEMORY_SERVER_MODE=monolithic node start.js
+# 期望: [memory] 9338,4 个 memory-* 不 spawn
+```
+
+详细见 CHANGELOG.md 2026-07-10 Round 3 段。
