@@ -84,7 +84,7 @@ _REDOX_NESTED_QUANTIFIER = re.compile(r"\([^()]*[*+?][^()]*\)[+*]")
 - **风险**: `query` / `name` / `content` / `metadata` 等入参无 cap,1 GB 字符串直接进 Python worker stdin 或 SQL `LIKE`
 - **修复**: 字符串 ≤ 64 KB,`ids` ≤ 100,`metadata` 嵌套 ≤ 5 层,加 per-principal 配额
 
-#### S-MED-4 — Windows 临时 `.bat` 文件路径可预测
+#### S-MED-4 — Windows 临时 `.bat` 文件路径可预测 ✅ 已修复 (randomBytes 16 hex 命名)
 - **位置**: `shared-mcp/proto/child-process.mjs:71-96`
 - **风险**: 命名格式 `mcp-child-${pid}-${ts}.bat`,在多用户 Windows 上可被低权限用户抢占。引号转义正确,本地信任模型可接受,但应加上 unlink-on-exit。
 - **修复**: `crypto.randomBytes(16).toString('hex')` + 退出时强制 unlink
