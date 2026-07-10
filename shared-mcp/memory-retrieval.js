@@ -19,6 +19,7 @@ import path from "node:path";
 import { resolveStoreRoot as resolveCanonicalStoreRoot } from "../bus/store-root.js";
 import { validateMcpInput } from "./omni-platform-helpers.js";
 import { spawnProcess } from "./proto/child-process.mjs";
+import { DomainError, MCP_CODES } from "./mcp-domain-error.js";
 
 const SEARCH_ROUTE_VALUES = new Set(["auto", "mixed", "durable", "task", "recent", "reference"]);
 
@@ -125,7 +126,7 @@ async function runSemanticSearchOnce({
     },
   });
   if (result.code !== 0) {
-    throw new Error(result.stderr.trim() || result.stdout.trim() || `semantic-search-exit-${result.code}`);
+    throw new DomainError(MCP_CODES.SUBPROCESS_FAILED, result.stderr.trim() || result.stdout.trim() || `semantic-search-exit-${result.code}`);
   }
   return JSON.parse(result.stdout);
 }
@@ -371,7 +372,7 @@ Only include records that are genuinely relevant. Return fewer than max_results 
 
       if (!response.ok) {
         const errorText = await response.text().catch(() => "");
-        throw new Error(`LLM API error ${response.status}: ${errorText}`);
+        throw new DomainError(MCP_CODES.EXTERNAL_SERVICE, `LLM API error ${response.status}: ${errorText}`);
       }
 
       const data = await response.json();

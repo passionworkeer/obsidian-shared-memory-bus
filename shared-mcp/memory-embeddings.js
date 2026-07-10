@@ -11,6 +11,7 @@
 
 import fs from "node:fs";
 import { spawn } from "node:child_process";
+import { DomainError, MCP_CODES } from "./mcp-domain-error.js";
 
 function jsonResult(payload) {
   return {
@@ -82,7 +83,7 @@ export function createMemoryEmbeddings(params) {
     } = params;
 
     if (!fs.existsSync(EMBEDDINGS_SCRIPT)) {
-      throw new Error(`embeddings-script-missing: ${EMBEDDINGS_SCRIPT}`);
+      throw new DomainError(MCP_CODES.SCRIPT_MISSING, `embeddings-script-missing: ${EMBEDDINGS_SCRIPT}`);
     }
 
     const args_ = [EMBEDDINGS_SCRIPT];
@@ -98,7 +99,7 @@ export function createMemoryEmbeddings(params) {
     });
 
     if (result.code !== 0) {
-      throw new Error(result.stderr.trim() || result.stdout.trim() || `embeddings-exit-${result.code}`);
+      throw new DomainError(MCP_CODES.SUBPROCESS_FAILED, result.stderr.trim() || result.stdout.trim() || `embeddings-exit-${result.code}`);
     }
 
     // Refresh metrics after rebuild

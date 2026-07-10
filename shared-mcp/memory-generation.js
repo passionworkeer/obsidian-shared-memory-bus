@@ -11,6 +11,7 @@
 
 import fs from "node:fs";
 import { spawn } from "node:child_process";
+import { DomainError, MCP_CODES } from "./mcp-domain-error.js";
 
 function jsonResult(payload) {
   return {
@@ -75,7 +76,7 @@ export function createMemoryGeneration(params) {
     const { MEMORY_BUS_SCRIPT, VAULT_ROOT, RUNTIME_ENV, POWERSHELL_COMMAND, IS_WINDOWS } = params;
 
     if (!fs.existsSync(MEMORY_BUS_SCRIPT)) {
-      throw new Error(`memory-bus-script-missing: ${MEMORY_BUS_SCRIPT}`);
+      throw new DomainError(MCP_CODES.SCRIPT_MISSING, `memory-bus-script-missing: ${MEMORY_BUS_SCRIPT}`);
     }
 
     const args = IS_WINDOWS
@@ -90,7 +91,7 @@ export function createMemoryGeneration(params) {
     });
 
     if (result.code !== 0) {
-      throw new Error(result.stderr.trim() || result.stdout.trim() || `refresh-derived-artifacts-exit-${result.code}`);
+      throw new DomainError(MCP_CODES.SUBPROCESS_FAILED, result.stderr.trim() || result.stdout.trim() || `refresh-derived-artifacts-exit-${result.code}`);
     }
 
     return {
