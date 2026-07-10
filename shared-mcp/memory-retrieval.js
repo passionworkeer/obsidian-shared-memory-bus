@@ -14,11 +14,11 @@
  * All state is passed in via params to avoid circular import issues.
  */
 
-import { spawn } from "node:child_process";
-import path from "node:path";
 import { TOOLS } from "./memory-tools.js";
+import path from "node:path";
 import { resolveStoreRoot as resolveCanonicalStoreRoot } from "../bus/store-root.js";
 import { validateMcpInput } from "./omni-platform-helpers.js";
+import { spawnProcess } from "./proto/child-process.mjs";
 
 const SEARCH_ROUTE_VALUES = new Set(["auto", "mixed", "durable", "task", "recent", "reference"]);
 
@@ -63,35 +63,6 @@ function resolveStoreRootParam(params = {}) {
       path.join(process.env.USERPROFILE || process.env.HOME || ".", ".ai-memory")
     );
   }
-}
-
-function spawnProcess(executable, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, {
-      stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
-      ...options,
-    });
-
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      resolve({ code: code || 0, stdout, stderr });
-    });
-
-    if (options.input !== undefined) {
-      child.stdin.end(options.input);
-    } else {
-      child.stdin.end();
-    }
-  });
 }
 
 async function runSemanticSearchOnce({

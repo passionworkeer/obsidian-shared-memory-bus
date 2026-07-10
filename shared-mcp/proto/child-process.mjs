@@ -299,6 +299,40 @@ export async function bootstrapChild(protocolVersion = defaultProtocolVersion) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Q-HIGH-7: 通用 spawn-exec-and-collect helper,抽公供 memory-retrieval.js /
+// memory-bridge.js 复用。语义是"spawn → 收 stdout/stderr → 关闭后 resolve"。
+// 原两侧各自定义 spawnProcess 时只是复制了相同 27 行,这里提到 proto 层避免漂移。
+// ---------------------------------------------------------------------------
+export function spawnProcess(executable, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(executable, args, {
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+      ...options,
+    });
+
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      resolve({ code: code || 0, stdout, stderr });
+    });
+
+    if (options.input !== undefined) {
+      child.stdin.end(options.input);
+    } else {
+      child.stdin.end();
+    }
+  });
+}
+
 // Wire rpc.mjs's late-bound hooks to our implementations.
 setBootstrapChild(bootstrapChild);
 setTeardownChild(teardownChild);

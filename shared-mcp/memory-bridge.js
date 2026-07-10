@@ -11,8 +11,8 @@
  */
 
 import fs from "node:fs";
-import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { spawnProcess } from "./proto/child-process.mjs";
 
 const BLACKBOARD_QUERY_SCRIPT = fileURLToPath(
   new URL("./scripts/blackboard_query.py", import.meta.url),
@@ -36,35 +36,6 @@ function errorResult(message) {
     content: [{ type: "text", text: JSON.stringify({ ok: false, error: String(message) }, null, 2) }],
     isError: true,
   };
-}
-
-function spawnProcess(executable, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, {
-      stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
-      ...options,
-    });
-
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      resolve({ code: code || 0, stdout, stderr });
-    });
-
-    if (options.input !== undefined) {
-      child.stdin.end(options.input);
-    } else {
-      child.stdin.end();
-    }
-  });
 }
 
 function truncateText(value, maxLength = 400) {
