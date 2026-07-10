@@ -478,25 +478,34 @@ process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet
 4. S-HIGH-4: Docker 错误不吞
 5. S-MED-1/2/3: metrics host / ReDoS / MCP 长度 cap
 
-### Wave 4 — 性能(2–3 天) ⏸️ 部分完成 (3 项)+ 留待后续专项
+### Wave 4 — 性能(2–3 天) ⏳ 部分完成 (8 项,6 新)+ 留待后续专项
 
-**已修 (commits 7e12b54, 6bbab16, 34c5743):**
+**已修 (commits 26c1238 / 5f20275 / 18380bb / da46be3 / 52d1427 / bfa3d4f / 2f53a12 / 7e12b54 / 6bbab16 / 34c5743):**
+- Q-CRIT-1: search_ranking.py 抽 _resolve_query_runtime_for_dense (净 -10 行, 2 处重复 → 1 helper) ✅ (commit 52d1427)。审计说"3 处重复"实测仅 2 处,ann_dense_scores 不存在。
 - Q-CRIT-2: readEmbeddingsSummary mtime cache (3s TTL) ✅
 - Q-CRIT-3: handleRefineMemorySelection fallback 加 degraded: true ✅
+- Q-HIGH-3: bus/bm25.js 加 tokenize FIFO 缓存 (1024 entries) ✅ (commit 5f20275)。审计严重高估:文件 102 行,非性能瓶颈。
 - Q-HIGH-4: embedding-provider-registry proxy env 抽 getProxyEnv() ✅
+- Q-HIGH-7: spawnProcess helper 抽到 child-process.mjs ✅ (commit 2f53a12)
+- Q-HIGH-8: buildHandlerRegistry 同名 handler 抛 Error ✅ (commit 26c1238)
+- Q-MED-4 / I-LOW-1: getContextPath 复用 bus/store-root.js 导出 ✅ (commit da46be3)
+- Q-MED-5: cli/package.json engines >=16 → >=18 ✅ (commit 18380bb)
 
-**留待独立 PR (高风险,涉及大文件改动):**
-- Q-CRIT-1: search_ranking.py 抽 _resolve_query_runtime (1367 行 → 拆 3-5 文件)
-- Q-CRIT-4: per-call Python spawn 改 worker pool
-- Q-HIGH-1: 3 个 800+ 行文件拆分 (bus/generate-embeddings.js, shared-mcp/embedding-worker-pool.cjs, retrieval/search_ranking.py)
-- Q-HIGH-2: generate-embeddings.js main() O(N²) 重写
-- Q-HIGH-3: bus/bm25.js 加倒排索引
-- Q-HIGH-5: fact_0/1/2 → 内容 hash 键
-- Q-HIGH-6: 跨语言 hash parity test
-- Q-HIGH-7/8/10: IPC 统一 / handler 名冲突 / trace id
-- Q-MED-*: 18 项中低风险,按需修
+**留待独立 PR (高风险,涉及大文件改动或跨语言协调):**
+- Q-CRIT-4: per-call Python spawn 改 worker pool (降级路径真实存在,需与 Q-HIGH-1 联做)
+- Q-HIGH-1: 800+ 行文件拆分继续 (generate-embeddings.js 抽 NOISE_PATTERNS 到 text-noise.js 已 start,commit bfa3d4f 805→799 行; 余 main/loadExistingIndex 拆 + embedding-worker-pool.cjs 658 行拆 + search_ranking.py 1367 行拆,与 Q-CRIT-1 helper 抽取协同)
+- Q-HIGH-2: generate-embeddings.js main() 描述"N+1 次写"实测 writeIndexSnapshot 已 atomic per-batch,只是 batch 数 × 1,需重新评估 partial-write 语义后才能改 (留待后续 deep-PR)
+- Q-HIGH-5: fact_0/1/2 → 内容 hash 键 (动 JSONL schema,需跨语言协调)
+- Q-HIGH-6: 跨语言 hash parity test (audit 描述失准:JS 侧已无 build_embedding_config_hash 对应函数,问题形态已变)
+- Q-HIGH-10: IPC 跨语言 trace id (audit 路径失准:shared-mcp/proto/compute.js 已不存在,新路径需再查)
+- Q-MED-3/8/10: 4 处错误风格 / fixture / var 用法 (后续 cleanup bundle)
 
-### Wave 5 — 架构与可观测(可选) ⏸️ 留待独立 PR
+### Wave 5 — 架构与可观测 ⏳ 入口已激活
+
+**已修 (commit 5079e8e):**
+- I-HIGH-1: `omni-memory-server.js` 激活 `AI_MEMORY_SERVER_MODE` env 入口 (retrieval/bridge/dream/mgmt/all),死代码 `toolFilter` 升级为环境变量驱动。完整 4-server 独立进程拆分 (`docs/architecture/SERVER-SPLIT.md` §7) 留作后续 PR; 本次 PR 是入口激活,把死代码变活路径。
+
+涉及 server-split 实施 (I-HIGH-1) 与 IPC/可观测架构改动,应作专项 PR:
 
 涉及 server-split 实施 (I-HIGH-1) 与 IPC/可观测架构改动,应作专项 PR:
 - I-HIGH-1: 实施 server-split 4 个独立进程 (omni-memory-{retrieval,bridge,dream,mgmt}:9338-9341)

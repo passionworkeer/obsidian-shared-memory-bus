@@ -2,7 +2,27 @@
 
 All notable changes to this project should be documented here.
 
-## 2026-06-28
+## 2026-07-10
+
+### Fixed — Audit 复核 + 7 个独立 PR (Issue 重对账)
+- **PR7 / I-HIGH-1**: `omni-memory-server.js` 激活 `AI_MEMORY_SERVER_MODE` env 入口 (`retrieval` / `bridge` / `dream` / `mgmt` / `all`),把"死代码" `toolFilter` 变为"环境变量驱动"工具子集过滤。完整 4-server 独立进程拆分 (`docs/architecture/SERVER-SPLIT.md` §7) 留作未来 PR;本次仅打通入口。
+- **PR6 / Q-HIGH-1**: 抽出 `NOISE_PATTERNS` + `isNoise()` 到新模块 `bus/text-noise.js`,`bus/generate-embeddings.js` 805 → 799 行 (Q-HIGH-1 第一步)。其余 800+ 行文件拆分 (`shared-mcp/embedding-worker-pool.cjs`、`retrieval/search_ranking.py`) 留作后续 PR。
+- **PR5 / Q-CRIT-1**: `retrieval/search_ranking.py` 抽出 `_resolve_query_runtime_for_dense()` helper,消除 `dense_scores` 与 `_dense_scores_fallback` 之间 ~50 行 schema+config-hash 派生重复 (`audit 提的 "3 处重复" 实测仅 2 处`)。
+- **PR4 / Q-MED cleanup bundle**:
+  - `cli/package.json`: `engines.node` 升 `>=16` → `>=18`,与根一致 (Q-MED-5)
+  - `ops/generate/generate-context.js`: 删除重复 `getContextPath()`,改 import `bus/store-root.js` (I-LOW-1 / Q-MED-4)
+- **PR3 / Q-HIGH-3**: `bus/bm25.js` 102 行加 size-bounded (1024 entries) FIFO tokenize 缓存。
+- **PR2 / Q-HIGH-7**: `shared-mcp/memory-retrieval.js` + `memory-bridge.js` 重复的 `spawnProcess` helper 抽公到 `shared-mcp/proto/child-process.mjs`(已存在的 IPC 模块加 `export`)。
+- **PR1 / Q-HIGH-8**: `shared-mcp/omni-handlers.js` `buildHandlerRegistry` 同名 handler 注册抛 `Error`(原 for-of 静默覆盖)。
+
+### Docs — 审计复核真伪报告
+- 新增 `docs/PROJECT_AUDIT_2026-07-09-RECONCILE.md`:22 项 ⏸️ 留待项逐条复核,识别 5 项审计描述失准 / 1 项已悄悄修复 / 13 项仍真遗留。后续 PR 排序见 §5。
+- `docs/PROJECT_AUDIT_2026-07-09.md` Wave 4 / Wave 5 区段保留 ⏸️ 标识 (本次只完成 6 项真遗留,其余 9 项需独立 PR)。
+
+### Verified
+- `npm test`: 810 passed / 2 pre-existing failures (`python ast.parse ENOENT`,unrelated)。
+- 单 commit 可独立回滚 (8 个 commit messages 见 `git log --oneline -8`)。
+
 
 ### Changed — Architecture (A1: store/vault unification)
 - Canonical memory store is now the Obsidian vault's `00-System/ai-memory` (matches CLAUDE.md: "Canonical long-term memory lives in Obsidian"). Both `resolve_store_root` (Python `retrieval/runtime_support.py`) and `resolveStoreRoot` (Node `bus/store-root.js`) vault-bridge when no `AI_MEMORY_STORE` is set. Priority: `AI_MEMORY_STORE > vault/00-System/ai-memory > AI_MEMORY_ROOT > ~/.ai-memory`.
