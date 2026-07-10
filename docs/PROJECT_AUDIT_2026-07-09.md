@@ -92,12 +92,12 @@ _REDOX_NESTED_QUANTIFIER = re.compile(r"\([^()]*[*+?][^()]*\)[+*]")
 - **风险**: 命名格式 `mcp-child-${pid}-${ts}.bat`,在多用户 Windows 上可被低权限用户抢占。引号转义正确,本地信任模型可接受,但应加上 unlink-on-exit。
 - **修复**: `crypto.randomBytes(16).toString('hex')` + 退出时强制 unlink
 
-#### S-MED-5 — `attachQueryMethods(KnowledgeGraph)` import-time 副作用
+#### S-MED-5 — `attachQueryMethods(KnowledgeGraph)` import-time 副作用 ⚠️ 不修 (审计明确说无需修复,记录在案)
 - **位置**: `ops/knowledge/knowledge-graph.js:30`
 - **风险**: 无安全问题,仅 DoS 分析参考。原型链在 import 时被改写,Node ESM 缓存 → 一次性成本。
 - **修复**: 无需修复,记录在案。
 
-#### S-MED-6 — `loadTaskRecords` 返回类型双形态
+#### S-MED-6 — `loadTaskRecords` 返回类型双形态 ⚠️ 留待后续 (代码风格,非安全问题)
 - **位置**: `bus/`(具体路径需复核)
 - **风险**: 调用方必须 `Array.isArray(...) ? ... : ...`,容易遗漏分支导致静默 bug
 - **修复**: 始终返回 `{records, skippedLines}` 单形态
