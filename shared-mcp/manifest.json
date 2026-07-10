@@ -73,8 +73,8 @@
       "notes": "Optional shared MiniMax MCP. Requires MINIMAX_API_KEY and an installed minimax-coding-plan-mcp executable, or set MINIMAX_MCP_COMMAND explicitly."
     },
     {
-      "id": "memory",
-      "displayName": "Memory",
+      "id": "memory-retrieval",
+      "displayName": "Memory · Retrieval",
       "mode": "shared",
       "port": 9338,
       "probeType": "mcp-initialize",
@@ -82,17 +82,80 @@
       "startupProbeAttempts": 45,
       "stdioCommandWindows": "{{node}} --experimental-default-type=module \"{{omniMemoryServer}}\"",
       "stdioCommandPosix": "{{node}} --experimental-default-type=module {{omniMemoryServer}}",
-      "notes": "Unified shared memory interface with isolated search worker subprocess. search_shared_memory and related tools are isolated — if the search worker crashes, the MCP server stays alive and returns SEARCH_WORKER_UNAVAILABLE with auto-recovery.",
+      "stdioEnv": {
+        "AI_MEMORY_SERVER_MODE": "retrieval",
+        "AI_MEMORY_METRICS_PORT": "9338"
+      },
       "isolatedSubprocess": {
         "id": "search-worker",
         "description": "Python search worker process managed by the memory MCP server",
-        "managedBy": "memory",
+        "managedBy": "memory-retrieval",
         "script": "{{searchWorkerService}}",
         "isolation": "isolated-subprocess",
         "restartPolicy": "always",
         "maxRestarts": 5,
         "circuitWindowMs": 300000
-      }
+      },
+      "notes": "I-HIGH-1 stage 3: read-only retrieval + status queries (14 tools). Hosts the search-worker isolated subprocess."
+    },
+    {
+      "id": "memory-bridge",
+      "displayName": "Memory · Bridge",
+      "mode": "shared",
+      "port": 9339,
+      "probeType": "mcp-initialize",
+      "stdioCommandWindows": "{{node}} --experimental-default-type=module \"{{omniMemoryServer}}\"",
+      "stdioCommandPosix": "{{node}} --experimental-default-type=module {{omniMemoryServer}}",
+      "stdioEnv": {
+        "AI_MEMORY_SERVER_MODE": "bridge",
+        "AI_MEMORY_METRICS_PORT": "9339"
+      },
+      "notes": "I-HIGH-1 stage 3: claude-mem / blackboard cross-tool bridge (6 tools)."
+    },
+    {
+      "id": "memory-dream",
+      "displayName": "Memory · Dream",
+      "mode": "shared",
+      "port": 9340,
+      "probeType": "mcp-initialize",
+      "stdioCommandWindows": "{{node}} --experimental-default-type=module \"{{omniMemoryServer}}\"",
+      "stdioCommandPosix": "{{node}} --experimental-default-type=module {{omniMemoryServer}}",
+      "stdioEnv": {
+        "AI_MEMORY_SERVER_MODE": "dream",
+        "AI_MEMORY_METRICS_PORT": "9340"
+      },
+      "notes": "I-HIGH-1 stage 3: async rebuild + nightly dream (3 tools)."
+    },
+    {
+      "id": "memory-mgmt",
+      "displayName": "Memory · Mgmt",
+      "mode": "shared",
+      "port": 9341,
+      "probeType": "mcp-initialize",
+      "stdioCommandWindows": "{{node}} --experimental-default-type=module \"{{omniMemoryServer}}\"",
+      "stdioCommandPosix": "{{node}} --experimental-default-type=module {{omniMemoryServer}}",
+      "stdioEnv": {
+        "AI_MEMORY_SERVER_MODE": "mgmt",
+        "AI_MEMORY_METRICS_PORT": "9341"
+      },
+      "notes": "I-HIGH-1 stage 3: index / embedding runtime management + KG queries (6 tools)."
+    },
+    {
+      "id": "memory",
+      "displayName": "Memory (monolithic, legacy)",
+      "mode": "shared",
+      "port": 9338,
+      "probeType": "mcp-initialize",
+      "startupProbeTimeoutSeconds": 10,
+      "startupProbeAttempts": 45,
+      "stdioCommandWindows": "{{node}} --experimental-default-type=module \"{{omniMemoryServer}}\"",
+      "stdioCommandPosix": "{{node}} --experimental-default-type=module {{omniMemoryServer}}",
+      "stdioEnv": {
+        "AI_MEMORY_SERVER_MODE": "all",
+        "AI_MEMORY_METRICS_PORT": "9338"
+      },
+      "legacy": true,
+      "notes": "Legacy monolithic memory server. Only spawned when AI_MEMORY_SERVER_MODE=monolithic/all (SERVER-SPLIT.md §8.2 compatibility guarantee). Port 9338 is shared with memory-retrieval but the two are mutually exclusive — see spawn-plan.js."
     },
     {
       "id": "playwright",

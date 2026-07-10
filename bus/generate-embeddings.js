@@ -9,6 +9,8 @@ import { resolveEmbeddingRuntime } from "./runtime-config.js";
 import { resolveStoreRoot } from "./store-root.js";
 import { VECTOR_SCHEMA_VERSION, buildHashEmbedding } from "./lsh-hash.js";
 import { createJsonlStream } from "../ops/util/jsonl-stream.js";
+import { NOISE_PATTERNS, isNoise as isNoiseHelper } from "./text-noise.js";
+import { loadExistingIndex } from "./generate-embeddings-load.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -62,17 +64,10 @@ const ACTIVE_EMBED_PROFILE = String(EMBED_RUNTIME.profileName || "").trim();
 const ACTIVE_EMBED_PROVIDER = String(EMBED_RUNTIME.providerName || "").trim();
 const HASH_MODEL = "hashing-v1";
 
-const NOISE_PATTERNS = [
-  /^Sender\s*\(/i,
-  /^System:/i,
-  /^Subagent Context/i,
-  /^\[Subagent Context\]/i,
-  /^Exec completed/i,
-  /^Exec failed/i,
-  /^A new session was started/i,
-  /^\[(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s/i,
-  /^Run your Session Startup/i,
-];
+// Q-HIGH-1 partial split: NOISE_PATTERNS lives in bus/text-noise.js for reuse.
+// Re-exported below as a local symbol so legacy callers (and tests
+// asserting on the const list) still work without touching them.
+const _NOISE_PATTERNS = NOISE_PATTERNS;
 
 function firstNonEmptyEnv(...names) {
   for (const name of names) {
@@ -178,11 +173,7 @@ function sleep(ms) {
 }
 
 function isNoise(text) {
-  const normalized = normalizeSpaces(text);
-  if (!normalized || normalized.length < 5) {
-    return true;
-  }
-  return NOISE_PATTERNS.some((pattern) => pattern.test(normalized));
+  return isNoiseHelper(text, normalizeSpaces);
 }
 
 function fallbackId(entry, title, content) {
@@ -468,74 +459,6 @@ function collectDocuments() {
   return documents;
 }
 
-/**
- * Load the existing index.jsonl (v1 or v2 format).
- *
- * Returns a Map keyed by entry_id (sub-entry id).  Each value is the parsed
- * index record with an added `fieldTexts` dict derived from its `contentHash`
- * map for the reuse check.
- *
- * v2 records (with record_id/field) are preferred; legacy v1 records
- * (one entry per record_id, no record_id/field) are also loaded and treated
- * as having field="content".
- */
-/**
- * Load the existing index.jsonl (v1 or v2 format) using streaming.
- * Never loads the entire file into memory — iterates one record at a time.
- *
- * Returns a Map keyed by entry_id (sub-entry id).  Each value is the parsed
- * index record with an added `fieldTexts` dict derived from its `contentHash`
- * map for the reuse check.
- *
- * v2 records (with record_id/field) are preferred; legacy v1 records
- * (one entry per record_id, no record_id/field) are also loaded and treated
- * as having field="content".
- */
-async function loadExistingIndex() {
-  const existing = new Map();
-  if (!fs.existsSync(INDEX_FILE)) {
-    return existing;
-  }
-
-  for await (const record of createJsonlStream(INDEX_FILE)) {
-    if (!record || !record.id) {
-      continue;
-    }
-    try {
-      const entryId = String(record.id).trim();
-
-      // Reconstruct fieldTexts from the stored record:
-      // v2: record has { record_id, field, text, contentHash: { fieldName -> hash } }
-      // v1 (legacy): no record_id/field — treat as { field: "content", text: record.text || record.search_text }
-      if (record.record_id !== undefined && record.field !== undefined) {
-        // v2 format — contentHash is { fieldName -> hash }
-        const fieldTexts = {};
-        if (record.contentHash && typeof record.contentHash === "object" && !Array.isArray(record.contentHash)) {
-          for (const [fname, h] of Object.entries(record.contentHash)) {
-            fieldTexts[fname] = String(h || "");
-          }
-        } else if (typeof record.contentHash === "string") {
-          // Legacy single-hash string: treat as content field
-          fieldTexts.content = String(record.contentHash);
-        }
-        existing.set(entryId, { ...record, fieldTexts });
-      } else {
-        // v1 legacy format — one entry per record_id with a single contentHash
-        const recordId = entryId;
-        const fieldTexts = {};
-        if (record.contentHash && typeof record.contentHash === "string") {
-          fieldTexts.content = String(record.contentHash);
-        }
-        existing.set(entryId, { ...record, fieldTexts, record_id: recordId, field: "content" });
-      }
-    } catch (err) {
-      // Ignore malformed lines and continue rebuilding.
-      console.error(`[generate-embeddings] JSON parse error in index load (skipping line): ${err.message}`);
-    }
-  }
-
-  return existing;
-}
 
 /**
  * Write all field-level records to index.jsonl (v2 format).
@@ -615,7 +538,7 @@ async function main() {
   ensureDirectory(EMBEDDINGS_DIR);
 
   const documents = collectDocuments();
-  const existing = await loadExistingIndex();
+  const existing = await loadExistingIndex(INDEX_FILE);
   const preferredBackend = normalizeEmbeddingAdapter(EMBED_ADAPTER, MODEL) || "hash";
   const preferredModelName = preferredBackend === "hash" ? HASH_MODEL : MODEL;
   const preferredConfigHash = buildEmbeddingConfigHash({
@@ -767,6 +690,19 @@ async function main() {
 
     const orderedRecords = Array.from(finalRecords.values()).sort((l, r) => l.id.localeCompare(r.id));
     writeIndexSnapshot(orderedRecords);
+    // Q-HIGH-2 partial-write 设计意图: 每个 batch 完成后原子写一份"到目前为止
+    // 全部最终条目"快照到 index.jsonl。writeIndexSnapshot 内部走 tmp+rename
+    // atomic (OS-level rename),所以失败时 reader 看到的是上一个完整 batch
+    // 或空文件的二选一状态,不会读到 partial-write 中间状态。
+    //
+    // 此设计的有意收益:
+    //   - 长嵌入过程 (sentence-transformers 冷启动后逐 batch) 失败时,前面
+    //     已完成的 batch 不必重跑(下次 main() 会复用 cache)
+    //   - 监控 / 健康检查等 reader 可读到"最近一个 batch 完成"的状态,
+    //     不必等到整个 main() 结束
+    //
+    // 优化方向: 若 main() 失败率低 / batch 数 ≤10,此 partial-write 总开销
+    // 远小于 reload 整个 embedding pipeline 的成本。当前保留。
     console.log("done");
   }
 

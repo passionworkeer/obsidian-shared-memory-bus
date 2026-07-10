@@ -415,6 +415,62 @@ def store_query_embedding(cache_key: str, embedding: List[float]) -> None:
     prune_timed_cache(_QUERY_EMBEDDING_CACHE, _QUERY_EMBEDDING_CACHE_TTL, _QUERY_EMBEDDING_CACHE_MAX_ENTRIES)
 
 
+
+
+def _resolve_query_runtime_for_dense(
+    first_record: Dict,
+    EMBEDDING_RUNTIME: Dict[str, object],
+) -> Tuple[Optional[Dict[str, object]], Optional[str], Optional[bool]]:
+    """
+    Q-CRIT-1: 抽自 dense_scores / _dense_scores_fallback 共用的"
+    从 first_record 解包 schema/model/backend/configHash,推导 query_runtime"流程。
+    两路径仍在后续各自做 embed_query/dimension 检查/扫描,但前置派生单点。
+
+    返回 (query_runtime, error, _placeholder):
+      - query_runtime 为 None 时,调用方应直接退出 (error 非空)
+      - 第三个 placeholder 保留供将来 emit queryEmbeddingCacheHit 复用
+    """
+    first_schema_version = int(first_record.get("featureSchemaVersion", 0) or 0)
+    if first_schema_version != VECTOR_SCHEMA_VERSION:
+        return None, (
+            f"embedding-schema-version-mismatch:stored={first_schema_version},"
+            f"expected={VECTOR_SCHEMA_VERSION};rebuild-memory-embeddings-required"
+        ), False
+    model_name = str(first_record.get("model", DEFAULT_MODEL)).strip() or DEFAULT_MODEL
+    backend = normalize_embedding_adapter(str(first_record.get("backend", "")).strip(), model_name) or "hash"
+    if model_name.startswith("hashing-"):
+        model_name = HASH_MODEL
+    record_config_hash = str(first_record.get("configHash", "")).strip()
+    query_runtime = dict(EMBEDDING_RUNTIME)
+    if record_config_hash:
+        active_adapter = normalize_embedding_adapter(
+            EMBEDDING_RUNTIME.get("adapter") or EMBEDDING_RUNTIME.get("backend"),
+            str(EMBEDDING_RUNTIME.get("model", DEFAULT_MODEL) or DEFAULT_MODEL),
+        ) or "hash"
+        active_model_name = (
+            HASH_MODEL
+            if active_adapter == "hash"
+            else str(EMBEDDING_RUNTIME.get("model", DEFAULT_MODEL) or DEFAULT_MODEL).strip() or DEFAULT_MODEL
+        )
+        active_config_hash = build_embedding_config_hash(
+            active_adapter,
+            active_model_name,
+            str(EMBEDDING_RUNTIME.get("baseUrl", "")),
+        )
+        if record_config_hash != active_config_hash:
+            return None, "embedding-config-mismatch:rebuild-memory-embeddings-required", False
+        query_runtime["adapter"] = active_adapter
+        query_runtime["backend"] = active_adapter
+        query_runtime["model"] = active_model_name
+    else:
+        query_runtime["adapter"] = backend
+        query_runtime["backend"] = backend
+        query_runtime["model"] = model_name
+    return query_runtime, None, None
+
+
+
+
 def dense_scores(
     entries_by_id: Dict[str, dict],
     query: str,
@@ -457,43 +513,10 @@ def dense_scores(
         first_record = next(iter(index_records.values()))
         return _dense_scores_fallback(index_records, first_record, query, EMBEDDING_RUNTIME)
 
-    first_schema_version = int(first_record.get("featureSchemaVersion", 0) or 0)
-    if first_schema_version != VECTOR_SCHEMA_VERSION:
-        return {}, (
-            f"embedding-schema-version-mismatch:stored={first_schema_version},"
-            f"expected={VECTOR_SCHEMA_VERSION};rebuild-memory-embeddings-required"
-        ), {"queryEmbeddingCacheHit": False}
-    model_name = str(first_record.get("model", DEFAULT_MODEL)).strip() or DEFAULT_MODEL
-    backend = normalize_embedding_adapter(str(first_record.get("backend", "")).strip(), model_name) or "hash"
-    if model_name.startswith("hashing-"):
-        model_name = HASH_MODEL
-    record_config_hash = str(first_record.get("configHash", "")).strip()
-    query_runtime = dict(EMBEDDING_RUNTIME)
-    if record_config_hash:
-        active_adapter = normalize_embedding_adapter(
-            EMBEDDING_RUNTIME.get("adapter") or EMBEDDING_RUNTIME.get("backend"),
-            str(EMBEDDING_RUNTIME.get("model", DEFAULT_MODEL) or DEFAULT_MODEL),
-        ) or "hash"
-        active_model_name = (
-            HASH_MODEL
-            if active_adapter == "hash"
-            else str(EMBEDDING_RUNTIME.get("model", DEFAULT_MODEL) or DEFAULT_MODEL).strip() or DEFAULT_MODEL
-        )
-        active_config_hash = build_embedding_config_hash(
-            active_adapter,
-            active_model_name,
-            str(EMBEDDING_RUNTIME.get("baseUrl", "")),
-        )
-        if record_config_hash != active_config_hash:
-            return {}, "embedding-config-mismatch:rebuild-memory-embeddings-required", {"queryEmbeddingCacheHit": False}
-        query_runtime["adapter"] = active_adapter
-        query_runtime["backend"] = active_adapter
-        query_runtime["model"] = active_model_name
-    else:
-        query_runtime["adapter"] = backend
-        query_runtime["backend"] = backend
-        query_runtime["model"] = model_name
-
+    query_runtime, error, _placeholder = _resolve_query_runtime_for_dense(first_record, EMBEDDING_RUNTIME)
+    if error is not None or query_runtime is None:
+        return {}, error, {"queryEmbeddingCacheHit": False}
+    model_name = str(query_runtime.get("model", DEFAULT_MODEL))
     query_vector, error, query_embedding_cache_hit = embed_query(query, query_runtime, model_name)
     if error is not None or query_vector is None:
         return {}, error, {"queryEmbeddingCacheHit": bool(query_embedding_cache_hit)}
@@ -556,43 +579,10 @@ def _dense_scores_fallback(
 
     Logic mirrors the streaming path above — kept in sync manually.
     """
-    first_schema_version = int(first_record.get("featureSchemaVersion", 0) or 0)
-    if first_schema_version != VECTOR_SCHEMA_VERSION:
-        return {}, (
-            f"embedding-schema-version-mismatch:stored={first_schema_version},"
-            f"expected={VECTOR_SCHEMA_VERSION};rebuild-memory-embeddings-required"
-        ), {"queryEmbeddingCacheHit": False}
-    model_name = str(first_record.get("model", DEFAULT_MODEL)).strip() or DEFAULT_MODEL
-    backend = normalize_embedding_adapter(str(first_record.get("backend", "")).strip(), model_name) or "hash"
-    if model_name.startswith("hashing-"):
-        model_name = HASH_MODEL
-    record_config_hash = str(first_record.get("configHash", "")).strip()
-    query_runtime = dict(EMBEDDING_RUNTIME)
-    if record_config_hash:
-        active_adapter = normalize_embedding_adapter(
-            EMBEDDING_RUNTIME.get("adapter") or EMBEDDING_RUNTIME.get("backend"),
-            str(EMBEDDING_RUNTIME.get("model", DEFAULT_MODEL) or DEFAULT_MODEL),
-        ) or "hash"
-        active_model_name = (
-            HASH_MODEL
-            if active_adapter == "hash"
-            else str(EMBEDDING_RUNTIME.get("model", DEFAULT_MODEL) or DEFAULT_MODEL).strip() or DEFAULT_MODEL
-        )
-        active_config_hash = build_embedding_config_hash(
-            active_adapter,
-            active_model_name,
-            str(EMBEDDING_RUNTIME.get("baseUrl", "")),
-        )
-        if record_config_hash != active_config_hash:
-            return {}, "embedding-config-mismatch:rebuild-memory-embeddings-required", {"queryEmbeddingCacheHit": False}
-        query_runtime["adapter"] = active_adapter
-        query_runtime["backend"] = active_adapter
-        query_runtime["model"] = active_model_name
-    else:
-        query_runtime["adapter"] = backend
-        query_runtime["backend"] = backend
-        query_runtime["model"] = model_name
-
+    query_runtime, error, _placeholder = _resolve_query_runtime_for_dense(first_record, EMBEDDING_RUNTIME)
+    if error is not None or query_runtime is None:
+        return {}, error, {"queryEmbeddingCacheHit": False}
+    model_name = str(query_runtime.get("model", DEFAULT_MODEL))
     query_vector, error, query_embedding_cache_hit = embed_query(query, query_runtime, model_name)
     if error is not None or query_vector is None:
         return {}, error, {"queryEmbeddingCacheHit": bool(query_embedding_cache_hit)}

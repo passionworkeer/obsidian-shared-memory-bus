@@ -45,7 +45,7 @@
  *
  * Inspired by:
  *   - EverOS docs/storage_layout.md "Markdown + YAML frontmatter" chassis
- *   - tech-debt-roadmap.md 债项 "可读导出层"
+ *   - 可读导出层债项 (设计见 docs/PROJECT_AUDIT_*.md)
  */
 
 import fs from "node:fs";

@@ -1,8 +1,6 @@
 # Tests + dev docs (not needed at runtime by consumers)
 tests/
 docs/
-PROJECT_ANALYSIS.md
-tech-debt-roadmap.md
 
 # CI / IDE / index / VCS
 .github/
@@ -26,7 +24,6 @@ cache/
 # Landing page + screenshots (project showcase, not runtime)
 web/
 assets/
-_gen_fixture.js
 
 # Build artifacts
 *.tgz

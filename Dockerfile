@@ -11,11 +11,12 @@
 FROM python:3.12-slim AS python-deps
 
 WORKDIR /app
-COPY retrieval/requirements.txt retrieval/requirements.txt 2>/dev/null || true
+# S-HIGH-4: 不再吞错。requirements.txt 必须存在,缺则构建失败。
+COPY retrieval/requirements.txt retrieval/requirements.txt
 
 # Install Python retrieval dependencies (no GPU needed for hash/BM25 embeddings)
-RUN pip install --no-cache-dir uv 2>/dev/null || pip install --no-cache-dir \
-    numpy scikit-learn scipy pandas 2>/dev/null || true
+# S-HIGH-4: 移除 || true;若 uv 不可用则 fallback 到 pip
+RUN pip install --no-cache-dir uv || pip install --no-cache-dir numpy scikit-learn scipy pandas
 
 FROM python:3.12-slim
 
@@ -41,7 +42,8 @@ COPY package.json package.json start.js /app/
 WORKDIR /app
 
 # Install Node dependencies
-RUN npm install --omit=dev 2>/dev/null || true
+# S-HIGH-4: 不再 || true;npm install 失败应让构建失败
+RUN npm install --omit=dev
 
 # Create non-root user and grant ownership of writable paths.
 # python:3.12-slim is Debian-based -> useradd (not alpine adduser).

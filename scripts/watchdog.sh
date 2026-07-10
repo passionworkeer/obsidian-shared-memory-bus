@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 # AI Memory Bus Watchdog Supervisor
-# Usage: ./watchdog.sh <pid_file> <callback_script_or_command>
+# Usage: ./watchdog.sh <pid_file> <callback_exe> [callback_args...]
 #
 # POSIX bash watchdog — works on Windows (Git Bash / WSL), macOS, and Linux.
+#
+# Security (S-HIGH-1): 不再接收字符串 callback,而是 exe + args,
+# 运行时 exec "$exe" "${args[@]}" 避免 bash -c 字符串执行。
 
 set -euo pipefail
 
-PID_FILE="${1:?Usage: $0 <pid_file> <callback>}"
-CALLBACK="${2:?Usage: $0 <pid_file> <callback>}"
+PID_FILE="${1:?Usage: $0 <pid_file> <callback_exe> [args...]}"
+CALLBACK_EXE="${2:?Usage: $0 <pid_file> <callback_exe> [args...]}"
+shift 2
+CALLBACK_ARGS=("$@")
 INTERVAL="${WATCHDOG_INTERVAL:-15}"
 MAX_RESTARTS="${WATCHDOG_MAX_RESTARTS:-3}"
 RESTART_COUNT=0
@@ -31,8 +36,8 @@ while true; do
                 log "Max restarts reached, giving up"
                 exit 1
             fi
-            bash -c "$CALLBACK" &
-            log "Callback invoked"
+            "$CALLBACK_EXE" "${CALLBACK_ARGS[@]}" &
+            log "Callback invoked: $CALLBACK_EXE ${CALLBACK_ARGS[*]}"
         fi
     fi
 done

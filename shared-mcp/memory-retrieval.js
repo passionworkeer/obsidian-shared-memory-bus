@@ -14,10 +14,11 @@
  * All state is passed in via params to avoid circular import issues.
  */
 
-import { spawn } from "node:child_process";
-import path from "node:path";
 import { TOOLS } from "./memory-tools.js";
+import path from "node:path";
 import { resolveStoreRoot as resolveCanonicalStoreRoot } from "../bus/store-root.js";
+import { validateMcpInput } from "./omni-platform-helpers.js";
+import { spawnProcess } from "./proto/child-process.mjs";
 
 const SEARCH_ROUTE_VALUES = new Set(["auto", "mixed", "durable", "task", "recent", "reference"]);
 
@@ -62,35 +63,6 @@ function resolveStoreRootParam(params = {}) {
       path.join(process.env.USERPROFILE || process.env.HOME || ".", ".ai-memory")
     );
   }
-}
-
-function spawnProcess(executable, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, {
-      stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
-      ...options,
-    });
-
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      resolve({ code: code || 0, stdout, stderr });
-    });
-
-    if (options.input !== undefined) {
-      child.stdin.end(options.input);
-    } else {
-      child.stdin.end();
-    }
-  });
 }
 
 async function runSemanticSearchOnce({
@@ -181,6 +153,8 @@ export function createMemoryRetrieval(params) {
   // ---------------------------------------------------------------------------
 
   async function handleSearchSharedMemory(args) {
+    try { validateMcpInput(args, { idsField: "ids", metadataField: "metadata" }); }
+    catch (e) { return errorResult(e.message); }
     const query = String(args.query || "").trim();
     if (!query) {
       return errorResult("query is required");
@@ -352,8 +326,10 @@ Only include records that are genuinely relevant. Return fewer than max_results 
 
     if (!apiKey) {
       const fallback = ids.slice(0, maxResults);
+      // Q-CRIT-3: degraded: true 标记 LLM 不可用,调用方可区分"系统猜"和"用户/LLM 选择"
       return jsonResult({
         ok: true,
+        degraded: true,
         fallback: true,
         selected: fallback.map((id) => ({ id, reason: "LLM unavailable, returning by original order" })),
         reasoning:
@@ -406,6 +382,7 @@ Only include records that are genuinely relevant. Return fewer than max_results 
       const fallbackIds = ids.slice(0, maxResults);
       return jsonResult({
         ok: true,
+        degraded: true,
         fallback: true,
         selected: fallbackIds.map((id) => ({ id, reason: `LLM call failed: ${err.message}` })),
         reasoning: `LLM call failed (${err.message}). Returned top N by original order.`,
@@ -436,6 +413,7 @@ Only include records that are genuinely relevant. Return fewer than max_results 
       const fallbackIds = ids.slice(0, maxResults);
       return jsonResult({
         ok: true,
+        degraded: true,
         fallback: true,
         selected: fallbackIds.map((id) => ({ id, reason: "LLM response was not parseable" })),
         reasoning: `LLM returned unparseable response. Returned top N by original order.\n\nRaw: ${llmResponse.slice(0, 300)}`,

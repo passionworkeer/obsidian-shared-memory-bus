@@ -1,7 +1,7 @@
 # Logging
 
 > Centralized log specification for the obsidian-shared-memory-bus PowerShell
-> startup chain and MCP server processes. Implements tech-debt-roadmap §4.3.
+> startup chain and MCP server processes. 详见最近一次 `docs/PROJECT_AUDIT_*.md` §4.3 相关条目。
 
 ## 1. Directory layout
 

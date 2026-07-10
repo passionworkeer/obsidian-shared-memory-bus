@@ -80,7 +80,7 @@ node start.js
 node setup-mcp.js
 ```
 
-Restart Claude Code / Codex / Cursor — your `memory_recall`, `memory_store`, `memory_search` tools appear.
+Restart Claude Code / Codex / Cursor — your `memory_search`, `search_shared_memory`, `memory_write` tools appear.
 
 Full English guide: [docs/promotion/QUICKSTART.en.md](docs/promotion/QUICKSTART.en.md)
 

@@ -23,7 +23,7 @@
     "validate": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/validate-layout.ps1",
     "check-integrity": "node ops/check/check-memory-integrity.js --strict",
     "generate-context": "node ops/generate/generate-context.js",
-    "watchdog": "bash scripts/watchdog.sh /tmp/memory-bus.pid 'node scripts/vault-detect.js'",
+    "watchdog": "bash scripts/watchdog.sh /tmp/memory-bus.pid node scripts/vault-detect.js",
     "vault:detect": "node scripts/vault-detect.js",
     "setup-mcp": "node setup-mcp.js",
     "env:check": "node scripts/env-check.js",
@@ -63,7 +63,8 @@
     "node": ">=18",
     "powershell": ">=7"
   },
-  "dependencies": {
+  "dependencies": {},
+  "devDependencies": {
     "eslint": "^10.2.0"
   }
 }
