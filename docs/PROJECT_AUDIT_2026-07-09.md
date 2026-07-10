@@ -251,7 +251,7 @@ process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet
 - **位置**: `bus/bm25.js`
 - **修复**: 倒排索引 + 单次 tokenize
 
-#### Q-HIGH-4 — `embedding-provider-registry.js` `process.env` 展开,同字面量重复 4 次
+#### Q-HIGH-4 — `embedding-provider-registry.js` `process.env` 展开,同字面量重复 4 次 ✅ 已修复 (抽 getProxyEnv())
 - **位置**: `bus/embedding-provider-registry.js`
 - **修复**: 抽 `getEnvConfig()` helper
 

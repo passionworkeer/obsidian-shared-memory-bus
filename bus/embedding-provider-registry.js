@@ -6,6 +6,16 @@ function normalizeString(value) {
   return String(value || "").trim();
 }
 
+// Q-HIGH-4: 抽 getProxyEnv() 消除 4 处 process.env.HTTP(S)_PROXY 重复
+function getProxyEnv() {
+  return {
+    ...(process.env.HTTP_PROXY ? { HTTP_PROXY: process.env.HTTP_PROXY } : {}),
+    ...(process.env.HTTPS_PROXY ? { HTTPS_PROXY: process.env.HTTPS_PROXY } : {}),
+    ...(process.env.http_proxy ? { http_proxy: process.env.http_proxy } : {}),
+    ...(process.env.https_proxy ? { https_proxy: process.env.https_proxy } : {}),
+  };
+}
+
 function getProviderHost(baseUrl) {
   if (!baseUrl) {
     return "";
@@ -73,10 +83,7 @@ function createEmbeddingProviderRegistry(options = {}) {
             TF_ENABLE_ONEDNN_OPTS: "0",
             PYTHONUTF8: "1",
             PYTHONIOENCODING: "utf-8",
-            ...(process.env.HTTP_PROXY ? { HTTP_PROXY: process.env.HTTP_PROXY } : {}),
-            ...(process.env.HTTPS_PROXY ? { HTTPS_PROXY: process.env.HTTPS_PROXY } : {}),
-            ...(process.env.http_proxy ? { http_proxy: process.env.http_proxy } : {}),
-            ...(process.env.https_proxy ? { https_proxy: process.env.https_proxy } : {}),
+            ...getProxyEnv(),
           }
         );
         const result = await pool.embedWithPool({
