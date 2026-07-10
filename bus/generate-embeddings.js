@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -8,13 +7,19 @@ import { resolvePythonRuntime, withPythonArgs } from "./python-runtime.js";
 import { resolveEmbeddingRuntime } from "./runtime-config.js";
 import { resolveStoreRoot } from "./store-root.js";
 import { VECTOR_SCHEMA_VERSION, buildHashEmbedding } from "./lsh-hash.js";
+import {
+  firstNonEmptyEnv,
+  hydrateProcessEnvFromWindows,
+  readWindowsEnvironmentVariable,
+  resolveEmbedTimeoutMs,
+  normalizeSpaces,
+} from "./text-utility.js";
 import { createJsonlStream } from "../ops/util/jsonl-stream.js";
 import { NOISE_PATTERNS, isNoise as isNoiseHelper } from "./text-noise.js";
 import { loadExistingIndex } from "./generate-embeddings-load.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const WINDOWS_ENV_CACHE = new Map();
 
 hydrateProcessEnvFromWindows([
   "AI_MEMORY_RUNTIME_CONFIG_PATH",
@@ -50,7 +55,7 @@ const EMBED_RUNTIME = resolveEmbeddingRuntime({
   defaults: {
     adapter: "hash",
     model: "all-MiniLM-L6-v2",
-    timeoutMs: resolveTimeoutMs(),
+    timeoutMs: resolveEmbedTimeoutMs(),
     requestDelayMs: 0,
     batchSize: 0,
     allowBatchFallback: false,
@@ -69,98 +74,10 @@ const HASH_MODEL = "hashing-v1";
 // asserting on the const list) still work without touching them.
 const _NOISE_PATTERNS = NOISE_PATTERNS;
 
-function firstNonEmptyEnv(...names) {
-  for (const name of names) {
-    const value = process.env[name];
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-  }
-  for (const name of names) {
-    const value = readWindowsEnvironmentVariable(name);
-    if (value) {
-      return value;
-    }
-  }
-  return "";
-}
-
-function hydrateProcessEnvFromWindows(names) {
-  if (process.platform !== "win32" || !Array.isArray(names)) {
-    return;
-  }
-
-  for (const name of names) {
-    const normalized = String(name || "").trim();
-    if (!normalized || firstNonEmptyEnv(normalized)) {
-      continue;
-    }
-
-    const value = readWindowsEnvironmentVariable(normalized);
-    if (value) {
-      process.env[normalized] = value;
-    }
-  }
-}
-
-function readWindowsEnvironmentVariable(name) {
-  if (process.platform !== "win32") {
-    return "";
-  }
-  // Defensive: env-var names are an allowlist of identifiers. Reject anything
-  // else so a future caller can't inject PowerShell via a crafted name — the
-  // name is interpolated into a `powershell -Command` string below.
-  if (!/^[A-Za-z0-9_]+$/.test(String(name || ""))) {
-    return "";
-  }
-  if (WINDOWS_ENV_CACHE.has(name)) {
-    return WINDOWS_ENV_CACHE.get(name);
-  }
-
-  const escapedName = String(name || "").replace(/'/g, "''");
-  const command = [
-    `$value = [Environment]::GetEnvironmentVariable('${escapedName}', 'User')`,
-    "if ([string]::IsNullOrWhiteSpace($value)) {",
-    `  $value = [Environment]::GetEnvironmentVariable('${escapedName}', 'Machine')`,
-    "}",
-    "if (-not [string]::IsNullOrWhiteSpace($value)) { [Console]::Out.Write($value) }",
-  ].join("; ");
-
-  let value = "";
-  try {
-    const result = spawnSync("powershell.exe", ["-NoProfile", "-Command", command], {
-      encoding: "utf8",
-      windowsHide: true,
-    });
-    if (!result.error && result.status === 0) {
-      value = String(result.stdout || "").trim();
-    }
-  } catch {
-    value = "";
-  }
-
-  WINDOWS_ENV_CACHE.set(name, value);
-  return value;
-}
-
-function resolveTimeoutMs() {
-  const timeoutMs = Number(firstNonEmptyEnv("AI_MEMORY_EMBED_TIMEOUT_MS") || "0") || 0;
-  if (timeoutMs > 0) {
-    return Math.max(1000, timeoutMs);
-  }
-
-  const timeoutSeconds = Number(firstNonEmptyEnv("AI_MEMORY_EMBED_TIMEOUT_SECONDS") || "120") || 120;
-  return Math.max(1000, timeoutSeconds * 1000);
-}
-
 const STORE_ROOT = resolveStoreRoot();
 const STRUCTURED_DIR = path.join(STORE_ROOT, "structured");
 const EMBEDDINGS_DIR = path.join(STORE_ROOT, "embeddings");
 const INDEX_FILE = path.join(EMBEDDINGS_DIR, "index.jsonl");
-
-function normalizeSpaces(value) {
-  return String(value || "").replace(/\s+/g, " ").trim();
-}
 
 function ensureDirectory(targetPath) {
   if (!fs.existsSync(targetPath)) {
