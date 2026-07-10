@@ -219,7 +219,7 @@ process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet
 - **风险**: 改一处忘改另两处 → 静默行为分歧
 - **修复**: 抽 `_resolve_query_runtime` helper,3 个调用点共享
 
-#### Q-CRIT-2 — `shared-mcp/metrics/source.js:98-170` `readEmbeddingsSummary` 每次 scrape 都重读 50–100 MB JSONL
+#### Q-CRIT-2 — `shared-mcp/metrics/source.js:98-170` `readEmbeddingsSummary` 每次 scrape 都重读 50–100 MB JSONL ✅ 已修复 (3s mtime cache)
 - **位置**: `shared-mcp/metrics/source.js:98-170`
 - **现实**: 无 mtime 缓存,Prometheus scrape + 60 s tick 双重触发
 - **修复**: mtime-keyed 缓存,3 秒 TTL

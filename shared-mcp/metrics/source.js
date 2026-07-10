@@ -17,6 +17,10 @@
 //   - buildEmbeddingRuntimeRestartSignature
 //   - log
 //
+// Q-CRIT-2: per-path mtime-keyed cache (3s TTL) for readEmbeddingsSummary
+// to avoid re-reading 50-100MB JSONL on every Prometheus scrape.
+const EMBEDDINGS_SUMMARY_CACHE = new Map();
+//
 // The METRICS counter object intentionally lives here (next to its
 // primary writers — the source refresh helpers) and is re-imported by
 // compute.js. External callers should go through the re-export shell.
@@ -113,6 +117,15 @@ function readEmbeddingsSummary({ EMBEDDINGS_INDEX_PATH }) {
     };
   }
 
+  // Q-CRIT-2: mtime-keyed cache, 3s TTL. Avoids re-reading 50-100MB JSONL on
+  // every Prometheus scrape + 60s tick double-trigger.
+  const stat = fs.statSync(EMBEDDINGS_INDEX_PATH);
+  const cacheKey = `${EMBEDDINGS_INDEX_PATH}:${stat.mtimeMs}:${stat.size}`;
+  const cached = EMBEDDINGS_SUMMARY_CACHE.get(EMBEDDINGS_INDEX_PATH);
+  if (cached && cached.key === cacheKey && Date.now() - cached.at < 3000) {
+    return cached.value;
+  }
+
   const tools = {};
   const backends = {};
   const models = {};
@@ -149,11 +162,10 @@ function readEmbeddingsSummary({ EMBEDDINGS_INDEX_PATH }) {
     }
   }
 
-  const stat = fs.statSync(EMBEDDINGS_INDEX_PATH);
   const ageSeconds = Number.isFinite(stat.mtimeMs)
     ? Math.max(0, Math.round((Date.now() - stat.mtimeMs) / 1000))
     : null;
-  return {
+  const result = {
     exists: true,
     path: EMBEDDINGS_INDEX_PATH,
     count,
@@ -167,6 +179,8 @@ function readEmbeddingsSummary({ EMBEDDINGS_INDEX_PATH }) {
     providerHosts,
     configHashes,
   };
+  EMBEDDINGS_SUMMARY_CACHE.set(EMBEDDINGS_INDEX_PATH, { key: cacheKey, at: Date.now(), value: result });
+  return result;
 }
 
 function readEmbeddingRuntimeSummary({ resolveEmbeddingRuntime, EMBEDDING_RUNTIME_DEFAULTS }) {
