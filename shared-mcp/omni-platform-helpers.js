@@ -281,6 +281,60 @@ function isWatchdogSupervisorAlive() {
   return alive;
 }
 
+// ---------------------------------------------------------------------------
+// MCP input validation (S-MED-3)
+// ---------------------------------------------------------------------------
+// Per-call guards to prevent 1GB string args from reaching Python stdin / SQL
+// LIKE. Caps are advisory defaults; tighten per tool if needed.
+const MCP_INPUT_STRING_MAX = 64 * 1024;          // 64 KB
+const MCP_INPUT_IDS_MAX = 100;
+const MCP_INPUT_METADATA_DEPTH_MAX = 5;
+
+function _checkString(name, value, limit) {
+  if (typeof value !== "string") return;
+  if (value.length > limit) {
+    throw new Error(
+      `mcp.input-too-long: ${name} is ${value.length} chars, max ${limit} (see AI_MEMORY_MCP_INPUT_STRING_MAX)`,
+    );
+  }
+}
+
+function _checkDepth(value, depth) {
+  if (depth > MCP_INPUT_METADATA_DEPTH_MAX) {
+    throw new Error(
+      `mcp.input-too-deep: metadata exceeds ${MCP_INPUT_METADATA_DEPTH_MAX} nesting levels`,
+    );
+  }
+  if (value && typeof value === "object") {
+    for (const v of Object.values(value)) {
+      _checkDepth(v, depth + 1);
+    }
+  }
+}
+
+/**
+ * Validate common MCP tool inputs.
+ * Throws with a clear `mcp.*` error code on violation.
+ *
+ * @param {object} args - Raw tool args
+ * @param {object} [opts] - { stringFields?: string[], idsField?: string, metadataField?: string }
+ */
+function validateMcpInput(args, opts = {}) {
+  if (!args || typeof args !== "object") return;
+  const stringFields = opts.stringFields || ["query", "name", "content", "title", "text"];
+  for (const f of stringFields) {
+    if (typeof args[f] === "string") _checkString(f, args[f], MCP_INPUT_STRING_MAX);
+  }
+  if (opts.idsField && Array.isArray(args[opts.idsField]) && args[opts.idsField].length > MCP_INPUT_IDS_MAX) {
+    throw new Error(
+      `mcp.input-too-long: ${opts.idsField} has ${args[opts.idsField].length} entries, max ${MCP_INPUT_IDS_MAX}`,
+    );
+  }
+  if (opts.metadataField && args[opts.metadataField]) {
+    _checkDepth(args[opts.metadataField], 1);
+  }
+}
+
 export {
   WINDOWS_ENV_CACHE,
   RUNTIME_ENV_NAMES,
@@ -290,4 +344,8 @@ export {
   runWindowsPowerShellProbe,
   isHiddenWindowsScriptAlive,
   isWatchdogSupervisorAlive,
+  validateMcpInput,
+  MCP_INPUT_STRING_MAX,
+  MCP_INPUT_IDS_MAX,
+  MCP_INPUT_METADATA_DEPTH_MAX,
 };
