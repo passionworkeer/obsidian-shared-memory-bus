@@ -207,7 +207,40 @@ const sharedParams = {
 // ---------------------------------------------------------------------------
 const ALL_HANDLERS = buildHandlerRegistry(sharedParams, mcpMemoryHandlers);
 const server = createMcpServer();
-registerMcpRequestHandlers(server, { ALL_HANDLERS, METRICS, log });
+
+// I-HIGH-1 partial: AI_MEMORY_SERVER_MODE 控制工具子集暴露。
+//   undefined / "all"          → 全部 29 个工具 (向后兼容,monolithic 模式,默认)
+//   "retrieval" / "bridge" / "dream" / "mgmt"
+//                              → 仅暴露对应子集 (为未来 4-server 拆分做铺垫;
+//                                 当前仍是单进程,只是工具名过滤 + 不可见 tool
+//                                 调用直接返回 tool-not-found)
+//
+// 完整 4-server 独立进程拆分 (docs/architecture/SERVER-SPLIT.md §7) 留作未来 PR;
+// 本次 PR 只激活 toolFilter 入口,把现状从"死代码"变为"环境变量驱动"模式,
+import { RETRIEVAL_TOOLS, BRIDGE_TOOLS, DREAM_TOOLS, MGMT_TOOLS } from "./tool-registry.js";
+const SUBSETS_BY_MODE = Object.freeze({
+  retrieval: RETRIEVAL_TOOLS,
+  bridge: BRIDGE_TOOLS,
+  dream: DREAM_TOOLS,
+  mgmt: MGMT_TOOLS,
+});
+const serverMode = String(process.env.AI_MEMORY_SERVER_MODE || "all").trim().toLowerCase();
+const toolFilter = SUBSETS_BY_MODE[serverMode] || undefined;
+// I-HIGH-1 stage 3 (PR17 commit 4): 让 tasklist / ps 能区分 4 个独立 server 进程。
+// split 模式下 process.title 显示为 omni-memory-{retrieval,bridge,dream,mgmt},
+// monolithic / 默认模式下保持 omni-memory-server 原标题。
+if (SUBSETS_BY_MODE[serverMode]) {
+  try {
+    process.title = `omni-memory-${serverMode}`;
+  } catch {
+    // 某些平台 (e.g. Windows w/ title 权限受限) 不允许改 process.title,
+    // best-effort 失败不应阻塞启动。
+  }
+}
+if (toolFilter) {
+  log.info("omni-memory-server-mode-active", { mode: serverMode, toolCount: toolFilter.length });
+}
+registerMcpRequestHandlers(server, { ALL_HANDLERS, METRICS, log, toolFilter });
 
 process.on("uncaughtException", (err) => {
   log.error("uncaught-exception", { error: err.message, stack: err.stack });

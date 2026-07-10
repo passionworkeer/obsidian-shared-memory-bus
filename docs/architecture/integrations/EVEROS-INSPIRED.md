@@ -2,7 +2,7 @@
 
 > English: Design report on which EverOS ideas we adopted, which we deferred, and which we explicitly rejected — and why. Companion to PR #feature/eve-markdown-source-of-truth and PR #feature/eve-cascade-watcher.
 
-> 关联：EverOS upstream <https://github.com/EverMind-AI/EverOS> (Apache 2.0, 8.8k★) · 本项目 `tech-debt-roadmap.md` 债项 E1-E7 · PoC 实现 feature/eve-markdown-source-of-truth + feature/eve-cascade-watcher
+> 关联：EverOS upstream <https://github.com/EverMind-AI/EverOS> (Apache 2.0, 8.8k★) · 债务清单详见最近一次 `docs/PROJECT_AUDIT_*.md` · PoC 实现 feature/eve-markdown-source-of-truth + feature/eve-cascade-watcher
 
 ---
 
@@ -211,8 +211,8 @@
 - [EverOS docs/how-memory-works.md](https://raw.githubusercontent.com/EverMind-AI/EverOS/main/docs/how-memory-works.md) — cascade daemon + OME
 - [EverOS docs/cascade_runbook.md](https://raw.githubusercontent.com/EverMind-AI/EverOS/main/docs/cascade_runbook.md) — md_change_state queue
 - [EverOS docs/architecture.md](https://raw.githubusercontent.com/EverMind-AI/EverOS/main/docs/architecture.md) — DDD 分层 + import-linter
-- 本项目 `tech-debt-roadmap.md` §5.3/§5.4/§5.5 — ANN + cascade 路线图
-- 本项目 `PROJECT_ANALYSIS.md` — 差分审计
+- ANN + cascade 路线图: 见最近一次 `docs/PROJECT_AUDIT_*.md`
+- 差分审计: 见最近一次 `docs/PROJECT_AUDIT_*.md`
 
 ---
 

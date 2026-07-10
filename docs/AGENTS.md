@@ -29,7 +29,7 @@
 
 - 任何 LSH / hash / canonicalization 算法变更必须**同时**改 `bus/lsh-hash.js` 和 `retrieval/lsh_utils.py`
 - 跑 `npm run test:cross` + `pytest tests/unit/py/test_lsh_utils.py -v` 验证
-- 见 [specs/lsh-fixture.json](../specs/lsh-fixture.json) 的 1000 条真值向量
+- 跨语言等价基线由 `tests/cross-language/` 下的等价测试维护(无独立 fixture 文件)
 
 ### 3. Schema 单一来源
 
@@ -55,7 +55,7 @@
 
 - 新功能必须带测试（`tests/unit/js/` 或 `tests/unit/py/`）
 - 修改 `bus/` 或 `retrieval/` 必须跑 `npm run test:all`
-- 跨语言变更必须更新 `specs/lsh-fixture.json`（跑 `node _gen_fixture.js`）
+- 跨语言变更必须同步更新 `tests/cross-language/` 等价测试
 
 ---
 
@@ -95,7 +95,7 @@ feat(export): JSONL → Markdown 真相派生层 (EverOS 借鉴 PoC)
 - 派生到 ~/.ai-memory/derived/ 给 Obsidian 直接消费
 - 8 必填 + 2 可选 frontmatter 字段
 
-关联: tech-debt-roadmap.md 债项 #E1
+关联: 参见最近一次 `docs/PROJECT_AUDIT_*.md`
 ```
 
 ---
@@ -128,7 +128,7 @@ feat(export): JSONL → Markdown 真相派生层 (EverOS 借鉴 PoC)
 - ❌ 删 `~/.ai-memory` 数据（即使是测试环境 —— 用 `AI_MEMORY_STORE=/tmp/test-store` 隔离）
 - ❌ 在 `bus/` 写 fs 同步 API（必须 stream / async）
 - ❌ 在 commit message 里出现 "tested locally" 这种含糊词（必须说"npm test 通过 N 个"）
-- ❌ 给已废弃代码加新功能（先 review tech-debt-roadmap.md）
+- ❌ 给已废弃代码加新功能（先 review 最近一次 `docs/PROJECT_AUDIT_*.md`）
 
 ---
 

@@ -401,6 +401,5 @@ Sync-AllSources {
 | Python 检索 | `retrieval/semantic_search.py` |
 | BM25 + Dense 排名 | `retrieval/search_ranking.py` |
 | Embeddings 生成 | `bus/generate-embeddings.js` |
-| OpenClaw 同步 | `ops/sync-openclaw-to-obsidian.js` |
 | 5 层架构文档 | `docs/MEMORY-TIERING.md` |
 | 架构文档 | `docs/ARCHITECTURE.md` |

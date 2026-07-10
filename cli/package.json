@@ -1,14 +1,15 @@
 {
   "name": "ai-memory-cli",
-  "version": "1.0.0",
+  "version": "3.1.0",
   "type": "module",
   "description": "Unified CLI for yt",
+  "license": "MIT",
   "bin": {
     "ai-memory": "./ai-memory.js"
   },
   "preferGlobal": true,
   "engines": {
-    "node": ">=16"
+    "node": ">=18"
   },
   "keywords": [
     "memory",

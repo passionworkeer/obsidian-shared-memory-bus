@@ -2,6 +2,7 @@ import { spawn, execSync } from 'node:child_process';
 import { writeFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
+import { randomBytes } from 'node:crypto';
 import {
   resolveStdioLaunchSpec,
   resolvePowerShellExe,
@@ -169,8 +170,10 @@ export function spawnChildProcess() {
       // Write the child's launch command to a temp .bat so PowerShell can
       // invoke it via cmd /c without needing its own visible window.
       const psExe = resolvePowerShellExe();
+      // S-MED-4: 临时 .bat 用 crypto random 命名 (16 hex) 避免本地用户抢占;
+      // exit 时 unlink 已存在,无需追加 unlink-on-exit 钩子
       const childBatPath = join(process.env.TEMP || process.env.TMP || '/tmp',
-        `mcp-child-${process.pid}-${Date.now()}.bat`);
+        `mcp-child-${randomBytes(16).toString('hex')}.bat`);
 
       // Build the literal command that the batch file will run.
       // Arguments that contain spaces are double-quoted; double-quotes inside
@@ -294,6 +297,40 @@ export async function bootstrapChild(protocolVersion = defaultProtocolVersion) {
   log(
     `child initialized with protocol ${initResponse.protocolVersion} and server ${initResponse.serverInfo?.name || serverId}`,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Q-HIGH-7: 通用 spawn-exec-and-collect helper,抽公供 memory-retrieval.js /
+// memory-bridge.js 复用。语义是"spawn → 收 stdout/stderr → 关闭后 resolve"。
+// 原两侧各自定义 spawnProcess 时只是复制了相同 27 行,这里提到 proto 层避免漂移。
+// ---------------------------------------------------------------------------
+export function spawnProcess(executable, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(executable, args, {
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+      ...options,
+    });
+
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      resolve({ code: code || 0, stdout, stderr });
+    });
+
+    if (options.input !== undefined) {
+      child.stdin.end(options.input);
+    } else {
+      child.stdin.end();
+    }
+  });
 }
 
 // Wire rpc.mjs's late-bound hooks to our implementations.

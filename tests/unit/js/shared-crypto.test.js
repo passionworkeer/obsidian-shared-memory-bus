@@ -115,4 +115,42 @@ describe("shared-crypto — buildEmbeddingConfigHash", () => {
     });
     assert.equal(a, b);
   });
+
+  // Q-HIGH-6: cross-language parity (pinned JS reference, matches Python output).
+  //
+  // background: Python counterpart at retrieval/embedding_providers.py:47-59
+  // uses json.dumps(..., ensure_ascii=False, separators=(",", ":")). JS uses
+  // JSON.stringify defaults. Keys are in identical order in both implementations
+  // ({"backend": ..., "model": ..., "baseUrl": ...}, no whitespace), so for
+  // ASCII-only model/baseUrl strings both serializations produce identical
+  // bytes — hence identical SHA-1 hashes. Pinned 2026-07-10 against the Python
+  // binary in repo, see retrieval/embedding_providers.py:47 for the source.
+  //
+  // If you change either serialization, run a Python verification first
+  // (rebuild_expected_hash.py helper) and update these constants together.
+  test("parity pinned value: hash backend hashing-v1 (Q-HIGH-6)", () => {
+    assert.equal(
+      buildEmbeddingConfigHash({ backend: "hash", modelName: "hashing-v1" }),
+      "e9e06904388700cb",
+    );
+  });
+  test("parity pinned value: openai-compatible text-embedding-3-small (Q-HIGH-6)", () => {
+    assert.equal(
+      buildEmbeddingConfigHash({
+        backend: "openai-compatible",
+        modelName: "text-embedding-3-small",
+        baseUrl: "https://api.example.com/v1",
+      }),
+      "fe398c9c8d4bc7ba",
+    );
+  });
+  test("parity pinned value: transformer all-MiniLM-L6-v2 (Q-HIGH-6)", () => {
+    assert.equal(
+      buildEmbeddingConfigHash({
+        backend: "transformer",
+        modelName: "all-MiniLM-L6-v2",
+      }),
+      "c47b2ee4718c14c7",
+    );
+  });
 });

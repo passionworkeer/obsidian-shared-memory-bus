@@ -11,8 +11,8 @@
  */
 
 import fs from "node:fs";
-import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { spawnProcess } from "./proto/child-process.mjs";
 
 const BLACKBOARD_QUERY_SCRIPT = fileURLToPath(
   new URL("./scripts/blackboard_query.py", import.meta.url),
@@ -36,35 +36,6 @@ function errorResult(message) {
     content: [{ type: "text", text: JSON.stringify({ ok: false, error: String(message) }, null, 2) }],
     isError: true,
   };
-}
-
-function spawnProcess(executable, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, {
-      stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
-      ...options,
-    });
-
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      resolve({ code: code || 0, stdout, stderr });
-    });
-
-    if (options.input !== undefined) {
-      child.stdin.end(options.input);
-    } else {
-      child.stdin.end();
-    }
-  });
 }
 
 function truncateText(value, maxLength = 400) {
@@ -136,8 +107,39 @@ function describeClaudeMemFailure({ route, envelope }) {
  */
 export function createMemoryBridge(params) {
 
+  // S-HIGH-3: SSRF guard — refuse to fetch non-loopback / non-https hosts when
+  // CLAUDE_MEM_BASE comes from an env var (could be set by an attacker to
+  // exfiltrate data to a public URL or probe internal services).
+  const MEM_BRIDGE_ALLOWED_HOSTS = new Set(
+    (process.env.AI_MEMORY_BRIDGE_ALLOWED_HOSTS || "127.0.0.1,localhost,::1")
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  const MEM_BRIDGE_REQUIRE_HTTPS = String(process.env.AI_MEMORY_BRIDGE_REQUIRE_HTTPS || "false") === "true";
+
+  function assertSafeBaseUrl(rawBase) {
+    let u;
+    try {
+      u = new URL(rawBase);
+    } catch {
+      throw new Error(`bridge.invalid-base-url: ${String(rawBase).slice(0, 64)} is not a valid URL`);
+    }
+    if (MEM_BRIDGE_REQUIRE_HTTPS && u.protocol !== "https:") {
+      throw new Error(`bridge.insecure-base-url: ${u.protocol} not allowed (require https)`);
+    }
+    const host = u.hostname.toLowerCase();
+    if (!MEM_BRIDGE_ALLOWED_HOSTS.has(host)) {
+      throw new Error(
+        `bridge.host-not-allowed: ${host} (configure AI_MEMORY_BRIDGE_ALLOWED_HOSTS to permit)`,
+      );
+    }
+    return u;
+  }
+
   async function fetchClaudeMem(route, options = {}) {
-    const response = await fetch(`${params.CLAUDE_MEM_BASE}${route}`, options);
+    const baseUrl = assertSafeBaseUrl(params.CLAUDE_MEM_BASE);
+    const response = await fetch(`${baseUrl.toString().replace(/\/$/, "")}${route}`, options);
     return readResponseEnvelope(response);
   }
 

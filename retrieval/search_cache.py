@@ -85,16 +85,9 @@ def _get_sqlite_cache():
         if removed > 0:
             import sys
             sys.stderr.write(f"[search_cache] cleaned {removed} expired SQLite entries\n")
-        # Attempt warm — get_warm_queries reads from SQLite itself (no-op on cold DB)
-        try:
-            from retrieval.cache.warm_strategy import get_warm_queries, warm_cache
-            recent = get_warm_queries(cache_dir, max_queries=10)
-            if recent:
-                warm_cache(sqlite_cache, recent, timeout_seconds=10)
-        except (OSError, RuntimeError) as exc:
-            logger.warning("SQLite cache warm-up failed (dir=%s): %s", cache_dir, exc, exc_info=True)
-        except Exception:  # noqa: BLE001 - warm failure must not break init
-            logger.warning("SQLite cache warm-up failed (dir=%s)", cache_dir, exc_info=True)
+        # Attempt warm — 见 docs/PROJECT_AUDIT_*.md §I-LOW-7:
+        # retrieval/cache/warm_strategy.py 未实现,当前跳过 warm-up,
+        # 缓存仅在首次查询时按需填充。
         _SQLITE_CACHE = sqlite_cache
         return _SQLITE_CACHE
     except (OSError, ImportError) as exc:

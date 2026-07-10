@@ -132,7 +132,7 @@ node start.js
 node setup-mcp.js
 ```
 
-**重启 Claude Code / Codex / Cursor**，MCP 工具列表里就会多出 `memory_recall` / `memory_store` / `memory_search` 等。
+**重启 Claude Code / Codex / Cursor**，MCP 工具列表里就会多出 `memory_search` / `search_shared_memory` / `memory_write` 等。
 
 完整中文引导：[docs/promotion/QUICKSTART.zh-CN.md](docs/promotion/QUICKSTART.zh-CN.md)
 
@@ -184,6 +184,8 @@ node setup-mcp.js
 
 ## MCP 端点
 
+> 端口单一来源: `shared-mcp/port-registry.js` (`CRITICAL_PORTS`); 下表为人读摘要
+
 | 服务 | URL | 用途 |
 |------|-----|------|
 | Memory | http://127.0.0.1:9338/mcp | 记忆读写、检索 |
@@ -191,6 +193,8 @@ node setup-mcp.js
 | Fetch | http://127.0.0.1:9332/mcp | HTTP 抓取 |
 | Time | http://127.0.0.1:9333/mcp | 时间工具 |
 | Playwright | http://127.0.0.1:9337/mcp | 浏览器自动化 |
+
+> 9334/9335 为 `port-registry.js` CRITICAL_PORTS 中的预留 integration 端口 (供未来 4-server 拆分 `omni-memory-retrieval/bridge/dream/mgmt` 9338-9341 外的扩展使用)
 
 ---
 

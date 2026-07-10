@@ -40,7 +40,7 @@
  *
  * Inspired by:
  *   - EverOS docs/cascade_runbook.md "watchdog + SQLite md_change_state"
- *   - tech-debt-roadmap.md §5.5 "cascade 队列触发增量索引"
+ *   - cascade 队列触发增量索引 (设计见 docs/PROJECT_AUDIT_*.md)
  */
 
 import fs from "node:fs";

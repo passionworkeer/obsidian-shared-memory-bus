@@ -49,7 +49,7 @@ obsidian-shared-memory-bus/
 │   ├── run-memory-dream.ps1          # AUTO-DREAM consolidator
 │   ├── check-memory-integrity.js     # Schema/contract validator
 │   ├── generate-memory-hygiene-report.js  # Duplicate/invalid record detector
-│   ├── sync-openclaw-to-obsidian.js  # OpenClaw → structured JSONL
+│   ├── sync-openclaw-to-obsidian.js  # (planned) OpenClaw → structured JSONL — not yet implemented
 │   ├── obsidian-blackboard-daemon.js # Chokidar vault watcher
 │   ├── install-client-integrations.ps1 / .sh  # Client MCP wiring
 │   ├── verify-client-integrations.ps1 / .sh   # Hard validation gate

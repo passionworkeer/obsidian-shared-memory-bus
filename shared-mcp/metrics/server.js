@@ -97,7 +97,7 @@ function startMetricsServer({ EMBEDDINGS_INDEX_PATH, readEmbeddingRuntimeSummary
     log.error("metrics-server-error", { port, error: err.message });
   });
 
-  metricsServer.listen(port, () => { log.info("metrics-server-started", { port }); });
+  metricsServer.listen(port, "127.0.0.1", () => { log.info("metrics-server-started", { port, host: "127.0.0.1" }); });
 }
 
 function startMetricsRefreshInterval({ GENERATED_ROOT, STORE_ROOT, readEmbeddingsSummary }) {
