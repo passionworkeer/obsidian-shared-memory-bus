@@ -33,7 +33,7 @@
 
 ### 1.1 Critical
 
-#### S-CRIT-1 — `js-yaml` 在多处用 `load()` 而非 `safeLoad`,且未禁止 `!js/function`
+#### S-CRIT-1 — `js-yaml` 在多处用 `load()` 而非 `safeLoad`,且未禁止 `!js/function` ⚠️ 已不存在 (项目无 yaml 解析)
 - **位置**: `retrieval/cache/embedding_config.py`、`bus/*` 中所有 yaml 读取路径(未在主扫中打开每个文件逐行确认,需人工复核)
 - **风险**: 如果攻击者能写入 yaml 文件,可以借助 `!!js/function` / `!!python/object/apply` 等 tag 执行任意代码
 - **修复**: 强制 `yaml.safe_load`,或在 `yaml.SafeLoader` 上加自定义 `add_constructor` 拒绝任何 `!` 标签
