@@ -2,6 +2,56 @@
 
 All notable changes to this project should be documented here.
 
+## 2026-07-10 (Round 3)
+
+### Fixed — I-HIGH-1 stage 3 完整 4-server 进程拆分 + Q-MED-3 文档化
+
+#### PR17 (7 commits, ~1500 行): I-HIGH-1 stage 3 完整 4-server 进程拆分
+
+把 `omni-memory-server.js` 的 29 个 MCP 工具真正拆为 4 个独立进程。`AI_MEMORY_SERVER_MODE=monolithic` 仍可用作向后兼容 fallback (`SERVER-SPLIT.md` §8.2 兼容承诺)。
+
+| Commit | 改动 |
+|---|---|
+| `9702753` | `shared-mcp/port-registry.js` — `MCP_SERVERS` 加 4 条 `memory-{retrieval,bridge,dream,mgmt}`,原 `memory` 标 `legacy:true, onlyInMode:monolithic`;新增 `SPLIT_MEMORY_METRICS_PORTS` 与 mcp 端口同端口 |
+| `b018202` | `shared-mcp/manifest.json` — 拆 1 条 `memory` 为 4 条 `memory-*` server,各带 `stdioEnv` 注入 `AI_MEMORY_SERVER_MODE` + `AI_MEMORY_METRICS_PORT`;`isolatedSubprocess`(search-worker)只挂 `memory-retrieval` |
+| `5c2135b` | 新增 `shared-mcp/spawn-plan.js` (`resolveSpawnPlan` + `selectServersForSpawn`);`start.js` 改用 spawn-plan 决策,把 `MCP_SERVERS` 条目 env 注入子进程 |
+| `d665e5d` | `shared-mcp/omni-memory-server.js` — split 模式下 `process.title = 'omni-memory-{retrieval,bridge,dream,mgmt}'`,让 `tasklist`/`ps` 区分 4 个进程 |
+| `c31272f` | `shared-mcp/start-shared-mcp.ps1` — `Resolve-StdioEnvironment` 把 `id -eq "memory"` 扩为 `id -like "memory-*"`,新增 `AI_MEMORY_SERVER_MODE`/`AI_MEMORY_METRICS_PORT` 注入(优先用户 env,回退 `manifest.stdioEnv`) |
+| `b96dd36` | 新增 `shared-mcp/mcp-process-manager.js` — `buildSpawnCommand`/`spawnServer`/`restartPolicyFor`/`probeServer`/`monitorServer`(circuit breaker 与 `manifest isolatedSubprocess.restartPolicy` 对齐) |
+| `6c7ebf8` | 新单测 6 个文件 59 case: `spawn-plan` / `port-registry-split` / `manifest-split` / `mcp-process-manager` / `omni-memory-server-mode` / `error-result-code` |
+
+**设计要点**:
+- 默认 split 模式 spawn 4 个独立 server (端口 9338-9341);`AI_MEMORY_SERVER_MODE=monolithic` 显式回退到 1 个 legacy memory (端口 9338)
+- split 模式不 spawn legacy memory,monolithic 模式不 spawn 4 个 `memory-*`,**两组共用 9338 但互斥**
+- 4 个 server 共享同一份 `~/.ai-memory/` SQLite + JSONL (WAL 模式并发读)
+- search-worker IPC 隔离只挂 `memory-retrieval`,其他 3 个 server 不启 search-worker
+
+**回滚**: 每个 commit 独立可 revert;`git revert 9702753^..6c7ebf8` 一键回滚整个 stage 3。
+
+#### PR18 (commit `6aa2b99`): Q-MED-3 范围描述文档化 + `errorResult` 透传 code 升级
+
+Q-MED-3 范围太广 (30 处 `throw new Error` 散落 + 4 种错误风格并存),审计 `RECONCILE §8 PR8` 已标"按需修,文档化"。本次只做最小微升级 + 文档化,完整统一 (~285 行) 留后续 wave。
+
+- `shared-mcp/omni-handlers.js`: `errorResult(message, code)` 接受可选 `code`,透传到 MCP response JSON
+- `docs/reference/q-med-3-status.md`: 4 套风格散落清单 + 7 个 `code` 白名单 (`INVALID_INPUT`/`TOOL_NOT_FOUND`/`SUBSET_NOT_EXPOSED`/`SCRIPT_MISSING`/`SUBPROCESS_FAILED`/`BRIDGE_UNREACHABLE`/`INTERNAL`) + 后续 wave 立项指南
+- `tests/unit/js/error-result-code.test.js`: 契约守护 (无 SDK 依赖,inline 复刻验证)
+
+**新 wire shape**:
+```js
+// 旧 — 维持不变
+errorResult("bridge unreachable")
+// → { ok: false, error: "bridge unreachable" }
+
+// 新 — 显式传 code (client 可做 error-type 路由)
+errorResult("bridge unreachable", "BRIDGE_UNREACHABLE")
+// → { ok: false, error: "bridge unreachable", code: "BRIDGE_UNREACHABLE" }
+```
+
+### Verified
+- `npm test`: 795 passed / 0 fail (新加 59 case 全部通过,无 regression)
+- PR17 7 个 commit + PR18 1 个 commit,8 个 commit 全部可独立 revert
+- 端到端手测: `node start.js` 默认 spawn 4 个 server;`AI_MEMORY_SERVER_MODE=monolithic node start.js` 回退单进程
+
 ## 2026-07-10 (Round 2)
 
 ### Fixed — 9 个独立 PR 收尾 Wave 4/5 + 杂项
