@@ -93,11 +93,32 @@ function buildHandlerRegistry(sharedParams, mcpMemoryHandlers) {
   return ALL_HANDLERS;
 }
 
-function errorResult(message) {
+/**
+ * Build a MCP error result envelope.
+ *
+ * Q-MED-3 (PR18) 微升级: 接受可选 code 参数,透传到 JSON payload。
+ * 不传 code 时维持旧 wire 形状 `{ ok: false, error: string }`,向后兼容。
+ * 传 code 时新增 `code` 字段,供 client 做 error-type 路由。
+ *
+ * 当前范围: 仅为 error envelope 留出 code 字段;真正把 30 处 throw 替换为
+ * McpDomainError 类(继承本 envelope)留后续 wave(范围 ~285 行,审计
+ * RECONCILE §8 PR8 已标 "按需修,文档化")。详见 docs/internal/q-med-3-status.md。
+ *
+ * @param {string|Error} message - 错误描述
+ * @param {string} [code]        - 可选 machine-readable 错误码 (UPPER_SNAKE_CASE)
+ * @returns {{ content: Array, isError: true }}
+ */
+function errorResult(message, code) {
+  const payload = { ok: false, error: String(message) };
+  // 仅在 code 是非空字符串时写入,避免空字符串/undefined 污染 payload
+  if (typeof code === "string" && code.length > 0) {
+    payload.code = code;
+  }
   return {
-    content: [{ type: "text", text: JSON.stringify({ ok: false, error: String(message) }, null, 2) }],
+    content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
     isError: true,
   };
+}
 }
 
 function createMcpServer() {
