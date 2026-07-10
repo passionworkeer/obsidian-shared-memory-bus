@@ -478,14 +478,23 @@ process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet
 4. S-HIGH-4: Docker 错误不吞
 5. S-MED-1/2/3: metrics host / ReDoS / MCP 长度 cap
 
-### Wave 4 — 性能(2–3 天)
-1. Q-CRIT-1: 抽 `_resolve_query_runtime`
-2. Q-CRIT-2 + Q-HIGH-9: mtime 缓存
-3. Q-CRIT-3: `degraded: true`
-4. Q-CRIT-4: hash adapter 降级
-5. Q-HIGH-1: 拆 3 个超大文件
-6. Q-HIGH-2/3: sort-once + 倒排索引
-7. Q-HIGH-6: 跨语言 parity test
+### Wave 4 — 性能(2–3 天) ⏸️ 部分完成 (3 项)+ 留待后续专项
+
+**已修 (commits 7e12b54, 6bbab16, 34c5743):**
+- Q-CRIT-2: readEmbeddingsSummary mtime cache (3s TTL) ✅
+- Q-CRIT-3: handleRefineMemorySelection fallback 加 degraded: true ✅
+- Q-HIGH-4: embedding-provider-registry proxy env 抽 getProxyEnv() ✅
+
+**留待独立 PR (高风险,涉及大文件改动):**
+- Q-CRIT-1: search_ranking.py 抽 _resolve_query_runtime (1367 行 → 拆 3-5 文件)
+- Q-CRIT-4: per-call Python spawn 改 worker pool
+- Q-HIGH-1: 3 个 800+ 行文件拆分 (bus/generate-embeddings.js, shared-mcp/embedding-worker-pool.cjs, retrieval/search_ranking.py)
+- Q-HIGH-2: generate-embeddings.js main() O(N²) 重写
+- Q-HIGH-3: bus/bm25.js 加倒排索引
+- Q-HIGH-5: fact_0/1/2 → 内容 hash 键
+- Q-HIGH-6: 跨语言 hash parity test
+- Q-HIGH-7/8/10: IPC 统一 / handler 名冲突 / trace id
+- Q-MED-*: 18 项中低风险,按需修
 
 ### Wave 5 — 架构与可观测(可选)
 1. Q-HIGH-7/8/10: IPC 统一 / handler 名冲突 / trace id
