@@ -168,6 +168,13 @@ function ensureDirectory(targetPath) {
   }
 }
 
+// Q-CRIT-4 warm-up: only transformer / openai-compatible / gemini need a
+// Python worker pool. hash is in-process JS, no warm-up cost.
+function preferredBackendNeedsPool(adapter) {
+  const a = normalizeEmbeddingAdapter(adapter, "hash");
+  return a === "transformer" || a === "openai-compatible" || a === "gemini";
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -536,6 +543,17 @@ async function embedBatch(texts, runtime) {
 async function main() {
   const force = process.argv.includes("--force");
   ensureDirectory(EMBEDDINGS_DIR);
+
+  // Q-CRIT-4 root-cause: pre-warm the Python worker pool so the first
+  // embedBatch() call doesn't pay the 3-8s sentence-transformers cold-start
+  // cost. No-op for non-Python backends (hash) and when pool is unavailable
+  // (per-call spawn fallback will be used).
+  if (preferredBackendNeedsPool(EMBED_ADAPTER)) {
+    await EMBEDDING_PROVIDER_REGISTRY.warmUp({
+      pythonCommand: PYTHON.command,
+      pythonArgs: PYTHON.args,
+    });
+  }
 
   const documents = collectDocuments();
   const existing = await loadExistingIndex(INDEX_FILE);

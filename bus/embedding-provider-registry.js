@@ -137,6 +137,7 @@ for text in texts:
 `;
 
   const _pool = null;
+  let _warmed = false;
 
   async function getPool() {
     if (_pool) return _pool;
@@ -454,6 +455,46 @@ for text in texts:
     },
     list() {
       return Object.keys(adapters);
+    },
+    /**
+     * Pre-warm the Python worker pool so the first embedBatch() call
+     * doesn't pay the 3-8s sentence-transformers cold-start cost
+     * (Q-CRIT-4 root cause: pool was lazy-initialized on first request).
+     *
+     * Safe to call multiple times. No-op if pool is unavailable
+     * (per-call spawn fallback will be used).
+     *
+     * @param {object} runtime - { pythonCommand, pythonArgs, env }
+     * @returns {Promise<boolean>} true if warm-up ran, false if skipped
+     */
+    async warmUp(runtime) {
+      if (_warmed) return false;
+      if (!runtime || !runtime.pythonCommand) return false;
+      const pool = await getPool();
+      if (!pool) return false;
+      try {
+        await pool.initPool(
+          runtime.pythonCommand,
+          withPythonArgs(runtime, ["-c", pool.buildWorkerScript()]),
+          {
+            ...process.env,
+            ...(runtime.env || {}),
+            TF_CPP_MIN_LOG_LEVEL: "3",
+            TF_ENABLE_ONEDNN_OPTS: "0",
+            PYTHONUTF8: "1",
+            PYTHONIOENCODING: "utf-8",
+            ...getProxyEnv(),
+          },
+        );
+        _warmed = true;
+        return true;
+      } catch (err) {
+        console.warn(
+          "[embedding-registry] warmUp failed, will lazy-init on first request:",
+          err && err.message ? err.message : String(err),
+        );
+        return false;
+      }
     },
   };
 }
