@@ -460,7 +460,18 @@ process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet
 4. D-HIGH-2/3: 合并 lint / test workflows ✅
 5. D-MED-9: `eslint` 移 devDependencies ✅
 
-### Wave 3 — 安全(1–2 天) ⏳ 启动中
+### Wave 3 — 安全(1–2 天) ✅ 已完成 (commits 20baf38..b16d498)
+- S-CRIT-1 (yaml): 已不存在,grep 0 命中
+- S-HIGH-1 (watchdog Invoke-Expression / bash -c): 改 exe+args
+- S-HIGH-2 (-Command 字符串): 已不存在,统一走 -EncodedCommand
+- S-HIGH-3 (SSRF): assertSafeBaseUrl + 主机 allowlist
+- S-HIGH-4 (Docker || true): 3 处全部移除
+- S-MED-1 (metrics listen): 显式 127.0.0.1
+- S-MED-2 (ReDoS): regex 库 timeout=1.0 + 启发式兜底
+- S-MED-3 (MCP 长度 cap): validateMcpInput helper
+- S-MED-4 (.bat 随机名): crypto.randomBytes(16)
+- S-MED-5: 无需修复,记录在案
+- S-MED-6: 留待后续,非安全问题
 1. S-CRIT-1: `yaml.safe_load` 全局
 2. S-HIGH-1: `scripts/watchdog.ps1` 拆参
 3. S-HIGH-3: SSRF allowlist
