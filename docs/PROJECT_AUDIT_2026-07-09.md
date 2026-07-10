@@ -62,7 +62,7 @@ param(... [string]$CallbackExe, [string[]]$CallbackArgs = @(), ...)
 - **风险**: 攻击者若能控制环境变量,可让服务代理请求到内网或任意公网 URL(SSRF),并附带内部 token
 - **修复**: URL allowlist,拒绝非 https/非已知 host;token 通过 `Authorization: Bearer` 注入,不放 URL
 
-#### S-HIGH-4 — Docker 安装步骤吞错(`2>/dev/null || true`)
+#### S-HIGH-4 — Docker 安装步骤吞错(`2>/dev/null || true`) ✅ 已修复 (Dockerfile 3 处 || true 全部移除)
 - **位置**: `Dockerfile` 中多行 `curl ... | bash` 模式,失败时静默继续
 - **风险**: 构建出的镜像缺少关键工具(如 `git` / `pwsh`),运行时才发现,排查困难
 - **修复**: 移除 `|| true`,或显式 `set -euo pipefail` 后的 `|| { echo "missing X"; exit 1; }`
