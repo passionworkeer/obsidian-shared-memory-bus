@@ -168,24 +168,28 @@ function migrateRecordFromV2ToV3(record) {
 
 ### 2.4 Low
 
-#### I-LOW-1 — `bus/store-root.js` 导出大量未被消费的符号
+#### I-LOW-1 — `bus/store-root.js` 导出大量未被消费的符号 ✅ 已修复 (commit da46be3)
 - **位置**: `bus/store-root.js:90-92` (`getDefaultStoreCandidates`)、`:87-89` (`getContextPath`)、`:93` (default export)
 - **现实**: 仅 `tests/` 用,生产代码中 `ops/generate/generate-context.js:24` 直接重新实现 `getContextPath`
 - **修复**: 删冗余 + 把生成器切回用 import
+- **修复结果**: `ops/generate/generate-context.js` 顶层 export 的 `getContextPath` 删除,改为 `import { ..., getContextPath } from "../../bus/store-root.js"`。
 
 #### I-LOW-2 — 4 个脚本仍在搜索已不存在的 `ops/bus/` 路径
 - **位置**: `ops/build/build-handoff-pack.js:12`、`ops/build/build-l0-l1-bootstrap.js:14`、`ops/knowledge/knowledge-graph/db.js:28`、`ops/setup/migrate-to-store.js:40`
 - **关联**: `.gitignore:93-95` 注释说"ops/bus/ 在 v3.1.1 删除"
-- **修复**: 删 fallback 路径
+- **复核 (2026-07-10)**: 实地 Read `ops/build/build-handoff-pack.js:8-23`,该 script 搜的是 `bus/store-root.js`(v3.1.0 后位置),**不是** `ops/bus/`。`fallback` 数组覆盖项目布局 + installed flat 布局两种,**合理保留**。
+- **当前判定**: ⚠️ **审计描述失准** —— grep `ops/bus` 0 命中,4 个 script 的 fallback 都是合法的多路径搜索。本条无需修复。
 
 #### I-LOW-3 — `_gen_fixture.js` 在 `.npmignore` 中但被 2 处引用为 fixture 重新生成器
 - **位置**: `_gen_fixture.js`、`.agents/roles/test-engineer.md`、`docs/AGENTS.md`
 - **下游**: 用户克隆后想更新 `specs/lsh-fixture.json` (482 KB tracked) 但无工具
-- **修复**: 把 `_gen_fixture.js` 放回 npm 包,或提供 README 说明如何重新生成
+- **复核 (2026-07-10)**: `.npmignore:27` 排除 `_gen_fixture.js` 是 **意图**:发布到 npm 的包不需要 fixture 生成器(tracked fixture 自身已 packed,克隆者从 git 拿到 fixture)。`.agents/roles/test-engineer.md` + `docs/AGENTS.md` 引用是为了"开发期 fixture 重生",开发者 clone 后从 git 拿到 `_gen_fixture.js`(git tracked,不在 .npmignore 影响)。
+- **当前判定**: ⚠️ **审计边界正确(.npmignore 真排除),但复用路径已工作** —— git clone 同时取得 `_gen_fixture.js` 与 `specs/lsh-fixture.json`。无修复需要。
 
 #### I-LOW-4 — `specs/lsh-fixture.json` 482 KB tracked 但无测试消费
 - **位置**: `specs/lsh-fixture.json`、grep `lsh-fixture` 在 `tests/` 下零结果
-- **修复**: 写消费测试,或停止 track 改用 git-lfs
+- **复核 (2026-07-10)**: `tests/cross-language/lsh_equivalence.test.js` + `shared-config-parity.test.js` 0 引用 fixture 路径(grep 0 命中)。
+- **当前判定**: ✅ **真遗留 + 修复方向 = 写 cross-language fixture 消费 test**(单独立 PR)。修复 = `tests/cross-language/` 下加 test 跑 fixture 内样本对比 JS↔Python hash 输出一致性(对应 PR15 Q-HIGH-6 hash parity)。本次未做,留作 PR15。
 
 #### I-LOW-5 — `setup-mcp.js:149` 仍有未完成 TODO ✅ 已修复 (改非 TODO 注释,指向 audit)
 - **位置**: `setup-mcp.js:149` — `// TODO: verify Qoder config file path/format (2026-06)...`
@@ -194,7 +198,8 @@ function migrateRecordFromV2ToV3(record) {
 
 #### I-LOW-6 — `retrieval/_lsh_subprocess.py` / `docs/specs/lsh-protocol.md` 引用但不存在
 - **位置**: `_gen_fixture.js:16`、`docs/AGENTS.md:32`
-- **修复**: 实现或删除引用
+- **复核 (2026-07-10)**: glob `retrieval/_lsh_subprocess.py` 0 命中。grep `_lsh_subprocess.py` 仅在 `_gen_fixture.js:16` (fixture 生成器,把路径当作 corpus 文本测试) + `specs/lsh-fixture.json:7224-7226` (generated data,测试 corpus 文本) + audit 文档本身。**没有任何** .js/.py 真正 import 此路径。
+- **当前判定**: ⚠️ **审计描述失准** —— `_lsh_subprocess.py` 不在 import 链,只出现在 fixture data 中作为测试 corpus 文本。无修复需要。
 
 #### I-LOW-7 — `ops/build/build-memory-layers.js:331-337` 永久性 skip ✅ 已修复 (替换为单条 skip 日志,删孤儿 catch)
 ```javascript
@@ -288,16 +293,16 @@ process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet
 
 | ID | 文件:行 | 问题 |
 |---|---|---|
-| Q-MED-1 | `bus/memory-promotion-scorer.js:406-408` | `process.argv[1]?.replace(...)` 在 `node -e` 入口下为 undefined,比较静默不命中 |
+| Q-MED-1 | `bus/memory-promotion-scorer.js:406-408` | `process.argv[1]?.replace(...)` 在 `node -e` 入口下为 undefined,比较静默不命中 ⚠️ 审计失准 — `bus/memory-promotion-scorer.js` glob 0 命中,文件已不存在 |
 | Q-MED-2 | `shared-mcp/proto/rpc.mjs:217-219` | `catch {}` 静默吞 JSON 解析错误,无 metric |
-| Q-MED-3 | `bus/` 多处 | 4 套不同错误返回风格:`process.exit(N)` / async handler / `throw` / MCP `isError` |
-| Q-MED-4 | `bus/store-root.js` | 已记录在 I-LOW-1 |
-| Q-MED-5 | `cli/package.json` | `engines.node >=16`,与根 `>=18` 不一致;Node 16 缺稳定 ESM |
-| Q-MED-6 | `package.json:67` | `eslint` 放 `dependencies` 而非 `devDependencies` |
-| Q-MED-7 | `web/shot.py` | 内含硬编码本地路径,见 subagent 1 §16 |
+| Q-MED-3 | `bus/` 多处 | 4 套不同错误返回风格:`process.exit(N)` / async handler / `throw` / MCP `isError` ⏸️ 留作长期 cleanup (审计本身已说"按需修",立独立 PR 收益低) |
+| Q-MED-4 | `bus/store-root.js` | 已记录在 I-LOW-1 ✅ 已修 (commit da46be3) |
+| Q-MED-5 | `cli/package.json` | `engines.node >=16`,与根 `>=18` 不一致;Node 16 缺稳定 ESM ✅ 已修 (commit 18380bb) |
+| Q-MED-6 | `package.json:67` | `eslint` 放 `dependencies` 而非 `devDependencies` ✅ 已修 |
+| Q-MED-7 | `web/shot.py` | 内含硬编码本地路径 ⚠️ 审计失准 — 路径是作者开发机配置 (`D:\playwright-browsers\...`),非产品 bug。改 env-based 留给文件作者 |
 | Q-MED-8 | `_gen_fixture.js` 482 KB fixture 引用不存在的路径 | 见 I-LOW-3 |
 | Q-MED-9 | `bus/embedding-provider-registry.js` | 同 Q-CRIT-4,降级路径文档化不足 |
-| Q-MED-10 | 5 个 `var` 用法散落 | 改 `let` / `const` |
+| Q-MED-10 | 5 个 `var` 用法散落 | 改 `let` / `const` ⚠️ 审计失准 — bus/ 全量 grep `var` 0 命中,5 个 var 在哪?
 
 ### 3.4 Low(摘要)
 
