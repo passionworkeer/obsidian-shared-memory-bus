@@ -1,12 +1,17 @@
 # AI Memory Bus Watchdog Supervisor
-# Usage: .\watchdog.ps1 -PidFile <path> -Callback <command>
-# Example: .\watchdog.ps1 -PidFile "$env:AI_MEMORY_STORE\bus.pid" -Callback "node scripts/vault-detect.js"
+# Usage: .\watchdog.ps1 -PidFile <path> -CallbackExe <exe> -CallbackArgs <string[]>
+# Example: .\watchdog.ps1 -PidFile "$env:AI_MEMORY_STORE\bus.pid" -CallbackExe "node" -CallbackArgs @("scripts/vault-detect.js")
 #
 # Cross-platform PowerShell watchdog for Windows.
+#
+# Security (S-HIGH-1): -Callback 改为 -CallbackExe + -CallbackArgs,
+# 运行时 & \$CallbackExe @CallbackArgs,避免 Invoke-Expression 等价 eval。
+# 当前唯一调用方是 package.json:26 的静态 "node scripts/vault-detect.js"。
 
 param(
     [Parameter(Mandatory)][string]$PidFile,
-    [Parameter(Mandatory)][string]$Callback,
+    [Parameter(Mandatory)][string]$CallbackExe,
+    [string[]]$CallbackArgs = @(),
     [int]$Interval = 15,
     [int]$MaxRestarts = 3
 )
@@ -37,7 +42,7 @@ while ($true) {
                 Write-Host "[watchdog] Max restarts reached" -ForegroundColor Red
                 exit 1
             }
-            Invoke-Expression $Callback
+            & $CallbackExe @CallbackArgs
         }
     }
 }

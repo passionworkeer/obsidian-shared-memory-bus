@@ -40,11 +40,14 @@
 
 ### 1.2 High
 
-#### S-HIGH-1 — `Invoke-Expression $Callback`(`scripts/watchdog.ps1:40`)
+#### S-HIGH-1 — `Invoke-Expression $Callback`(`scripts/watchdog.ps1:40`) ✅ 已修复 (PS1 + sh 双路径)
 ```powershell
-param([Parameter(Mandatory)][string]$Callback, ...)
-...
+# 旧
+param(... [string]$Callback, ...)
 Invoke-Expression $Callback
+# 新
+param(... [string]$CallbackExe, [string[]]$CallbackArgs = @(), ...)
+& $CallbackExe @CallbackArgs
 ```
 - **风险**: `iex` 等价于 `eval`。当前唯一调用方是 `package.json:26` 的静态命令,但接口形态是真实注入 sink。
 - **修复**: 在注册时把 `$Callback` 拆成可执行文件 + 参数列表,运行时 `& exe @args`。
