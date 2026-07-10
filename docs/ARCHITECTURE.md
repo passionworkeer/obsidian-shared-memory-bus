@@ -1,11 +1,23 @@
 # Architecture
 
 ## Canonical Source Of Truth
-Shared long-term memory lives in a local `.ai-memory` store — no Obsidian dependency required.
+Shared long-term memory lives in the **Obsidian vault** at `00-System/ai-memory`. This is the canonical data plane — `CLAUDE.md` declares it ("Canonical long-term memory lives in Obsidian"), and the code now matches that intent.
 
-The store is the canonical data plane. Memory indexing, MCP transport, backup, and optional sync are separate layers built around that source of truth rather than replacements for it. The store can live on any drive with sufficient space; `AI_MEMORY_STORE` selects the root, defaulting to `E:\.ai-memory\` on this machine.
+Two resolvers agree on the same root with the same priority order, so retrieval and MCP transport always read real data:
 
-Core canonical paths:
+```
+AI_MEMORY_STORE  >  vault/00-System/ai-memory  >  AI_MEMORY_ROOT  >  ~/.ai-memory
+  (explicit)         (vault bridge, canonical)      (legacy)          (pure file fallback)
+```
+
+- Python: `retrieval/runtime_support.py:resolve_store_root` (`:243-264`)
+- Node: `bus/store-root.js:resolveStoreRoot` (`:62-82`)
+
+The **vault bridge** is the key change. When no `AI_MEMORY_STORE` is set explicitly, both resolvers locate the Obsidian vault and use its `00-System/ai-memory` directory as the store root. The vault is discovered by `resolveFromObsidianConfig` (`bus/vault-root.js:122-148`, Python mirror `retrieval/runtime_support.py:188-218`), which reads Obsidian's `obsidian.json` and picks the most recently used open vault. This finds vaults on any drive (e.g. `E:\`), which the previous hardcoded default candidates — all under the home directory — could never reach.
+
+The pure-file `.ai-memory` store is now a **fallback only**: it is used when no vault exists (e.g. on a CI runner or a machine without Obsidian). It is no longer the canonical location.
+
+Core canonical paths (relative to the resolved store root, which is normally `vault/00-System/ai-memory`):
 - `{store}/generated/L0-bootstrap.md` — L0 + L1 bootstrap for session start
 - `{store}/generated/GLOBAL-CONTEXT.md` — onboarding overlay (full history)
 - `{store}/generated/SHARED-SKILLS.md` — shared skill context
@@ -42,7 +54,7 @@ Core canonical paths:
 Thinking about the system in planes helps keep the portability and sharing story honest.
 
 - Canonical data plane:
-  - the local `.ai-memory` store (pure files, no Obsidian dependency) plus structured JSONL records under `{store}/structured/`
+  - the Obsidian vault's `00-System/ai-memory` directory (canonical; the vault is auto-discovered and the store root bridges to it). The pure-file `.ai-memory` store is a fallback when no vault exists. Structured JSONL records live under `{store}/structured/`.
 - Retrieval plane:
   - BM25, dense, and hybrid search over the canonical data plane
 - Bridge plane:
@@ -67,7 +79,7 @@ This bundle intentionally combines the strongest ideas from two native memory st
   - subagent activity captured as structured recall targets
 
 ## Memory Outputs
-All paths are relative to the store root (`AI_MEMORY_STORE`, default `E:\.ai-memory\`).
+All paths are relative to the resolved store root — normally the Obsidian vault's `00-System/ai-memory` (auto-discovered). When no vault is present, the root falls back to `AI_MEMORY_STORE`, then `AI_MEMORY_ROOT`, then `~/.ai-memory`. See [Canonical Source Of Truth](#canonical-source-of-truth) above for the full priority chain.
 
 - durable shared inbox:
   - `structured/shared-inbox.jsonl`
@@ -109,6 +121,23 @@ All paths are relative to the store root (`AI_MEMORY_STORE`, default `E:\.ai-mem
 
 The architecture uses local shared HTTP for safe-to-share services and leaves strongly stateful desktop tooling isolated.
 
+## Startup Chain And Worker Pool
+The MCP layer is launched and wired as follows:
+
+1. `start.js` spawns each MCP server through the singleton stdio proxy. For the memory server it spawns `shared-mcp/singleton-stdio-mcp-proxy.mjs`, which in turn launches `shared-mcp/omni-memory-server.js` as the actual stdio command (`start.js:40-73`).
+2. `start.js` deliberately does **not** force a `~/.ai-memory` store root onto the child. It only forwards `AI_MEMORY_STORE` / `AI_MEMORY_STORE_ROOT` when explicitly set, so that the child's `resolveStoreRoot()` vault bridge resolves the canonical vault location (`start.js:49-55`).
+3. The memory server exposes 28 MCP tools, including `search_shared_memory` and `memory_boot`.
+4. `search_shared_memory` does **not** cold-start Python per request. It routes through a persistent warm worker pool (`shared-mcp/embedding-worker-pool.cjs`) that spawns Python `semantic-search.py` workers and reuses them across requests, with lazy initialization and one-shot fallback if a worker is unavailable.
+
+## Vault Auto-Discovery
+The vault bridge depends on locating the Obsidian vault. Resolution order (`bus/vault-root.js` + `retrieval/runtime_support.py:resolve_vault_root`):
+
+1. Explicit env: `AI_MEMORY_OBSIDIAN_VAULT` or `OBSIDIAN_VAULT_ROOT`.
+2. `resolveFromObsidianConfig` — reads Obsidian's `obsidian.json` (`%APPDATA%/obsidian/obsidian.json` on Windows, `~/Library/Application Support/obsidian/obsidian.json` on macOS, `$XDG_CONFIG_HOME/obsidian/obsidian.json` on Linux), and picks the most recently used vault marked `open`. This is how a vault on `E:\` is found when the hard-coded default candidates (all under the home directory) do not match.
+3. Default candidates: `~/Documents/Obsidian Vault`, `~/Obsidian Vault`, `~/Desktop/Obsidian Vault`.
+
+The Node side previously only checked env + default candidates and missed vaults on non-home drives; `resolveFromObsidianConfig` now aligns it with the Python side, which has always had this logic.
+
 ## Runtime Roles
 
 ### `bus/memory-bus.ps1`
@@ -130,14 +159,14 @@ Runs a consolidation pass over durable, session, and task layers to produce a cl
 It now also builds a typed durable promotion and refresh queue, so downstream writeback can see `sourceLayer`, `sourceScope`, `targetScope`, `sourceKind`, `sourceRecordId`, and the recorded promotion reason instead of relying on untyped "newer than baseline" guesses.
 It should run after both `MEMORY-LAYERS` and `HANDOFF` so all generated outputs share the same `sourceStructuredSignature`.
 
-### `ops/run-obsidian-mcp.ps1`
-Finds the active Obsidian vault and launches the Obsidian MCP server from the bundle-local or global `mcpvault` install.
+### `ops/run-memory-mcp.ps1`
+Launches the optional memory MCP server using environment-provided configuration.
 
 ### `ops/run-minimax-mcp.ps1`
 Starts the optional MiniMax MCP using environment-provided secrets and either an auto-detected executable or `MINIMAX_MCP_COMMAND`.
 
 ### `shared-mcp/start-default-shared-mcp.ps1`
-Starts the default shared MCP set: `context7`, `fetch`, `time`, `sequential-thinking`, `obsidian`, `memory`, `playwright`, and `MiniMax` when its environment is configured.
+Starts the default shared MCP set: `context7`, `fetch`, `time`, `sequential-thinking`, `memory`, `playwright`, and `MiniMax` when its environment is configured.
 
 ### `shared-mcp/start-shared-mcp.ps1`
 Starts or adopts shared singleton MCP listeners from `shared-mcp/manifest.json`.
@@ -211,7 +240,7 @@ The current weights are still hand-tuned. They improve operator control and insp
   - startup registration is emitted as LaunchAgents on macOS and as `systemd --user` units or XDG autostart entries on Linux, but still has less live field validation than the Windows path
 
 ## Why The Architecture Works
-- The local `.ai-memory` store stays canonical — no Obsidian dependency, pure filesystem
+- The Obsidian vault's `00-System/ai-memory` is canonical, auto-discovered on any drive via `resolveFromObsidianConfig`; the pure-file `.ai-memory` store is a fallback, not the primary location
 - memory retrieval is shared over HTTP, not duplicated per agent
 - stateless MCPs are centralized
 - Playwright can be centralized because one HTTP backend can still serve isolated MCP sessions and isolated browser profiles
@@ -256,7 +285,7 @@ See [`docs/DEPLOYMENT-MATRIX.md`](DEPLOYMENT-MATRIX.md) for recommended operatin
 | `shared-mcp/omni-memory-server.js` | Shared `memory` MCP server: HTTP transport, tool dispatch, retrieval worker management |
 | `bus/generate-embeddings.js` | Embeddings generation: reads structured JSONL, calls embedding provider, writes index |
 | `ops/build-memory-layers.js` | Reads structured/*.jsonl, builds layered MEMORY-LAYERS snapshot, stamps promotion metadata |
-| `ops/sync-openclaw-to-obsidian.js` | Ingests OpenClaw sessions/runs/jobs/blackboard → structured JSONL |
+| `ops/sync-openclaw.js` | (planned) Ingests OpenClaw sessions/runs/jobs/blackboard → structured JSONL — script not yet implemented; watchdog currently no-ops |
 
 ### Python Files
 | File | Responsibility |
@@ -340,7 +369,7 @@ PowerShell, Node.js, and Python each own meaningful pieces. Some logic is duplic
 Query side switches immediately on config change, but stored vectors do not change. A rebuild is still required for clean dense match after changing adapter/model/URL.
 
 ### Data Plane Not Yet A Single Write Plane
-Live architecture has multiple write planes: human-written vault notes, shared inbox/event generation, direct claude-mem bridge writes, OpenClaw blackboard writes. "Canonical" means canonical storage, not one unified transactional boundary.
+Live architecture has multiple write planes: human-written vault notes, shared inbox/event generation, direct claude-mem bridge writes, OpenClaw blackboard writes. The claude-mem bridge in particular writes directly into the canonical vault `00-System/ai-memory` directory, which is what motivated elevating the vault to canonical and adding the store→vault bridge. "Canonical" means canonical storage location, not one unified transactional boundary.
 
 ### Query Routing — Hand-Tuned Weights
 Route inference depends on regex/filter hints — ambiguous prompts can route poorly. Weights are hand-tuned, not learned from judgments. No offline benchmark for comparing route profiles.

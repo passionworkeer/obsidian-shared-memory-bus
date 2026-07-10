@@ -47,15 +47,27 @@ if ($nodeVersion) {
     $checks += @{ name = "Node.js"; ok = $false; detail = "not found" }
 }
 
-# Python - try multiple paths
+# Python - prefer configured runtime, then PATH-resolved commands
 $pythonCmd = $null
 $pythonVersion = $null
-$pythonPaths = @("python", "python3", "D:\python\python.exe", "$env:LOCALAPPDATA\Programs\Python\python.exe")
-foreach ($p in $pythonPaths) {
+$pythonCandidates = New-Object System.Collections.Generic.List[object]
+foreach ($envName in @("AI_MEMORY_PYTHON", "PYTHON_EXE", "PYTHON")) {
+    $value = [Environment]::GetEnvironmentVariable($envName)
+    if (-not [string]::IsNullOrWhiteSpace($value)) {
+        $pythonCandidates.Add([pscustomobject]@{ Command = $value; Args = @() }) | Out-Null
+    }
+}
+$pythonCandidates.Add([pscustomobject]@{ Command = "python"; Args = @() }) | Out-Null
+$pythonCandidates.Add([pscustomobject]@{ Command = "python3"; Args = @() }) | Out-Null
+if ($IsWindows -or $env:OS -eq "Windows_NT") {
+    $pythonCandidates.Add([pscustomobject]@{ Command = "py"; Args = @("-3") }) | Out-Null
+    $pythonCandidates.Add([pscustomobject]@{ Command = "py"; Args = @() }) | Out-Null
+}
+foreach ($candidate in $pythonCandidates) {
     try {
-        $v = & $p --version 2>$null
+        $v = & $candidate.Command @($candidate.Args + @("--version")) 2>$null
         if ($v) {
-            $pythonCmd = $p
+            $pythonCmd = ([string[]]@($candidate.Command) + [string[]]$candidate.Args) -join " "
             $pythonVersion = $v
             break
         }
@@ -75,27 +87,34 @@ if ($LASTEXITCODE -eq 0 -and $npmVersion) {
     $checks += @{ name = "npm"; ok = $false; detail = "not found" }
 }
 
-# Obsidian Vault - try multiple paths
-$vaultPaths = @(
-    $env:OBSIDIAN_VAULT_ROOT,
-    $env:AI_MEMORY_OBSIDIAN_VAULT,
-    "E:\desktop\Obsidian Vault",
-    "$env:USERPROFILE\Documents\Obsidian Vault",
-    "$env:APPDATA\obsidian\obsidian.json"
+# AI Memory Store - try multiple paths
+$storePaths = @(
+    $env:AI_MEMORY_STORE,
+    $env:AI_MEMORY_STORE_ROOT,
+    "$env:USERPROFILE\.ai-memory",
+    "$env:USERPROFILE\ai-memory"
 )
 
-$foundVault = $null
-foreach ($vp in $vaultPaths) {
-    if ($vp -and (Test-Path -LiteralPath $vp -PathType Container)) {
-        $foundVault = $vp
+$foundStore = $null
+foreach ($sp in $storePaths) {
+    if ($sp -and (Test-Path -LiteralPath $sp -PathType Container)) {
+        $foundStore = $sp
         break
     }
 }
 
-if ($foundVault) {
-    $checks += @{ name = "Obsidian Vault"; ok = $true; detail = $foundVault }
+if ($foundStore) {
+    $checks += @{ name = "AI Memory Store"; ok = $true; detail = $foundStore }
+    $env:AI_MEMORY_STORE = $foundStore
 } else {
-    $checks += @{ name = "Obsidian Vault"; ok = $false; detail = "not found" }
+    $defaultStore = Join-Path $env:USERPROFILE ".ai-memory"
+    try {
+        New-Item -ItemType Directory -Path $defaultStore -Force | Out-Null
+        $env:AI_MEMORY_STORE = $defaultStore
+        $checks += @{ name = "AI Memory Store"; ok = $true; detail = "$defaultStore (created)" }
+    } catch {
+        $checks += @{ name = "AI Memory Store"; ok = $false; detail = "not found and could not create $defaultStore" }
+    }
 }
 
 # Display results
@@ -219,7 +238,7 @@ if ($Verify -or (-not $SkipMcp)) {
         "9332" = "fetch"
         "9333" = "time"
         "9334" = "sequential-thinking"
-        "9335" = "obsidian"
+        "9335" = "memory"
         "9336" = "MiniMax (optional)"
         "9337" = "playwright (optional)"
         "9338" = "memory"

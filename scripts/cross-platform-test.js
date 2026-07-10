@@ -71,21 +71,21 @@ test('platform.executables', () => {
   if (!exe.python) throw new Error('No python executable');
 });
 
-// 5. platform.resolveVaultRoot exists and is a function
-test('platform.resolveVaultRoot', () => {
-  if (typeof platform.resolveVaultRoot !== 'function') {
-    throw new Error('resolveVaultRoot is not a function');
+// 5. platform.resolveStoreRoot exists and is a function
+test('platform.resolveStoreRoot', () => {
+  if (typeof platform.resolveStoreRoot !== 'function') {
+    throw new Error('resolveStoreRoot is not a function');
   }
   // Should either return a path or throw ENOENT
   try {
-    const vault = platform.resolveVaultRoot();
-    if (typeof vault !== 'string' || !vault) {
-      throw new Error(`resolveVaultRoot returned invalid value: ${vault}`);
+    const store = platform.resolveStoreRoot();
+    if (typeof store !== 'string' || !store) {
+      throw new Error(`resolveStoreRoot returned invalid value: ${store}`);
     }
-    console.log(`   vault root: ${vault}`);
+    console.log(`   store root: ${store}`);
   } catch (e) {
     if (e.code === 'ENOENT') {
-      console.log('   vault root: (not found — set OBSIDIAN_VAULT_ROOT)');
+      console.log('   store root: (not found — set AI_MEMORY_STORE)');
     } else {
       throw e;
     }

@@ -4,11 +4,17 @@
  * Bridges stdio-based MCP calls to the HTTP/SSE-based Playwright MCP server
  * Uses mcp-session-id header for session affinity (StreamableHTTP transport)
  */
-const http = require('http');
-const readline = require('readline');
+import http from 'node:http';
+import readline from 'node:readline';
 
-const PLAYWRIGHT_HOST = 'localhost';
-const PLAYWRIGHT_PORT = 9337;
+const PLAYWRIGHT_HOST = process.env.PLAYWRIGHT_MCP_HOST || 'localhost';
+const PLAYWRIGHT_PORT = Number(process.env.PLAYWRIGHT_MCP_PORT || 9337);
+
+// Upper bound on accumulated SSE response bodies. A misbehaving/compromised
+// upstream could stream unbounded data and OOM this proxy; cap it and abort
+// (defense-in-depth, mirroring proto/rpc.mjs readJsonBody's 10MB limit; SSE
+// carries multiple events so we allow a bit more headroom).
+const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
 
 // Safe stdout write queue — prevents concurrent writes from interleaving JSON
 const stdoutQueue = [];
@@ -46,7 +52,7 @@ function parseSSE(data, targetId) {
           // Forward server-initiated notifications to stdout
           safeWrite(JSON.stringify(json) + '\n');
         }
-      } catch (e) {
+      } catch {
         // skip malformed lines
       }
     }
@@ -75,8 +81,19 @@ function httpPost(method, params, id) {
       }
 
       let data = '';
-      res.on('data', chunk => { data += chunk; });
+      let tooLarge = false;
+      res.on('data', chunk => {
+        if (tooLarge) return;
+        data += chunk;
+        if (Buffer.byteLength(data) > MAX_RESPONSE_BYTES) {
+          tooLarge = true;
+          process.stderr.write('[playwright-stdio-proxy] Response body exceeded ' + MAX_RESPONSE_BYTES + ' bytes; aborting request ' + id + '\n');
+          reject(new Error('response body too large (>' + MAX_RESPONSE_BYTES + ' bytes)'));
+          req.destroy();
+        }
+      });
       res.on('end', () => {
+        if (tooLarge) return;
         const result = parseSSE(data, id);
         if (result) {
           resolve(result);
@@ -111,8 +128,21 @@ function httpPostNotification(method, params) {
         process.stderr.write('[playwright-stdio-proxy] Session: ' + mcpSessionId + '\n');
       }
       let data = '';
-      res.on('data', chunk => { data += chunk; });
-      res.on('end', () => resolve({ ok: true, data }));
+      let tooLarge = false;
+      res.on('data', chunk => {
+        if (tooLarge) return;
+        data += chunk;
+        if (Buffer.byteLength(data) > MAX_RESPONSE_BYTES) {
+          tooLarge = true;
+          process.stderr.write('[playwright-stdio-proxy] Notification response body exceeded ' + MAX_RESPONSE_BYTES + ' bytes; aborting\n');
+          reject(new Error('response body too large (>' + MAX_RESPONSE_BYTES + ' bytes)'));
+          req.destroy();
+        }
+      });
+      res.on('end', () => {
+        if (tooLarge) return;
+        resolve({ ok: true, data });
+      });
     });
     req.on('error', reject);
     req.write(body);

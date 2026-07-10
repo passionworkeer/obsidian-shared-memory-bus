@@ -1,5 +1,5 @@
-import fs from "fs";
-import readline from "readline";
+import fs from "node:fs";
+import readline from "node:readline";
 
 /**
  * Async generator that yields parsed JSON objects from a JSONL file,

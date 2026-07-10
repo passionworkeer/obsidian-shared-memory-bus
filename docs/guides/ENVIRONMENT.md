@@ -13,12 +13,12 @@ This page documents the environment variables the runtime understands. For an in
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `AI_MEMORY_ROOT` | No | `~/.ai-memory` (installed) or repo root | Where the runtime files live |
-| `AI_MEMORY_STORE` | No | Auto-detected (best free drive, min 2 GB) | **Root path for shared memory store** — e.g. `E:\.ai-memory`. Overrides auto-detection. |
+| `AI_MEMORY_ROOT` | No | repo root / runtime root | Runtime files root for direct source-tree runs; legacy launchers may still fall back to it as a store hint |
+| `AI_MEMORY_STORE` | No | Auto-detected (best free drive, min 2 GB) | **Canonical root path for shared memory store** — e.g. `E:\.ai-memory`. Overrides auto-detection. |
 | `AI_MEMORY_RUNTIME_CONFIG_PATH` | No | Auto-resolved | Explicit runtime config path for source-tree or advanced runs |
 | `AI_MEMORY_OBSIDIAN_VAULT` | No | — | **Deprecated.** Previously used to point at an Obsidian vault. The system now uses `AI_MEMORY_STORE` instead. Kept for backward compatibility only. |
 | `AI_MEMORY_WATCHDOG_ENABLED` | No | `1` (enabled) | Set to `0` to disable the background watchdog |
-| `AI_MEMORY_BASE_PORT` | No | `9330` | Base port; servers use basePort+N (memory=9338) |
+| `AI_MEMORY_BASE_PORT` | No | `9330` | Base port; manifest ports are shifted by offset (memory defaults to basePort+8 = 9338) |
 | `AI_MEMORY_PROFILE_SYNC` | No | `false` | Enable profile sync on startup |
 
 ## Embedding Variables

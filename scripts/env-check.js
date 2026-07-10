@@ -7,14 +7,11 @@
  * Exit code: 0 = all pass, 1 = one or more fail
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createRequire } from 'node:module';
-
-const require = createRequire(import.meta.url);
-const { platform } = require('../bus/platform/index.js');
-const { resolveStoreRoot } = require('../bus/store-root.js');
+import { platform } from '../bus/platform/index.js';
+import { resolveStoreRoot } from '../bus/store-root.js';
 
 const checks = [];
 
@@ -28,7 +25,7 @@ function check(name, fn) {
 }
 
 function exe(name, args, extraEnv) {
-  return execSync(`${name} ${args}`, {
+  return execFileSync(name, Array.isArray(args) ? args : [args], {
     encoding: 'utf8',
     timeout: 5000,
     windowsHide: true,
@@ -40,18 +37,30 @@ const nodeExe = platform.executables?.node || 'node';
 const pyExe = platform.executables?.python || (platform.name === 'win32' ? 'python' : 'python3');
 
 // Node.js
-check('Node.js', () => exe(nodeExe, '--version'));
+check('Node.js', () => exe(nodeExe, ['--version']));
 
 // Python — try multiple names since 'python' may not be in PATH on Windows
 check('Python', () => {
-  const candidates = [pyExe, 'python.exe', 'py', '-3'];
-  if (process.env.PYTHON) candidates.unshift(process.env.PYTHON);
+  const candidates = [
+    { command: process.env.AI_MEMORY_PYTHON, argsPrefix: [] },
+    { command: process.env.PYTHON_EXE, argsPrefix: [] },
+    { command: process.env.PYTHON, argsPrefix: [] },
+    { command: pyExe, argsPrefix: [] },
+    { command: 'python', argsPrefix: [] },
+    { command: 'python3', argsPrefix: [] },
+    ...(platform.name === 'win32'
+      ? [
+          { command: 'py', argsPrefix: ['-3'] },
+          { command: 'py', argsPrefix: [] },
+        ]
+      : []),
+  ].filter((candidate) => candidate.command);
   const tried = [];
-  for (const name of candidates) {
+  for (const candidate of candidates) {
     try {
-      return exe(name, '--version', { PYTHONIOENCODING: 'utf-8' });
+      return exe(candidate.command, [...candidate.argsPrefix, '--version'], { PYTHONIOENCODING: 'utf-8' });
     } catch {
-      tried.push(name);
+      tried.push([candidate.command, ...candidate.argsPrefix].join(' '));
     }
   }
   throw new Error(`none of [${tried.join(', ')}] found`);

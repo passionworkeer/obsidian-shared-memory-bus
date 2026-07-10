@@ -5,7 +5,11 @@
 const PLATFORM = process.platform;  // 'win32' | 'darwin' | 'linux'
 
 // ---------------------------------------------------------------------------
-// Load platform-specific adapters (lazy — only the active one is fully used)
+// Import the three platform adapter factory functions. The module bodies
+// themselves only define functions and read env vars at top level — they do
+// not spawn processes or perform I/O until the factory is invoked. Only the
+// factory for the active platform is actually called (see `platform` below),
+// so the other two adapters' bodies are dead weight on the active path.
 // ---------------------------------------------------------------------------
 
 import { getWindowsAdapter } from "./windows.js";

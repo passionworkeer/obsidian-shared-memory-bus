@@ -14,8 +14,11 @@
  * All state is passed in via params to avoid circular import issues.
  */
 
-import { spawn } from "node:child_process";
 import { TOOLS } from "./memory-tools.js";
+import path from "node:path";
+import { resolveStoreRoot as resolveCanonicalStoreRoot } from "../bus/store-root.js";
+import { validateMcpInput } from "./omni-platform-helpers.js";
+import { spawnProcess } from "./proto/child-process.mjs";
 
 const SEARCH_ROUTE_VALUES = new Set(["auto", "mixed", "durable", "task", "recent", "reference"]);
 
@@ -36,33 +39,30 @@ function errorResult(message) {
   };
 }
 
-function spawnProcess(executable, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, {
-      stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
-      ...options,
-    });
-
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      resolve({ code: code || 0, stdout, stderr });
-    });
-
-    if (options.input !== undefined) {
-      child.stdin.end(options.input);
-    } else {
-      child.stdin.end();
-    }
-  });
+function resolveStoreRootParam(params = {}) {
+  // Explicit store params (caller override) win first.
+  const explicitStore =
+    params.STORE_ROOT ||
+    params.MEMORY_STORE_ROOT ||
+    params.storeRoot ||
+    params.memoryStoreRoot ||
+    params.AI_MEMORY_STORE ||
+    params.AI_MEMORY_STORE_ROOT;
+  if (explicitStore) return explicitStore;
+  // Canonical resolution vault-bridges to the Obsidian vault's ai-memory when
+  // no store env is set. Must take priority over the legacy AI_MEMORY_ROOT hint,
+  // otherwise the server reads an empty ~/.ai-memory instead of the real vault
+  // data (consistent with bus/store-root.js priority).
+  try {
+    return resolveCanonicalStoreRoot();
+  } catch {
+    return (
+      params.AI_MEMORY_ROOT ||
+      params.VAULT_ROOT ||
+      params.vaultRoot ||
+      path.join(process.env.USERPROFILE || process.env.HOME || ".", ".ai-memory")
+    );
+  }
 }
 
 async function runSemanticSearchOnce({
@@ -82,7 +82,8 @@ async function runSemanticSearchOnce({
   snippetWindow = 220,
   maxVerbatimPerResult = 1,
 }) {
-  const { SEARCH_SCRIPT, VAULT_ROOT, PYTHON_SPAWN_ENV, PYTHON, withPythonArgs } = params;
+  const { SEARCH_SCRIPT, PYTHON_SPAWN_ENV, PYTHON, withPythonArgs } = params;
+  const storeRoot = resolveStoreRootParam(params);
   const normalizedRoute = SEARCH_ROUTE_VALUES.has(String(route || "").trim().toLowerCase())
     ? String(route || "").trim().toLowerCase()
     : "auto";
@@ -120,7 +121,7 @@ async function runSemanticSearchOnce({
   const result = await spawnProcess(PYTHON.command, withPythonArgs(PYTHON, args), {
     env: {
       ...PYTHON_SPAWN_ENV,
-      AI_MEMORY_OBSIDIAN_VAULT: VAULT_ROOT,
+      AI_MEMORY_STORE: storeRoot,
     },
   });
   if (result.code !== 0) {
@@ -152,6 +153,8 @@ export function createMemoryRetrieval(params) {
   // ---------------------------------------------------------------------------
 
   async function handleSearchSharedMemory(args) {
+    try { validateMcpInput(args, { idsField: "ids", metadataField: "metadata" }); }
+    catch (e) { return errorResult(e.message); }
     const query = String(args.query || "").trim();
     if (!query) {
       return errorResult("query is required");
@@ -213,7 +216,7 @@ export function createMemoryRetrieval(params) {
             maxVerbatimPerResult,
           })
         );
-      } catch (_fallbackError) {
+      } catch {
         if (!params.METRICS.searches_total[normalizedRoute]) {
           params.METRICS.searches_total[normalizedRoute] = {};
         }
@@ -323,8 +326,10 @@ Only include records that are genuinely relevant. Return fewer than max_results 
 
     if (!apiKey) {
       const fallback = ids.slice(0, maxResults);
+      // Q-CRIT-3: degraded: true 标记 LLM 不可用,调用方可区分"系统猜"和"用户/LLM 选择"
       return jsonResult({
         ok: true,
+        degraded: true,
         fallback: true,
         selected: fallback.map((id) => ({ id, reason: "LLM unavailable, returning by original order" })),
         reasoning:
@@ -377,6 +382,7 @@ Only include records that are genuinely relevant. Return fewer than max_results 
       const fallbackIds = ids.slice(0, maxResults);
       return jsonResult({
         ok: true,
+        degraded: true,
         fallback: true,
         selected: fallbackIds.map((id) => ({ id, reason: `LLM call failed: ${err.message}` })),
         reasoning: `LLM call failed (${err.message}). Returned top N by original order.`,
@@ -407,6 +413,7 @@ Only include records that are genuinely relevant. Return fewer than max_results 
       const fallbackIds = ids.slice(0, maxResults);
       return jsonResult({
         ok: true,
+        degraded: true,
         fallback: true,
         selected: fallbackIds.map((id) => ({ id, reason: "LLM response was not parseable" })),
         reasoning: `LLM returned unparseable response. Returned top N by original order.\n\nRaw: ${llmResponse.slice(0, 300)}`,
@@ -455,12 +462,26 @@ Only include records that are genuinely relevant. Return fewer than max_results 
 
   // ── Entity / knowledge-graph handlers ─────────────────────────────────
 
-  function loadKnowledgeGraph() {
+  async function loadKnowledgeGraph() {
     try {
-      const { KnowledgeGraph } = require("../../ops/knowledge/knowledge-graph.js");
-      return new KnowledgeGraph({ vaultRoot: params.VAULT_ROOT });
-    } catch {
-      return null;
+      const moduleUrl = new URL("../ops/knowledge/knowledge-graph.js", import.meta.url);
+      const { KnowledgeGraph } = await import(moduleUrl.href);
+      return new KnowledgeGraph({ storeRoot: resolveStoreRootParam(params) });
+    } catch (error) {
+      return {
+        available: false,
+        error: String(error?.message || error),
+        ingestRecord: () => {},
+        beginBatch: () => {},
+        endBatch: () => {},
+        close: () => {},
+        stats: () => ({ entities: 0, triples: 0, currentFacts: 0, expiredFacts: 0 }),
+        getEntity: () => null,
+        queryEntity: () => [],
+        searchEntities: () => [],
+        timeline: () => [],
+        getEntitiesByType: () => [],
+      };
     }
   }
 
@@ -468,8 +489,10 @@ Only include records that are genuinely relevant. Return fewer than max_results 
     const name = String(args.name || "").trim();
     if (!name) return errorResult("name is required");
 
-    const kg = loadKnowledgeGraph();
-    if (!kg) return errorResult("knowledge-graph-unavailable: run build-memory-layers.js first");
+    const kg = await loadKnowledgeGraph();
+    if (kg.available === false) {
+      return errorResult(`knowledge-graph-unavailable: ${kg.error || "unknown-error"}`);
+    }
 
     try {
       const entity = kg.getEntity(name);
@@ -490,8 +513,10 @@ Only include records that are genuinely relevant. Return fewer than max_results 
     const entityQuery = String(args.entity_query || "").trim();
     if (!entityQuery) return errorResult("entity_query is required");
 
-    const kg = loadKnowledgeGraph();
-    if (!kg) return errorResult("knowledge-graph-unavailable: run build-memory-layers.js first");
+    const kg = await loadKnowledgeGraph();
+    if (kg.available === false) {
+      return errorResult(`knowledge-graph-unavailable: ${kg.error || "unknown-error"}`);
+    }
 
     try {
       // 1. Find matching entities
@@ -525,8 +550,10 @@ Only include records that are genuinely relevant. Return fewer than max_results 
   // ── KG stats ───────────────────────────────────────────────────────────
 
   async function handleGetKgStats(_args) {
-    const kg = loadKnowledgeGraph();
-    if (!kg) return errorResult("knowledge-graph-unavailable: run build-memory-layers.js first");
+    const kg = await loadKnowledgeGraph();
+    if (kg.available === false) {
+      return errorResult(`knowledge-graph-unavailable: ${kg.error || "unknown-error"}`);
+    }
     try {
       const stats = kg.stats();
       // Get entity counts by type via the known type list
@@ -562,8 +589,10 @@ Only include records that are genuinely relevant. Return fewer than max_results 
     const limit = Math.max(1, Number(args.limit ?? 10) || 10);
     const typeFilter = args.type ? String(args.type).trim() : null;
 
-    const kg = loadKnowledgeGraph();
-    if (!kg) return errorResult("knowledge-graph-unavailable: run build-memory-layers.js first");
+    const kg = await loadKnowledgeGraph();
+    if (kg.available === false) {
+      return errorResult(`knowledge-graph-unavailable: ${kg.error || "unknown-error"}`);
+    }
     try {
       let matched = kg.searchEntities(query, { limit });
       if (typeFilter) {
@@ -591,8 +620,10 @@ Only include records that are genuinely relevant. Return fewer than max_results 
     if (!entityType) return errorResult("entityType is required");
     const limit = Math.max(1, Number(args.limit ?? 50) || 50);
 
-    const kg = loadKnowledgeGraph();
-    if (!kg) return errorResult("knowledge-graph-unavailable: run build-memory-layers.js first");
+    const kg = await loadKnowledgeGraph();
+    if (kg.available === false) {
+      return errorResult(`knowledge-graph-unavailable: ${kg.error || "unknown-error"}`);
+    }
     try {
       const rows = kg.getEntitiesByType(entityType);
       return jsonResult({
@@ -612,8 +643,10 @@ Only include records that are genuinely relevant. Return fewer than max_results 
     const direction = args.direction || "both";
     const limit = Math.max(1, Number(args.limit ?? 50) || 50);
 
-    const kg = loadKnowledgeGraph();
-    if (!kg) return errorResult("knowledge-graph-unavailable: run build-memory-layers.js first");
+    const kg = await loadKnowledgeGraph();
+    if (kg.available === false) {
+      return errorResult(`knowledge-graph-unavailable: ${kg.error || "unknown-error"}`);
+    }
     try {
       const rels = kg.queryEntity(entityName, { direction });
       return jsonResult({

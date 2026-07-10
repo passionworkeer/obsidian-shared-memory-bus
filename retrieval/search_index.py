@@ -10,11 +10,15 @@ from __future__ import annotations
 import datetime
 import hashlib
 import json
+import logging
 import os
 import re
 import sys
 import time as time_module
-from typing import Dict, List
+from pathlib import Path
+from typing import Dict, List, Tuple
+
+logger = logging.getLogger(__name__)
 
 from search_ranking import (
     tokenize,
@@ -50,17 +54,22 @@ from search_ranking import _BM25_CACHE, _SEARCH_RESULT_CACHE, _QUERY_EMBEDDING_C
 # Path constants (mirrored from semantic_search for testability)
 # ---------------------------------------------------------------------------
 
-def _resolve_vault_root() -> str:
+def _resolve_store_root() -> str:
     try:
-        from runtime_support import resolve_vault_root
-        return str(resolve_vault_root())
+        from runtime_support import resolve_store_root
+        return str(resolve_store_root())
     except Exception:
-        return os.environ.get("VAULT_ROOT", "")
+        return (
+            os.environ.get("AI_MEMORY_STORE")
+            or os.environ.get("AI_MEMORY_STORE_ROOT")
+            or os.environ.get("AI_MEMORY_ROOT")
+            or os.path.join(os.path.expanduser("~"), ".ai-memory")
+        )
 
-VAULT_ROOT = _resolve_vault_root()
-AI_MEMORY_ROOT = os.path.join(VAULT_ROOT, "00-System", "ai-memory")
-STRUCTURED_DIR = os.path.join(AI_MEMORY_ROOT, "structured")
-EMBEDDINGS_INDEX = os.path.join(AI_MEMORY_ROOT, "embeddings", "index.jsonl")
+STORE_ROOT = _resolve_store_root()
+AI_MEMORY_ROOT = STORE_ROOT
+STRUCTURED_DIR = os.path.join(STORE_ROOT, "structured")
+EMBEDDINGS_INDEX = os.path.join(STORE_ROOT, "embeddings", "index.jsonl")
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +90,6 @@ def invalidate_embeddings_cache() -> None:
     _INDEX_CACHE["loaded_at"] = 0.0
     _INDEX_CACHE["signature"] = ""
 
-    from search_ranking import _QUERY_EMBEDDING_CACHE
     _QUERY_EMBEDDING_CACHE.clear()
     _SEARCH_RESULT_CACHE.clear()
 
@@ -94,22 +102,44 @@ def build_file_stamp(file_path: str) -> str:
     if not os.path.exists(file_path):
         return "__missing__"
     try:
-        with open(file_path, "rb") as handle:
-            body = handle.read()
-        return f"{os.path.basename(file_path)}:{hashlib.sha1(body).hexdigest()}:{len(body)}"
-    except Exception:
-        return f"{os.path.basename(file_path)}:__unreadable__"
+        st = os.stat(file_path)
+        return f"{Path(file_path).name}:{st.st_mtime_ns}:{st.st_size}"
+    except OSError as exc:
+        logger.warning("build_file_stamp stat failed for %s: %s", file_path, exc)
+        return f"{Path(file_path).name}:__unreadable__"
+
+
+# Module-level memo: dedup build_file_stamp calls within a short TTL window.
+# Keyed by absolute path, value is (stamp, computed_at). Prevents N×M stat
+# amplification when build_structured_signature / build_embeddings_signature
+# are invoked multiple times per request (e.g. once in execute_search for
+# cache key, again in load_entries/load_embeddings_index for invalidation).
+_SIGNATURE_MEMO: Dict[str, Tuple[str, float]] = {}
+_SIGNATURE_MEMO_TTL = 1.0  # seconds
+
+
+def _memoized_file_stamp(file_path: str) -> str:
+    now = time_module.time()
+    cached = _SIGNATURE_MEMO.get(file_path)
+    if cached is not None and (now - cached[1]) < _SIGNATURE_MEMO_TTL:
+        return cached[0]
+    stamp = build_file_stamp(file_path)
+    _SIGNATURE_MEMO[file_path] = (stamp, now)
+    return stamp
 
 
 def build_structured_signature() -> str:
     if not os.path.isdir(STRUCTURED_DIR):
         return "__missing__"
-    parts = [build_file_stamp(os.path.join(STRUCTURED_DIR, file_name)) for file_name in STRUCTURED_FILES]
+    parts = [
+        _memoized_file_stamp(os.path.join(STRUCTURED_DIR, file_name))
+        for file_name in STRUCTURED_FILES
+    ]
     return "|".join(parts) if parts else "__empty__"
 
 
 def build_embeddings_signature() -> str:
-    return build_file_stamp(EMBEDDINGS_INDEX)
+    return _memoized_file_stamp(EMBEDDINGS_INDEX)
 
 
 # ---------------------------------------------------------------------------
@@ -265,7 +295,8 @@ def _load_entries_uncached(structured_dir: str) -> List[dict]:
                         continue
                     try:
                         payload = json.loads(line)
-                    except Exception:
+                    except json.JSONDecodeError as exc:
+                        logger.debug("skipping malformed JSON line in %s: %s", file_path, exc)
                         continue
                     if _SCHEMA_VALIDATION_AVAILABLE:
                         valid, errors = validate_record(payload)
@@ -275,7 +306,11 @@ def _load_entries_uncached(structured_dir: str) -> List[dict]:
                         if entry["id"] not in seen_ids:
                             seen_ids.add(entry["id"])
                             entries.append(entry)
-        except Exception:
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("failed to load structured file %s: %s", file_path, exc, exc_info=True)
+            continue
+        except Exception as exc:
+            logger.warning("unexpected error loading structured file %s: %s", file_path, exc, exc_info=True)
             continue
 
     return entries
@@ -327,11 +362,205 @@ def _load_embeddings_index_uncached(embeddings_index: str) -> Dict[str, dict]:
                     continue
                 try:
                     payload = json.loads(line)
-                except Exception:
+                except json.JSONDecodeError as exc:
+                    logger.debug("skipping malformed JSON line in %s: %s", embeddings_index, exc)
                     continue
                 record_id = str(payload.get("id", "")).strip()
                 if record_id and isinstance(payload.get("embedding"), list):
                     records[record_id] = payload
-    except Exception:
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("failed to load embeddings index %s: %s", embeddings_index, exc, exc_info=True)
+        return {}
+    except Exception as exc:
+        logger.warning("unexpected error loading embeddings index %s: %s", embeddings_index, exc, exc_info=True)
         return {}
     return records
+
+
+# ---------------------------------------------------------------------------
+# ANN-accelerated dense scoring (optional, opt-in via --use-ann)
+#
+# See retrieval/ann_index.py for the index implementation and
+# tech-debt-roadmap.md 5.3 for the phased rollout plan. The ANN path is only
+# used when hnswlib is importable (ANNIndex.is_available()); otherwise callers
+# transparently fall back to the existing full-scan cosine scorer in
+# search_ranking.dense_scores.
+# ---------------------------------------------------------------------------
+
+from typing import Optional, Tuple  # noqa: E402 - appended module section
+
+_ANN_INDEX_CACHE: Dict[str, object] = {
+    "index": None,        # ANNIndex instance
+    "ids": None,          # List[str] entry_id per row, aligned with the index
+    "signature": "",      # embeddings signature used to build this index
+}
+
+
+def build_ann_index(embeddings_index_path: Optional[str] = None):
+    """Build (and cache) an ANNIndex from the current embeddings index.
+
+    Returns ``(ann_index, entry_ids)`` or ``(None, None)`` when the index is
+    empty or cannot be built. Cached by the embeddings signature so repeated
+    queries reuse the same ANN index.
+    """
+    from ann_index import ANNIndex
+    import numpy as np
+
+    signature = build_embeddings_signature()
+    if (
+        _ANN_INDEX_CACHE["index"] is not None
+        and str(_ANN_INDEX_CACHE.get("signature", "")) == signature
+    ):
+        return _ANN_INDEX_CACHE["index"], _ANN_INDEX_CACHE["ids"]
+
+    records = load_embeddings_index()
+    if not records:
+        _ANN_INDEX_CACHE["index"] = None
+        _ANN_INDEX_CACHE["ids"] = None
+        _ANN_INDEX_CACHE["signature"] = signature
+        return None, None
+
+    dim = 0
+    entry_ids: List[str] = []
+    vectors = []
+    for record_id, payload in records.items():
+        embedding = payload.get("embedding")
+        if not isinstance(embedding, list) or not embedding:
+            continue
+        if dim == 0:
+            dim = len(embedding)
+        elif len(embedding) != dim:
+            continue
+        entry_id = str(payload.get("id", record_id)).strip()
+        if not entry_id:
+            continue
+        entry_ids.append(entry_id)
+        vectors.append(embedding)
+
+    if not vectors or dim == 0:
+        _ANN_INDEX_CACHE["index"] = None
+        _ANN_INDEX_CACHE["ids"] = None
+        _ANN_INDEX_CACHE["signature"] = signature
+        return None, None
+
+    matrix = np.asarray(vectors, dtype=np.float32)
+    # Use positional integer labels; entry_ids[i] maps to label i.
+    ann = ANNIndex(dim=dim, max_elements=max(len(entry_ids) * 2, 1000))
+    ann.add(matrix, list(range(len(entry_ids))))
+
+    _ANN_INDEX_CACHE["index"] = ann
+    _ANN_INDEX_CACHE["ids"] = entry_ids
+    _ANN_INDEX_CACHE["signature"] = signature
+    return ann, entry_ids
+
+def ann_dense_scores(
+    query: str,
+    EMBEDDING_RUNTIME: Dict[str, object],
+    embeddings_index_path: Optional[str] = None,
+    top_k: int = 100,
+) -> Tuple[Optional[Dict[str, float]], Optional[str], Dict[str, object]]:
+    """ANN-accelerated dense scoring.
+
+    Returns ``(scores, error, meta)`` in the same shape as
+    ``search_ranking.dense_scores``. ``scores`` maps entry_id -> normalised
+    cosine score in [0, 1].
+
+    Returns ``(None, reason, meta)`` when the ANN path is unavailable (hnswlib
+    not installed) or the embeddings index is empty/unusable; the caller should
+    then fall back to the brute-force dense_scores.
+    """
+    from ann_index import ANNIndex
+    from search_ranking import (
+        embed_query,
+        normalize_embedding_adapter,
+        DEFAULT_MODEL,
+        HASH_MODEL,
+        VECTOR_SCHEMA_VERSION,
+        build_embedding_config_hash,
+    )
+    import numpy as np
+
+    meta: Dict[str, object] = {"queryEmbeddingCacheHit": False, "ann": True}
+    if not ANNIndex.is_available():
+        return None, "ann-unavailable:hnswlib-not-installed", meta
+
+    ann, entry_ids = build_ann_index(embeddings_index_path)
+    if ann is None or not entry_ids:
+        return None, "ann-unavailable:empty-embeddings-index", meta
+
+    # Resolve the query embedding using the stored index metadata, mirroring the
+    # schema/config validation in search_ranking.dense_scores.
+    records = load_embeddings_index()
+    first_record = next(iter(records.values()))
+    first_schema_version = int(first_record.get("featureSchemaVersion", 0) or 0)
+    if first_schema_version != VECTOR_SCHEMA_VERSION:
+        return None, (
+            f"embedding-schema-version-mismatch:stored={first_schema_version},"
+            f"expected={VECTOR_SCHEMA_VERSION};rebuild-memory-embeddings-required"
+        ), meta
+
+    model_name = str(first_record.get("model", DEFAULT_MODEL)).strip() or DEFAULT_MODEL
+    backend = normalize_embedding_adapter(str(first_record.get("backend", "")).strip(), model_name) or "hash"
+    if model_name.startswith("hashing-"):
+        model_name = HASH_MODEL
+    record_config_hash = str(first_record.get("configHash", "")).strip()
+    query_runtime = dict(EMBEDDING_RUNTIME)
+    if record_config_hash:
+        active_adapter = normalize_embedding_adapter(
+            EMBEDDING_RUNTIME.get("adapter") or EMBEDDING_RUNTIME.get("backend"),
+            str(EMBEDDING_RUNTIME.get("model", DEFAULT_MODEL) or DEFAULT_MODEL),
+        ) or "hash"
+        active_model_name = (
+            HASH_MODEL
+            if active_adapter == "hash"
+            else str(EMBEDDING_RUNTIME.get("model", DEFAULT_MODEL) or DEFAULT_MODEL).strip() or DEFAULT_MODEL
+        )
+        active_config_hash = build_embedding_config_hash(
+            active_adapter,
+            active_model_name,
+            str(EMBEDDING_RUNTIME.get("baseUrl", "")),
+        )
+        if record_config_hash != active_config_hash:
+            return None, "embedding-config-mismatch:rebuild-memory-embeddings-required", meta
+        query_runtime["adapter"] = active_adapter
+        query_runtime["backend"] = active_adapter
+        query_runtime["model"] = active_model_name
+    else:
+        query_runtime["adapter"] = backend
+        query_runtime["backend"] = backend
+        query_runtime["model"] = model_name
+
+    query_vector, error, query_embedding_cache_hit = embed_query(query, query_runtime, model_name)
+    meta["queryEmbeddingCacheHit"] = bool(query_embedding_cache_hit)
+    if error is not None or query_vector is None:
+        return None, error, meta
+    if len(query_vector) != ann.dim:
+        return None, f"embedding-dimension-mismatch:index={ann.dim},query={len(query_vector)}", meta
+
+    # Over-fetch candidates so the per-entry best-score reduction has enough
+    # headroom (one entry may have multiple field embeddings in the index).
+    candidate_k = min(max(top_k * 4, 50), len(entry_ids))
+    results = ann.search(np.asarray(query_vector, dtype=np.float32), k=candidate_k)
+
+    # Reduce to best cosine score per entry_id (distance = 1 - cosine).
+    best_by_entry: Dict[str, float] = {}
+    for label, distance in results:
+        if label < 0 or label >= len(entry_ids):
+            continue
+        entry_id = entry_ids[label]
+        cosine = 1.0 - float(distance)
+        if cosine <= 0:
+            continue
+        existing = best_by_entry.get(entry_id)
+        if existing is None or cosine > existing:
+            best_by_entry[entry_id] = cosine
+
+    if not best_by_entry:
+        return {}, None, meta
+
+    max_score = max(best_by_entry.values())
+    scores: Dict[str, float] = {
+        eid: (float(s) / max_score if max_score > 0 else 0.0)
+        for eid, s in best_by_entry.items()
+    }
+    return scores, None, meta

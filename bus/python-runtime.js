@@ -1,7 +1,7 @@
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
-import { spawnSync } from "child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -81,7 +81,7 @@ function resolveLatestPythonFromDirectory(rootPath, source) {
     }
 
     return buildRuntime(candidates[0], [], source);
-  } catch (_error) {
+  } catch {
     return null;
   }
 }

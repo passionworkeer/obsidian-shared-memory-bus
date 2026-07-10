@@ -21,7 +21,7 @@ try {
   // Node >= 14.5
   const { AsyncLocalStorage } = require("node:async_hooks");
   _als = new AsyncLocalStorage();
-} catch (_e) {
+} catch {
   // Node < 14.5 — no-op fallback
 }
 
@@ -55,10 +55,19 @@ export function getCurrentTraceId() {
 /**
  * Sets the current trace ID for the current synchronous execution frame.
  * Prefer `withTrace()` for async call chains.
+ *
+ * Q-HIGH-10: 同步镜像 trace id 到 process.env.AI_MEMORY_TRACE_ID;
+ * Python 子进程自动继承 env,后续 os.environ.get('AI_MEMORY_TRACE_ID')
+ * 可在 Python worker 日志中打印 trace id,跨 Node→Python 边界追踪。
  * @param {string|undefined} id
  */
 export function setCurrentTraceId(id) {
   _currentTraceId = id;
+  if (id) {
+    process.env.AI_MEMORY_TRACE_ID = id;
+  } else {
+    delete process.env.AI_MEMORY_TRACE_ID;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -161,11 +170,15 @@ export function createStructuredLogger(component) {
 export function withTrace(traceId, fn, ...args) {
   return runAsync(traceId, async (...a) => {
     const prev = _currentTraceId;
+    const prevEnv = process.env.AI_MEMORY_TRACE_ID;
     _currentTraceId = traceId;
+    process.env.AI_MEMORY_TRACE_ID = traceId;
     try {
       return await fn(...a);
     } finally {
       _currentTraceId = prev;
+      if (prevEnv === undefined) delete process.env.AI_MEMORY_TRACE_ID;
+      else process.env.AI_MEMORY_TRACE_ID = prevEnv;
     }
   }, ...args);
 }

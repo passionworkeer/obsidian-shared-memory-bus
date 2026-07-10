@@ -1,6 +1,6 @@
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -30,6 +30,7 @@ const EMBEDDING_ADAPTER_ALIASES = {
   "sentence-transformers": "transformer",
   openai: "openai-compatible",
   "openai-compatible": "openai-compatible",
+  gemini: "gemini",
 };
 
 function isPlainObject(value) {
@@ -114,7 +115,7 @@ function cloneJsonValue(value, fallback = {}) {
 
   try {
     return JSON.parse(JSON.stringify(value));
-  } catch (_error) {
+  } catch {
     return { ...value };
   }
 }

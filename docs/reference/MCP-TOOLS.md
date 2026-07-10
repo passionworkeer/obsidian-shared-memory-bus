@@ -24,6 +24,8 @@
 
 **Primary** search tool. Queries the canonical shared Obsidian memory bus across Codex, Claude Code, OpenCode, Copilot, Cursor, Trae, and OpenClaw. Defaults to hybrid retrieval and falls back to BM25 when dense embeddings are unavailable.
 
+> **用哪个检索工具？** `search_shared_memory` 是主检索工具（语义检索 vault `00-System/ai-memory` 全量数据，走 worker pool + Python `semantic_search.py`）。`memory_search` 是 BM25 **项目**工具（仅读 `projects/*.jsonl`），vault 无 `projects/` 数据时返回空属设计行为——要跨工具语义检索请用 `search_shared_memory`。
+
 **Implementation**: Spawns a persistent Node.js search worker (JSONL-over-stdin/stdout IPC) backed by a Python semantic search subprocess. If the worker is unavailable, falls back to a one-shot Python process. Timeout is **120 seconds**.
 
 **Input**
@@ -391,7 +393,7 @@ Inserts a new item into the local `claude-mem` store.
     "observation": {
       "id": 2482,
       "title": "codex-bridge-probe",
-      "project": "obsidian-shared-memory-bus"
+      "project": "yt"
     }
   },
   "response": {

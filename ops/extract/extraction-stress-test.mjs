@@ -18,7 +18,7 @@ import assert from "node:assert";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
-const { resolveStoreRoot, getProjectsRoot } = require("../bus/store-root.js");
+const { resolveStoreRoot, getProjectsRoot } = require("../../bus/store-root.js");
 
 // ---------------------------------------------------------------------------
 // Config
@@ -29,6 +29,11 @@ const STORE_ROOT = resolveStoreRoot();
 const PROJECTS_ROOT = getProjectsRoot(STORE_ROOT);
 const PROJECT_JSONL = path.join(PROJECTS_ROOT, `${TEST_PROJECT}.jsonl`);
 const PENDING_FILE = path.join(STORE_ROOT, "extraction-pending.jsonl");
+const REQUIRED_EXTRACTION_MODULES = [
+  "extraction-pipeline.mjs",
+  "extraction-validate.mjs",
+  "extract-transcript.mjs",
+];
 
 // Mock LLM response — always returns valid XML
 const MOCK_XML_RESPONSE = `<extraction>
@@ -62,6 +67,10 @@ function cleanTestFiles() {
   for (const f of [PROJECT_JSONL, PENDING_FILE]) {
     if (fs.existsSync(f)) fs.unlinkSync(f);
   }
+}
+
+function findMissingExtractionModules() {
+  return REQUIRED_EXTRACTION_MODULES.filter((name) => !fs.existsSync(path.join(__dirname, name)));
 }
 
 function countJsonlLines(filePath) {
@@ -154,7 +163,7 @@ async function testJsonlIntegrityUnderConcurrentWrite({ concurrency, iterations 
   const baseUrl = `http://127.0.0.1:${mockServerPort}`;
 
   // Run pipeline concurrently
-  const { runExtraction } = await import("../ops/extraction-pipeline.mjs");
+  const { runExtraction } = await import("./extraction-pipeline.mjs");
 
   const tasks = [];
   for (let iter = 0; iter < iterations; iter++) {
@@ -211,7 +220,7 @@ async function testPendingFallbackOnLLMFailure() {
   // Direct parseXml call bypasses env-var / module-const timing issue.
   const start = now();
 
-  const { parseExtractionXml, meetsQualityBar } = await import("../ops/extraction-validate.mjs");
+  const { parseExtractionXml, meetsQualityBar } = await import("./extraction-validate.mjs");
 
   // Simulate: LLM down → garbage XML response
   const garbageXml = `<extraction><session_type>unknown</session_type><confidence>1.5</confidence></extraction>`;
@@ -254,7 +263,7 @@ function appendJsonlToFile(filePath, obj) {
 }
 
 async function testValidateRecordPerformance() {
-  const { validateRecord } = await import("../ops/extraction-pipeline.mjs");
+  const { validateRecord } = await import("./extraction-pipeline.mjs");
 
   const start = now();
   const ITERATIONS = 50000;
@@ -290,7 +299,7 @@ async function testValidateRecordPerformance() {
 }
 
 async function testParseXmlPerformance() {
-  const { parseExtractionXml } = await import("../ops/extraction-validate.mjs");
+  const { parseExtractionXml } = await import("./extraction-validate.mjs");
 
   const start = now();
   const ITERATIONS = 10000;
@@ -316,7 +325,7 @@ async function testParseXmlPerformance() {
 }
 
 async function testBuildTranscriptPerformance() {
-  const { buildExtractionTranscript } = await import("../ops/extract-transcript.mjs");
+  const { buildExtractionTranscript } = await import("./extract-transcript.mjs");
 
   const start = now();
   const ITERATIONS = 5000;
@@ -347,7 +356,7 @@ async function testMemoryLeakDetection() {
   // Run pipeline 50 times and measure RSS growth
   const baseline = process.memoryUsage().heapUsed;
 
-  const { runExtraction } = await import("../ops/extraction-pipeline.mjs");
+  const { runExtraction } = await import("./extraction-pipeline.mjs");
   const baseUrl = `http://127.0.0.1:${mockServerPort}`;
 
   const transcripts = [];
@@ -395,6 +404,16 @@ async function main() {
   console.log("  提取层压力测试");
   console.log("=".repeat(70));
   console.log("");
+
+  const missingModules = findMissingExtractionModules();
+  if (missingModules.length > 0) {
+    console.log("skipped: optional extraction modules unavailable");
+    for (const name of missingModules) {
+      console.log(`  missing: ops/extract/${name}`);
+    }
+    process.exit(0);
+    return;
+  }
 
   // Setup
   cleanTestFiles();

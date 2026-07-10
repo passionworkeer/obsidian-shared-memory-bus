@@ -1,0 +1,36 @@
+# Tests + dev docs (not needed at runtime by consumers)
+tests/
+docs/
+
+# CI / IDE / index / VCS
+.github/
+.claude/
+.agents/
+.gitnexus/
+.pytest_cache/
+.git/
+.editorconfig
+.gitattributes
+
+# Runtime caches (regenerated on demand)
+cache/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+
+# Node dependencies (declared in package.json, not bundled)
+**/node_modules/
+
+# Landing page + screenshots (project showcase, not runtime)
+web/
+assets/
+
+# Build artifacts
+*.tgz
+*.log
+**/.DS_Store
+
+# Root lockfiles (not needed in the published package)
+package-lock.json
+shared-mcp/package-lock.json
+cli/package-lock.json

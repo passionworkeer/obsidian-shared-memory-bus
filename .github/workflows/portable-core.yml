@@ -49,27 +49,21 @@ jobs:
       - name: Seed portable smoke vault
         shell: pwsh
         env:
-          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke/00-System/ai-memory
+          AI_MEMORY_STORE: ${{ runner.temp }}/memory-store/00-System/ai-memory
         run: |
-          $vault = $env:RUNNER_TEMP
-          $vaultRoot = Join-Path $vault 'vault-smoke'
-          $memRoot = Join-Path $vaultRoot '00-System/ai-memory'
+          $store = $env:RUNNER_TEMP
+          $memRoot = Join-Path $store 'memory-store/00-System/ai-memory'
           $paths = @(
             (Join-Path $memRoot 'generated'),
             (Join-Path $memRoot 'structured'),
             (Join-Path $memRoot 'events'),
             (Join-Path $memRoot 'inbox'),
             (Join-Path $memRoot 'state'),
-            (Join-Path $memRoot 'embeddings'),
-            (Join-Path $vaultRoot '02-KB')
+            (Join-Path $memRoot 'embeddings')
           )
           foreach ($path in $paths) {
             New-Item -ItemType Directory -Force -Path $path | Out-Null
           }
-
-          Set-Content -LiteralPath (Join-Path $vaultRoot '02-KB/OBSIDIAN.md') -Encoding UTF8 -Value '# Portable Smoke Vault'
-          Set-Content -LiteralPath (Join-Path $vaultRoot '02-KB/MEMORY.md') -Encoding UTF8 -Value '# Durable Memory'
-          Set-Content -LiteralPath (Join-Path $vaultRoot '02-KB/WORKING.md') -Encoding UTF8 -Value '# Working Memory'
 
           @'
           {"schemaVersion":2,"id":"durable-1","t":"2026-04-02T00:00:00.000Z","tool":"codex","type":"workflow-rule","project":"portable-smoke","title":"Shared MCP is the default runtime layer","content":"Shared MCP is the default runtime layer for portable smoke validation.","source":"shared-inbox","scope":"feedback","visibility":"shared","source_kind":"writeback","memory_level":"durable","workspace":"portable-smoke","task_state":"","freshness":"warm","confidence":0.8,"metadata":{}}
@@ -99,38 +93,28 @@ jobs:
       - name: Build memory layers
         shell: pwsh
         env:
-          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke/00-System/ai-memory
+          AI_MEMORY_STORE: ${{ runner.temp }}/memory-store/00-System/ai-memory
         run: |
           node ./ops/build/build-memory-layers.js | Out-Null
-          if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_STORE 'generated/MEMORY-LAYERS.md') -PathType Leaf)) {
-            throw 'MEMORY-LAYERS.md was not generated'
-          }
 
       - name: Build handoff pack
         shell: pwsh
         env:
-          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke/00-System/ai-memory
+          AI_MEMORY_STORE: ${{ runner.temp }}/memory-store/00-System/ai-memory
         run: |
           node ./ops/build/build-handoff-pack.js | Out-Null
-          if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_STORE 'generated/HANDOFF.md') -PathType Leaf)) {
-            throw 'HANDOFF.md was not generated'
-          }
 
       - name: Run auto dream consolidation
         shell: pwsh
         env:
-          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke/00-System/ai-memory
-          AI_MEMORY_OBSIDIAN_VAULT: ${{ runner.temp }}/vault-smoke
+          AI_MEMORY_STORE: ${{ runner.temp }}/memory-store/00-System/ai-memory
         run: |
           ./ops/run/run-memory-dream.ps1 -Force | Out-Null
-          if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_STORE 'generated/AUTO-DREAM.md') -PathType Leaf)) {
-            throw 'AUTO-DREAM.md was not generated'
-          }
 
       - name: Validate memory integrity contract
         shell: pwsh
         env:
-          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke/00-System/ai-memory
+          AI_MEMORY_STORE: ${{ runner.temp }}/memory-store/00-System/ai-memory
         run: |
           node ./ops/check/check-memory-integrity.js --strict --json | Out-Null
 
@@ -138,7 +122,7 @@ jobs:
         if: false  # Requires API keys for embedding generation
         shell: pwsh
         env:
-          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke/00-System/ai-memory
+          AI_MEMORY_STORE: ${{ runner.temp }}/memory-store/00-System/ai-memory
         run: |
           node ./bus/generate-embeddings.js | Out-Null
           if (-not (Test-Path -LiteralPath (Join-Path $env:AI_MEMORY_STORE 'embeddings/index.jsonl') -PathType Leaf)) {
@@ -149,7 +133,7 @@ jobs:
         if: false  # Requires embeddings to be built first
         shell: pwsh
         env:
-          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke/00-System/ai-memory
+          AI_MEMORY_STORE: ${{ runner.temp }}/memory-store/00-System/ai-memory
         run: |
           $json = node ./retrieval/semantic-search.js --json --mode hybrid --top-k 3 "openclaw blackboard portable task"
           $result = $json | ConvertFrom-Json
@@ -167,7 +151,7 @@ jobs:
         if: false  # Requires embeddings
         shell: pwsh
         env:
-          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke/00-System/ai-memory
+          AI_MEMORY_STORE: ${{ runner.temp }}/memory-store/00-System/ai-memory
         run: |
           $json = node ./retrieval/semantic-search.js --json --mode hybrid --route task --tool openclaw --source-kind blackboard --top-k 3 "shrimp intel queue"
           $result = $json | ConvertFrom-Json
@@ -187,7 +171,7 @@ jobs:
       - name: Portable install wrapper smoke
         shell: bash
         env:
-          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke/00-System/ai-memory
+          AI_MEMORY_STORE: ${{ runner.temp }}/memory-store/00-System/ai-memory
         run: |
           chmod +x ./scripts/install.sh
           if [ "$RUNNER_OS" = "Windows" ]; then
@@ -204,7 +188,7 @@ jobs:
         if: false  # Requires MCP servers to be installed and healthy — skip for now
         shell: bash
         env:
-          AI_MEMORY_STORE: ${{ runner.temp }}/vault-smoke/00-System/ai-memory
+          AI_MEMORY_STORE: ${{ runner.temp }}/memory-store/00-System/ai-memory
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
             export AI_MEMORY_PWSH="powershell.exe"

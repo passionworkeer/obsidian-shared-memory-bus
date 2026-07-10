@@ -3,14 +3,29 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { fileURLToPath } from "url";
+import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ORIGINAL_AI_MEMORY_STORE = process.env.AI_MEMORY_STORE;
+const TEST_STORE_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "ai-memory-parse-test-"));
+process.env.AI_MEMORY_STORE = TEST_STORE_ROOT;
 
-// bus/vault-root.js honours AI_MEMORY_OBSIDIAN_VAULT env var, so we set the
-// env here instead of writing a stub to the production source tree.
-process.env.AI_MEMORY_OBSIDIAN_VAULT = process.env.AI_MEMORY_OBSIDIAN_VAULT
-  || path.join(os.tmpdir(), `vault-parse-${Date.now()}`);
+// ESM Note: Module.prototype._compile patching is not available in ESM
+// The module will need to be imported directly and exports used
+
+const memoryLayersParse = await import(
+  `../../../ops/memory/memory-layers-parse.js?testStore=${encodeURIComponent(TEST_STORE_ROOT)}`
+);
+
+if (ORIGINAL_AI_MEMORY_STORE === undefined) {
+  delete process.env.AI_MEMORY_STORE;
+} else {
+  process.env.AI_MEMORY_STORE = ORIGINAL_AI_MEMORY_STORE;
+}
+
+test.after(() => {
+  fs.rmSync(TEST_STORE_ROOT, { recursive: true, force: true });
+});
 
 const {
   normalizeSpaces, sha1, sha256, parseTimestamp, classifyScope,
@@ -29,7 +44,7 @@ const {
   shouldSkipAsRecentDuplicate, getFreshness, tokenize,
   NON_PROMOTABLE_PROMOTION_TYPES,
   loadStructuredRecords,
-} = await import("../../../ops/memory/memory-layers-parse.js");
+} = memoryLayersParse;
 
 // ---------------------------------------------------------------------------
 // Path constants
@@ -728,15 +743,41 @@ test("withFileLock: idempotent sequential calls", () => {
 // loadEntityExtractor / loadKnowledgeGraph
 // ---------------------------------------------------------------------------
 
-test("loadEntityExtractor: returns object with extractFromRecord", () => {
-  const extractor = loadEntityExtractor();
+test("loadEntityExtractor: returns object with extractFromRecord", async () => {
+  const extractor = await loadEntityExtractor();
   assert.equal(typeof extractor.extractFromRecord, "function");
-  const result = extractor.extractFromRecord({ id: "test", content: "test" });
+  const result = extractor.extractFromRecord({
+    id: "test",
+    content: "Alice works on MemPalace project with Postgres",
+  });
   assert.ok(result !== null && typeof result === "object");
+  assert.ok(
+    Array.isArray(result.entities) && result.entities.some((entity) => entity.name === "Alice"),
+    "lazy-loaded extractor should enrich records instead of returning passthrough records"
+  );
 });
 
-test("loadKnowledgeGraph: returns object with ingestRecord and close", () => {
-  const kg = loadKnowledgeGraph();
-  assert.equal(typeof kg.ingestRecord, "function");
-  assert.equal(typeof kg.close, "function");
+test("loadKnowledgeGraph: returns real graph object when node:sqlite is available", async (t) => {
+  try {
+    await import("node:sqlite");
+  } catch {
+    t.skip("node:sqlite is not available on this Node.js version");
+    return;
+  }
+
+  // Build a KG against a temp store so this test does not collide with
+  // production STORE_ROOT state or with the tests/unit/js/knowledge-graph.test.js
+  // suite (which also writes to a real SQLite database).
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "kg-lazy-"));
+  try {
+    const { KnowledgeGraph } = await import("../../../ops/knowledge/knowledge-graph.js");
+    const kg = new KnowledgeGraph({ vaultRoot: tmp });
+    assert.equal(typeof kg.ingestRecord, "function");
+    assert.equal(typeof kg.stats, "function");
+    assert.equal(typeof kg.close, "function");
+    assert.equal(kg.stats().entities, 0, "fresh tempdir KG should be empty");
+    kg.close();
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });

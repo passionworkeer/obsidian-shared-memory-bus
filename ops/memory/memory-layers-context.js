@@ -3,15 +3,9 @@
 // Extracted from ops/build-memory-layers.js (2019 lines)
 // ---------------------------------------------------------------------------
 
-import fs from "fs";
-import path from "path";
 const {
   normalizeSpaces,
-  sha256,
-  getFreshness,
-  getFreshness: getFreshnessParse,  // alias
   STRUCTURED_ROOT,
-  GENERATED_ROOT,
   MEMORY_LAYERS_MD: PARSE_MEMORY_LAYERS_MD,
   MEMORY_LAYERS_JSON: PARSE_MEMORY_LAYERS_JSON,
   GLOBAL_CONTEXT_MD: PARSE_GLOBAL_CONTEXT_MD,
@@ -269,7 +263,7 @@ function buildGlobalContext(layers) {
         .map(([k, n]) => `- ${k}: ${n} 条`)
         .join("\n"),
       "",
-      "完整记录请查看 `00-System/ai-memory/structured/` 下的 JSONL 文件。",
+      "完整记录请查看 store root 下的 `structured/` JSONL 文件。",
       ""
     );
   } else {
@@ -287,7 +281,7 @@ function buildGlobalContext(layers) {
   }
 
   // Build meta JSON (immutable — constructed from scratch)
-  const metaSegments = Object.entries(segments).map(([key, seg]) => ({
+  const metaSegments = Object.entries(segments).map(([, seg]) => ({
     name: seg.name,
     scope: seg.scope,
     budget: seg.budget,
@@ -421,7 +415,7 @@ function buildMemoryIndex(layers) {
     for (const rec of records.slice(0, 20)) {
       const title = normalizeSpaces(rec.title || rec.id || "(untitled)") || "(untitled)";
       const desc = normalizeSpaces(
-        (rec.description || String(rec.content || "").substring(0, 60)).replace(/[#*`_~\[\]]/g, "")
+        (rec.description || String(rec.content || "").substring(0, 60)).replace(/[#*`_~[\]]/g, "")
       );
       const id = normalizeSpaces(rec.id || "") || "";
       const slug = id.replace(/[^a-zA-Z0-9]/g, "-").substring(0, 20);
@@ -443,7 +437,7 @@ function buildMemoryIndex(layers) {
   lines.push("- [HANDOFF.md](./HANDOFF.md) — 交接包");
   lines.push("- [MEMORY-LAYERS.md](./MEMORY-LAYERS.md) — 层级概览");
   lines.push("");
-  lines.push("> Memory hygiene stats: see `00-System/ai-memory/generated/memory_hygiene_report.json` if present");
+  lines.push("> Memory hygiene stats: see `generated/memory_hygiene_report.json` under the store root if present");
 
   return lines.join("\n");
 }

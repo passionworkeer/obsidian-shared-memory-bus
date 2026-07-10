@@ -17,7 +17,7 @@
 
 import path from "node:path";
 import fs from "node:fs";
-import { fileURLToPath } from "url";
+import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -88,19 +88,19 @@ function migrateRecordFromV1ToV2(record) {
 
 /**
  * Placeholder for future v2 → v3 migration.
- * Currently returns record unchanged — update when v3 schema is defined.
+ * v3 schema is not yet defined; throws to avoid silent no-op on user data.
  *
  * @param {object} record
- * @returns {object}
+ * @returns {object} - Never returns; throws until v3 schema is defined.
+ * @throws {Error} Always — v3 migration is not implemented.
  */
 function migrateRecordFromV2ToV3(record) {
   if (!record || typeof record !== "object") {
     throw new Error("migrate-record-from-v2-to-v3: source record must be a plain object");
   }
-
-  console.warn("[migrate-schema] v2→v3 migration is not yet implemented — returning record unchanged");
-
-  return { ...record };
+  throw new Error(
+    "migrate-record-from-v2-to-v3: v3 schema is not yet defined — see docs/PROJECT_AUDIT_*.md §I-MED-1",
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -179,7 +179,7 @@ if (args.includes("--dry-run")) {
 let input;
 try {
   input = JSON.parse(fs.readFileSync(0, "utf8").trim());
-} catch (err) {
+} catch {
   console.error("Usage: echo '{...}' | node migrate-schema.js");
   console.error("Or:    node migrate-schema.js --dry-run");
   process.exit(1);

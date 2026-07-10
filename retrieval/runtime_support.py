@@ -8,8 +8,9 @@ import importlib.util
 import json
 import os
 import sys
+import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 # Dynamically import the sibling platform.py module (avoids stdlib name collision
 # and works whether or not retrieval/ is a package with __init__.py).
@@ -35,7 +36,8 @@ IS_MACOS = _get_platform_name() == "darwin"
 is_windows = _is_windows_fn
 get_platform_name = _get_platform_name
 get_default_store_root = _get_default_store_root
-_WINDOWS_ENV_CACHE: Dict[str, str] = {}
+_WINDOWS_ENV_CACHE: Dict[str, Tuple[str, float]] = {}
+_WINDOWS_ENV_CACHE_TTL_S = 60.0  # re-read registry env (e.g. rotated API keys) after this
 EMBEDDING_RUNTIME_RESERVED_KEYS = {
     "activeProfile",
     "activeProvider",
@@ -117,9 +119,12 @@ def merge_config_blocks(*blocks: object) -> Dict[str, object]:
 def read_windows_environment_variable(name: str) -> str:
     if not IS_WINDOWS:
         return ""
+    now = time.time()
     cached = _WINDOWS_ENV_CACHE.get(name)
     if cached is not None:
-        return cached
+        value, ts = cached
+        if now - ts < _WINDOWS_ENV_CACHE_TTL_S:
+            return value
     value = ""
     try:
         import winreg  # type: ignore
@@ -139,7 +144,7 @@ def read_windows_environment_variable(name: str) -> str:
                 break
     except Exception:
         value = ""
-    _WINDOWS_ENV_CACHE[name] = value
+    _WINDOWS_ENV_CACHE[name] = (value, now)
     return value
 
 
@@ -238,6 +243,30 @@ def resolve_vault_root() -> Path:
         + tried
         + "]. Set AI_MEMORY_OBSIDIAN_VAULT or OBSIDIAN_VAULT_ROOT to your vault path."
     )
+
+
+def resolve_store_root() -> Path:
+    """Resolve the canonical .ai-memory store root.
+
+    Priority: explicit store env > vault bridge > AI_MEMORY_ROOT (legacy) > default.
+    The vault bridge makes the Obsidian vault's ``00-System/ai-memory`` the
+    canonical store when it exists, so retrieval reads real data without any
+    extra config. CLAUDE.md sets Obsidian as the canonical long-term memory;
+    this code now matches that intent.
+    """
+    explicit = first_non_empty_env("AI_MEMORY_STORE", "AI_MEMORY_STORE_ROOT")
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    try:
+        vault_ai_memory = resolve_vault_root() / "00-System" / "ai-memory"
+        if vault_ai_memory.is_dir():
+            return vault_ai_memory.resolve()
+    except RuntimeError:
+        pass
+    legacy_root = first_non_empty_env("AI_MEMORY_ROOT")
+    if legacy_root:
+        return Path(legacy_root).expanduser().resolve()
+    return get_default_store_root().expanduser().resolve()
 
 
 def resolve_runtime_root_candidates(anchor_file: str = "", root_override: str = "") -> List[Path]:

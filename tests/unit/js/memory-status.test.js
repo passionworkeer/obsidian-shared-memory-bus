@@ -1,5 +1,9 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { createMemoryStatus } from "../../../shared-mcp/memory-status.js";
 
 // ---------------------------------------------------------------------------
 // Pure function implementations (mirrored from memory-status.js)
@@ -184,6 +188,70 @@ describe("compactUnique", () => {
   test("default parameters", () => {
     const result = compactUnique(["one", "two"]);
     assert.strictEqual(result.length, 2);
+  });
+});
+
+describe("memory status handlers", () => {
+  test("get_memory_overview reads canonical generated and structured roots", async () => {
+    const storeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "memory-status-store-"));
+    const vaultRoot = fs.mkdtempSync(path.join(os.tmpdir(), "memory-status-vault-"));
+    try {
+      fs.mkdirSync(path.join(storeRoot, "generated"), { recursive: true });
+      fs.mkdirSync(path.join(storeRoot, "structured"), { recursive: true });
+      fs.writeFileSync(
+        path.join(storeRoot, "generated", "GLOBAL-CONTEXT.meta.json"),
+        JSON.stringify({
+          totalRecords: 1,
+          estimatedTotalTokens: 42,
+          segments: [{ name: "user", totalCount: 1, displayedRecords: [{ title: "Canonical title" }] }],
+        }),
+        "utf8"
+      );
+      fs.writeFileSync(
+        path.join(storeRoot, "structured", "task-memory.jsonl"),
+        `${JSON.stringify({ id: "task-1", title: "Canonical task", task_state: "open" })}\n`,
+        "utf8"
+      );
+
+      const { handlers } = createMemoryStatus({
+        VAULT_ROOT: vaultRoot,
+        GENERATED_ROOT: path.join(storeRoot, "generated"),
+        STRUCTURED_ROOT: path.join(storeRoot, "structured"),
+        METRICS: {
+          searches_total: 0,
+          search_latency_seconds: [],
+          embeddings_index_age_seconds: null,
+          embeddings_index_size: 0,
+          structured_files_total: 0,
+          promotion_queue_size: 0,
+          search_worker_restarts_total: 0,
+          search_worker_backpressure_rejected: 0,
+          mcp_requests_total: 0,
+        },
+        readEmbeddingRuntimeSummary: () => ({}),
+        readEmbeddingsSummary: () => ({}),
+        refreshEmbeddingMetricsFromSummary: () => {},
+        buildEmbeddingIndexState: () => ({}),
+        readMemoryIntegritySummary: () => ({}),
+        readMemoryHygieneReport: () => ({ health: { score: 99, grade: "A" }, recommendations: [] }),
+        readWatchdogState: () => ({}),
+        getClaudeMemHealth: async () => ({ ok: true }),
+        getSearchWorkerHealth: async () => ({}),
+        getSearchWorkerSnapshot: () => ({ circuitBreaker: {} }),
+      });
+
+      const result = await handlers.get_memory_overview({});
+      const payload = JSON.parse(result.content[0].text);
+
+      assert.equal(payload.ok, true);
+      assert.equal(payload.memory_summary.total_records, 1);
+      assert.equal(payload.active_tasks.count, 1);
+      assert.equal(payload.workspace.root, vaultRoot);
+      assert.equal(payload.memory_summary.segments.user.totalCount, 1);
+    } finally {
+      fs.rmSync(storeRoot, { recursive: true, force: true });
+      fs.rmSync(vaultRoot, { recursive: true, force: true });
+    }
   });
 });
 

@@ -3,6 +3,9 @@
 .env.*
 *.env
 
+# Internal strategy/planning docs (author-only, not for public release)
+docs/internal/
+
 # Generated startup scripts (contain user-specific absolute paths)
 shared-mcp/startup/
 
@@ -19,9 +22,14 @@ __pycache__/
 .venv/
 ops/__pycache__/
 retrieval/__pycache__/
-retrieval/cache/__pycache__/
 *.egg-info/
 .pytest_cache/
+
+# Runtime-generated memory store artifacts (live in user store directory, not in project)
+# Note: ops/adapters/generated/ contains source-code schema files — NOT gitignored
+generated/
+/structured/
+test-e2e.jsonl
 
 # Bundles and generated state
 node_modules/
@@ -46,14 +54,21 @@ retrieval/eval/results.json
 .claude/
 .cursor/
 .vscode/
+.superpowers/
 cursor/
 cursor
 .agents/
+!.agents/
+!.agents/skills/
+!.agents/skills/*.md
 .trae/
 
 # Machine-specific client configs (contain user/environment-specific settings)
 opencode.json
 c8rc.json
+
+# Git worktrees (created by Agent tool, never commit)
+.worktrees/
 
 # Template .config (duplicate of config/, use config/ instead)
 templates/.memory/.config/
@@ -72,8 +87,10 @@ _run_*.sh
 $null
 interview/
 
-# Test-generated stubs
-ops/bus/
+# Memory bus sync mirrors (generated, user-specific)
+imported/
+/inbox/
+agents.json
 
 # Debug/test scratch files
 _test_*.py

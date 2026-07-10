@@ -23,19 +23,22 @@ jobs:
         run: npm install --prefix shared-mcp eslint
 
       - name: ESLint
-        run: npx eslint shared-mcp/*.js cli/*.js bus/*.js ops/*.js retrieval/*.js --ignore-pattern node_modules/ --ignore-pattern dist/ || true
+        # Flat config (eslint.config.js) is active; ESLint 10 ignores .eslintrc.cjs.
+        run: npx eslint shared-mcp/*.js cli/*.js bus/*.js ops/**/*.js retrieval/*.js --ignore-pattern node_modules/ --ignore-pattern dist/
 
       - name: Coverage baseline
         run: |
           cd shared-mcp
           npm install
-          npx c8 --exclude='**/node_modules/**' --reporter=text --report-dir=../coverage npx eslint shared-mcp/*.js --ignore-pattern node_modules/ || true
+          npx c8 --exclude='**/node_modules/**' --reporter=text --report-dir=../coverage npx eslint shared-mcp/*.js --ignore-pattern node_modules/
         continue-on-error: true
 
       - name: Security audit
+        # High/critical vulnerabilities must block CI. Exit code 1 from npm audit
+        # causes this step (and the job) to fail until the dependency is patched.
         run: |
           cd shared-mcp
-          npm audit --audit-level=high || true
+          npm audit --audit-level=high
 
       - name: Shell syntax check
         run: |

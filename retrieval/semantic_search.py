@@ -28,15 +28,23 @@ _RETRIEVAL_DIR = os.path.dirname(os.path.abspath(__file__))
 if _RETRIEVAL_DIR not in sys.path:
     sys.path.insert(0, _RETRIEVAL_DIR)
 
+# Also add the parent directory (AI_MEMORY_ROOT) to sys.path for flat runtime layout
+_PARENT_DIR = os.path.dirname(_RETRIEVAL_DIR)
+if _PARENT_DIR not in sys.path:
+    sys.path.insert(0, _PARENT_DIR)
+
 import argparse
 import datetime
 import json
+import logging
 import math
 import os
 import re
 import sys
 import time as time_module
 from typing import Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Imports from submodules (split from this file)
@@ -138,7 +146,7 @@ from runtime_support import (
     normalize_bool,
     normalize_int,
     resolve_embedding_runtime,
-    resolve_vault_root,
+    resolve_store_root,
     normalize_embedding_adapter,
 )
 
@@ -237,14 +245,14 @@ _BM25_CACHE_MAX_ENTRIES = normalize_int(first_non_empty_env("AI_MEMORY_BM25_CACH
 # ---------------------------------------------------------------------------
 
 try:
-    VAULT_ROOT = str(resolve_vault_root())
+    STORE_ROOT = str(resolve_store_root())
 except RuntimeError:
-    # CI or vault-less environment: use a temp directory as fallback
+    # CI or store-less environment: use a temp directory as fallback
     import tempfile as _tmp
-    VAULT_ROOT = _tmp.mkdtemp(prefix="ai-memory-smoke-")
-AI_MEMORY_ROOT = os.path.join(VAULT_ROOT, "00-System", "ai-memory")
-STRUCTURED_DIR = os.path.join(AI_MEMORY_ROOT, "structured")
-EMBEDDINGS_INDEX = os.path.join(AI_MEMORY_ROOT, "embeddings", "index.jsonl")
+    STORE_ROOT = _tmp.mkdtemp(prefix="ai-memory-smoke-")
+AI_MEMORY_ROOT = STORE_ROOT
+STRUCTURED_DIR = os.path.join(STORE_ROOT, "structured")
+EMBEDDINGS_INDEX = os.path.join(STORE_ROOT, "embeddings", "index.jsonl")
 
 # ---------------------------------------------------------------------------
 # Resiliency infrastructure

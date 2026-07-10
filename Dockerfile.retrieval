@@ -1,0 +1,36 @@
+# =============================================================================
+# Dockerfile.retrieval — Python Retrieval Engine (Dense Embeddings)
+# =============================================================================
+# Builds the dense embeddings retrieval engine as a separate service.
+# Only needed when AI_MEMORY_EMBED_BACKEND is set to "openai" or another
+# API-based embedding provider that supports dense vectors.
+#
+# Start with: docker-compose --profile dense-embeddings up -d
+# =============================================================================
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install runtime dependencies
+RUN pip install --no-cache-dir \
+    numpy>=1.24.0 \
+    scikit-learn>=1.3.0 \
+    scipy>=1.11.0 \
+    pandas>=2.0.0 \
+    openai>=1.0.0 \
+    httpx>=0.25.0
+
+# Copy Python retrieval engine
+COPY retrieval/ /app/retrieval/
+
+# Health endpoint (simple HTTP server)
+RUN echo '#!/bin/sh\npython3 retrieval/health_server.py' > /usr/local/bin/retrieval-server && chmod +x /usr/local/bin/retrieval-server
+
+ENV AI_MEMORY_ROOT=/root/.ai-memory
+ENV AI_MEMORY_STORE=/root/.ai-memory
+ENV AI_MEMORY_EMBED_BACKEND=openai
+
+EXPOSE 8080
+
+CMD ["python3", "-m", "http.server", "8080", "--directory", "/app/retrieval"]

@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">yt hero card</title>
+  <desc id="desc">Bilingual Chinese and English hero card for yt.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07111f"/>
+      <stop offset="0.55" stop-color="#0b2533"/>
+      <stop offset="1" stop-color="#102f3f"/>
+    </linearGradient>
+    <linearGradient id="line" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#44d7ff"/>
+      <stop offset="1" stop-color="#75f0c8"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="900" fill="url(#bg)"/>
+  <g opacity="0.2" stroke="#ffffff" stroke-width="1">
+    <path d="M120 180H1480M120 300H1480M120 420H1480M120 540H1480M120 660H1480"/>
+    <path d="M260 100V780M500 100V780M740 100V780M980 100V780M1220 100V780"/>
+  </g>
+  <circle cx="800" cy="450" r="132" fill="#0e3a4a" stroke="url(#line)" stroke-width="8"/>
+  <circle cx="800" cy="450" r="70" fill="#07111f" stroke="#75f0c8" stroke-width="4"/>
+  <text x="800" y="434" text-anchor="middle" font-family="Arial, sans-serif" font-size="30" font-weight="700" fill="#ffffff">.ai-memory</text>
+  <text x="800" y="475" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" fill="#aeefff">Local Store</text>
+  <g fill="#102b3a" stroke="#44d7ff" stroke-width="4">
+    <rect x="150" y="170" width="260" height="110" rx="18"/>
+    <rect x="1190" y="170" width="260" height="110" rx="18"/>
+    <rect x="150" y="620" width="260" height="110" rx="18"/>
+    <rect x="1190" y="620" width="260" height="110" rx="18"/>
+  </g>
+  <g stroke="url(#line)" stroke-width="5" fill="none" opacity="0.95">
+    <path d="M410 225C560 230 620 330 682 390"/>
+    <path d="M1190 225C1040 230 980 330 918 390"/>
+    <path d="M410 675C560 670 620 570 682 510"/>
+    <path d="M1190 675C1040 670 980 570 918 510"/>
+  </g>
+  <g font-family="Arial, sans-serif" fill="#ffffff" text-anchor="middle">
+    <text x="280" y="238" font-size="28" font-weight="700">Codex</text>
+    <text x="1320" y="238" font-size="28" font-weight="700">Claude Code</text>
+    <text x="280" y="688" font-size="28" font-weight="700">Cursor</text>
+    <text x="1320" y="688" font-size="28" font-weight="700">Copilot</text>
+  </g>
+  <text x="120" y="95" font-family="Arial, sans-serif" font-size="62" font-weight="800" fill="#ffffff">让 AI 工具共享记忆</text>
+  <text x="120" y="148" font-family="Arial, sans-serif" font-size="30" fill="#b8eefe">Shared local memory for AI coding tools</text>
+  <text x="120" y="820" font-family="Arial, sans-serif" font-size="28" fill="#d8fff4">本地优先 · MCP 共享端点 · BM25 + 向量混合检索</text>
+  <text x="120" y="858" font-family="Arial, sans-serif" font-size="22" fill="#9cc9d8">Local-first · Shared MCP endpoints · BM25 + vector hybrid retrieval</text>
+</svg>

@@ -26,6 +26,51 @@ import re
 from typing import Callable, List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
+# ReDoS-safe regex compiler (S-MED-2)
+# ---------------------------------------------------------------------------
+# Prefer the third-party `regex` library which supports a `timeout=` kwarg on
+# compile/match/sub. Falls back to the stdlib `re` with `signal.alarm` on POSIX
+# (only effective at runtime, not at compile time) — but the stdlib path still
+# keeps the existing nested-quantifier heuristic as a coarse pre-filter.
+#
+# Reference: docs/PROJECT_AUDIT_2026-07-09.md §1.3 S-MED-2
+try:
+    import regex as _regex_mod  # type: ignore[import-untyped]
+    _HAS_REGEX_TIMEOUT = True
+except ImportError:
+    _regex_mod = None
+    _HAS_REGEX_TIMEOUT = False
+
+
+def _compile_with_redos_guard(pattern_str: str, name: str) -> Optional[re.Pattern]:
+    """Compile `pattern_str`, defending against exponential-backtracking ReDoS.
+
+    Returns the compiled pattern, or None on rejection / timeout.
+    """
+    if _HAS_REGEX_TIMEOUT:
+        try:
+            return _regex_mod.compile(pattern_str, timeout=1.0)
+        except _regex_mod.error as exc:
+            import sys as _sys
+            _sys.stderr.write(f"[redaction] skipped invalid custom pattern '{name}': {exc}\n")
+            return None
+        except TimeoutError:
+            import sys as _sys
+            _sys.stderr.write(
+                f"[redaction] skipped custom pattern '{name}' "
+                f"(regex compile timed out, likely ReDoS)\n",
+            )
+            return None
+    # Fallback: stdlib re + nested-quantifier heuristic only (already filtered
+    # upstream by `_REDOX_NESTED_QUANTIFIER`).
+    try:
+        return re.compile(pattern_str)
+    except re.error as exc:
+        import sys as _sys
+        _sys.stderr.write(f"[redaction] skipped invalid custom pattern '{name}': {exc}\n")
+        return None
+
+# ---------------------------------------------------------------------------
 # PII Detection Patterns
 # ---------------------------------------------------------------------------
 
@@ -49,16 +94,28 @@ PHONE = re.compile(r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b")
 # URLs with embedded credentials: https://user:pass@example.com
 URL_WITH_AUTH = re.compile(r"https?://[\w-]+:[\w-]+@")
 
+# Authorization Bearer tokens: "Authorization: Bearer eyJhbGci..." / "Bearer mfp_..."
+# Single character class + linear quantifier (no nested quantifiers) -> ReDoS-safe.
+BEARER_TOKEN = re.compile(r"Bearer\s+[A-Za-z0-9_\-\.]{16,}", re.I)
+
+# Credentials in URL query strings: "https://.../?key=AIza..." / "?api_key=..." /
+# "?access_token=..." / "?sig=...". Common for Gemini keys (AIza...) and signed URLs.
+# The value class is a single alternation-free set -> linear, ReDoS-safe.
+URL_QUERY_KEY = re.compile(r"[?&](?:api[_-]?key|key|access_token|sig)=[A-Za-z0-9_\-\.%]{8,}", re.I)
+
 # Built-in pattern registry: (name, regex, placeholder_in_tools_mode)
 # Order matters: URL_WITH_AUTH must come before EMAIL so that "user:pass@host"
 # is stripped before EMAIL can match "pass@host" in the leftover text.
+# BEARER_TOKEN and URL_QUERY_KEY are credential-bearing, run before EMAIL too.
 BUILTIN_PATTERNS: List[Tuple[str, re.Pattern, str]] = [
-    ("URL_AUTH",     URL_WITH_AUTH,   "[REDACTED_URL_AUTH]"),
-    ("CREDIT_CARD",  CREDIT_CARD,     "[REDACTED_CREDIT_CARD]"),
-    ("SSN",          SSN,             "[REDACTED_SSN]"),
-    ("API_KEY",      API_KEY,         "[REDACTED_API_KEY]"),
-    ("EMAIL",        EMAIL,           "[REDACTED_EMAIL]"),
-    ("PHONE",        PHONE,           "[REDACTED_PHONE]"),
+    ("URL_AUTH",       URL_WITH_AUTH,    "[REDACTED_URL_AUTH]"),
+    ("URL_QUERY_KEY",  URL_QUERY_KEY,    "[REDACTED_URL_QUERY_KEY]"),
+    ("BEARER_TOKEN",   BEARER_TOKEN,     "[REDACTED_BEARER_TOKEN]"),
+    ("CREDIT_CARD",    CREDIT_CARD,      "[REDACTED_CREDIT_CARD]"),
+    ("SSN",            SSN,              "[REDACTED_SSN]"),
+    ("API_KEY",        API_KEY,          "[REDACTED_API_KEY]"),
+    ("EMAIL",          EMAIL,            "[REDACTED_EMAIL]"),
+    ("PHONE",          PHONE,            "[REDACTED_PHONE]"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -73,6 +130,16 @@ def _resolve_mode() -> str:
 def _resolve_enabled() -> bool:
     raw = os.environ.get("AI_MEMORY_REDACTION_ENABLED", "true").strip().lower()
     return raw not in ("0", "false", "no", "off")
+
+
+# Guards for env-sourced custom patterns (AI_MEMORY_REDACTION_CUSTOM_PATTERNS).
+# Env regexes are user-controlled input; without guards a valid-but-catastrophic
+# pattern (e.g. (a+)+) can cause exponential backtracking on tool payloads.
+MAX_CUSTOM_PATTERN_LEN = 200
+# Heuristic: a quantifier (* + ?) applied to a group whose last token is itself
+# a quantifier — the textbook ReDoS signature. Conservative: false positives
+# just cause a pattern to be rejected (logged), not a runtime hang.
+_REDOX_NESTED_QUANTIFIER = re.compile(r"\([^()]*[*+?][^()]*\)[+*]")
 
 
 def _resolve_custom_patterns() -> List[Tuple[str, re.Pattern, str]]:
@@ -101,18 +168,33 @@ def _resolve_custom_patterns() -> List[Tuple[str, re.Pattern, str]]:
         if not name or not pattern_str:
             continue
         try:
-            compiled = re.compile(pattern_str)
+            if len(pattern_str) > MAX_CUSTOM_PATTERN_LEN:
+                import sys as _sys
+                _sys.stderr.write(
+                    f"[redaction] skipped overlong custom pattern '{name}' "
+                    f"(>{MAX_CUSTOM_PATTERN_LEN} chars)\n"
+                )
+                continue
+            if _REDOX_NESTED_QUANTIFIER.search(pattern_str):
+                import sys as _sys
+                _sys.stderr.write(
+                    f"[redaction] skipped custom pattern '{name}' "
+                    f"(nested-quantifier ReDoS heuristic)\n"
+                )
+                continue
+            compiled = _compile_with_redos_guard(pattern_str, name)
+            if compiled is None:
+                continue
             results.append((name, compiled, f"[REDACTED_{name.upper()}]"))
-        except re.error as exc:
+        except Exception as exc:  # noqa: BLE001 — defensive: any unexpected error skips the pattern
             import sys as _sys
-            _sys.stderr.write(f"[redaction] skipped invalid custom pattern '{name}': {exc}\n")
+            _sys.stderr.write(f"[redaction] skipped custom pattern '{name}' (unexpected error: {exc})\n")
     return results
 
 
 # ---------------------------------------------------------------------------
 # REDACTION_CONFIG — global config dict
 # ---------------------------------------------------------------------------
-
 class _RedactionConfig:
     """Lazy-computed config that respects environment variables."""
 

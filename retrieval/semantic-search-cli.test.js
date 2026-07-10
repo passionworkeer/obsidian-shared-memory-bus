@@ -1,7 +1,6 @@
-const test = require("node:test");
-const assert = require("node:assert/strict");
-
-const { buildPythonSearchArgs, parseCliArgs } = require("./semantic-search-cli.js");
+import test from "node:test";
+import assert from "node:assert/strict";
+import { buildPythonSearchArgs, parseCliArgs } from "./semantic-search-cli.js";
 
 test("parseCliArgs keeps OpenClaw route and filter flags separate from the query", () => {
   const parsed = parseCliArgs([

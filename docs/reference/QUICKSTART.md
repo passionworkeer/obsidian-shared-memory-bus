@@ -11,7 +11,7 @@ Get from zero to a working shared memory bus in 30 minutes. Five steps.
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
   .\scripts\install.ps1 `
-  -WorkspaceRoot E:\desktop\your-project
+  -WorkspaceRoot C:\path\to\your-project
 ```
 
 `-WorkspaceRoot` is optional, but if you use it here it must point at an existing repo/workspace root.
@@ -121,7 +121,7 @@ After install, your Claude Code, Codex, OpenCode, Cursor, and Copilot all share 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -File $env:AI_MEMORY_ROOT\verify-client-integrations.ps1 `
-  -WorkspaceRoot E:\desktop\your-project `
+  -WorkspaceRoot C:\path\to\your-project `
   -RunCliChecks
 ```
 
@@ -169,7 +169,7 @@ Before trusting the stack for heavy multi-agent work:
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -File $env:AI_MEMORY_ROOT\run-pressure-test.ps1 `
-  -WorkspaceRoot E:\desktop\your-project `
+  -WorkspaceRoot C:\path\to\your-project `
   -Waves 3 `
   -RunCliChecks
 ```

@@ -9,11 +9,23 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
+import os
 import re
 import sys
 import time as time_module
+from datetime import datetime, timezone
 from typing import Dict, Iterable, List, Literal, Optional, Tuple
+
+try:
+    import numpy as _np
+    _HAS_NUMPY = True
+except ImportError:
+    _np = None
+    _HAS_NUMPY = False
+
+logger = logging.getLogger(__name__)
 
 from embedding_providers import (
     DEFAULT_MODEL,
@@ -29,12 +41,21 @@ try:
 except Exception:
     BM25Okapi = None
 
-try:
-    import jieba  # type: ignore
+# jieba 延迟加载（轻量化优化：避免冷启动开销）
+jieba = None
 
-    jieba.setLogLevel(20)
-except Exception:
-    jieba = None
+def _ensure_jieba():
+    """懒加载 jieba 分词器，首次使用时才初始化"""
+    global jieba
+    if jieba is not None:
+        return jieba
+    try:
+        import jieba as _jieba_module
+        _jieba_module.setLogLevel(20)
+        jieba = _jieba_module
+        return jieba
+    except Exception:
+        return None
 
 try:
     from streaming_index import StreamingIndex
@@ -67,7 +88,7 @@ _QUERY_EMBEDDING_CACHE_TTL = 600.0
 _SEARCH_RESULT_CACHE_TTL = 300.0
 _QUERY_EMBEDDING_CACHE_MAX_ENTRIES = 128
 _SEARCH_RESULT_CACHE_MAX_ENTRIES = 128
-_BM25_CACHE_MAX_ENTRIES = 8
+_BM25_CACHE_MAX_ENTRIES = 32
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +106,10 @@ NOISE_PATTERNS = [
     re.compile(r"^\[(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s", re.I),
     re.compile(r"^Run your Session Startup", re.I),
 ]
-STRUCTURED_FILES = [
+# Canonical structured-file list lives in shared/structured-files.json (single
+# source shared with ops/memory/memory-archival.js). Loaded at import with a
+# literal fallback so retrieval/ still works standalone if the JSON is absent.
+_STRUCTURED_FILES_FALLBACK = [
     "shared-inbox.jsonl",
     "session-memory.jsonl",
     "shared-events.jsonl",
@@ -97,6 +121,23 @@ STRUCTURED_FILES = [
     "openclaw-jobs.jsonl",
     "openclaw-journal.jsonl",
 ]
+
+
+def _load_structured_files() -> List[str]:
+    try:
+        _here = os.path.dirname(os.path.abspath(__file__))
+        _path = os.path.join(_here, "..", "shared", "structured-files.json")
+        with open(_path, "r", encoding="utf-8") as _fh:
+            _data = json.load(_fh)
+        files = _data.get("files") if isinstance(_data, dict) else None
+        if isinstance(files, list) and files:
+            return [str(f) for f in files]
+    except Exception as exc:  # noqa: BLE001 — degrade to fallback, never crash import
+        logger.warning("structured-files.json load failed, using fallback: %s", exc)
+    return list(_STRUCTURED_FILES_FALLBACK)
+
+
+STRUCTURED_FILES = _load_structured_files()
 DURABLE_SCOPES = {"user", "feedback", "project", "reference"}
 ROUTE_VALUES = {"auto", "mixed", "durable", "task", "recent", "reference"}
 KNOWN_LAYERS = ("durable", "session", "event", "task")
@@ -140,12 +181,14 @@ def tokenize(text: str) -> List[str]:
             seen.add(normalized)
             tokens.append(normalized)
 
-    if jieba is not None:
+    # 懒加载 jieba（轻量化优化）
+    _jieba = _ensure_jieba()
+    if _jieba is not None:
         try:
-            for piece in jieba.cut(source):
+            for piece in _jieba.cut(source):
                 add(piece)
         except Exception:
-            pass
+            logger.warning("jieba.cut failed for tokenize; falling back to regex", exc_info=True)
 
     for piece in re.findall(r"[a-z0-9][a-z0-9_\-./:]{1,}", source):
         add(piece)
@@ -262,7 +305,59 @@ def cosine_similarity(left: Iterable[float], right: Iterable[float]) -> float:
         right_norm += right_value * right_value
     if left_norm <= 0 or right_norm <= 0:
         return 0.0
-    return numerator / math.sqrt(left_norm * right_norm)
+    result = numerator / math.sqrt(left_norm * right_norm)
+    # Guard against NaN/Inf from degenerate/abnormal embeddings
+    # (e.g. provider returning non-finite values). Non-finite results
+    # must not leak downstream where `score <= 0` would treat NaN as a
+    # high score and pollute top-k.
+    return result if math.isfinite(result) else 0.0
+
+
+def cosine_similarity_batch(query_vec, matrix) -> List[float]:
+    """
+    Cosine similarity of a single query vector against each row of `matrix`.
+
+    `matrix` is an iterable of vectors (each vector is an iterable of floats).
+    When numpy is available, computes row-normalized dot products in one
+    vectorized pass. When numpy is absent, falls back to a Python loop calling
+    the scalar `cosine_similarity` (identical behavior to the pre-batch path).
+
+    Rows whose length != query length are scored 0.0 (matching scalar behavior).
+    """
+    # Materialize rows once; needed for both paths (length checks + iteration).
+    rows = [list(payload.get("embedding", [])) if isinstance(payload, dict) else list(payload) for payload in matrix]
+
+    if _HAS_NUMPY and _np is not None:
+        if not rows:
+            return []
+        dim = len(query_vec)
+        if dim == 0:
+            return [0.0] * len(rows)
+        # Filter rows to the query dimension; mismatched rows get 0.0.
+        aligned: List[List[float]] = []
+        aligned_idx: List[int] = []
+        for i, row in enumerate(rows):
+            if len(row) == dim:
+                aligned.append([float(v) for v in row])
+                aligned_idx.append(i)
+        results = [0.0] * len(rows)
+        if not aligned:
+            return results
+        mat = _np.asarray(aligned, dtype=_np.float64)
+        q = _np.asarray([float(v) for v in query_vec], dtype=_np.float64)
+        mat_norm = _np.linalg.norm(mat, axis=1)
+        q_norm = float(_np.linalg.norm(q))
+        if q_norm <= 0.0:
+            return results
+        safe = mat_norm > 0
+        dots = mat[safe] @ q
+        scores = dots / (mat_norm[safe] * q_norm)
+        for j, idx in enumerate([i for i, ok in enumerate(safe) if ok]):
+            results[aligned_idx[idx]] = float(scores[j])
+        return results
+
+    # Fallback: scalar per-row (bit-identical to today's behavior).
+    return [cosine_similarity(query_vec, row) for row in rows]
 
 
 def embed_query(query: str, runtime: Dict[str, object], model_name: str = "") -> Tuple[Optional[List[float]], Optional[str], bool]:
@@ -320,6 +415,62 @@ def store_query_embedding(cache_key: str, embedding: List[float]) -> None:
     prune_timed_cache(_QUERY_EMBEDDING_CACHE, _QUERY_EMBEDDING_CACHE_TTL, _QUERY_EMBEDDING_CACHE_MAX_ENTRIES)
 
 
+
+
+def _resolve_query_runtime_for_dense(
+    first_record: Dict,
+    EMBEDDING_RUNTIME: Dict[str, object],
+) -> Tuple[Optional[Dict[str, object]], Optional[str], Optional[bool]]:
+    """
+    Q-CRIT-1: 抽自 dense_scores / _dense_scores_fallback 共用的"
+    从 first_record 解包 schema/model/backend/configHash,推导 query_runtime"流程。
+    两路径仍在后续各自做 embed_query/dimension 检查/扫描,但前置派生单点。
+
+    返回 (query_runtime, error, _placeholder):
+      - query_runtime 为 None 时,调用方应直接退出 (error 非空)
+      - 第三个 placeholder 保留供将来 emit queryEmbeddingCacheHit 复用
+    """
+    first_schema_version = int(first_record.get("featureSchemaVersion", 0) or 0)
+    if first_schema_version != VECTOR_SCHEMA_VERSION:
+        return None, (
+            f"embedding-schema-version-mismatch:stored={first_schema_version},"
+            f"expected={VECTOR_SCHEMA_VERSION};rebuild-memory-embeddings-required"
+        ), False
+    model_name = str(first_record.get("model", DEFAULT_MODEL)).strip() or DEFAULT_MODEL
+    backend = normalize_embedding_adapter(str(first_record.get("backend", "")).strip(), model_name) or "hash"
+    if model_name.startswith("hashing-"):
+        model_name = HASH_MODEL
+    record_config_hash = str(first_record.get("configHash", "")).strip()
+    query_runtime = dict(EMBEDDING_RUNTIME)
+    if record_config_hash:
+        active_adapter = normalize_embedding_adapter(
+            EMBEDDING_RUNTIME.get("adapter") or EMBEDDING_RUNTIME.get("backend"),
+            str(EMBEDDING_RUNTIME.get("model", DEFAULT_MODEL) or DEFAULT_MODEL),
+        ) or "hash"
+        active_model_name = (
+            HASH_MODEL
+            if active_adapter == "hash"
+            else str(EMBEDDING_RUNTIME.get("model", DEFAULT_MODEL) or DEFAULT_MODEL).strip() or DEFAULT_MODEL
+        )
+        active_config_hash = build_embedding_config_hash(
+            active_adapter,
+            active_model_name,
+            str(EMBEDDING_RUNTIME.get("baseUrl", "")),
+        )
+        if record_config_hash != active_config_hash:
+            return None, "embedding-config-mismatch:rebuild-memory-embeddings-required", False
+        query_runtime["adapter"] = active_adapter
+        query_runtime["backend"] = active_adapter
+        query_runtime["model"] = active_model_name
+    else:
+        query_runtime["adapter"] = backend
+        query_runtime["backend"] = backend
+        query_runtime["model"] = model_name
+    return query_runtime, None, None
+
+
+
+
 def dense_scores(
     entries_by_id: Dict[str, dict],
     query: str,
@@ -362,43 +513,10 @@ def dense_scores(
         first_record = next(iter(index_records.values()))
         return _dense_scores_fallback(index_records, first_record, query, EMBEDDING_RUNTIME)
 
-    first_schema_version = int(first_record.get("featureSchemaVersion", 0) or 0)
-    if first_schema_version != VECTOR_SCHEMA_VERSION:
-        return {}, (
-            f"embedding-schema-version-mismatch:stored={first_schema_version},"
-            f"expected={VECTOR_SCHEMA_VERSION};rebuild-memory-embeddings-required"
-        ), {"queryEmbeddingCacheHit": False}
-    model_name = str(first_record.get("model", DEFAULT_MODEL)).strip() or DEFAULT_MODEL
-    backend = normalize_embedding_adapter(str(first_record.get("backend", "")).strip(), model_name) or "hash"
-    if model_name.startswith("hashing-"):
-        model_name = HASH_MODEL
-    record_config_hash = str(first_record.get("configHash", "")).strip()
-    query_runtime = dict(EMBEDDING_RUNTIME)
-    if record_config_hash:
-        active_adapter = normalize_embedding_adapter(
-            EMBEDDING_RUNTIME.get("adapter") or EMBEDDING_RUNTIME.get("backend"),
-            str(EMBEDDING_RUNTIME.get("model", DEFAULT_MODEL) or DEFAULT_MODEL),
-        ) or "hash"
-        active_model_name = (
-            HASH_MODEL
-            if active_adapter == "hash"
-            else str(EMBEDDING_RUNTIME.get("model", DEFAULT_MODEL) or DEFAULT_MODEL).strip() or DEFAULT_MODEL
-        )
-        active_config_hash = build_embedding_config_hash(
-            active_adapter,
-            active_model_name,
-            str(EMBEDDING_RUNTIME.get("baseUrl", "")),
-        )
-        if record_config_hash != active_config_hash:
-            return {}, "embedding-config-mismatch:rebuild-memory-embeddings-required", {"queryEmbeddingCacheHit": False}
-        query_runtime["adapter"] = active_adapter
-        query_runtime["backend"] = active_adapter
-        query_runtime["model"] = active_model_name
-    else:
-        query_runtime["adapter"] = backend
-        query_runtime["backend"] = backend
-        query_runtime["model"] = model_name
-
+    query_runtime, error, _placeholder = _resolve_query_runtime_for_dense(first_record, EMBEDDING_RUNTIME)
+    if error is not None or query_runtime is None:
+        return {}, error, {"queryEmbeddingCacheHit": False}
+    model_name = str(query_runtime.get("model", DEFAULT_MODEL))
     query_vector, error, query_embedding_cache_hit = embed_query(query, query_runtime, model_name)
     if error is not None or query_vector is None:
         return {}, error, {"queryEmbeddingCacheHit": bool(query_embedding_cache_hit)}
@@ -411,6 +529,7 @@ def dense_scores(
     # --- Streaming path: scan records from disk one at a time (bounded memory) ---
     best_by_record: Dict[str, Tuple[str, float, dict]] = {}
     skipped_schema_mismatch = 0
+    scanned_payloads: List[dict] = []
     for payload in stream_index.scan():  # type: ignore[union-attr]
         entry_id = str(payload.get("id", "")).strip()
         if not entry_id:
@@ -419,14 +538,15 @@ def dense_scores(
         if record_schema_version != VECTOR_SCHEMA_VERSION:
             skipped_schema_mismatch += 1
             continue
+        scanned_payloads.append(payload)
 
-        record_id = str(payload.get("record_id", entry_id))
-        field = str(payload.get("field", "content"))
-
-        score = cosine_similarity(query_vector, payload.get("embedding", []))
+    batch_scores = cosine_similarity_batch(query_vector, scanned_payloads)
+    for payload, score in zip(scanned_payloads, batch_scores):
         if score <= 0:
             continue
-
+        entry_id = str(payload.get("id", "")).strip()
+        record_id = str(payload.get("record_id", entry_id))
+        field = str(payload.get("field", "content"))
         existing = best_by_record.get(record_id)
         if existing is None or score > existing[1]:
             best_by_record[record_id] = (entry_id, score, {**payload, "record_id": record_id, "field": field})
@@ -459,43 +579,10 @@ def _dense_scores_fallback(
 
     Logic mirrors the streaming path above — kept in sync manually.
     """
-    first_schema_version = int(first_record.get("featureSchemaVersion", 0) or 0)
-    if first_schema_version != VECTOR_SCHEMA_VERSION:
-        return {}, (
-            f"embedding-schema-version-mismatch:stored={first_schema_version},"
-            f"expected={VECTOR_SCHEMA_VERSION};rebuild-memory-embeddings-required"
-        ), {"queryEmbeddingCacheHit": False}
-    model_name = str(first_record.get("model", DEFAULT_MODEL)).strip() or DEFAULT_MODEL
-    backend = normalize_embedding_adapter(str(first_record.get("backend", "")).strip(), model_name) or "hash"
-    if model_name.startswith("hashing-"):
-        model_name = HASH_MODEL
-    record_config_hash = str(first_record.get("configHash", "")).strip()
-    query_runtime = dict(EMBEDDING_RUNTIME)
-    if record_config_hash:
-        active_adapter = normalize_embedding_adapter(
-            EMBEDDING_RUNTIME.get("adapter") or EMBEDDING_RUNTIME.get("backend"),
-            str(EMBEDDING_RUNTIME.get("model", DEFAULT_MODEL) or DEFAULT_MODEL),
-        ) or "hash"
-        active_model_name = (
-            HASH_MODEL
-            if active_adapter == "hash"
-            else str(EMBEDDING_RUNTIME.get("model", DEFAULT_MODEL) or DEFAULT_MODEL).strip() or DEFAULT_MODEL
-        )
-        active_config_hash = build_embedding_config_hash(
-            active_adapter,
-            active_model_name,
-            str(EMBEDDING_RUNTIME.get("baseUrl", "")),
-        )
-        if record_config_hash != active_config_hash:
-            return {}, "embedding-config-mismatch:rebuild-memory-embeddings-required", {"queryEmbeddingCacheHit": False}
-        query_runtime["adapter"] = active_adapter
-        query_runtime["backend"] = active_adapter
-        query_runtime["model"] = active_model_name
-    else:
-        query_runtime["adapter"] = backend
-        query_runtime["backend"] = backend
-        query_runtime["model"] = model_name
-
+    query_runtime, error, _placeholder = _resolve_query_runtime_for_dense(first_record, EMBEDDING_RUNTIME)
+    if error is not None or query_runtime is None:
+        return {}, error, {"queryEmbeddingCacheHit": False}
+    model_name = str(query_runtime.get("model", DEFAULT_MODEL))
     query_vector, error, query_embedding_cache_hit = embed_query(query, query_runtime, model_name)
     if error is not None or query_vector is None:
         return {}, error, {"queryEmbeddingCacheHit": bool(query_embedding_cache_hit)}
@@ -507,19 +594,23 @@ def _dense_scores_fallback(
 
     best_by_record: Dict[str, Tuple[str, float, dict]] = {}
     skipped_schema_mismatch = 0
+    matched_payloads: List[dict] = []
+    matched_ids: List[str] = []
     for entry_id, payload in index_records.items():
         record_schema_version = int(payload.get("featureSchemaVersion", 0) or 0)
         if record_schema_version != VECTOR_SCHEMA_VERSION:
             skipped_schema_mismatch += 1
             continue
+        matched_payloads.append(payload)
+        matched_ids.append(entry_id)
 
-        record_id = str(payload.get("record_id", entry_id))
-        field = str(payload.get("field", "content"))
-
-        score = cosine_similarity(query_vector, payload.get("embedding", []))
+    batch_scores = cosine_similarity_batch(query_vector, matched_payloads)
+    for entry_id, payload, score in zip(matched_ids, matched_payloads, batch_scores):
         if score <= 0:
             continue
 
+        record_id = str(payload.get("record_id", entry_id))
+        field = str(payload.get("field", "content"))
         existing = best_by_record.get(record_id)
         if existing is None or score > existing[1]:
             best_by_record[record_id] = (entry_id, score, {**payload, "record_id": record_id, "field": field})
@@ -555,6 +646,61 @@ def normalize_score_map(scores: Dict[str, float]) -> Dict[str, float]:
 
 
 # ---------------------------------------------------------------------------
+# Reciprocal Rank Fusion (RRF)
+# ---------------------------------------------------------------------------
+
+# RRF 常量：k=60 是 Elasticsearch/OpenSearch 默认值，平滑 top-1 主导。
+RRF_DEFAULT_K = 60
+
+
+def compute_rank_map(score_map: Dict[str, float]) -> Dict[str, int]:
+    """
+    将原始 score 映射为排名（rank，从 1 开始）。
+    按 score 降序排序；score <= 0 的 entry 不进 rank 表（视为未召回）。
+    返回新 dict，输入不变（不可变模式）。
+    """
+    positive = [(eid, float(v)) for eid, v in score_map.items() if float(v) > 0]
+    positive.sort(key=lambda kv: kv[1], reverse=True)
+    return {eid: idx + 1 for idx, (eid, _) in enumerate(positive)}
+
+
+def rrf_fusion_score(
+    bm25_rank: Optional[int],
+    dense_rank: Optional[int],
+    k: int = RRF_DEFAULT_K,
+) -> float:
+    """
+    RRF 公式：score = sum(1 / (k + rank))，某路缺失（rank 为 None）贡献 0。
+    rank 从 1 开始。k 必须 > 0。
+    """
+    if k <= 0:
+        k = RRF_DEFAULT_K
+    total = 0.0
+    if bm25_rank is not None and bm25_rank > 0:
+        total += 1.0 / (k + bm25_rank)
+    if dense_rank is not None and dense_rank > 0:
+        total += 1.0 / (k + dense_rank)
+    return total
+
+
+def resolve_fusion_mode(route: Optional[Dict[str, object]]) -> str:
+    """
+    决定 hybrid 模式下使用的融合策略：
+      1. 环境变量 AI_MEMORY_FUSION（'rrf' / 'weighted'）— 全局开关
+      2. route['fusion'] — 单次查询覆盖
+      3. 默认 'weighted'（保持现有行为，安全回退）
+    """
+    env_val = (os.environ.get("AI_MEMORY_FUSION") or "").strip().lower()
+    if env_val in {"rrf", "weighted"}:
+        return env_val
+    if route:
+        route_val = str(route.get("fusion", "")).strip().lower()
+        if route_val in {"rrf", "weighted"}:
+            return route_val
+    return "weighted"
+
+
+# ---------------------------------------------------------------------------
 # Entry scoring
 # ---------------------------------------------------------------------------
 
@@ -584,6 +730,8 @@ def score_entry(
     bm25_norm: Dict[str, float],
     dense_norm: Dict[str, float],
     temporal_decay: Optional[Dict[str, object]] = None,
+    bm25_rank_map: Optional[Dict[str, int]] = None,
+    dense_rank_map: Optional[Dict[str, int]] = None,
 ) -> Optional[Tuple[float, Dict[str, object]]]:
     entry_id = str(entry.get("id", "")).strip()
     bm25_component = float(bm25_norm.get(entry_id, 0.0))
@@ -594,11 +742,23 @@ def score_entry(
     elif effective_mode == "dense":
         retrieval_score = dense_component
     else:
-        # 自适应混合权重：从 route 中读取，若不存在则使用默认值
-        adaptive_blend = route.get("adaptiveBlend", {})
-        bm25_w = float(adaptive_blend.get("bm25Weight", 0.55))
-        dense_w = float(adaptive_blend.get("denseWeight", 0.45))
-        retrieval_score = (bm25_w * bm25_component) + (dense_w * dense_component)
+        fusion_mode = resolve_fusion_mode(route)
+        if fusion_mode == "rrf":
+            # RRF：基于 rank 融合，免归一化。某路未召回（rank=None）贡献 0。
+            bm25_rank = bm25_rank_map.get(entry_id) if bm25_rank_map else None
+            dense_rank = dense_rank_map.get(entry_id) if dense_rank_map else None
+            if bm25_rank is None and dense_rank is None:
+                retrieval_score = 0.0
+            else:
+                adaptive_blend = route.get("adaptiveBlend", {})
+                rrf_k = int(adaptive_blend.get("rrfK", RRF_DEFAULT_K))
+                retrieval_score = rrf_fusion_score(bm25_rank, dense_rank, rrf_k)
+        else:
+            # 加权求和（默认，安全回退）
+            adaptive_blend = route.get("adaptiveBlend", {})
+            bm25_w = float(adaptive_blend.get("bm25Weight", 0.55))
+            dense_w = float(adaptive_blend.get("denseWeight", 0.45))
+            retrieval_score = (bm25_w * bm25_component) + (dense_w * dense_component)
 
     if retrieval_score <= 0:
         return None
@@ -625,10 +785,13 @@ def score_entry(
         if updated_at:
             try:
                 normalized_ts = updated_at.replace("Z", "+00:00")
-                ts = __import__("datetime").datetime.fromisoformat(normalized_ts).timestamp()
-                now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).timestamp()
+                ts = datetime.fromisoformat(normalized_ts).timestamp()
+                now = datetime.now(timezone.utc).timestamp()
                 age_seconds = max(0.0, now - ts)
-            except Exception:
+            except (ValueError, TypeError):
+                logger.warning(
+                    "failed to parse timestamp %r; applying no decay", updated_at
+                )
                 age_seconds = 0.0
         decay_factor = 0.5 ** (age_seconds / 86400.0 / half_life) if half_life > 0 else 1.0
         final_score = final_score * decay_factor
@@ -695,6 +858,40 @@ def apply_field_match_bonus(
 # Reranking
 # ---------------------------------------------------------------------------
 
+def _cross_encoder_rerank(
+    scored: List[Tuple[str, float, Dict[str, object]]],
+    entries_by_id: Dict[str, dict],
+    query: str,
+) -> List[Tuple[str, float, Dict[str, object]]]:
+    """Optional cross-encoder rerank. Env-gated AI_MEMORY_RERANK=local (default off).
+    Graceful degradation: if sentence_transformers is missing or model load fails
+    (network/OOM/etc.), return input unchanged and write a one-line notice to stderr.
+    Recommended model: BAAI/bge-reranker-v2-m3 (multilingual, Chinese-capable)."""
+    if (os.environ.get("AI_MEMORY_RERANK", "off") or "off").strip().lower() != "local":
+        return scored
+    if not query or len(scored) <= 1:
+        return scored
+    try:
+        from sentence_transformers import CrossEncoder
+    except ImportError:
+        sys.stderr.write(
+            "[rerank] AI_MEMORY_RERANK=local but sentence_transformers not installed; skipping\n"
+        )
+        return scored
+    try:
+        model = CrossEncoder("BAAI/bge-reranker-v2-m3")
+        pairs = [
+            (query, str(entries_by_id.get(eid, {}).get("content", ""))[:2000])
+            for eid, _, _ in scored
+        ]
+        ce_scores = model.predict(pairs)
+        blended = sorted(zip(scored, ce_scores), key=lambda x: float(x[1]), reverse=True)
+        return [item for item, _ in blended]
+    except Exception as exc:  # model download failure, network, OOM, etc.
+        sys.stderr.write(f"[rerank] cross-encoder disabled: {exc}\n")
+        return scored
+
+
 def rerank_entries(
     entries_by_id: Dict[str, dict],
     effective_mode: str,
@@ -713,6 +910,8 @@ def rerank_entries(
 
     bm25_norm = normalize_score_map(bm25_map)
     dense_norm = normalize_score_map(dense_map)
+    bm25_rank_map = compute_rank_map(bm25_map)
+    dense_rank_map = compute_rank_map(dense_map)
 
     all_scored: List[Tuple[str, float, Dict[str, object]]] = []
 
@@ -720,7 +919,16 @@ def rerank_entries(
         entry = entries_by_id.get(entry_id)
         if entry is None:
             continue
-        scored = score_entry(entry, effective_mode, route, bm25_norm, dense_norm, temporal_decay)
+        scored = score_entry(
+            entry,
+            effective_mode,
+            route,
+            bm25_norm,
+            dense_norm,
+            temporal_decay,
+            bm25_rank_map=bm25_rank_map,
+            dense_rank_map=dense_rank_map,
+        )
         if scored is None:
             continue
         final_score, meta = scored
@@ -758,6 +966,7 @@ def rerank_entries(
     }
 
     top_entries = deduped_scored[:top_k]
+    top_entries = _cross_encoder_rerank(top_entries, entries_by_id, query_text_lower)
     ranked: List[Tuple[str, float]] = [(eid, score) for eid, score, _ in top_entries]
     return ranked, rank_meta, len(candidate_ids)
 
@@ -823,16 +1032,58 @@ def mmr_rerank(
     selected_ids: set = set()
     remaining = set(normalized_rel.keys())
 
+    # Pre-build candidate embedding matrix (numpy path) — only for entries
+    # that have an embedding and a positive relevance score.
+    cand_ids: List[str] = [eid for eid in remaining if entry_embeddings.get(eid) is not None]
+    cand_matrix = None
+    cand_norms = None
+    if _HAS_NUMPY and _np is not None and cand_ids:
+        cand_matrix = _np.asarray(
+            [[float(v) for v in entry_embeddings[eid]] for eid in cand_ids],
+            dtype=_np.float64,
+        )
+        cand_norms = _np.linalg.norm(cand_matrix, axis=1)
+
+    selected_matrix_rows: List[_np.ndarray] = []  # type: ignore[type-arg]
+    selected_norms: List[float] = []
+
     while remaining and len(selected) < top_k:
         best_mmr_score = -float("inf")
         best_entry_id = None
 
-        for entry_id in remaining:
-            rel_score = normalized_rel.get(entry_id, 0.0)
-
-            if not selected_ids:
-                mmr_score = rel_score
-            else:
+        if not selected_ids:
+            # First round: MMR == relevance score; pick max.
+            for entry_id in remaining:
+                mmr_score = normalized_rel.get(entry_id, 0.0)
+                if mmr_score > best_mmr_score:
+                    best_mmr_score = mmr_score
+                    best_entry_id = entry_id
+        elif _HAS_NUMPY and _np is not None and cand_matrix is not None:
+            # Vectorized: max over selected for each candidate.
+            sel_mat = _np.asarray(selected_matrix_rows, dtype=_np.float64)  # (k, dim)
+            sel_norms = _np.asarray(selected_norms, dtype=_np.float64)  # (k,)
+            sims = cand_matrix @ sel_mat.T  # (N, k)
+            denom = _np.outer(cand_norms, sel_norms)  # (N, k)
+            safe = denom > 0
+            row_max = _np.zeros(cand_matrix.shape[0], dtype=_np.float64)
+            for i in range(cand_matrix.shape[0]):
+                row_safe = safe[i]
+                if row_safe.any():
+                    row_max[i] = float(_np.max(sims[i][row_safe] / denom[i][row_safe]))
+                else:
+                    row_max[i] = 0.0
+            cand_index_of = {eid: idx for idx, eid in enumerate(cand_ids)}
+            for entry_id in remaining:
+                rel_score = normalized_rel.get(entry_id, 0.0)
+                idx = cand_index_of.get(entry_id)
+                max_sim = float(row_max[idx]) if idx is not None else 0.0
+                mmr_score = lambda_param * rel_score - (1.0 - lambda_param) * max_sim
+                if mmr_score > best_mmr_score:
+                    best_mmr_score = mmr_score
+                    best_entry_id = entry_id
+        else:
+            for entry_id in remaining:
+                rel_score = normalized_rel.get(entry_id, 0.0)
                 max_sim = 0.0
                 entry_emb = entry_embeddings.get(entry_id)
 
@@ -845,9 +1096,9 @@ def mmr_rerank(
 
                 mmr_score = lambda_param * rel_score - (1.0 - lambda_param) * max_sim
 
-            if mmr_score > best_mmr_score:
-                best_mmr_score = mmr_score
-                best_entry_id = entry_id
+                if mmr_score > best_mmr_score:
+                    best_mmr_score = mmr_score
+                    best_entry_id = entry_id
 
         if best_entry_id is None:
             break
@@ -855,6 +1106,12 @@ def mmr_rerank(
         selected.append((best_entry_id, best_mmr_score))
         selected_ids.add(best_entry_id)
         remaining.remove(best_entry_id)
+
+        if _HAS_NUMPY and _np is not None and cand_matrix is not None:
+            idx = {eid: i for i, eid in enumerate(cand_ids)}.get(best_entry_id)
+            if idx is not None:
+                selected_matrix_rows.append(cand_matrix[idx])
+                selected_norms.append(float(cand_norms[idx]))
 
     return selected
 

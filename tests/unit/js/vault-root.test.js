@@ -1,104 +1,143 @@
-import { test, describe } from "node:test";
+import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveVaultRoot, getDefaultVaultCandidates } from "../../../bus/vault-root.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-describe("vault root resolution", () => {
-  // ---------------------------------------------------------------------------
-  // resolveVaultRoot tests
-  // ---------------------------------------------------------------------------
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
+const VAULT_ROOT_JS = path.join(REPO_ROOT, "bus", "vault-root.js");
 
-  test("resolveVaultRoot returns a string or null", () => {
-    const result = resolveVaultRoot({ useCache: false });
+async function importFresh(envSnapshot) {
+  for (const [key, value] of Object.entries(envSnapshot)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  const mod = await import(pathToFileURL(VAULT_ROOT_JS).href + `?t=${Date.now()}-${Math.random()}`);
+  return mod;
+}
 
-    // Should return a string (path) or null
-    assert.ok(result === null || typeof result === "string");
-  });
+function snapshotEnv() {
+  return {
+    AI_MEMORY_OBSIDIAN_VAULT: process.env.AI_MEMORY_OBSIDIAN_VAULT,
+    OBSIDIAN_VAULT_ROOT: process.env.OBSIDIAN_VAULT_ROOT,
+    AI_MEMORY_STORE: process.env.AI_MEMORY_STORE,
+    AI_MEMORY_STORE_ROOT: process.env.AI_MEMORY_STORE_ROOT,
+    AI_MEMORY_ROOT: process.env.AI_MEMORY_ROOT,
+  };
+}
 
-  test("resolveVaultRoot with useCache returns cached value", () => {
-    // First call
-    const result1 = resolveVaultRoot({ useCache: false });
+function restoreEnv(snapshot) {
+  for (const [key, value] of Object.entries(snapshot)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+}
 
-    // Should set cache (if not already set)
-    // Second call should return cached value
-    const result2 = resolveVaultRoot({ useCache: true });
-
-    // If cache was set, result2 should equal result1
-    if (result1 !== null) {
-      assert.strictEqual(result1, result2);
-    }
-  });
-
-  test("resolveVaultRoot without options uses defaults", () => {
-    const result = resolveVaultRoot();
-
-    // Should return a string or null (depends on environment)
-    assert.ok(result === null || typeof result === "string");
-  });
-
-  // ---------------------------------------------------------------------------
-  // getDefaultVaultCandidates tests
-  // ---------------------------------------------------------------------------
-
-  test("getDefaultVaultCandidates returns array of paths", () => {
-    const candidates = getDefaultVaultCandidates();
-
-    assert.ok(Array.isArray(candidates));
-    // Should have at least one candidate
-    assert.ok(candidates.length > 0);
-
-    // All candidates should be strings
-    candidates.forEach((candidate) => {
-      assert.strictEqual(typeof candidate, "string");
-      assert.ok(candidate.length > 0);
+test("resolveVaultRoot returns AI_MEMORY_OBSIDIAN_VAULT when set", async () => {
+  const snapshot = snapshotEnv();
+  const fakeVault = fs.mkdtempSync(path.join(os.tmpdir(), "ai-vault-test-"));
+  try {
+    const mod = await importFresh({
+      AI_MEMORY_OBSIDIAN_VAULT: fakeVault,
+      OBSIDIAN_VAULT_ROOT: undefined,
+      AI_MEMORY_STORE: "/should/not/be/used",
+      AI_MEMORY_STORE_ROOT: undefined,
+      AI_MEMORY_ROOT: undefined,
     });
-  });
+    assert.equal(mod.resolveVaultRoot(), path.resolve(fakeVault));
+  } finally {
+    restoreEnv(snapshot);
+    fs.rmSync(fakeVault, { recursive: true, force: true });
+  }
+});
 
-  test("getDefaultVaultCandidates removes duplicates", () => {
-    const candidates = getDefaultVaultCandidates();
-    const unique = [...new Set(candidates)];
+test("resolveVaultRoot does not fall through to store env when no vault env is set", async () => {
+  const snapshot = snapshotEnv();
+  try {
+    const mod = await importFresh({
+      AI_MEMORY_OBSIDIAN_VAULT: undefined,
+      OBSIDIAN_VAULT_ROOT: undefined,
+      AI_MEMORY_STORE: "/tmp/store-only",
+      AI_MEMORY_STORE_ROOT: undefined,
+      AI_MEMORY_ROOT: undefined,
+    });
+    const result = mod.resolveVaultRoot();
+    assert.notEqual(result, "/tmp/store-only");
+    assert.notEqual(result, path.resolve("/tmp/store-only"));
+  } finally {
+    restoreEnv(snapshot);
+  }
+});
 
-    assert.strictEqual(candidates.length, unique.length, "Should not have duplicates");
-  });
+test("resolveVaultRoot does not fall through to AI_MEMORY_STORE_ROOT", async () => {
+  const snapshot = snapshotEnv();
+  try {
+    const mod = await importFresh({
+      AI_MEMORY_OBSIDIAN_VAULT: undefined,
+      OBSIDIAN_VAULT_ROOT: undefined,
+      AI_MEMORY_STORE: undefined,
+      AI_MEMORY_STORE_ROOT: "/tmp/store-root-only",
+      AI_MEMORY_ROOT: undefined,
+    });
+    assert.notEqual(mod.resolveVaultRoot(), "/tmp/store-root-only");
+    assert.notEqual(mod.resolveVaultRoot(), path.resolve("/tmp/store-root-only"));
+  } finally {
+    restoreEnv(snapshot);
+  }
+});
 
-  test("getDefaultVaultCandidates contains Obsidian-related paths", () => {
-    const candidates = getDefaultVaultCandidates();
+test("resolveVaultRoot does not fall through to AI_MEMORY_ROOT", async () => {
+  const snapshot = snapshotEnv();
+  try {
+    const mod = await importFresh({
+      AI_MEMORY_OBSIDIAN_VAULT: undefined,
+      OBSIDIAN_VAULT_ROOT: undefined,
+      AI_MEMORY_STORE: undefined,
+      AI_MEMORY_STORE_ROOT: undefined,
+      AI_MEMORY_ROOT: "/tmp/root-only",
+    });
+    assert.notEqual(mod.resolveVaultRoot(), "/tmp/root-only");
+    assert.notEqual(mod.resolveVaultRoot(), path.resolve("/tmp/root-only"));
+  } finally {
+    restoreEnv(snapshot);
+  }
+});
 
-    // Should contain Obsidian-related paths
-    const hasObsidianPath = candidates.some(
-      (candidate) =>
-        candidate.includes("Obsidian") || candidate.includes("obsidian")
-    );
-    assert.ok(hasObsidianPath, "Should have at least one Obsidian-related path");
-  });
+test("resolveVaultRoot prefers OBSIDIAN_VAULT_ROOT over store env", async () => {
+  const snapshot = snapshotEnv();
+  const fakeVault = fs.mkdtempSync(path.join(os.tmpdir(), "ai-vault-test-"));
+  try {
+    const mod = await importFresh({
+      AI_MEMORY_OBSIDIAN_VAULT: undefined,
+      OBSIDIAN_VAULT_ROOT: fakeVault,
+      AI_MEMORY_STORE: "/should/not/be/used",
+      AI_MEMORY_STORE_ROOT: "/should/not/be/used/either",
+      AI_MEMORY_ROOT: "/should/not/be/used/either/either",
+    });
+    assert.equal(mod.resolveVaultRoot(), path.resolve(fakeVault));
+  } finally {
+    restoreEnv(snapshot);
+    fs.rmSync(fakeVault, { recursive: true, force: true });
+  }
+});
 
-  // ---------------------------------------------------------------------------
-  // Integration tests
-  // ---------------------------------------------------------------------------
-
-  test("resolution chain finds valid vault or returns null", () => {
-    // Try to resolve vault root
-    const result = resolveVaultRoot({ useCache: false });
-
-    // In a proper test environment with Obsidian installed,
-    // this should find a valid vault path, otherwise null
-    if (result !== null) {
-      assert.strictEqual(typeof result, "string");
-      assert.ok(result.length > 0);
-    }
-  });
-
-  test("default candidates include vault-related paths", () => {
-    const candidates = getDefaultVaultCandidates();
-
-    // Should contain Obsidian-related paths (cross-platform check)
-    const hasObsidianPath = candidates.some(
-      (candidate) =>
-        candidate.includes("Obsidian") ||
-        candidate.includes("obsidian") ||
-        candidate.includes("AppData") ||
-        candidate.includes("Application Support") ||
-        candidate.includes(".config")
-    );
-    assert.ok(hasObsidianPath);
-  });
+test("getDefaultVaultCandidates returns a non-empty list with no store envs", async () => {
+  const snapshot = snapshotEnv();
+  try {
+    await importFresh({
+      AI_MEMORY_OBSIDIAN_VAULT: undefined,
+      OBSIDIAN_VAULT_ROOT: undefined,
+      AI_MEMORY_STORE: undefined,
+      AI_MEMORY_STORE_ROOT: undefined,
+      AI_MEMORY_ROOT: undefined,
+    });
+    const mod = await import(pathToFileURL(VAULT_ROOT_JS).href + `?t=${Date.now()}-${Math.random()}`);
+    const candidates = mod.getDefaultVaultCandidates();
+    assert.ok(Array.isArray(candidates));
+    assert.ok(candidates.length > 0, "getDefaultVaultCandidates should not return empty array");
+  } finally {
+    restoreEnv(snapshot);
+  }
 });

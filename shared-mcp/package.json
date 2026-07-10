@@ -1,7 +1,7 @@
 {
-  "name": "obsidian-shared-memory-bus-mcp",
+  "name": "yt-mcp",
   "version": "3.1.0",
-  "description": "Shared MCP server for obsidian-shared-memory-bus — memory, obsidian, and utility tools",
+  "description": "Shared MCP server for yt — memory and utility tools",
   "license": "MIT",
   "private": true,
   "type": "module",
@@ -9,13 +9,12 @@
     "type": "git",
     "url": "https://github.com/passionworkeer/obsidian-shared-memory-bus"
   },
-  "author": " passionworkeer",
+  "author": "passionworkeer",
   "bugs": {
     "url": "https://github.com/passionworkeer/obsidian-shared-memory-bus/issues"
   },
   "keywords": [
     "mcp",
-    "obsidian",
     "memory",
     "ai"
   ],
@@ -27,11 +26,10 @@
     "lint:fix": "eslint --fix --ignore-path ../.eslintignore --max-warnings=-1 ."
   },
   "dependencies": {
-    "@bitbonsai/mcpvault": "^0.11.0",
     "@modelcontextprotocol/sdk": "^1.18.0"
   },
   "devDependencies": {
     "c8": "^10.0.0",
-    "eslint": "^8.57.1"
+    "eslint": "^10.2.0"
   }
 }

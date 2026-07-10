@@ -79,7 +79,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Set vault env
-        run: echo "AI_MEMORY_OBSIDIAN_VAULT=$RUNNER_TEMP/vault-smoke" >> $GITHUB_ENV
+        run: echo "AI_MEMORY_STORE=$RUNNER_TEMP/memory-store" >> $GITHUB_ENV
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -90,7 +90,7 @@ jobs:
           python-version: '3.11'
 
       - name: Create smoke vault
-        run: mkdir -p "$AI_MEMORY_OBSIDIAN_VAULT"
+        run: mkdir -p "$AI_MEMORY_STORE"
         shell: bash
 
       - name: Install pytest
@@ -106,7 +106,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Set vault env
-        run: echo "AI_MEMORY_OBSIDIAN_VAULT=$RUNNER_TEMP/vault-smoke" >> $GITHUB_ENV
+        run: echo "AI_MEMORY_STORE=$RUNNER_TEMP/memory-store" >> $GITHUB_ENV
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -122,7 +122,7 @@ jobs:
           python-version: '3.11'
 
       - name: Create smoke vault
-        run: mkdir -p "$AI_MEMORY_OBSIDIAN_VAULT"
+        run: mkdir -p "$AI_MEMORY_STORE"
         shell: bash
 
       - name: Install dependencies

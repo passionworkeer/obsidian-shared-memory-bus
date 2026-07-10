@@ -13,6 +13,15 @@
 - [platform/SETUP_OVERVIEW.md](./platform/SETUP_OVERVIEW.md) — Cross-platform quick reference
 - [platform/MACOS_SETUP.md](./platform/MACOS_SETUP.md) — macOS-specific install guide
 - [platform/LINUX_SETUP.md](./platform/LINUX_SETUP.md) — Linux-specific install guide
+- [promotion/QUICKSTART.zh-CN.md](./promotion/QUICKSTART.zh-CN.md) — Chinese-first public quick start
+- [promotion/QUICKSTART.en.md](./promotion/QUICKSTART.en.md) — English public quick start
+
+## Promotion Kit
+- [promotion/POST.zh-CN.md](./promotion/POST.zh-CN.md) — Chinese forum/article draft
+- [promotion/POST.en.md](./promotion/POST.en.md) — English forum/article draft
+- [promotion/VIDEO-STORYBOARD.zh-CN.md](./promotion/VIDEO-STORYBOARD.zh-CN.md) — Chinese short-video storyboard
+- [promotion/VIDEO-STORYBOARD.en.md](./promotion/VIDEO-STORYBOARD.en.md) — English short-video storyboard
+- [promotion/IMAGE-PROMPTS.md](./promotion/IMAGE-PROMPTS.md) — image prompt catalog
 
 ## Troubleshooting
 - [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) — Common issues, FAQ, error codes

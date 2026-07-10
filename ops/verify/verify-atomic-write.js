@@ -6,31 +6,20 @@
  * backslashes in string literals are not subject to shell/eval escaping.
  */
 
-import path from "path";
-import fs from "fs";
-import os from "os";
+import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
 import { spawn } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-const PROJECT_ROOT = path.resolve(__dirname, "..");
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PROJECT_ROOT = path.resolve(__dirname, "..", "..");
 
-// Resolve the Obsidian vault from the Obsidian app config.
-function resolveObsidianVaultRoot() {
-  try {
-    const obsidianCfg = path.join(process.env.APPDATA || "", "obsidian", "obsidian.json");
-    const { vaults } = JSON.parse(fs.readFileSync(obsidianCfg, "utf8"));
-    const active = Object.values(vaults).find(v => v.open) || Object.values(vaults)[0];
-    return active ? active.path : null;
-  } catch (_e) {
-    return null;
-  }
-}
+// Resolve store root from AI_MEMORY_STORE environment variable.
+const store = process.env.AI_MEMORY_STORE || "";
 
-const vault     = resolveObsidianVaultRoot() ||
-  process.env.AI_MEMORY_OBSIDIAN_VAULT ||
-  process.env.OBSIDIAN_VAULT_ROOT ||
-  "E:\\desktop\\Obsidian Vault";
-
-const inboxPath = path.join(vault, "00-System", "ai-memory", "inbox", "stress-verify.md");
+const inboxPath = path.join(store, "inbox", "stress-verify.md");
 const inboxDir  = path.dirname(inboxPath);
 const session   = "verify-" + Date.now();
 const N         = 10;
@@ -39,13 +28,14 @@ const N         = 10;
 // Build a child-entry script to disk so no shell-escaping issues arise.
 // ---------------------------------------------------------------------------
 
-const childScriptPath = path.join(os.tmpdir(), `atomic-write-child-${process.pid}.js`);
+const childScriptPath = path.join(os.tmpdir(), `atomic-write-child-${process.pid}-${Date.now()}.mjs`);
+const appendLineAtomicUrl = pathToFileURL(path.join(PROJECT_ROOT, "ops", "inbox", "inbox-atomic-write.js")).href;
 
 // Use JSON.stringify to safely embed the strings without any escaping risk.
 const childScriptContent = [
   "/* Auto-generated child entry — do not edit */",
   "import path from 'path';",
-  "import { appendLineAtomic } from " + JSON.stringify(path.join(PROJECT_ROOT, "ops", "inbox-atomic-write.js")) + ";",
+  "import { appendLineAtomic } from " + JSON.stringify(appendLineAtomicUrl) + ";",
   "const inboxPath = " + JSON.stringify(inboxPath) + ";",
   "const id = Number(process.argv[2] || '0');",
   "const session = " + JSON.stringify(session) + ";",
@@ -84,7 +74,7 @@ const promises = Array.from({ length: N }, (_, id) =>
 Promise.all(promises)
   .then(results => {
     // Clean up temp script
-    try { fs.unlinkSync(childScriptPath); } catch (_e) { /* ignore */ }
+    try { fs.unlinkSync(childScriptPath); } catch { /* ignore */ }
 
     const allOk = results.every(r => r.code === 0 && r.stderr === "");
     const errors = results.filter(r => r.code !== 0);
@@ -108,7 +98,7 @@ Promise.all(promises)
       console.log("Content (first 500 chars):\n" + content.slice(0, 500));
     }
 
-    try { fs.unlinkSync(inboxPath); } catch (_e) { /* ignore */ }
+    try { fs.unlinkSync(inboxPath); } catch { /* ignore */ }
 
     if (allOk && lines.length === N) {
       console.log("RESULT: PASS — no lines dropped under concurrent load");

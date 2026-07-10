@@ -1,4 +1,4 @@
-# Contributing to Obsidian Shared Memory Bus
+# Contributing to yt
 
 Thank you for helping improve this project. This guide covers everything you need to get started.
 

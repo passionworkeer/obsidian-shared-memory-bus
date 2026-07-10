@@ -1,9 +1,8 @@
 <!-- SHARED-MEMORY-BUS:START -->
-## Shared Memory Bus (v2)
+## Shared Memory Bus
 
-- Canonical store: `E:\.ai-memory\` (Windows) / `~/.ai-memory/` (macOS/Linux)
-- **MCP-capable** (port 9338): call `memory_boot(project="obsidian-shared-memory-bus")` at session start
-- **Passive / no MCP**: read `E:\.ai-memory\CONTEXT.md` before substantive work
-- Durable writeback: `E:\.ai-memory\inbox\copilot.md`
-- For tasks with 2+ independent slices, prefer subagents or separate execution waves
+- Before long or multi-step work, consult AGENTS.md, <obsidian-vault>/02-KB/MEMORY.md, <obsidian-vault>/02-KB/WORKING.md, <obsidian-vault>/00-System/ai-memory/generated/GLOBAL-CONTEXT.md, and <obsidian-vault>/00-System/ai-memory/generated/tool-startup/copilot.md.
+- Durable cross-project facts belong in <obsidian-vault>/00-System/ai-memory/inbox/copilot.md.
+- Current-task progress belongs in <obsidian-vault>/02-KB/WORKING.md.
+- For tasks with 2 or more independent slices, prefer focused subagents or separate execution waves instead of one long-running context.
 <!-- SHARED-MEMORY-BUS:END -->

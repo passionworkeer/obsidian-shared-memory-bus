@@ -84,6 +84,37 @@ function Write-State {
 }
 
 $manifest = Get-Content -Raw -LiteralPath $manifestPath -Encoding utf8 | ConvertFrom-Json
+
+function Get-EffectiveServerPort {
+    param($Server)
+
+    if ($null -eq $Server -or -not ($Server.PSObject.Properties.Name -contains "port")) {
+        return 0
+    }
+
+    $configuredPort = [int]$Server.port
+    if ($configuredPort -le 0) {
+        return 0
+    }
+
+    $manifestBasePort = [int]$manifest.defaults.basePort
+    if ($manifestBasePort -le 0) {
+        return $configuredPort
+    }
+
+    $envBasePort = 0
+    $envBasePortRaw = [Environment]::GetEnvironmentVariable("AI_MEMORY_BASE_PORT")
+    if (-not [string]::IsNullOrWhiteSpace($envBasePortRaw)) {
+        $envBasePort = [int]$envBasePortRaw
+    }
+
+    if ($envBasePort -le 0 -or $envBasePort -eq $manifestBasePort) {
+        return $configuredPort
+    }
+
+    return [int]($envBasePort + ($configuredPort - $manifestBasePort))
+}
+
 $mutex = New-Object System.Threading.Mutex($false, $stateMutexName)
 $mutexAcquired = $false
 try {
@@ -113,8 +144,9 @@ try {
         }
 
         $candidatePids = New-Object System.Collections.Generic.List[int]
-        if ($server.PSObject.Properties.Name -contains "port") {
-            foreach ($listenerPid in @(Get-SharedListeningProcessIds -Port ([int]$server.port))) {
+        $port = Get-EffectiveServerPort -Server $server
+        if ($port -gt 0) {
+            foreach ($listenerPid in @(Get-SharedListeningProcessIds -Port $port)) {
                 if ([int]$listenerPid -gt 0) {
                     $candidatePids.Add([int]$listenerPid) | Out-Null
                 }
@@ -142,10 +174,10 @@ try {
             }) | Out-Null
         }
 
-        if ($server.PSObject.Properties.Name -contains "port") {
+        if ($port -gt 0) {
             $portCleared = $false
             for ($attempt = 0; $attempt -lt 10; $attempt++) {
-                $remainingListeners = @(Get-SharedListeningProcessIds -Port ([int]$server.port))
+                $remainingListeners = @(Get-SharedListeningProcessIds -Port $port)
                 if ($remainingListeners.Count -eq 0) {
                     $portCleared = $true
                     break
@@ -158,7 +190,7 @@ try {
                 $results.Add([pscustomobject]@{
                     id = $id
                     status = "stop-pending"
-                    pid = (@(Get-SharedListeningProcessIds -Port ([int]$server.port)) | Select-Object -First 1)
+                    pid = (@(Get-SharedListeningProcessIds -Port $port) | Select-Object -First 1)
                 }) | Out-Null
                 continue
             }

@@ -25,7 +25,7 @@ export const TOOLS = [
         workspace_root: {
           type: "string",
           description:
-            "Optional workspace path. If omitted, uses AI_MEMORY_OBSIDIAN_VAULT or the canonical vault root.",
+            "Optional workspace path. If omitted, uses AI_MEMORY_STORE or AI_MEMORY_STORE_ROOT.",
         },
         include_stats: {
           type: "boolean",
@@ -46,7 +46,7 @@ export const TOOLS = [
         workspace_root: {
           type: "string",
           description:
-            "Optional workspace or vault path. If omitted, uses the canonical shared Obsidian vault.",
+            "Optional workspace path. If omitted, uses AI_MEMORY_STORE.",
         },
         max_items: {
           type: "number",
@@ -66,7 +66,7 @@ export const TOOLS = [
   {
     name: "search_shared_memory",
     description:
-      "Search the canonical shared Obsidian memory bus across Codex, Claude Code, OpenCode, Copilot, Cursor, Trae, and OpenClaw. Defaults to hybrid retrieval and falls back to BM25 when dense embeddings are unavailable.",
+      "Search the canonical shared memory bus across Codex, Claude Code, OpenCode, Copilot, Cursor, Trae, and OpenClaw. Defaults to hybrid retrieval and falls back to BM25 when dense embeddings are unavailable.",
     inputSchema: {
       type: "object",
       properties: {
@@ -118,7 +118,7 @@ export const TOOLS = [
   {
     name: "get_memory_records",
     description:
-      "Fetch full structured records by ID from the canonical shared Obsidian memory bus. Returns all available fields including content, facts, concepts, files_read, files_modified, scope, memory_level, freshness, and confidence.",
+      "Fetch full structured records by ID from the canonical shared memory bus. Returns all available fields including content, facts, concepts, files_read, files_modified, scope, memory_level, freshness, and confidence.",
     inputSchema: {
       type: "object",
       properties: {
@@ -282,7 +282,7 @@ export const TOOLS = [
   },
   {
     name: "rebuild_memory_embeddings",
-    description: "Rebuild the dense embeddings index from shared Obsidian structured memory.",
+    description: "Rebuild the dense embeddings index from shared structured memory.",
     inputSchema: {
       type: "object",
       properties: {
