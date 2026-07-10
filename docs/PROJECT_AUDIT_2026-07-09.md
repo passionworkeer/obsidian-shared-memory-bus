@@ -496,10 +496,13 @@ process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet
 - Q-HIGH-7/8/10: IPC 统一 / handler 名冲突 / trace id
 - Q-MED-*: 18 项中低风险,按需修
 
-### Wave 5 — 架构与可观测(可选)
-1. Q-HIGH-7/8/10: IPC 统一 / handler 名冲突 / trace id
-2. I-HIGH-1: 实施 server-split 或删死代码
-3. 测试覆盖率达 80% +
+### Wave 5 — 架构与可观测(可选) ⏸️ 留待独立 PR
+
+涉及 server-split 实施 (I-HIGH-1) 与 IPC/可观测架构改动,应作专项 PR:
+- I-HIGH-1: 实施 server-split 4 个独立进程 (omni-memory-{retrieval,bridge,dream,mgmt}:9338-9341)
+- Q-HIGH-7/8/10: IPC 统一 / handler 名冲突 / trace id
+- 测试覆盖率 80%+ (Q-Test)
+- Q-MEM/Q-LOG/Q-DOC 等 Low 项
 
 ---
 
