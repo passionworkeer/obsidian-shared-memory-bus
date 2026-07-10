@@ -15,14 +15,10 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { resolveStoreRoot } from "../../bus/store-root.js";
+import { resolveStoreRoot, getContextPath } from "../../bus/store-root.js";
 
 function getProjectsRoot(storeRoot) {
   return path.join(storeRoot || resolveStoreRoot(), "projects");
-}
-
-function getContextPath(storeRoot) {
-  return path.join(storeRoot || resolveStoreRoot(), "CONTEXT.md");
 }
 
 const TOP_PER_PROJECT = 10;
