@@ -136,8 +136,39 @@ function describeClaudeMemFailure({ route, envelope }) {
  */
 export function createMemoryBridge(params) {
 
+  // S-HIGH-3: SSRF guard — refuse to fetch non-loopback / non-https hosts when
+  // CLAUDE_MEM_BASE comes from an env var (could be set by an attacker to
+  // exfiltrate data to a public URL or probe internal services).
+  const MEM_BRIDGE_ALLOWED_HOSTS = new Set(
+    (process.env.AI_MEMORY_BRIDGE_ALLOWED_HOSTS || "127.0.0.1,localhost,::1")
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  const MEM_BRIDGE_REQUIRE_HTTPS = String(process.env.AI_MEMORY_BRIDGE_REQUIRE_HTTPS || "false") === "true";
+
+  function assertSafeBaseUrl(rawBase) {
+    let u;
+    try {
+      u = new URL(rawBase);
+    } catch {
+      throw new Error(`bridge.invalid-base-url: ${String(rawBase).slice(0, 64)} is not a valid URL`);
+    }
+    if (MEM_BRIDGE_REQUIRE_HTTPS && u.protocol !== "https:") {
+      throw new Error(`bridge.insecure-base-url: ${u.protocol} not allowed (require https)`);
+    }
+    const host = u.hostname.toLowerCase();
+    if (!MEM_BRIDGE_ALLOWED_HOSTS.has(host)) {
+      throw new Error(
+        `bridge.host-not-allowed: ${host} (configure AI_MEMORY_BRIDGE_ALLOWED_HOSTS to permit)`,
+      );
+    }
+    return u;
+  }
+
   async function fetchClaudeMem(route, options = {}) {
-    const response = await fetch(`${params.CLAUDE_MEM_BASE}${route}`, options);
+    const baseUrl = assertSafeBaseUrl(params.CLAUDE_MEM_BASE);
+    const response = await fetch(`${baseUrl.toString().replace(/\/$/, "")}${route}`, options);
     return readResponseEnvelope(response);
   }
 

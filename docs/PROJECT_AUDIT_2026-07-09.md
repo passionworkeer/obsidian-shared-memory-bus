@@ -57,7 +57,7 @@ param(... [string]$CallbackExe, [string[]]$CallbackArgs = @(), ...)
 - **风险**: 用户控制的环境变量 / 参数若进入 `-Command` 字符串插值,可能注入任意 PowerShell
 - **修复**: 全部改为 `-File script.ps1 -Arg1 ... -Arg2 ...` 参数化调用
 
-#### S-HIGH-3 — SSRF + 凭据外泄
+#### S-HIGH-3 — SSRF + 凭据外泄 ✅ 已修复 (assertSafeBaseUrl + 主机 allowlist)
 - **位置**: `shared-mcp/memory-bridge.js` 的 `baseUrl`、`CLAUDE_MEM_BASE` 通过环境变量传入,fetch 直接使用
 - **风险**: 攻击者若能控制环境变量,可让服务代理请求到内网或任意公网 URL(SSRF),并附带内部 token
 - **修复**: URL allowlist,拒绝非 https/非已知 host;token 通过 `Authorization: Bearer` 注入,不放 URL
