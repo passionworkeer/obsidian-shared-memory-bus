@@ -718,7 +718,10 @@ function Resolve-StdioEnvironment {
         }
     }
 
-    if ([string]$Server.id -eq "memory") {
+    # I-HIGH-1 stage 3 (PR17 commit 5): 把原来只匹配 id -eq "memory" 的特殊处理
+    # 扩展为匹配所有以 "memory-" 开头的 server (memory-retrieval/bridge/dream/mgmt)
+    # 与 legacy "memory" 条目,统一继承 memory 专属 env 转发集合。
+    if ([string]$Server.id -eq "memory" -or [string]$Server.id -like "memory-*") {
         foreach ($name in @(
                 "AI_MEMORY_ROOT",
                 "AI_MEMORY_PWSH",
@@ -748,6 +751,18 @@ function Resolve-StdioEnvironment {
                 "OPENCLAW_BLACKBOARD_DB"
             )) {
             Add-EnvironmentValue -Environment $envMap -Name $name
+        }
+
+        # Stage 3 注入: AI_MEMORY_SERVER_MODE 与 AI_MEMORY_METRICS_PORT
+        # 若用户环境未设置,回退到 manifest.json stdioEnv 默认值 (这是 4-server split 的关键)。
+        foreach ($name in @("AI_MEMORY_SERVER_MODE", "AI_MEMORY_METRICS_PORT")) {
+            $value = Get-EnvironmentValue -Name $name
+            if ([string]::IsNullOrWhiteSpace($value) -and $Server.PSObject.Properties.Name -contains "stdioEnv" -and $null -ne $Server.stdioEnv -and $Server.stdioEnv.PSObject.Properties.Name -contains $name) {
+                $value = [string]$Server.stdioEnv.$name
+            }
+            if (-not [string]::IsNullOrWhiteSpace($value)) {
+                $envMap[$name] = $value
+            }
         }
     }
 
