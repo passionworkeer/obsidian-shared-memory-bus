@@ -226,6 +226,17 @@ const SUBSETS_BY_MODE = Object.freeze({
 });
 const serverMode = String(process.env.AI_MEMORY_SERVER_MODE || "all").trim().toLowerCase();
 const toolFilter = SUBSETS_BY_MODE[serverMode] || undefined;
+// I-HIGH-1 stage 3 (PR17 commit 4): 让 tasklist / ps 能区分 4 个独立 server 进程。
+// split 模式下 process.title 显示为 omni-memory-{retrieval,bridge,dream,mgmt},
+// monolithic / 默认模式下保持 omni-memory-server 原标题。
+if (SUBSETS_BY_MODE[serverMode]) {
+  try {
+    process.title = `omni-memory-${serverMode}`;
+  } catch {
+    // 某些平台 (e.g. Windows w/ title 权限受限) 不允许改 process.title,
+    // best-effort 失败不应阻塞启动。
+  }
+}
 if (toolFilter) {
   log.info("omni-memory-server-mode-active", { mode: serverMode, toolCount: toolFilter.length });
 }
