@@ -53,4 +53,4 @@ repro_command: "node --test tests/unit/js/foo.test.js"
 
 - ❌ 跑全测但只看了最后 5 行 (漏掉前面的失败)
 - ❌ 失败后不 narrow 直接让用户自己看日志
-- ❌ 跨语言测试发现 JS ≠ Py 时不更新 `specs/lsh-fixture.json`
+- ❌ 跨语言测试发现 JS ≠ Py 时不更新 `tests/cross-language/` 等价用例
