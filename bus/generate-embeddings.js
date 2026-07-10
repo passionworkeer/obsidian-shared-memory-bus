@@ -690,6 +690,19 @@ async function main() {
 
     const orderedRecords = Array.from(finalRecords.values()).sort((l, r) => l.id.localeCompare(r.id));
     writeIndexSnapshot(orderedRecords);
+    // Q-HIGH-2 partial-write 设计意图: 每个 batch 完成后原子写一份"到目前为止
+    // 全部最终条目"快照到 index.jsonl。writeIndexSnapshot 内部走 tmp+rename
+    // atomic (OS-level rename),所以失败时 reader 看到的是上一个完整 batch
+    // 或空文件的二选一状态,不会读到 partial-write 中间状态。
+    //
+    // 此设计的有意收益:
+    //   - 长嵌入过程 (sentence-transformers 冷启动后逐 batch) 失败时,前面
+    //     已完成的 batch 不必重跑(下次 main() 会复用 cache)
+    //   - 监控 / 健康检查等 reader 可读到"最近一个 batch 完成"的状态,
+    //     不必等到整个 main() 结束
+    //
+    // 优化方向: 若 main() 失败率低 / batch 数 ≤10,此 partial-write 总开销
+    // 远小于 reload 整个 embedding pipeline 的成本。当前保留。
     console.log("done");
   }
 
