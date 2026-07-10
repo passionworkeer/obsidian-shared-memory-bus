@@ -26,6 +26,51 @@ import re
 from typing import Callable, List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
+# ReDoS-safe regex compiler (S-MED-2)
+# ---------------------------------------------------------------------------
+# Prefer the third-party `regex` library which supports a `timeout=` kwarg on
+# compile/match/sub. Falls back to the stdlib `re` with `signal.alarm` on POSIX
+# (only effective at runtime, not at compile time) — but the stdlib path still
+# keeps the existing nested-quantifier heuristic as a coarse pre-filter.
+#
+# Reference: docs/PROJECT_AUDIT_2026-07-09.md §1.3 S-MED-2
+try:
+    import regex as _regex_mod  # type: ignore[import-untyped]
+    _HAS_REGEX_TIMEOUT = True
+except ImportError:
+    _regex_mod = None
+    _HAS_REGEX_TIMEOUT = False
+
+
+def _compile_with_redos_guard(pattern_str: str, name: str) -> Optional[re.Pattern]:
+    """Compile `pattern_str`, defending against exponential-backtracking ReDoS.
+
+    Returns the compiled pattern, or None on rejection / timeout.
+    """
+    if _HAS_REGEX_TIMEOUT:
+        try:
+            return _regex_mod.compile(pattern_str, timeout=1.0)
+        except _regex_mod.error as exc:
+            import sys as _sys
+            _sys.stderr.write(f"[redaction] skipped invalid custom pattern '{name}': {exc}\n")
+            return None
+        except TimeoutError:
+            import sys as _sys
+            _sys.stderr.write(
+                f"[redaction] skipped custom pattern '{name}' "
+                f"(regex compile timed out, likely ReDoS)\n",
+            )
+            return None
+    # Fallback: stdlib re + nested-quantifier heuristic only (already filtered
+    # upstream by `_REDOX_NESTED_QUANTIFIER`).
+    try:
+        return re.compile(pattern_str)
+    except re.error as exc:
+        import sys as _sys
+        _sys.stderr.write(f"[redaction] skipped invalid custom pattern '{name}': {exc}\n")
+        return None
+
+# ---------------------------------------------------------------------------
 # PII Detection Patterns
 # ---------------------------------------------------------------------------
 
@@ -137,18 +182,19 @@ def _resolve_custom_patterns() -> List[Tuple[str, re.Pattern, str]]:
                     f"(nested-quantifier ReDoS heuristic)\n"
                 )
                 continue
-            compiled = re.compile(pattern_str)
+            compiled = _compile_with_redos_guard(pattern_str, name)
+            if compiled is None:
+                continue
             results.append((name, compiled, f"[REDACTED_{name.upper()}]"))
-        except re.error as exc:
+        except Exception as exc:  # noqa: BLE001 — defensive: any unexpected error skips the pattern
             import sys as _sys
-            _sys.stderr.write(f"[redaction] skipped invalid custom pattern '{name}': {exc}\n")
+            _sys.stderr.write(f"[redaction] skipped custom pattern '{name}' (unexpected error: {exc})\n")
     return results
 
 
 # ---------------------------------------------------------------------------
 # REDACTION_CONFIG — global config dict
 # ---------------------------------------------------------------------------
-
 class _RedactionConfig:
     """Lazy-computed config that respects environment variables."""
 

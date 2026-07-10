@@ -71,7 +71,7 @@ Invoke-Expression $Callback
 - **风险**: `server.listen(port, ...)` 无 `host` 参数 → Node 17+ 默认监听 `::`(全部接口),违反 `docker-compose.yml:27-28` 的 loopback 假设
 - **修复**: 显式传 `'127.0.0.1'`(或 `'::1'`)
 
-#### S-MED-2 — ReDoS 启发式不完整
+#### S-MED-2 — ReDoS 启发式不完整 ✅ 已修复 (regex 库 timeout=1.0,fallback 保留启发式)
 - **位置**: `ops/redact/redaction.py:97`
 ```python
 _REDOX_NESTED_QUANTIFIER = re.compile(r"\([^()]*[*+?][^()]*\)[+*]")
