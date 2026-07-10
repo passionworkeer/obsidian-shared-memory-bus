@@ -88,11 +88,30 @@ export function createMemoryStatus(params) {
     return results;
   }
 
-  function resolveGeneratedDir(workspaceRoot) {
-    if (workspaceRoot && fs.existsSync(path.join(workspaceRoot, "00-System", "ai-memory", "generated"))) {
-      return path.join(workspaceRoot, "00-System", "ai-memory", "generated");
+  function resolveStoreDir(workspaceRoot, dirName, canonicalDir) {
+    const root = workspaceRoot || params.CANONICAL_AI_MEMORY_ROOT || params.VAULT_ROOT || "";
+    if (root) {
+      const directDir = path.join(root, dirName);
+      if (fs.existsSync(directDir)) {
+        return directDir;
+      }
+
+      const legacyDir = path.join(root, "00-System", "ai-memory", dirName);
+      if (fs.existsSync(legacyDir)) {
+        return legacyDir;
+      }
+
+      return canonicalDir || directDir;
     }
-    return params.GENERATED_ROOT;
+    return canonicalDir || "";
+  }
+
+  function resolveGeneratedDir(workspaceRoot) {
+    return resolveStoreDir(workspaceRoot, "generated", params.GENERATED_ROOT);
+  }
+
+  function resolveStructuredDir(workspaceRoot) {
+    return resolveStoreDir(workspaceRoot, "structured", params.STRUCTURED_ROOT);
   }
 
   async function buildWakeUpPack(args = {}) {
@@ -225,7 +244,7 @@ export function createMemoryStatus(params) {
     if (fs.existsSync(gitConfig)) {
       try {
         const content = fs.readFileSync(gitConfig, "utf8");
-        const remoteMatch = content.match(/url\s*=\s*.*?[\/:]([^\/]+?)(?:\.git)?$/m);
+        const remoteMatch = content.match(/url\s*=\s*.*?[:/]([^/]+?)(?:\.git)?$/m);
         if (remoteMatch) {
           return remoteMatch[1];
         }
@@ -237,7 +256,7 @@ export function createMemoryStatus(params) {
   }
 
   async function loadTaskRecords(workspaceRoot) {
-    const structuredDir = path.join(workspaceRoot, "00-System", "ai-memory", "structured");
+    const structuredDir = resolveStructuredDir(workspaceRoot);
     const taskFile = path.join(structuredDir, "task-memory.jsonl");
     if (!fs.existsSync(taskFile)) {
       return [];
@@ -349,7 +368,7 @@ export function createMemoryStatus(params) {
   async function handleGetMemoryOverview(args) {
     const { VAULT_ROOT } = params;
     const workspaceRoot = args.workspace_root || VAULT_ROOT;
-    const generatedDir = path.join(workspaceRoot, "00-System", "ai-memory", "generated");
+    const generatedDir = resolveGeneratedDir(workspaceRoot);
 
     const meta = readOptionalJson(path.join(generatedDir, "GLOBAL-CONTEXT.meta.json"));
     const dream = readOptionalJson(path.join(generatedDir, "AUTO-DREAM.json"));

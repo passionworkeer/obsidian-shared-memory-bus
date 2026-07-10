@@ -1,17 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import path from "node:path";
-import fs from "node:fs";
-import os from "node:os";
-import { fileURLToPath } from "url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-// bus/store-root.js and bus/vault-root.js honour AI_MEMORY_STORE and
-// AI_MEMORY_OBSIDIAN_VAULT env vars, so we just set them here and avoid
-// polluting the production source tree with stub files.
-process.env.AI_MEMORY_STORE = process.env.AI_MEMORY_STORE || path.join(os.tmpdir(), "bhp-store");
-process.env.AI_MEMORY_OBSIDIAN_VAULT = process.env.AI_MEMORY_OBSIDIAN_VAULT || path.join(os.tmpdir(), "bhp-vault");
 
 // ---------------------------------------------------------------------------
 // Load the source under test

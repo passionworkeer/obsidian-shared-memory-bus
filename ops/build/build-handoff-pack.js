@@ -1,6 +1,6 @@
-import fs from "fs";
-import path from "path";
-import { fileURLToPath, pathToFileURL } from "url";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { buildGeneratedArtifactMetadata } from "../memory/memory-contract.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -9,8 +9,6 @@ async function loadStoreRootHelper() {
   const candidates = [
     // bus/ sibling (project layout: ops/build -> ../../bus/)
     path.join(__dirname, "..", "..", "bus", "store-root.js"),
-    // ops/bus/ (legacy nested layout)
-    path.join(__dirname, "bus", "store-root.js"),
     // Script-local (installed flat layout: ~/.ai-memory/ops/)
     path.join(__dirname, "store-root.js"),
   ];
@@ -28,7 +26,7 @@ async function loadStoreRootHelper() {
 const resolveStoreRootMod = await loadStoreRootHelper();
 const resolveStoreRoot = resolveStoreRootMod.resolveStoreRoot || resolveStoreRootMod;
 
-const STORE_ROOT = resolveStoreRoot(); // e.g. "E:\\.ai-memory"
+const STORE_ROOT = resolveStoreRoot();
 const AI_MEMORY_ROOT = STORE_ROOT;
 const STRUCTURED_ROOT = path.join(AI_MEMORY_ROOT, "structured");
 const GENERATED_ROOT = path.join(AI_MEMORY_ROOT, "generated");
@@ -53,7 +51,7 @@ function readJsonl(filePath) {
     }
     try {
       records.push(JSON.parse(line));
-    } catch (_error) {
+    } catch {
     }
   }
   return records;
@@ -317,18 +315,9 @@ export {
 };
 
 // Only run main() when executed directly (not when imported as a module in tests).
-// Guard against E:\ drive not existing on CI runners.
 const __filename = fileURLToPath(import.meta.url);
 const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === __filename;
 
 if (isDirectRun) {
-  try {
-    main();
-  } catch (err) {
-    if (err.code === "ENOENT" && err.message.includes("E:\\")) {
-      // E:\.ai-memory\ does not exist on this CI runner — skip silently.
-      process.exit(0);
-    }
-    throw err;
-  }
+  main();
 }

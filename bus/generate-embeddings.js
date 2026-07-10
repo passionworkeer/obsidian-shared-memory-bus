@@ -1,16 +1,19 @@
-import { spawn, spawnSync } from "child_process";
-import crypto from "crypto";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+import { spawnSync } from "node:child_process";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { createEmbeddingProviderRegistry, getProviderHost, buildEmbeddingConfigHash, normalizeEmbeddingAdapter } from "./embedding-provider-registry.js";
 import { resolvePythonRuntime, withPythonArgs } from "./python-runtime.js";
 import { resolveEmbeddingRuntime } from "./runtime-config.js";
-import { resolveVaultRoot } from "./vault-root.js";
-import { VECTOR_SCHEMA_VERSION, fnv1a32, buildHashFeatures, buildHashEmbedding } from "./lsh-hash.js";
+import { resolveStoreRoot } from "./store-root.js";
+import { VECTOR_SCHEMA_VERSION, buildHashEmbedding } from "./lsh-hash.js";
 import { createJsonlStream } from "../ops/util/jsonl-stream.js";
+import { NOISE_PATTERNS, isNoise as isNoiseHelper } from "./text-noise.js";
+import { loadExistingIndex } from "./generate-embeddings-load.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const WINDOWS_ENV_CACHE = new Map();
 
 hydrateProcessEnvFromWindows([
@@ -35,8 +38,11 @@ hydrateProcessEnvFromWindows([
   "UV_COMMAND",
 ]);
 
-const USER_HOME = process.env.USERPROFILE || process.env.HOME || "";
-const AI_MEMORY_ROOT = process.env.AI_MEMORY_ROOT || __dirname;
+const AI_MEMORY_ROOT =
+  process.env.AI_MEMORY_STORE ||
+  process.env.AI_MEMORY_STORE_ROOT ||
+  process.env.AI_MEMORY_ROOT ||
+  __dirname;
 const PYTHON = resolvePythonRuntime();
 const EMBED_RUNTIME = resolveEmbeddingRuntime({
   rootPath: AI_MEMORY_ROOT,
@@ -57,19 +63,11 @@ const ALLOW_BATCH_FALLBACK = Boolean(EMBED_RUNTIME.allowBatchFallback);
 const ACTIVE_EMBED_PROFILE = String(EMBED_RUNTIME.profileName || "").trim();
 const ACTIVE_EMBED_PROVIDER = String(EMBED_RUNTIME.providerName || "").trim();
 const HASH_MODEL = "hashing-v1";
-const HASH_DIM = 384;
 
-const NOISE_PATTERNS = [
-  /^Sender\s*\(/i,
-  /^System:/i,
-  /^Subagent Context/i,
-  /^\[Subagent Context\]/i,
-  /^Exec completed/i,
-  /^Exec failed/i,
-  /^A new session was started/i,
-  /^\[(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s/i,
-  /^Run your Session Startup/i,
-];
+// Q-HIGH-1 partial split: NOISE_PATTERNS lives in bus/text-noise.js for reuse.
+// Re-exported below as a local symbol so legacy callers (and tests
+// asserting on the const list) still work without touching them.
+const _NOISE_PATTERNS = NOISE_PATTERNS;
 
 function firstNonEmptyEnv(...names) {
   for (const name of names) {
@@ -109,6 +107,12 @@ function readWindowsEnvironmentVariable(name) {
   if (process.platform !== "win32") {
     return "";
   }
+  // Defensive: env-var names are an allowlist of identifiers. Reject anything
+  // else so a future caller can't inject PowerShell via a crafted name — the
+  // name is interpolated into a `powershell -Command` string below.
+  if (!/^[A-Za-z0-9_]+$/.test(String(name || ""))) {
+    return "";
+  }
   if (WINDOWS_ENV_CACHE.has(name)) {
     return WINDOWS_ENV_CACHE.get(name);
   }
@@ -131,7 +135,7 @@ function readWindowsEnvironmentVariable(name) {
     if (!result.error && result.status === 0) {
       value = String(result.stdout || "").trim();
     }
-  } catch (_error) {
+  } catch {
     value = "";
   }
 
@@ -149,12 +153,9 @@ function resolveTimeoutMs() {
   return Math.max(1000, timeoutSeconds * 1000);
 }
 
-const VAULT_ROOT = resolveVaultRoot();
-console.error("[DEBUG] VAULT_ROOT:", VAULT_ROOT);
-console.error("[DEBUG] STRUCTURED_DIR:", path.join(VAULT_ROOT, "00-System", "ai-memory", "structured"));
-const SHARED_MEMORY_ROOT = path.join(VAULT_ROOT, "00-System", "ai-memory");
-const STRUCTURED_DIR = path.join(SHARED_MEMORY_ROOT, "structured");
-const EMBEDDINGS_DIR = path.join(SHARED_MEMORY_ROOT, "embeddings");
+const STORE_ROOT = resolveStoreRoot();
+const STRUCTURED_DIR = path.join(STORE_ROOT, "structured");
+const EMBEDDINGS_DIR = path.join(STORE_ROOT, "embeddings");
 const INDEX_FILE = path.join(EMBEDDINGS_DIR, "index.jsonl");
 
 function normalizeSpaces(value) {
@@ -172,19 +173,13 @@ function sleep(ms) {
 }
 
 function isNoise(text) {
-  const normalized = normalizeSpaces(text);
-  if (!normalized || normalized.length < 5) {
-    return true;
-  }
-  return NOISE_PATTERNS.some((pattern) => pattern.test(normalized));
+  return isNoiseHelper(text, normalizeSpaces);
 }
 
 function fallbackId(entry, title, content) {
   const seed = [entry.tool || "", entry.t || "", title || "", content || ""].join("|");
   return crypto.createHash("sha1").update(seed).digest("hex").slice(0, 16);
 }
-
-// buildSearchText is superseded by extractFieldTexts / buildParentSearchText.
 
 /**
  * index.jsonl schema (v2 - field-level):
@@ -306,10 +301,7 @@ const EMBEDDING_PROVIDER_REGISTRY = createEmbeddingProviderRegistry({
   hashModel: HASH_MODEL,
 });
 
-// buildDocument is superseded by field-level extraction in collectDocuments.
-function buildDocument(entry) {
-  return null; // intentionally broken — do not use
-}
+// buildDocument was removed (superseded by field-level extraction in collectDocuments).
 
 /**
  * Collect structured records and extract their field-level texts.
@@ -467,74 +459,6 @@ function collectDocuments() {
   return documents;
 }
 
-/**
- * Load the existing index.jsonl (v1 or v2 format).
- *
- * Returns a Map keyed by entry_id (sub-entry id).  Each value is the parsed
- * index record with an added `fieldTexts` dict derived from its `contentHash`
- * map for the reuse check.
- *
- * v2 records (with record_id/field) are preferred; legacy v1 records
- * (one entry per record_id, no record_id/field) are also loaded and treated
- * as having field="content".
- */
-/**
- * Load the existing index.jsonl (v1 or v2 format) using streaming.
- * Never loads the entire file into memory — iterates one record at a time.
- *
- * Returns a Map keyed by entry_id (sub-entry id).  Each value is the parsed
- * index record with an added `fieldTexts` dict derived from its `contentHash`
- * map for the reuse check.
- *
- * v2 records (with record_id/field) are preferred; legacy v1 records
- * (one entry per record_id, no record_id/field) are also loaded and treated
- * as having field="content".
- */
-async function loadExistingIndex() {
-  const existing = new Map();
-  if (!fs.existsSync(INDEX_FILE)) {
-    return existing;
-  }
-
-  for await (const record of createJsonlStream(INDEX_FILE)) {
-    if (!record || !record.id) {
-      continue;
-    }
-    try {
-      const entryId = String(record.id).trim();
-
-      // Reconstruct fieldTexts from the stored record:
-      // v2: record has { record_id, field, text, contentHash: { fieldName -> hash } }
-      // v1 (legacy): no record_id/field — treat as { field: "content", text: record.text || record.search_text }
-      if (record.record_id !== undefined && record.field !== undefined) {
-        // v2 format — contentHash is { fieldName -> hash }
-        const fieldTexts = {};
-        if (record.contentHash && typeof record.contentHash === "object" && !Array.isArray(record.contentHash)) {
-          for (const [fname, h] of Object.entries(record.contentHash)) {
-            fieldTexts[fname] = String(h || "");
-          }
-        } else if (typeof record.contentHash === "string") {
-          // Legacy single-hash string: treat as content field
-          fieldTexts.content = String(record.contentHash);
-        }
-        existing.set(entryId, { ...record, fieldTexts });
-      } else {
-        // v1 legacy format — one entry per record_id with a single contentHash
-        const recordId = entryId;
-        const fieldTexts = {};
-        if (record.contentHash && typeof record.contentHash === "string") {
-          fieldTexts.content = String(record.contentHash);
-        }
-        existing.set(entryId, { ...record, fieldTexts, record_id: recordId, field: "content" });
-      }
-    } catch (err) {
-      // Ignore malformed lines and continue rebuilding.
-      console.error(`[generate-embeddings] JSON parse error in index load (skipping line): ${err.message}`);
-    }
-  }
-
-  return existing;
-}
 
 /**
  * Write all field-level records to index.jsonl (v2 format).
@@ -547,8 +471,41 @@ async function loadExistingIndex() {
  * for a personal-memory scale index).
  */
 function writeIndexSnapshot(orderedRecords) {
-  const body = orderedRecords.map((record) => JSON.stringify(record)).join("\n");
-  fs.writeFileSync(INDEX_FILE, body ? `${body}\n` : "", "utf8");
+  // Stream-write each record directly to a tmp file, then rename
+  // atomically over INDEX_FILE. Avoids building one giant in-memory
+  // JSONL string for large indices (e.g. 10k records = ~50-100MB
+  // intermediate). Each per-record write is bounded; peak buffer is
+  // one record + write stream high-water mark, not the whole index.
+  const dir = path.dirname(INDEX_FILE);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  const tmp = `${INDEX_FILE}.tmp.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}`;
+  // createWriteStream (sync fd write loop) is fine here — the
+  // outer batch loop is already async and the fd closes on EOF/end.
+  const fd = fs.openSync(tmp, "w");
+  try {
+    for (const record of orderedRecords) {
+      const line = `${JSON.stringify(record)}\n`;
+      fs.writeSync(fd, line);
+    }
+    fs.closeSync(fd);
+  } catch (err) {
+    // Best-effort cleanup: close fd then unlink tmp so a failed
+    // snapshot doesn't leave a stray file in the embeddings dir.
+    try {
+      fs.closeSync(fd);
+    } catch {
+      /* ignore */
+    }
+    try {
+      fs.unlinkSync(tmp);
+    } catch {
+      /* ignore */
+    }
+    throw err;
+  }
+  fs.renameSync(tmp, INDEX_FILE);
   return orderedRecords;
 }
 
@@ -581,7 +538,7 @@ async function main() {
   ensureDirectory(EMBEDDINGS_DIR);
 
   const documents = collectDocuments();
-  const existing = await loadExistingIndex();
+  const existing = await loadExistingIndex(INDEX_FILE);
   const preferredBackend = normalizeEmbeddingAdapter(EMBED_ADAPTER, MODEL) || "hash";
   const preferredModelName = preferredBackend === "hash" ? HASH_MODEL : MODEL;
   const preferredConfigHash = buildEmbeddingConfigHash({
@@ -607,7 +564,6 @@ async function main() {
 
   for (const doc of orderedRecordIds) {
     const storedByField = existingByRecord.get(doc.recordId) || new Map();
-    let allFieldsReusable = true;
 
     for (const [fieldName, fieldText] of Object.entries(doc.fieldTexts)) {
       const entryId = fieldName === "content" ? doc.recordId : `${doc.recordId}__${fieldName}`;
@@ -634,7 +590,6 @@ async function main() {
           featureSchemaVersion: VECTOR_SCHEMA_VERSION,
         });
       } else {
-        allFieldsReusable = false;
         pending.push({ entryId, recordId: doc.recordId, fieldName, text: fieldText, doc });
       }
     }
@@ -665,7 +620,18 @@ async function main() {
   }
 
   if (orderedRecordIds.length === 0) {
-    fs.writeFileSync(INDEX_FILE, "", "utf8");
+    // Atomic tmp+rename: write to a sibling temp file in the same
+    // directory and rename over INDEX_FILE.  The rename is atomic on
+    // POSIX and Windows (same volume), so a kill mid-write never
+    // leaves a half-written or zero-byte index file behind for
+    // downstream readers.
+    const dir = path.dirname(INDEX_FILE);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    const tmp = `${INDEX_FILE}.tmp.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}`;
+    fs.writeFileSync(tmp, "", "utf8");
+    fs.renameSync(tmp, INDEX_FILE);
     console.log("No structured documents found. Wrote empty embeddings index.");
     return;
   }
@@ -724,6 +690,19 @@ async function main() {
 
     const orderedRecords = Array.from(finalRecords.values()).sort((l, r) => l.id.localeCompare(r.id));
     writeIndexSnapshot(orderedRecords);
+    // Q-HIGH-2 partial-write 设计意图: 每个 batch 完成后原子写一份"到目前为止
+    // 全部最终条目"快照到 index.jsonl。writeIndexSnapshot 内部走 tmp+rename
+    // atomic (OS-level rename),所以失败时 reader 看到的是上一个完整 batch
+    // 或空文件的二选一状态,不会读到 partial-write 中间状态。
+    //
+    // 此设计的有意收益:
+    //   - 长嵌入过程 (sentence-transformers 冷启动后逐 batch) 失败时,前面
+    //     已完成的 batch 不必重跑(下次 main() 会复用 cache)
+    //   - 监控 / 健康检查等 reader 可读到"最近一个 batch 完成"的状态,
+    //     不必等到整个 main() 结束
+    //
+    // 优化方向: 若 main() 失败率低 / batch 数 ≤10,此 partial-write 总开销
+    // 远小于 reload 整个 embedding pipeline 的成本。当前保留。
     console.log("done");
   }
 
@@ -751,10 +730,10 @@ export {
   buildParentSearchText,
   hashFieldText,
   fieldTextsUnchanged,
-  buildDocument,
 };
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === __filename;
+if (isDirectRun) {
   main().catch((error) => {
     console.error(error && error.stack ? error.stack : String(error));
     process.exit(1);

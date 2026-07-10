@@ -6,28 +6,25 @@
  * Run with: node --test tests/integration/js/kg-integration.test.js
  */
 
-"use strict";
-
-const Module = require("module");
-const path = require("path");
-const fs = require("fs");
-const {
+import path from "node:path";
+import fs from "node:fs";
+import {
   createTempDir,
   cleanupTempDir,
   createTempJsonl,
   readJsonl,
-} = require("../../helpers/setup");
-const {
+} from "../../helpers/setup.js";
+import {
   SAMPLE_RECORDS_WITH_ENTITIES,
   ENTITY_EXTRACTION_FIXTURES,
-} = require("../../helpers/fixtures");
+} from "../../helpers/fixtures.js";
 
 // ---------------------------------------------------------------------------
 // Test suite
 // ---------------------------------------------------------------------------
 
-const { test, describe, beforeEach, afterEach } = require("node:test");
-const assert = require("node:assert/strict");
+import { test, describe, beforeEach, afterEach } from "node:test";
+import assert from "node:assert/strict";
 
 describe("KG integration tests", () => {
   let tempKgDir;

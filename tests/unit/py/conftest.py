@@ -9,8 +9,8 @@ import sys
 import os
 from pathlib import Path
 
-# _test_file: e.g. E:\desktop\obsidian-shared-memory-bus\tests\unit\py\test_foo.py
-#   parent4 = repo root (E:\desktop\obsidian-shared-memory-bus)
+# _test_file: e.g. /path/to/obsidian-shared-memory-bus/tests/unit/py/test_foo.py
+#   parent4 = repo root (/path/to/obsidian-shared-memory-bus)
 _test_file_resolved = Path(__file__).resolve()
 project_root = _test_file_resolved.parent.parent.parent.parent
 repo_ops = project_root / "ops"

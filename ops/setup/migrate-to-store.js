@@ -26,6 +26,9 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ---------------------------------------------------------------------------
 // Store root resolution — must match bus/store-root.js
@@ -34,8 +37,6 @@ function loadStoreRootHelper() {
   const candidates = [
     // bus/ sibling (project layout)
     path.join(__dirname, "..", "..", "bus", "store-root.js"),
-    // ops/bus/ (legacy nested layout)
-    path.join(__dirname, "..", "bus", "store-root.js"),
     // Script-local (installed flat layout: ~/.ai-memory/ops/)
     path.join(__dirname, "store-root.js"),
   ];
@@ -58,34 +59,22 @@ async function resolveStoreRoot() {
   return process.env.AI_MEMORY_STORE || DEFAULT_STORE_ROOT;
 }
 
-function resolveVaultRoot() {
-  // Legacy: try to find the Obsidian vault that holds ai-memory
-  const vaultRootCandidates = [
+function resolveLegacySource() {
+  // Legacy: try to find the old ai-memory in Obsidian vault (backward compat fallback)
+  const legacyCandidates = [
     process.env.AI_MEMORY_OBSIDIAN_VAULT,
     process.env.OBSIDIAN_VAULT_ROOT,
   ];
-  for (const candidate of vaultRootCandidates) {
-    if (candidate && fs.existsSync(candidate)) return path.resolve(candidate);
-  }
-  // Heuristic: find "Obsidian Vault" folder
-  const userHome = process.env.USERPROFILE || "";
-  const candidateVaults = [
-    path.join(userHome, "Obsidian Vault"),
-    path.join(userHome, "Desktop", "Obsidian Vault"),
-    path.join(userHome, "Documents", "Obsidian Vault"),
-    // Common desktop locations
-    "E:\\desktop\\Obsidian Vault",
-    "E:\\Obsidian Vault",
-    "D:\\Obsidian Vault",
-  ];
-  for (const candidate of candidateVaults) {
-    const aiMemoryPath = path.join(candidate, "00-System", "ai-memory");
-    if (fs.existsSync(aiMemoryPath)) return path.resolve(candidate);
+  for (const candidate of legacyCandidates) {
+    if (candidate && fs.existsSync(candidate)) {
+      const aiMemoryPath = path.join(candidate, "00-System", "ai-memory");
+      if (fs.existsSync(aiMemoryPath)) return path.resolve(candidate);
+    }
   }
   return "";
 }
 
-const VAULT_ROOT = resolveVaultRoot();
+const LEGACY_SOURCE = resolveLegacySource();
 
 async function main() {
   console.log("=".repeat(60));
@@ -94,8 +83,8 @@ async function main() {
   console.log();
 
   const STORE_ROOT = await resolveStoreRoot();
-  const LEGACY_AI_MEMORY = VAULT_ROOT
-    ? path.join(VAULT_ROOT, "00-System", "ai-memory")
+  const LEGACY_AI_MEMORY = LEGACY_SOURCE
+    ? path.join(LEGACY_SOURCE, "00-System", "ai-memory")
     : "";
 
   // ---------------------------------------------------------------------------
@@ -108,7 +97,7 @@ async function main() {
   function log(msg) { if (VERBOSE) console.log(msg); }
   function logDry(msg) { if (DRY_RUN) console.log("[DRY-RUN]", msg); }
 
-  function cp(src, dst, options = {}) {
+  function cp(src, dst, _options = {}) {
     if (!fs.existsSync(src)) {
       log(`  skip  (not found): ${src}`);
       return 0;
@@ -178,7 +167,7 @@ async function main() {
   if (FORCE) console.log("*** FORCE mode — existing files WILL be overwritten ***\n");
 
   console.log(`New store root : ${STORE_ROOT}`);
-  console.log(`Legacy vault    : ${VAULT_ROOT || "(not auto-detected)"}`);
+  console.log(`Legacy source  : ${LEGACY_SOURCE || "(not auto-detected)"}`);
   console.log(`Legacy data     : ${LEGACY_AI_MEMORY || "(not found)"}`);
   console.log();
 
@@ -234,7 +223,7 @@ async function main() {
 
   // --- Root files ---
   console.log("\n[2/2] Migrating root files...");
-  for (const [fileName, desc] of rootFiles) {
+  for (const [fileName] of rootFiles) {
     const src = path.join(LEGACY_AI_MEMORY, fileName);
     const dst = path.join(STORE_ROOT, fileName);
     const count = cp(src, dst);

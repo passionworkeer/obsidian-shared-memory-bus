@@ -18,22 +18,51 @@
  * Run with: node --test tests/integration/py/search-flow.test.js
  */
 
-"use strict";
+import path from "node:path";
+import { spawn, spawnSync } from "node:child_process";
+import assert from "node:assert/strict";
+import { test, describe } from "node:test";
+import { fileURLToPath } from "node:url";
 
-const fs   = require("node:fs");
-const path = require("node:path");
-const { spawn } = require("node:child_process");
-const assert = require("node:assert/strict");
-const { test, describe } = require("node:test");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const PYTHON = process.env.PYTHON || (process.platform === "win32" ? "python" : "python3");
 const RETRIEVAL_DIR = path.resolve(__dirname, "../../../retrieval");
-const SEMANTIC_SEARCH_PY = path.join(RETRIEVAL_DIR, "semantic-search.py");
+const SEMANTIC_SEARCH_PY = path.join(RETRIEVAL_DIR, "semantic_search.py");
 const PYTHON_MIN_VERSION = [3, 11];
+
+function resolvePythonRuntime() {
+  const candidates = [
+    { command: process.env.AI_MEMORY_PYTHON, argsPrefix: [] },
+    { command: process.env.PYTHON_EXE, argsPrefix: [] },
+    { command: process.env.PYTHON, argsPrefix: [] },
+    { command: "python", argsPrefix: [] },
+    { command: "python3", argsPrefix: [] },
+    ...(process.platform === "win32"
+      ? [
+          { command: "py", argsPrefix: ["-3"] },
+          { command: "py", argsPrefix: [] },
+        ]
+      : []),
+  ].filter((candidate) => candidate.command);
+
+  for (const candidate of candidates) {
+    const probe = spawnSync(candidate.command, [...candidate.argsPrefix, "--version"], {
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    if (!probe.error && probe.status === 0) {
+      return candidate;
+    }
+  }
+
+  return { command: "python", argsPrefix: [], missing: true };
+}
+
+const PYTHON = resolvePythonRuntime();
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -45,11 +74,19 @@ const PYTHON_MIN_VERSION = [3, 11];
  */
 async function checkPythonVersion() {
   return new Promise((resolve) => {
-    const child = spawn(PYTHON, ["-c", "import sys; print('.'.join(map(str, sys.version_info[:3])))"], {
+    if (PYTHON.missing) {
+      resolve({ ok: false, version: "not found", reason: "python-not-found" });
+      return;
+    }
+
+    const child = spawn(PYTHON.command, [...PYTHON.argsPrefix, "-c", "import sys; print('.'.join(map(str, sys.version_info[:3])))"], {
       windowsHide: true,
     });
     let stdout = "";
     child.stdout.on("data", d => { stdout += d; });
+    child.on("error", err => {
+      resolve({ ok: false, version: "not found", reason: err.message });
+    });
     child.on("close", () => {
       const versionStr = stdout.trim();
       const parts = versionStr.split(".").map(Number);
@@ -70,7 +107,12 @@ async function checkPythonVersion() {
  */
 async function runSearchScript(args, env = {}) {
   return new Promise((resolve) => {
-    const child = spawn(PYTHON, args, {
+    if (PYTHON.missing) {
+      resolve({ code: 127, stdout: "", stderr: "Python runtime not found" });
+      return;
+    }
+
+    const child = spawn(PYTHON.command, [...PYTHON.argsPrefix, ...args], {
       cwd: path.dirname(SEMANTIC_SEARCH_PY),
       windowsHide: true,
       env: { ...process.env, PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1", ...env },
@@ -79,6 +121,7 @@ async function runSearchScript(args, env = {}) {
     let stderr = "";
     child.stdout.on("data", d => { stdout += d; });
     child.stderr.on("data", d => { stderr += d; });
+    child.on("error", err => resolve({ code: 127, stdout, stderr: err.message }));
     child.on("close", code => resolve({ code: code || 0, stdout, stderr }));
   });
 }
@@ -210,7 +253,7 @@ describe("search flow — semantic-search.py CLI pipeline", () => {
     }
 
     // Start server and kill it after 1.5s — we're testing startup only
-    const child = spawn(PYTHON, [SEMANTIC_SEARCH_PY, "--server"], {
+    const child = spawn(PYTHON.command, [...PYTHON.argsPrefix, SEMANTIC_SEARCH_PY, "--server"], {
       cwd: path.dirname(SEMANTIC_SEARCH_PY),
       windowsHide: true,
       env: { ...process.env, PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1" },

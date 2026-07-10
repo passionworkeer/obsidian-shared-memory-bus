@@ -3,14 +3,14 @@
  * Shared cryptographic utilities used across multiple bus modules.
  */
 
-import crypto from "crypto";
+import crypto from "node:crypto";
 
 /**
  * Build a short (16-char hex) config hash from embedding backend parameters.
  * Used to detect when the embedding configuration changes and the index needs rebuilding.
  *
  * @param {{ backend: string, modelName: string, baseUrl?: string }} cfg
- * @returns {string} SHA-256 slice (16 hex chars)
+ * @returns {string} SHA-1 slice (16 hex chars)
  */
 function buildEmbeddingConfigHash({ backend, modelName, baseUrl = "" }) {
   // Normalize backend name using the same adapter logic as embedding-provider-registry
@@ -22,9 +22,7 @@ function buildEmbeddingConfigHash({ backend, modelName, baseUrl = "" }) {
     model: String(modelName || "").trim(),
     baseUrl: normalizedBaseUrl.toLowerCase(),
   });
-  // SHA-256 first 16 hex chars = 64 bits. Non-cryptographic, but avoids
-  // SHA-1 deprecation warnings and reduces collision probability vs SHA-1.
-  return crypto.createHash("sha256").update(payload).digest("hex").slice(0, 16);
+  return crypto.createHash("sha1").update(payload).digest("hex").slice(0, 16);
 }
 
 /**

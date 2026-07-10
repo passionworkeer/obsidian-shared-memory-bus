@@ -3,26 +3,36 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { fileURLToPath } from "url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ---------------------------------------------------------------------------
 // Create temp directory for DAILY_LOG_DIR to avoid hardcoded path dependency
 // MUST be set before any module that uses AI_MEMORY_ROOT
 // ---------------------------------------------------------------------------
+const ORIGINAL_AI_MEMORY_ROOT = process.env.AI_MEMORY_ROOT;
 const TEST_AI_MEMORY_ROOT = path.join(os.tmpdir(), `ai-memory-test-${Date.now()}`);
 fs.mkdirSync(TEST_AI_MEMORY_ROOT, { recursive: true });
 process.env.AI_MEMORY_ROOT = TEST_AI_MEMORY_ROOT;
-process.env.AI_MEMORY_OBSIDIAN_VAULT = process.env.AI_MEMORY_OBSIDIAN_VAULT
-  || path.join(os.tmpdir(), `vault-dedup-${Date.now()}`);
 
 // ESM Note: Module.prototype._compile patching is not available in ESM
 // The module will need to be imported directly and exports used
 
+const memoryLayersDedup = await import("../../../ops/memory/memory-layers-dedup.js");
+
+if (ORIGINAL_AI_MEMORY_ROOT === undefined) {
+  delete process.env.AI_MEMORY_ROOT;
+} else {
+  process.env.AI_MEMORY_ROOT = ORIGINAL_AI_MEMORY_ROOT;
+}
+
+test.after(() => {
+  fs.rmSync(TEST_AI_MEMORY_ROOT, { recursive: true, force: true });
+});
+
 const {
   writeJsonl,
   patchJsonlRecord,
+  readJsonlWithPatches,
+  compactPatches,
   deduplicateSharedInbox,
   getRecordsByDate,
   buildDailyLogEntry,
@@ -34,7 +44,7 @@ const {
   sha256,
   getFreshness,
   shouldSkipAsRecentDuplicate,
-} = await import("../../../ops/memory/memory-layers-dedup.js");
+} = memoryLayersDedup;
 
 // ---------------------------------------------------------------------------
 // writeJsonl
@@ -68,55 +78,96 @@ test("writeJsonl: creates parent directories", () => {
 });
 
 // ---------------------------------------------------------------------------
-// patchJsonlRecord
+// patchJsonlRecord (append-only with .patches.jsonl sidecar)
 // ---------------------------------------------------------------------------
 
-test("patchJsonlRecord: updates record with matching id", () => {
+test("patchJsonlRecord: appends to sidecar and is visible via readJsonlWithPatches", () => {
   const tmpFile = path.join(os.tmpdir(), `patch-jsonl-test-${Date.now()}.jsonl`);
   fs.writeFileSync(tmpFile, JSON.stringify({ id: "target", content: "original", facts: [], concepts: [] }) + "\n", "utf8");
   try {
     const enriched = { entities: ["EntityA"], facts: ["fact1"], concepts: ["concept1"] };
-    patchJsonlRecord(tmpFile, "target", enriched);
-    const content = fs.readFileSync(tmpFile, "utf8");
-    const lines = content.split("\n").filter((l) => l.trim());
-    const patched = JSON.parse(lines[0]);
-    assert.equal(patched.id, "target");
+    const acquired = patchJsonlRecord(tmpFile, "target", enriched);
+    assert.equal(acquired, true, "patch lock acquired");
+
+    // Main file is unchanged (append-only)
+    const mainContent = fs.readFileSync(tmpFile, "utf8");
+    assert.ok(mainContent.includes('"id":"target"'));
+    assert.ok(!mainContent.includes("fact1"), "main file is not rewritten");
+
+    // Sidecar has the patch envelope
+    const patchPath = `${tmpFile}.patches.jsonl`;
+    assert.ok(fs.existsSync(patchPath), "sidecar created");
+    const merged = readJsonlWithPatches(tmpFile);
+    const patched = merged.find((r) => r.id === "target");
+    assert.ok(patched, "target record present after merge");
     assert.deepEqual(patched.entities, ["EntityA"]);
     assert.deepEqual(patched.facts, ["fact1"]);
     assert.deepEqual(patched.concepts, ["concept1"]);
   } finally {
     try { fs.unlinkSync(tmpFile); } catch {}
+    try { fs.unlinkSync(`${tmpFile}.patches.jsonl`); } catch {}
   }
 });
 
-test("patchJsonlRecord: merges facts/concepts without duplication", () => {
+test("patchJsonlRecord: merges facts/concepts without duplication across multiple patches", () => {
   const tmpFile = path.join(os.tmpdir(), `patch-jsonl-merge-${Date.now()}.jsonl`);
   fs.writeFileSync(tmpFile, JSON.stringify({ id: "rec", content: "C", facts: ["existing-fact"], concepts: ["existing-concept"], entities: [] }) + "\n", "utf8");
   try {
     const enriched = { entities: ["E"], facts: ["new-fact"], concepts: ["new-concept"] };
     patchJsonlRecord(tmpFile, "rec", enriched);
-    const content = fs.readFileSync(tmpFile, "utf8");
-    const patched = JSON.parse(content.split("\n").filter((l) => l.trim())[0]);
+    // Apply a second patch with an overlapping fact
+    patchJsonlRecord(tmpFile, "rec", { facts: ["new-fact", "third-fact"], concepts: [] });
+    const merged = readJsonlWithPatches(tmpFile);
+    const patched = merged.find((r) => r.id === "rec");
     assert.ok(patched.facts.includes("existing-fact"));
     assert.ok(patched.facts.includes("new-fact"));
+    assert.ok(patched.facts.includes("third-fact"));
+    // Dedupe check
+    assert.equal(patched.facts.filter((f) => f === "new-fact").length, 1, "fact deduped across patches");
     assert.ok(patched.concepts.includes("existing-concept"));
     assert.ok(patched.concepts.includes("new-concept"));
   } finally {
     try { fs.unlinkSync(tmpFile); } catch {}
+    try { fs.unlinkSync(`${tmpFile}.patches.jsonl`); } catch {}
   }
 });
 
-test("patchJsonlRecord: skips non-matching ids", () => {
+test("patchJsonlRecord: writes patch envelope for any id (read-side dedups by id)", () => {
   const tmpFile = path.join(os.tmpdir(), `patch-jsonl-skip-${Date.now()}.jsonl`);
   const originalContent = JSON.stringify({ id: "other", content: "unchanged" }) + "\n";
   fs.writeFileSync(tmpFile, originalContent, "utf8");
   try {
     patchJsonlRecord(tmpFile, "nonexistent", { entities: ["X"] });
-    const content = fs.readFileSync(tmpFile, "utf8");
-    assert.ok(content.includes('"id":"other"'));
-    assert.ok(!content.includes("X"));
+    const merged = readJsonlWithPatches(tmpFile);
+    const other = merged.find((r) => r.id === "other");
+    assert.ok(other, "other record preserved");
+    assert.ok(!other.entities || !other.entities.includes("X"), "non-matching patch does not affect other record");
+    // ReadJsonlWithPatches last-wins; the "nonexistent" patch creates a new record.
+    const nonExistent = merged.find((r) => r.id === "nonexistent");
+    assert.ok(nonExistent, "patch for unknown id becomes a record on read");
   } finally {
     try { fs.unlinkSync(tmpFile); } catch {}
+    try { fs.unlinkSync(`${tmpFile}.patches.jsonl`); } catch {}
+  }
+});
+
+test("compactPatches: merges sidecar into base and clears sidecar", () => {
+  const tmpFile = path.join(os.tmpdir(), `patch-jsonl-compact-${Date.now()}.jsonl`);
+  fs.writeFileSync(tmpFile, JSON.stringify({ id: "x", content: "X" }) + "\n", "utf8");
+  try {
+    patchJsonlRecord(tmpFile, "x", { entities: ["Ent"], facts: ["F1"] });
+    assert.ok(fs.existsSync(`${tmpFile}.patches.jsonl`));
+    const result = compactPatches(tmpFile);
+    assert.equal(result.merged, 1);
+    assert.equal(result.removedPatches, 1);
+    assert.ok(!fs.existsSync(`${tmpFile}.patches.jsonl`), "sidecar cleared");
+    // After compaction, main file has the merged record and no sidecar
+    const records = readJsonlWithPatches(tmpFile);
+    const x = records.find((r) => r.id === "x");
+    assert.ok(x.entities.includes("Ent"));
+  } finally {
+    try { fs.unlinkSync(tmpFile); } catch {}
+    try { fs.unlinkSync(`${tmpFile}.patches.jsonl`); } catch {}
   }
 });
 

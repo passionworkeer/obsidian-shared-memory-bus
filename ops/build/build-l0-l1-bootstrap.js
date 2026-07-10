@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -11,8 +11,6 @@ async function loadStoreRootHelper() {
   const candidates = [
     // bus/ sibling (project layout: ops/ and bus/ are siblings under project root)
     path.join(__dirname, "..", "..", "bus", "store-root.js"),
-    // ops/bus/ (legacy nested layout)
-    path.join(__dirname, "..", "bus", "store-root.js"),
     // Script-local (installed flat layout: ~/.ai-memory/ops/)
     path.join(__dirname, "store-root.js"),
   ];
@@ -49,7 +47,6 @@ async function buildL0L1Bootstrap(cwd) {
   const L0_FIXED = path.join(storeRoot, "L0-fixed.md")
   const GENERATED = path.join(storeRoot, "generated")
   const L0_BOOTSTRAP = path.join(GENERATED, "L0-bootstrap.md")
-  const BODY_MD = path.join(GENERATED, "GLOBAL-CONTEXT.body.md")
 
   // 1. Read L0-fixed.md
   const L0_content = fs.existsSync(L0_FIXED) ? fs.readFileSync(L0_FIXED, "utf-8") : ""

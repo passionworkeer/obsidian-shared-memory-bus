@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "files": [
+    "shared-inbox.jsonl",
+    "session-memory.jsonl",
+    "shared-events.jsonl",
+    "task-memory.jsonl",
+    "claude-code.jsonl",
+    "openclaw.jsonl",
+    "openclaw-blackboard.jsonl",
+    "openclaw-runs.jsonl",
+    "openclaw-jobs.jsonl",
+    "openclaw-journal.jsonl"
+  ]
+}

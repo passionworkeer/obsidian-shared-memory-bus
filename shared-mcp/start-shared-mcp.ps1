@@ -22,8 +22,43 @@ if (-not $helperPath) {
 
 $manifestPath = Join-Path $root "manifest.json"
 $statePath = Join-Path $root "state.json"
-$logRoot = Join-Path $root "logs"
+$fallbackLogRoot = Join-Path $root "logs"
 $proxyScriptPath = Join-Path $root "singleton-stdio-mcp-proxy.mjs"
+
+# Resolve central log root (~/.ai-memory/logs/), falling back to shared-mcp/logs.
+# Source the standalone helper if available; otherwise use the fallback.
+$logPathHelper = Join-Path $sourceRoot (Join-Path "scripts" "Get-LogPath.ps1")
+$logRoot = $fallbackLogRoot
+if (Test-Path -LiteralPath $logPathHelper -PathType Leaf) {
+    . $logPathHelper
+    try {
+        $centralLogRoot = Get-LogRoot
+        if (-not [string]::IsNullOrWhiteSpace($centralLogRoot) -and (Test-Path -LiteralPath $centralLogRoot -PathType Container)) {
+            $logRoot = $centralLogRoot
+        }
+    } catch {
+        # Fall back to shared-mcp/logs — logging must never block startup.
+    }
+}
+
+# Append a timestamped line to the daily start log. Silently ignores failures.
+function Write-StartupLog {
+    param(
+        [Parameter(Mandatory = $true)][string]$Message,
+        [string]$Level = "INFO"
+    )
+    try {
+        $dailyLogPath = if (Get-Command Get-DailyLogPath -ErrorAction SilentlyContinue) {
+            Get-DailyLogPath -Prefix "start"
+        } else {
+            Join-Path $logRoot ("start-{0}.log" -f (Get-Date -Format "yyyy-MM-dd"))
+        }
+        $line = "[{0}] [{1}] {2}" -f (Get-Date).ToString("o"), $Level, $Message
+        Add-Content -Path $dailyLogPath -Value $line -Encoding UTF8
+    } catch {
+        # Logging must never crash the caller.
+    }
+}
 $stateMutexName = Get-SharedMutexName -BaseName "AiMcpStateV1"
 
 function Ensure-Directory {
@@ -169,7 +204,7 @@ function Get-ServerUrl {
         [string]$manifest.defaults.path
     }
 
-    return "http://{0}:{1}{2}" -f $manifest.defaults.host, [int]$Server.port, $path
+    return "http://{0}:{1}{2}" -f $manifest.defaults.host, (Get-EffectiveServerPort -Server $Server), $path
 }
 
 function Get-ServerHealthUrl {
@@ -181,7 +216,7 @@ function Get-ServerHealthUrl {
         [string]$manifest.defaults.healthPath
     }
 
-    return "http://{0}:{1}{2}" -f $manifest.defaults.host, [int]$Server.port, $path
+    return "http://{0}:{1}{2}" -f $manifest.defaults.host, (Get-EffectiveServerPort -Server $Server), $path
 }
 
 function Test-ServerReady {
@@ -242,6 +277,26 @@ function Get-ServerStartupProbeAttempts {
     }
 
     return [Math]::Min([Math]::Max($candidate, 1), 180)
+}
+
+function Get-EffectiveServerPort {
+    param($Server)
+
+    if ($null -eq $Server -or -not ($Server.PSObject.Properties.Name -contains "port")) {
+        return 0
+    }
+
+    $configuredPort = [int]$Server.port
+    if ($configuredPort -le 0) {
+        return 0
+    }
+
+    $manifestBasePort = [int]$manifest.defaults.basePort
+    if ($manifestBasePort -le 0 -or $basePort -le 0 -or $basePort -eq $manifestBasePort) {
+        return $configuredPort
+    }
+
+    return [int]($basePort + ($configuredPort - $manifestBasePort))
 }
 
 function ConvertTo-ShellLiteral {
@@ -484,14 +539,17 @@ function Test-CommandTemplateAvailable {
 }
 
 function Resolve-PreferredCommandTemplate {
-    param([string[]]$Templates)
+    param(
+        [string[]]$Templates,
+        $Server = $null
+    )
 
     $resolvedTemplates = New-Object System.Collections.Generic.List[string]
     foreach ($template in @($Templates)) {
         if ([string]::IsNullOrWhiteSpace([string]$template)) {
             continue
         }
-        $resolved = Resolve-CommandTemplate -Template ([string]$template)
+        $resolved = Resolve-CommandTemplate -Template ([string]$template) -Server $Server
         if (-not [string]::IsNullOrWhiteSpace($resolved)) {
             $resolvedTemplates.Add($resolved) | Out-Null
         }
@@ -562,13 +620,18 @@ sys.exit(0 if importlib.util.find_spec(sys.argv[1]) else 1)
 }
 
 function Resolve-CommandTemplate {
-    param([Parameter(Mandatory = $true)][string]$Template)
+    param(
+        [Parameter(Mandatory = $true)][string]$Template,
+        $Server = $null
+    )
 
     if ([string]::IsNullOrWhiteSpace($Template)) {
         return ""
     }
 
     $replacements = [ordered]@{
+        "{{host}}" = [string]$manifest.defaults.host
+        "{{port}}" = if ($null -ne $Server) { [string](Get-EffectiveServerPort -Server $Server) } else { "" }
         "{{powershell}}" = (ConvertTo-ShellLiteral (Resolve-SharedPowerShellExecutable))
         "{{node}}" = (ConvertTo-ShellLiteral (Resolve-SharedNodeExecutable))
         "{{python}}" = (ConvertTo-ShellLiteral (Resolve-SharedPythonExecutable))
@@ -613,7 +676,7 @@ function Resolve-StdioCommand {
         return ""
     }
 
-    return Resolve-PreferredCommandTemplate -Templates $templates
+    return Resolve-PreferredCommandTemplate -Templates $templates -Server $Server
 }
 
 function Resolve-LaunchCommand {
@@ -624,7 +687,7 @@ function Resolve-LaunchCommand {
         return ""
     }
 
-    return Resolve-PreferredCommandTemplate -Templates $templates
+    return Resolve-PreferredCommandTemplate -Templates $templates -Server $Server
 }
 
 function Get-EnvironmentValue {
@@ -655,7 +718,10 @@ function Resolve-StdioEnvironment {
         }
     }
 
-    if ([string]$Server.id -eq "memory") {
+    # I-HIGH-1 stage 3 (PR17 commit 5): 把原来只匹配 id -eq "memory" 的特殊处理
+    # 扩展为匹配所有以 "memory-" 开头的 server (memory-retrieval/bridge/dream/mgmt)
+    # 与 legacy "memory" 条目,统一继承 memory 专属 env 转发集合。
+    if ([string]$Server.id -eq "memory" -or [string]$Server.id -like "memory-*") {
         foreach ($name in @(
                 "AI_MEMORY_ROOT",
                 "AI_MEMORY_PWSH",
@@ -676,6 +742,8 @@ function Resolve-StdioEnvironment {
                 "AI_MEMORY_EMBED_ALLOW_BATCH_FALLBACK",
                 "AI_MEMORY_PYTHON",
                 "UV_COMMAND",
+                "AI_MEMORY_STORE",
+                "AI_MEMORY_STORE_ROOT",
                 "AI_MEMORY_OBSIDIAN_VAULT",
                 "OBSIDIAN_VAULT_ROOT",
                 "CLAUDE_MEM_BASE",
@@ -683,6 +751,18 @@ function Resolve-StdioEnvironment {
                 "OPENCLAW_BLACKBOARD_DB"
             )) {
             Add-EnvironmentValue -Environment $envMap -Name $name
+        }
+
+        # Stage 3 注入: AI_MEMORY_SERVER_MODE 与 AI_MEMORY_METRICS_PORT
+        # 若用户环境未设置,回退到 manifest.json stdioEnv 默认值 (这是 4-server split 的关键)。
+        foreach ($name in @("AI_MEMORY_SERVER_MODE", "AI_MEMORY_METRICS_PORT")) {
+            $value = Get-EnvironmentValue -Name $name
+            if ([string]::IsNullOrWhiteSpace($value) -and $Server.PSObject.Properties.Name -contains "stdioEnv" -and $null -ne $Server.stdioEnv -and $Server.stdioEnv.PSObject.Properties.Name -contains $name) {
+                $value = [string]$Server.stdioEnv.$name
+            }
+            if (-not [string]::IsNullOrWhiteSpace($value)) {
+                $envMap[$name] = $value
+            }
         }
     }
 
@@ -795,16 +875,16 @@ function Clean-StateFile {
 
         # PID is dead. Mark it and re-probe the port.
         $port = 0
-        if ($record.ContainsKey("port")) {
-            $port = [int]$record["port"]
-        } else {
-            # Look up port from manifest.
-            foreach ($srv in @($Manifest.servers)) {
-                if ([string]$srv.id -eq $serverId -and $srv.PSObject.Properties.Name -contains "port") {
-                    $port = [int]$srv.port
-                    break
-                }
+        # Look up effective port from manifest first so AI_MEMORY_BASE_PORT is honored
+        # even when state.json was written before the base port changed.
+        foreach ($srv in @($Manifest.servers)) {
+            if ([string]$srv.id -eq $serverId -and $srv.PSObject.Properties.Name -contains "port") {
+                $port = Get-EffectiveServerPort -Server $srv
+                break
             }
+        }
+        if ($port -le 0 -and $record.ContainsKey("port")) {
+            $port = [int]$record["port"]
         }
 
         $record["status"] = "dead"
@@ -831,6 +911,7 @@ function Clean-StateFile {
 }
 
 try {
+    Write-StartupLog -Message "shared-mcp startup begin (PID=$PID, logRoot=$logRoot)"
     $state = Read-State
 
     # Clean zombie PID entries before starting servers.
@@ -855,7 +936,7 @@ try {
             continue
         }
 
-        $port = [int]$server.port
+        $port = Get-EffectiveServerPort -Server $server
         $url = Get-ServerUrl -Server $server
         $healthUrl = Get-ServerHealthUrl -Server $server
         $readyTimeoutSeconds = Get-ServerReadyTimeoutSeconds -Server $server
@@ -1047,8 +1128,36 @@ try {
     Write-State -State $state
     $results | ConvertTo-Json -Depth 6
     if (@($results | Where-Object { @("started", "already-running", "adopted") -notcontains [string]$_.status }).Count -gt 0) {
+        Write-StartupLog -Message "shared-mcp startup completed with failures" -Level "WARN"
         exit 1
     }
+    Write-StartupLog -Message "shared-mcp startup completed successfully"
+} catch {
+    # Write crash log with full exception details so users never see a blank window.
+    try {
+        $crashLogPath = if (Get-Command Get-CrashLogPath -ErrorAction SilentlyContinue) {
+            Get-CrashLogPath
+        } else {
+            Join-Path $logRoot ("crash-{0}.log" -f (Get-Date -Format "yyyy-MM-ddTHH-mm-ss"))
+        }
+        $crashContent = @(
+            "=== Crash Report ===",
+            "Timestamp: $(Get-Date -Format 'o')",
+            "PID: $PID",
+            "Script: $($MyInvocation.MyCommand.Path)",
+            "Error: $($_.Exception.Message)",
+            "Type: $($_.Exception.GetType().FullName)",
+            "",
+            "ScriptStackTrace:",
+            "$($_.ScriptStackTrace)"
+        ) -join "`n"
+        Add-Content -Path $crashLogPath -Value $crashContent -Encoding UTF8
+        Write-StartupLog -Message "CRASH: $($_.Exception.Message)" -Level "CRASH"
+        Write-Error "[shared-mcp] Startup failed. Crash log: $crashLogPath"
+    } catch {
+        Write-Error "[shared-mcp] Startup failed: $($_.Exception.Message)"
+    }
+    exit 1
 } finally {
     if ($mutexAcquired) {
         try {

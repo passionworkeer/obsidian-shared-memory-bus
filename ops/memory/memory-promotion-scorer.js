@@ -12,12 +12,11 @@
  * Human-review range:     0.40 – 0.65  (marked needs_review: true)
  *
  * Usage:
- *   node ops/memory/memory-promotion-scorer.js [--vault-root <path>] [--dry-run] [--verbose]
+ *   node ops/memory/memory-promotion-scorer.js [--store-root <path>] [--dry-run] [--verbose]
  */
 
-import fs from "fs";
-import path from "path";
-import crypto from "crypto";
+import fs from "node:fs";
+import path from "node:path";
 
 // ── CLI args ───────────────────────────────────────────────────────────────────
 
@@ -31,19 +30,19 @@ const opt  = (flag, def) => {
   return next;
 };
 
-const VAULT_ROOT = opt("--vault-root", process.env.AI_MEMORY_OBSIDIAN_VAULT || process.env.OBSIDIAN_VAULT_ROOT || null);
+const STORE_ROOT = opt("--store-root", process.env.AI_MEMORY_STORE || null);
 const DRY_RUN    = opt("--dry-run",    false);
 const VERBOSE    = opt("--verbose",   false) || opt("-v", false);
 
-if (!VAULT_ROOT) {
-  console.error("Error: --vault-root or AI_MEMORY_OBSIDIAN_VAULT is required.");
+if (!STORE_ROOT) {
+  console.error("Error: --store-root or AI_MEMORY_STORE is required.");
   process.exit(1);
 }
 
 // ── Paths ──────────────────────────────────────────────────────────────────────
 
-const STRUCT_DIR      = path.join(VAULT_ROOT, "00-System/ai-memory/structured");
-const QUEUE_DIR       = path.join(VAULT_ROOT, ".ai-memory/queue");
+const STRUCT_DIR      = path.join(STORE_ROOT, "structured");
+const QUEUE_DIR       = path.join(STORE_ROOT, ".ai-memory/queue");
 const PROMOTION_QUEUE = path.join(QUEUE_DIR,   "promotion-queue.jsonl");
 
 // ── Scoring weights (can be overridden via env) ───────────────────────────────
@@ -63,14 +62,8 @@ const CONFLICT_OVERLAP_THRESHOLD = 0.70;
 
 const log = (...msg) => VERBOSE && console.log("[promotion-scorer]", new Date().toISOString(), ...msg);
 const info = (...msg) => console.log("[promotion-scorer]", ...msg);
-const warn = (...msg) => console.warn("[promotion-scorer] WARNING:", ...msg);
-const err  = (...msg) => console.error("[promotion-scorer] ERROR:", ...msg);
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-
-function sha1(value) {
-  return crypto.createHash("sha1").update(String(value || ""), "utf8").digest("hex");
-}
 
 function normalizeSpaces(str = "") {
   return String(str).replace(/\s+/g, " ").trim();
@@ -79,7 +72,7 @@ function normalizeSpaces(str = "") {
 function tokenize(text = "") {
   return normalizeSpaces(text)
     .toLowerCase()
-    .split(/[\s\-_.,;:!?()[\]{}'"#@$%^&*+=|\\\/~`]+/)
+    .split(/[\s\-_.,;:!?()[\]{}'"#@$%^&*+=|\\\\~`]+/)
     .filter(Boolean);
 }
 
@@ -302,7 +295,7 @@ function detectConflicts(scoredCandidates, originalRecords) {
 }
 
 /**
- * Build the promotion queue and write to E:\.ai-memory\queue\promotion-queue.jsonl.
+ * Build the promotion queue under the resolved AI_MEMORY_STORE root.
  *
  * @param {{id: string, score: number, components: object, tier_from: number, tier_to: number, needs_review: boolean, conflicts: object[], record_summary: object, scored_at: string}[]} scoredCandidates
  * @returns {{written: number, auto_promote: number, needs_review: number, conflicts: number, path: string}}
@@ -364,7 +357,7 @@ function loadStructuredRecords() {
 // ── CLI dry-run ───────────────────────────────────────────────────────────────
 
 function main() {
-  info(`Starting promotion scorer (dry_run=${DRY_RUN}, vault=${VAULT_ROOT})`);
+  info(`Starting promotion scorer (dry_run=${DRY_RUN}, store=${STORE_ROOT})`);
   info(`Weights: recency=${SCORING_WEIGHTS.recency} confidence=${SCORING_WEIGHTS.confidence} crossSession=${SCORING_WEIGHTS.crossSessionHits} sourceQuality=${SCORING_WEIGHTS.sourceQuality}`);
   info(`Thresholds: auto_promote>=${AUTO_PROMOTE_THRESHOLD}  review=${REVIEW_LOWER_BOUND}-${AUTO_PROMOTE_THRESHOLD}  conflict_overlap>=${CONFLICT_OVERLAP_THRESHOLD}`);
 
@@ -408,4 +401,22 @@ function main() {
   info(`Done. Queue written to: ${result.path}`);
 }
 
-main();
+// Only auto-run when invoked directly as a CLI. When imported (e.g. by
+// unit tests), only the exported symbols are accessible.
+if (import.meta.url === `file:///${process.argv[1]?.replace(/\\/g, "/")}`) {
+  main();
+}
+
+export {
+  tokenize,
+  buildTokenFingerprint,
+  computeOverlap,
+  scoreRecency,
+  scoreConfidence,
+  scoreCrossSessionHits,
+  scoreSourceQuality,
+  scorePromotionCandidate,
+  scoreAllCandidates,
+  detectConflicts,
+  buildPromotionQueue,
+};

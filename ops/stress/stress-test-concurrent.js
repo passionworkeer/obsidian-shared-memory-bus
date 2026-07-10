@@ -62,8 +62,8 @@ async function testKgConcurrentWrite(concurrency = 20, writesPerProcess = 10) {
     const path = require('path');
     const PROOT = ${JSON.stringify(PROJECT_ROOT)};
     const { KnowledgeGraph } = require(path.join(PROOT, 'ops/knowledge/knowledge-graph.js'));
-    const { resolveVaultRoot } = require(path.join(PROOT, 'bus', 'vault-root.js'));
-    const vault = resolveVaultRoot();
+    const { resolveStoreRoot } = require(path.join(PROOT, 'bus', 'store-root.js'));
+    const vault = resolveStoreRoot();
     const kg = new KnowledgeGraph({ vaultRoot: vault });
     const errs = [];
     for (let i = 0; i < ${writesPerProcess}; i++) {
@@ -114,8 +114,8 @@ async function testKgConcurrentRead(concurrency = 50) {
     const path = require('path');
     const PROOT = ${JSON.stringify(PROJECT_ROOT)};
     const { KnowledgeGraph } = require(path.join(PROOT, 'ops/knowledge/knowledge-graph.js'));
-    const { resolveVaultRoot } = require(path.join(PROOT, 'bus', 'vault-root.js'));
-    const kg = new KnowledgeGraph({ vaultRoot: resolveVaultRoot() });
+    const { resolveStoreRoot } = require(path.join(PROOT, 'bus', 'store-root.js'));
+    const kg = new KnowledgeGraph({ vaultRoot: resolveStoreRoot() });
     try {
       const r = kg.queryCurrentTriples({ limit: 20 });
       process.stdout.write(JSON.stringify({ count: r.length }));
@@ -254,7 +254,6 @@ async function testInboxConcurrentWrite(concurrency = 10) {
   const { resolveStoreRoot } = await import(path.join(PROJECT_ROOT, "bus", "store-root.js"));
   const storeRoot = resolveStoreRoot();
   const inboxPath = path.join(storeRoot, "inbox", "stress-test.md");
-  const session = `stress-${Date.now()}`;
 
   const script = (id) => `
     const path = require('path');
@@ -306,8 +305,8 @@ async function testKgWalStress(iterations = 100) {
   let passed = 0, failed = 0, errors = 0;
 
   const { KnowledgeGraph } = await import(path.join(PROJECT_ROOT, "ops/knowledge/knowledge-graph.js"));
-  const { resolveVaultRoot } = await import(path.join(PROJECT_ROOT, "bus", "vault-root.js"));
-  const vault = resolveVaultRoot();
+  const { resolveStoreRoot } = await import(path.join(PROJECT_ROOT, "bus", "store-root.js"));
+  const vault = resolveStoreRoot();
 
   for (let i = 0; i < iterations; i++) {
     const kg = new KnowledgeGraph({ vaultRoot: vault });
@@ -359,8 +358,8 @@ async function testMixedConcurrency(concurrency = 50) {
     const PROOT = ${JSON.stringify(PROJECT_ROOT)};
     const { KnowledgeGraph } = require(path.join(PROOT, 'ops/knowledge/knowledge-graph.js'));
     const { memory_query } = require(path.join(PROOT, 'ops/mcp/mcp-memory-tools.js'));
-    const { resolveVaultRoot } = require(path.join(PROOT, 'bus', 'vault-root.js'));
-    const vault = resolveVaultRoot();
+    const { resolveStoreRoot } = require(path.join(PROOT, 'bus', 'store-root.js'));
+    const vault = resolveStoreRoot();
     const ops = [];
     const errs = [];
     const kg = new KnowledgeGraph({ vaultRoot: vault });
@@ -425,12 +424,11 @@ async function testMixedConcurrency(concurrency = 50) {
 
 async function testDbLockContention() {
   const label = "DB锁冲突压测 (100次快速连续写入)";
-  const start = now();
   let locked = 0, ok = 0;
 
   const { KnowledgeGraph } = await import(path.join(PROJECT_ROOT, "ops/knowledge/knowledge-graph.js"));
-  const { resolveVaultRoot } = await import(path.join(PROJECT_ROOT, "bus", "vault-root.js"));
-  const vault = resolveVaultRoot();
+  const { resolveStoreRoot } = await import(path.join(PROJECT_ROOT, "bus", "store-root.js"));
+  const vault = resolveStoreRoot();
 
   for (let i = 0; i < 100; i++) {
     const kg = new KnowledgeGraph({ vaultRoot: vault });
@@ -470,8 +468,8 @@ async function main() {
   console.log("=".repeat(60));
 
   const results = [];
-  const { resolveVaultRoot } = await import(path.join(PROJECT_ROOT, "bus", "vault-root.js"));
-  const vault = resolveVaultRoot();
+  const { resolveStoreRoot } = await import(path.join(PROJECT_ROOT, "bus", "store-root.js"));
+  const vault = resolveStoreRoot();
   console.log("Vault:", vault);
 
   const tests = [

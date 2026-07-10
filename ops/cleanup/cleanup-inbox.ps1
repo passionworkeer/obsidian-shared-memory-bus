@@ -14,7 +14,7 @@ if (-not $helperPath) {
 
 . $helperPath
 
-$VBase = Join-SharedPath @((Resolve-SharedObsidianVaultRoot -ThrowIfMissing), "00-System", "ai-memory")
+$VBase = Join-SharedPath @((Resolve-SharedStoreRoot -ThrowIfMissing), "00-System", "ai-memory")
 $InboxDir = Join-SharedPath @($VBase, "inbox")
 
 $NoisePatterns = @(

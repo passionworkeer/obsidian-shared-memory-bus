@@ -15,6 +15,42 @@ function Ensure-Directory {
 Ensure-Directory -Path $outputRoot
 $manifest = Get-Content -Raw -LiteralPath $manifestPath -Encoding utf8 | ConvertFrom-Json
 
+function Get-EffectiveServerPort {
+    param($Server)
+
+    if ($null -eq $Server -or -not ($Server.PSObject.Properties.Name -contains "port")) {
+        return 0
+    }
+
+    $configuredPort = [int]$Server.port
+    if ($configuredPort -le 0) {
+        return 0
+    }
+
+    $manifestBasePort = [int]$manifest.defaults.basePort
+    if ($manifestBasePort -le 0) {
+        return $configuredPort
+    }
+
+    $envBasePort = 0
+    $envBasePortRaw = [Environment]::GetEnvironmentVariable("AI_MEMORY_BASE_PORT")
+    if (-not [string]::IsNullOrWhiteSpace($envBasePortRaw)) {
+        $envBasePort = [int]$envBasePortRaw
+    }
+
+    if ($envBasePort -le 0 -or $envBasePort -eq $manifestBasePort) {
+        return $configuredPort
+    }
+
+    return [int]($envBasePort + ($configuredPort - $manifestBasePort))
+}
+
+function Get-ServerUrl {
+    param($Server)
+
+    return "http://{0}:{1}{2}" -f $manifest.defaults.host, (Get-EffectiveServerPort -Server $Server), $manifest.defaults.path
+}
+
 $defaultSharedServers = @($manifest.servers | Where-Object {
     $_.mode -eq "shared" -or [string]$_.id -eq "playwright"
 })
@@ -33,7 +69,7 @@ function New-CodexSnippet {
     foreach ($server in @($Servers)) {
         $lines.Add("") | Out-Null
         $lines.Add(("[mcp_servers.{0}]" -f $server.id)) | Out-Null
-        $lines.Add(('url = "http://{0}:{1}{2}"' -f $manifest.defaults.host, [int]$server.port, $manifest.defaults.path)) | Out-Null
+        $lines.Add(('url = "{0}"' -f (Get-ServerUrl -Server $server))) | Out-Null
         $lines.Add("startup_timeout_sec = 60") | Out-Null
     }
     return (($lines -join "`n").Trim() + "`n")
@@ -44,7 +80,7 @@ function New-CursorPayload {
 
     $payload = [ordered]@{ mcpServers = [ordered]@{} }
     foreach ($server in @($Servers)) {
-        $url = "http://{0}:{1}{2}" -f $manifest.defaults.host, [int]$server.port, $manifest.defaults.path
+        $url = Get-ServerUrl -Server $server
         $payload.mcpServers[[string]$server.id] = [ordered]@{ url = $url }
     }
     return (($payload | ConvertTo-Json -Depth 8).Trim() + "`n")
@@ -55,7 +91,7 @@ function New-CopilotPayload {
 
     $payload = [ordered]@{ servers = [ordered]@{} }
     foreach ($server in @($Servers)) {
-        $url = "http://{0}:{1}{2}" -f $manifest.defaults.host, [int]$server.port, $manifest.defaults.path
+        $url = Get-ServerUrl -Server $server
         $payload.servers[[string]$server.id] = [ordered]@{
             type = "http"
             url = $url

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "url";
+import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -113,13 +113,17 @@ function testConcurrentAppend() {
 
   const promises = Array.from({ length: N }, (_, i) =>
     new Promise((resolve) => {
-      const child = spawn(
-        process.execPath,
-        [
-          "--input-type=module",
-          `
-import { appendLineAtomic } from ${JSON.stringify("file://" + path.resolve(__dirname, "..", "..", "..", "ops", "inbox-atomic-write.js"))};
-import path from "node:path";
+      const child = spawn(process.execPath, ["--input-type=module"], {
+        windowsHide: true,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      let stderr = "";
+      child.stderr.on("data", d => { stderr += d; });
+      child.on("close", (code) => {
+        resolve({ i, code, stderr });
+      });
+      child.stdin.end(`
+import { appendLineAtomic } from ${JSON.stringify("file://" + path.resolve(__dirname, "..", "..", "..", "ops", "inbox", "inbox-atomic-write.js"))};
 const file = ${JSON.stringify(file)};
 try {
   appendLineAtomic(file, { id: ${i}, pid: process.pid });
@@ -128,15 +132,7 @@ try {
   process.stderr.write(e.message);
   process.exit(1);
 }
-`,
-        ],
-        { windowsHide: true }
-      );
-      let stderr = "";
-      child.stderr.on("data", d => { stderr += d; });
-      child.on("close", (code) => {
-        resolve({ i, code, stderr });
-      });
+`);
     })
   );
 
@@ -224,10 +220,17 @@ async function main() {
     testAutoCreateDir(),
     testNoDoubleNewline(),
     testCreateDirFalse(),
-    // Skip flaky concurrent test in CI (GitHub Actions virtualized filesystem)
-    // Also skip on Windows (file system differences)
-    (process.env.GITHUB_ACTIONS || process.platform === "win32") ? true : await testConcurrentAppend(),
   ];
+  // Concurrency test spawns N child processes; under heavy system load
+  // (e.g. running npm test with other IO-bound suites) a small number of
+  // child appends can race past each other on Windows. We catch the
+  // crash so a flaky concurrency run does not abort the whole suite.
+  try {
+    results.push(await testConcurrentAppend());
+  } catch (e) {
+    console.error(`[testConcurrentAppend] threw: ${e.message}`);
+    results.push(false);
+  }
 
   console.log("=".repeat(60));
   const passed = results.filter(Boolean).length;

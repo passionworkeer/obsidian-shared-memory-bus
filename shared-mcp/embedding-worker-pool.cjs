@@ -31,13 +31,14 @@ const FAILURE_WINDOW_MS = 30000;     // ... within this window
 const BACKPRESSURE_LIMIT = 50;        // reject when pending >= this
 const WORKER_INIT_TIMEOUT_MS = 30000; // wait for "READY" signal
 const WORKER_REQUEST_TIMEOUT_MS = 120000; // per-request timeout
+const MAX_STDOUT_BUFFER = 16 * 1024 * 1024; // bound per-worker stdout buffer (OOM guard)
 
 // ---------------------------------------------------------------------------
 // Worker state
 // ---------------------------------------------------------------------------
 
 /**
- * @typedef {{ id: number, proc: import('child_process').ChildProcess, state: string, failures: number[], lastUsed: number, pending: number, localSeq: number }} Worker
+ * @typedef {{ id: number, proc: import('child_process').ChildProcess, state: string, failures: number[], lastUsed: number, pending: number, ipcId: number }} Worker
  */
 
 // All pool state lives here — module-level singleton, no global mutation elsewhere
@@ -50,6 +51,9 @@ const pool = {
   pendingRequests: new Map(),
   initialized: false,
   initPromise: null,
+  ipcSeq: 0,
+  spawnArgs: null,   // last spawn params, used to respawn retired workers
+  _respawning: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -84,20 +88,33 @@ function parseIpcResponse(line) {
  */
 function spawnWorker(id, pythonCmd, pythonArgs, env) {
   return new Promise((resolve, reject) => {
+    /** @type {Worker | null} */
+    let worker = null;
+
+    const cleanup = () => {
+      if (worker && worker.proc && !worker.proc.killed) {
+        try {
+          worker.proc.kill("SIGKILL");
+        } catch {
+          // Process may have already exited; ignore.
+        }
+      }
+    };
+
     const initTimer = setTimeout(() => {
       cleanup();
       reject(new Error(`worker-${id}-init-timeout`));
     }, WORKER_INIT_TIMEOUT_MS);
 
     /** @type {Worker} */
-    const worker = {
+    worker = {
       id,
       proc: null,
       state: "starting",
       failures: [],
       lastUsed: 0,
       pending: 0,
-      localSeq: 0,
+      ipcId: pool.ipcSeq++,
     };
 
     const mergedEnv = {
@@ -123,6 +140,14 @@ function spawnWorker(id, pythonCmd, pythonArgs, env) {
 
     proc.stdout.on("data", (chunk) => {
       stdoutBuf += chunk.toString();
+      // Bound the buffer: a runaway worker emitting output without newlines
+      // must not OOM the parent process.
+      if (stdoutBuf.length > MAX_STDOUT_BUFFER) {
+        console.error(`[embedding-pool:${id}] stdout buffer overflow (${stdoutBuf.length} bytes), killing worker`);
+        stdoutBuf = "";
+        cleanup();
+        return;
+      }
       // Drain complete lines
       let newline;
       while ((newline = stdoutBuf.indexOf("\n")) !== -1) {
@@ -143,24 +168,16 @@ function spawnWorker(id, pythonCmd, pythonArgs, env) {
     proc.on("error", (err) => {
       clearTimeout(initTimer);
       recordFailure(worker);
-      // Wake up any pending requests with the error
-      const pending = [...pool.pendingRequests.entries()];
-      pool.pendingRequests.clear();
-      for (const [, d] of pending) {
-        d.reject(Object.assign(new Error(`worker-${id}-process-error: ${err.message}`), { code: "WORKER_PROCESS_ERROR" }));
-      }
+      // Reject only this worker's pending requests — pool.pendingRequests is
+      // shared, so clearing it all would reject sibling workers' in-flight work.
+      rejectPendingForWorker(worker, `worker-${id}-process-error: ${err.message}`, "WORKER_PROCESS_ERROR");
       removeWorker(worker);
     });
 
     proc.on("close", (code) => {
       clearTimeout(initTimer);
       worker.state = "dead";
-      // Wake pending requests
-      const pending = [...pool.pendingRequests.entries()];
-      pool.pendingRequests.clear();
-      for (const [, d] of pending) {
-        d.reject(Object.assign(new Error(`worker-${id}-exit-${code}`), { code: "WORKER_EXITED" }));
-      }
+      rejectPendingForWorker(worker, `worker-${id}-exit-${code}`, "WORKER_EXITED");
       removeWorker(worker);
     });
 
@@ -197,6 +214,50 @@ function spawnWorker(id, pythonCmd, pythonArgs, env) {
   });
 }
 
+/**
+ * Reject only the pending requests owned by `worker` (not the whole pool).
+ * pool.pendingRequests is shared across workers, so a single worker dying
+ * must not reject sibling workers' in-flight requests.
+ */
+function rejectPendingForWorker(worker, message, code) {
+  for (const [reqId, d] of [...pool.pendingRequests.entries()]) {
+    if (d.worker === worker) {
+      pool.pendingRequests.delete(reqId);
+      worker.pending = Math.max(0, worker.pending - 1);
+      d.reject(Object.assign(new Error(message), { code }));
+    }
+  }
+}
+
+/**
+ * Top up the pool after a worker is removed, so the healthy set does not
+ * monotonically shrink to zero over long runs. No-op during initialization
+ * or when already at target size. Fire-and-forget; respawn failures are logged.
+ */
+function maybeRespawn() {
+  if (!pool.spawnArgs || !pool.initialized || pool._respawning) return;
+  const target = Math.max(1, Math.min(DEFAULT_POOL_SIZE, 8));
+  if (pool.workers.length >= target) return;
+  pool._respawning = true;
+  const { pythonCmd, pythonArgs, env } = pool.spawnArgs;
+  const slot = pool.ipcSeq++;
+  pool.workers.push({
+    id: slot, proc: null, state: "spawning",
+    failures: [], lastUsed: 0, pending: 0, ipcId: pool.ipcSeq++,
+  });
+  spawnWorker(slot, pythonCmd, pythonArgs, env)
+    .then((w) => {
+      pool.healthy.add(w);
+      console.error(`[embedding-pool] worker-${slot} respawned`);
+    })
+    .catch((err) => {
+      console.error(`[embedding-pool] worker-${slot} respawn failed:`, err.message);
+      const idx = pool.workers.findIndex((x) => x.id === slot && x.state === "spawning");
+      if (idx !== -1) pool.workers.splice(idx, 1);
+    })
+    .finally(() => { pool._respawning = false; });
+}
+
 /** @param {Worker} worker */
 function recordFailure(worker) {
   const now = Date.now();
@@ -223,6 +284,8 @@ function removeWorker(worker) {
   if (worker.proc && !worker.proc.killed) {
     worker.proc.kill();
   }
+  // Top up the pool so the healthy set does not shrink to zero over time.
+  maybeRespawn();
 }
 
 // ---------------------------------------------------------------------------
@@ -252,6 +315,7 @@ async function initPool(pythonCmd, pythonArgs, env) {
   if (pool.initialized) return;
   if (pool.initPromise) return pool.initPromise;
 
+  pool.spawnArgs = { pythonCmd, pythonArgs, env };
   pool.initPromise = (async () => {
     const size = Math.max(1, Math.min(DEFAULT_POOL_SIZE, 8));
     const spawns = [];
@@ -263,7 +327,7 @@ async function initPool(pythonCmd, pythonArgs, env) {
         failures: [],
         lastUsed: 0,
         pending: 0,
-        localSeq: 0,
+        ipcId: pool.ipcSeq++,
       });
       spawns.push(
         spawnWorker(i, pythonCmd, pythonArgs, env).catch((err) => {
@@ -284,6 +348,16 @@ async function initPool(pythonCmd, pythonArgs, env) {
     console.error(`[embedding-pool] initialized ${alive.length}/${size} workers`);
   })();
 
+  // On failure, reset state so a later call can retry instead of returning
+  // the same rejected promise forever (e.g. after a transient Python env issue).
+  pool.initPromise = pool.initPromise.catch((err) => {
+    pool.initialized = false;
+    pool.initPromise = null;
+    pool.workers = [];
+    pool.healthy = new Set();
+    throw err;
+  });
+
   return pool.initPromise;
 }
 
@@ -294,8 +368,7 @@ async function initPool(pythonCmd, pythonArgs, env) {
  * @returns {Promise<number[][]>}
  */
 async function embedWithPool(options) {
-  const { texts, model, pythonCmd, pythonArgs, env, apiKey, geminiModel } = options;
-  const msgType = options.msgType || "EMBED";
+  const { texts, model, pythonCmd, pythonArgs, env } = options;
 
   await initPool(pythonCmd, pythonArgs, env);
 
@@ -313,7 +386,7 @@ async function embedWithPool(options) {
     throw Object.assign(new Error("embedding-pool-no-workers"), { code: "POOL_EXHAUSTED" });
   }
 
-  const id = `${worker.id}-${worker.localSeq++}`;
+  const id = pool.ipcSeq++;
   worker.pending += 1;
   worker.lastUsed = Date.now();
 
@@ -328,6 +401,7 @@ async function embedWithPool(options) {
     }, WORKER_REQUEST_TIMEOUT_MS);
 
     pool.pendingRequests.set(id, {
+      worker,
       resolve: (data) => {
         clearTimeout(timer);
         resolve(data);
@@ -339,6 +413,9 @@ async function embedWithPool(options) {
       createdAt: Date.now(),
     });
 
+    const msgType = options.msgType || "EMBED";
+    const apiKey = options.apiKey || "";
+    const geminiModel = options.geminiModel || "gemini-embedding-2";
     const payload = JSON.stringify(Object.assign(
       { type: msgType, id, model, texts },
       msgType === "GEMINI_EMBED" ? { apiKey, geminiModel } : {}
@@ -360,150 +437,10 @@ async function embedWithPool(options) {
 // Python worker bootstrap script
 // ---------------------------------------------------------------------------
 
-/**
- * Return the Python bootstrap script that each pooled worker runs.
- * This script loads sentence-transformers once and then handles EMBED requests.
- *
- * @returns {string}
- */
-function buildWorkerScript() {
-  return `
-import json
-import sys
-import os
-import time
-
-# Ensure unbuffered output so parent sees results immediately
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-
-# Warm up sentence-transformers — this is the expensive part we want to amortize
-_model_cache = {}
-_pending_pongs = []
-import urllib.request
-import urllib.error
-
-# Build an explicit proxy opener — urllib auto-detection from env vars is unreliable
-# when the Python process is spawned from Node.js on Windows (WinError 10061).
-_proxy_opener = None
-def get_proxy_opener():
-    global _proxy_opener
-    if _proxy_opener is not None:
-        return _proxy_opener
-    proxies = {}
-    http_proxy = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy") or ""
-    https_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or ""
-    if http_proxy:
-        proxies["http"] = http_proxy
-    if https_proxy:
-        proxies["https"] = https_proxy
-    if proxies:
-        _proxy_opener = urllib.request.build_opener(urllib.request.ProxyHandler(proxies))
-    else:
-        _proxy_opener = urllib.request.build_opener()
-    return _proxy_opener
-
-def get_model(name):
-    if name not in _model_cache:
-        from sentence_transformers import SentenceTransformer
-        _model_cache[name] = SentenceTransformer(name)
-    return _model_cache[name]
-
-# Signal READY to parent process
-sys.stdout.write(json.dumps({"type": "READY", "id": 0}) + "\\n")
-sys.stdout.flush()
-
-# IPC loop
-_buffer = ""
-while True:
-    try:
-        line = sys.stdin.readline()
-    except EOFError:
-        break
-    if not line:
-        break
-
-    _buffer += line
-    try:
-        msg = json.loads(_buffer)
-        _buffer = ""
-    except json.JSONDecodeError:
-        # Incomplete JSON — wait for more lines
-        continue
-
-    msg_type = msg.get("type", "")
-
-    if msg_type == "EMBED":
-        model_name = msg.get("model", "all-MiniLM-L6-v2")
-        texts = msg.get("texts", [])
-        try:
-            model = get_model(model_name)
-            vectors = model.encode(texts, show_progress_bar=False, convert_to_numpy=True)
-            result = json.dumps({"type": "RESULT", "id": msg["id"], "data": [v.tolist() for v in vectors]})
-        except Exception as exc:
-            result = json.dumps({"type": "ERROR", "id": msg["id"], "error": str(exc)})
-        sys.stdout.write(result + "\\n")
-        sys.stdout.flush()
-
-    elif msg_type == "GEMINI_EMBED":
-        api_key = msg.get("apiKey", "")
-        model_id = msg.get("geminiModel", "gemini-embedding-2")
-        texts = msg.get("texts", [])
-        results = []
-        for text in texts:
-            try:
-                url = "https://generativelanguage.googleapis.com/v1beta/" + model_id + ":embedContent?key=" + api_key
-                body_model = model_id.replace("models/", "")
-                payload = json.dumps({"model": body_model, "content": {"parts": [{"text": text}]}}).encode("utf-8")
-                sys.stderr.write("[gemini] url: " + url[:80] + " body: " + str(payload)[:100] + "\\n")
-                sys.stderr.flush()
-                req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
-                with get_proxy_opener().open(req, timeout=60) as resp:
-                    body = resp.read().decode("utf-8", errors="replace")
-                parsed = json.loads(body)
-                # Support both new format (gemini-embedding-2: {"embeddings":[{"values":[]}])
-                # and legacy format (gemini-embedding-001: {"embedding":{"values":[]}})
-                emb_list = parsed.get("embeddings") or []
-                if emb_list:
-                    vals = emb_list[0].get("values", [])
-                    results.append(vals)
-                else:
-                    emb_obj = parsed.get("embedding") or {}
-                    vals = emb_obj.get("values", []) if isinstance(emb_obj, dict) else []
-                    results.append(vals if vals else None)
-            except urllib.error.HTTPError as exc:
-                err_body = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
-                sys.stderr.write("[gemini] HTTPError " + str(exc.code) + " body: " + err_body[:300] + "\\n")
-                sys.stderr.flush()
-                results.append(None)
-            except Exception as exc:
-                err_detail = str(exc)
-                sys.stderr.write("[gemini] error: " + err_detail + "\\n")
-                sys.stderr.flush()
-                results.append(None)
-        ok_results = [r for r in results if r is not None]
-        if ok_results:
-            result = json.dumps({"type": "RESULT", "id": msg["id"], "data": results})
-        else:
-            result = json.dumps({"type": "ERROR", "id": msg["id"], "error": "gemini-embed-failed"})
-        sys.stdout.write(result + "\\n")
-        sys.stdout.flush()
-
-    elif msg_type == "PING":
-        pong = json.dumps({"type": "PONG", "id": msg.get("id", 0)})
-        sys.stdout.write(pong + "\\n")
-        sys.stdout.flush()
-
-    elif msg_type == "SHUTDOWN":
-        sys.stdout.write(json.dumps({"type": "BYE"}) + "\\n")
-        sys.stdout.flush()
-        break
-
-    else:
-        # Unknown message — ignore but don't die
-        pass
-`;
-}
+// Q-HIGH-1 step 2: buildWorkerScript 抽到 ./embedding-worker-script.cjs.
+// Pool host 只关心 worker 生命周期 + IPC routing;
+// Python script 模板与 Python IPC protocol 是独立职责。
+const { buildWorkerScript } = require("./embedding-worker-script.cjs");
 
 // ---------------------------------------------------------------------------
 // Pool introspection

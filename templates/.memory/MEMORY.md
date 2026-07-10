@@ -8,7 +8,7 @@ version: 1
 
 # Shared Memory Index
 
-This directory is the canonical store for all agent memory in the obsidian-shared-memory-bus system.
+This directory is the canonical store for all agent memory in the yt system.
 
 ## Structure
 

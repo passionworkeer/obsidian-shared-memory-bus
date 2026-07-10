@@ -11,7 +11,12 @@
  */
 
 import fs from "node:fs";
-import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { spawnProcess } from "./proto/child-process.mjs";
+
+const BLACKBOARD_QUERY_SCRIPT = fileURLToPath(
+  new URL("./scripts/blackboard_query.py", import.meta.url),
+);
 
 function jsonResult(payload) {
   return {
@@ -31,35 +36,6 @@ function errorResult(message) {
     content: [{ type: "text", text: JSON.stringify({ ok: false, error: String(message) }, null, 2) }],
     isError: true,
   };
-}
-
-function spawnProcess(executable, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, {
-      stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
-      ...options,
-    });
-
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      resolve({ code: code || 0, stdout, stderr });
-    });
-
-    if (options.input !== undefined) {
-      child.stdin.end(options.input);
-    } else {
-      child.stdin.end();
-    }
-  });
 }
 
 function truncateText(value, maxLength = 400) {
@@ -131,8 +107,39 @@ function describeClaudeMemFailure({ route, envelope }) {
  */
 export function createMemoryBridge(params) {
 
+  // S-HIGH-3: SSRF guard — refuse to fetch non-loopback / non-https hosts when
+  // CLAUDE_MEM_BASE comes from an env var (could be set by an attacker to
+  // exfiltrate data to a public URL or probe internal services).
+  const MEM_BRIDGE_ALLOWED_HOSTS = new Set(
+    (process.env.AI_MEMORY_BRIDGE_ALLOWED_HOSTS || "127.0.0.1,localhost,::1")
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  const MEM_BRIDGE_REQUIRE_HTTPS = String(process.env.AI_MEMORY_BRIDGE_REQUIRE_HTTPS || "false") === "true";
+
+  function assertSafeBaseUrl(rawBase) {
+    let u;
+    try {
+      u = new URL(rawBase);
+    } catch {
+      throw new Error(`bridge.invalid-base-url: ${String(rawBase).slice(0, 64)} is not a valid URL`);
+    }
+    if (MEM_BRIDGE_REQUIRE_HTTPS && u.protocol !== "https:") {
+      throw new Error(`bridge.insecure-base-url: ${u.protocol} not allowed (require https)`);
+    }
+    const host = u.hostname.toLowerCase();
+    if (!MEM_BRIDGE_ALLOWED_HOSTS.has(host)) {
+      throw new Error(
+        `bridge.host-not-allowed: ${host} (configure AI_MEMORY_BRIDGE_ALLOWED_HOSTS to permit)`,
+      );
+    }
+    return u;
+  }
+
   async function fetchClaudeMem(route, options = {}) {
-    const response = await fetch(`${params.CLAUDE_MEM_BASE}${route}`, options);
+    const baseUrl = assertSafeBaseUrl(params.CLAUDE_MEM_BASE);
+    const response = await fetch(`${baseUrl.toString().replace(/\/$/, "")}${route}`, options);
     return readResponseEnvelope(response);
   }
 
@@ -202,53 +209,19 @@ export function createMemoryBridge(params) {
       return { ok: false, error: `python-runtime-unavailable: ${PYTHON.error || "unknown-error"}` };
     }
 
-    // NOTE: Inline -c string is intentional — avoids a temp file on disk.
-    // Debug tip: to inspect, add `print("DEBUG:", payload)` before json.load().
-    const script = `
-import json
-import sqlite3
-import sys
-
-payload = json.load(sys.stdin)
-db = sqlite3.connect(payload["db"], timeout=5)
-db.row_factory = sqlite3.Row
-
-try:
-    if payload["op"] == "query":
-        states = [str(item).strip().upper() for item in payload.get("states", []) if str(item).strip()]
-        where = ""
-        params = []
-        if states:
-            where = " WHERE state IN ({})".format(",".join("?" for _ in states))
-            params.extend(states)
-        params.append(max(1, int(payload.get("limit", 10))))
-        sql = "SELECT id, repo, issue_number, issue_title, state, assigned_agent, processor, updated_at FROM tasks{} ORDER BY updated_at DESC LIMIT ?".format(where)
-        rows = [dict(row) for row in db.execute(sql, params)]
-        print(json.dumps({"ok": True, "rows": rows}, ensure_ascii=False))
-    elif payload["op"] == "insert":
-        repo = str(payload["repo"]).strip()
-        issue_number = int(payload["issue_number"])
-        assigned_agent = str(payload.get("assigned_agent") or "intel").strip() or "intel"
-        issue_title = str(payload.get("issue_title") or "{}#{}".format(repo, issue_number)).strip()
-        cursor = db.execute(
-            "INSERT INTO tasks (repo, issue_number, assigned_agent, issue_title, state) VALUES (?, ?, ?, ?, ?)",
-            (repo, issue_number, assigned_agent, issue_title, 'PENDING'),
-        )
-        db.commit()
-        print(json.dumps({"ok": True, "insertedId": cursor.lastrowid}, ensure_ascii=False))
-    else:
-        print(json.dumps({"ok": False, "error": "unsupported-op"}, ensure_ascii=False))
-finally:
-    db.close()
-`;
-
-    const result = await spawnProcess(PYTHON.command, withPythonArgs(PYTHON, ["-c", script]), {
-      env: PYTHON_SPAWN_ENV,
-      input: JSON.stringify({
-        ...payload,
-        db: BLACKBOARD_DB_PATH,
-      }),
-    });
+    // Payload is passed via stdin (same contract as the former inline -c string).
+    // The .py reads JSON from stdin and prints a single JSON line on stdout.
+    const result = await spawnProcess(
+      PYTHON.command,
+      withPythonArgs(PYTHON, [BLACKBOARD_QUERY_SCRIPT]),
+      {
+        env: PYTHON_SPAWN_ENV,
+        input: JSON.stringify({
+          ...payload,
+          db: BLACKBOARD_DB_PATH,
+        }),
+      },
+    );
 
     if (result.code !== 0) {
       return {

@@ -63,7 +63,6 @@ Read this file before substantive work:
 Prefer the shared HTTP endpoints for:
 
 - `memory` (port 9338)
-- `obsidian` (port 9335) — optional, no Obsidian dependency
 - `context7` (port 9331)
 - `fetch` (port 9332)
 - `time` (port 9333)

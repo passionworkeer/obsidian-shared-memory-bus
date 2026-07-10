@@ -7,9 +7,8 @@ import { spawn, spawnSync } from "node:child_process";
 // Derived constants
 // ---------------------------------------------------------------------------
 
-const USER_HOME = process.env.USERPROFILE || os.homedir();
+const USER_HOME = process.env.USERPROFILE || "";
 const APP_DATA = process.env.APPDATA || path.join(USER_HOME, "AppData", "Roaming");
-const LOCAL_APPDATA = process.env.LOCALAPPDATA || path.join(USER_HOME, "AppData", "Local");
 
 // ---------------------------------------------------------------------------
 // Env var cache (matches the pattern in omni-memory-server.js)
@@ -46,7 +45,7 @@ function readWindowsEnvironmentVariable(name) {
     if (!result.error && result.status === 0) {
       value = String(result.stdout || "").trim();
     }
-  } catch (_error) {
+  } catch {
     value = "";
   }
 
@@ -118,7 +117,7 @@ function resolvePowerShellCommand() {
     if (!probe.error && probe.status === 0) {
       return "powershell.exe";
     }
-  } catch (_error) {
+  } catch {
     // fall through
   }
   return firstNonEmptyEnv("AI_MEMORY_PWSH") || "powershell.exe";
@@ -243,10 +242,8 @@ function spawnPython(args, options = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// resolveVaultRoot — mirrors the logic from bus/vault-root.js
+// Utility: isDirectory
 // ---------------------------------------------------------------------------
-
-let cachedVaultRoot = null;
 
 function isDirectory(candidate) {
   if (!candidate) return false;
@@ -257,94 +254,39 @@ function isDirectory(candidate) {
   }
 }
 
-function getObsidianConfigCandidates() {
-  const candidates = [];
-  if (APP_DATA) {
-    candidates.push(path.join(APP_DATA, "obsidian", "obsidian.json"));
-  }
-  candidates.push(path.join(LOCAL_APPDATA, "obsidian", "obsidian.json"));
-  candidates.push(path.join(USER_HOME, "AppData", "Roaming", "obsidian", "obsidian.json"));
-  return [...new Set(candidates)];
-}
+// ---------------------------------------------------------------------------
+// Default store candidates (non-Obsidian)
+// ---------------------------------------------------------------------------
 
-function resolveFromObsidianConfig() {
-  for (const configPath of getObsidianConfigCandidates()) {
-    if (!fs.existsSync(configPath)) continue;
-    try {
-      const payload = JSON.parse(fs.readFileSync(configPath, "utf8"));
-      const vaults = Object.values(payload?.vaults || {})
-        .map((entry) => ({
-          path: String(entry?.path || "").trim(),
-          open: Boolean(entry?.open),
-          ts: Number(entry?.ts || 0),
-        }))
-        .filter((entry) => isDirectory(entry.path))
-        .map((entry) => ({ ...entry, path: path.resolve(entry.path) }));
-
-      if (vaults.length === 0) continue;
-
-      const byRecent = [...vaults].sort((l, r) => r.ts - l.ts);
-      const openVault = byRecent.find((e) => e.open);
-      return openVault ? openVault.path : byRecent[0].path;
-    } catch (_err) {
-      // Malformed config — skip
-    }
-  }
-  return "";
-}
-
-function getDefaultVaultCandidates() {
-  const candidates = [
-    path.join(USER_HOME, "Obsidian Vault"),
-    path.join(USER_HOME, "Documents", "Obsidian Vault"),
-    path.join(USER_HOME, "Desktop", "Obsidian Vault"),
+function getDefaultStoreCandidates() {
+  return [
+    path.join(os.homedir(), ".ai-memory"),
   ];
-  for (let i = 67; i <= 90; i++) {
-    const letter = String.fromCharCode(i);
-    const root = `${letter}:\\`;
-    try {
-      fs.accessSync(root, fs.constants.R_OK);
-      candidates.push(path.join(root, "Obsidian Vault"));
-    } catch {
-      // Drive not accessible — skip
-    }
-  }
-  return candidates;
-}
-
-function resolveVaultRoot(options = {}) {
-  if (cachedVaultRoot && !options.refresh) {
-    return cachedVaultRoot;
-  }
-
-  for (const envKey of ["AI_MEMORY_STORE", "AI_MEMORY_STORE_ROOT", "AI_MEMORY_OBSIDIAN_VAULT", "OBSIDIAN_VAULT_ROOT"]) {
-    const candidate = String(process.env[envKey] || "").trim();
-    if (isDirectory(candidate)) {
-      cachedVaultRoot = path.resolve(candidate);
-      return cachedVaultRoot;
-    }
-  }
-
-  const obsidianVault = resolveFromObsidianConfig();
-  if (obsidianVault) {
-    cachedVaultRoot = obsidianVault;
-    return cachedVaultRoot;
-  }
-
-  const fallback = getDefaultVaultCandidates().find((c) => isDirectory(c));
-  if (fallback) {
-    cachedVaultRoot = path.resolve(fallback);
-    return cachedVaultRoot;
-  }
-
-  throw Object.assign(
-    new Error("no-obsidian-vault: Set AI_MEMORY_OBSIDIAN_VAULT or OBSIDIAN_VAULT_ROOT, or open/create an Obsidian vault first."),
-    { code: "ENOENT" }
-  );
 }
 
 // ---------------------------------------------------------------------------
-// Store root resolution (mirrors bus/store-root.js but via this adapter)
+// resolveVaultRoot — delegates to bus/vault-root.js for the canonical impl
+// ---------------------------------------------------------------------------
+
+import { resolveVaultRootChain as resolveBusVaultRootChain, resolveVaultRoot as resolveBusVaultRoot } from "../vault-root.js";
+
+/**
+ * Returns the Obsidian vault root resolved from environment variables.
+ * Delegates to bus/vault-root.js so the platform adapter matches the
+ * canonical helper. Passes no configPath/vaultRootTxt so it only walks
+ * the env-only branches — same semantics as calling the simple
+ * resolveVaultRoot() helper directly, but via the unified chain.
+ */
+function resolveVaultRoot() {
+  return resolveBusVaultRootChain({
+    configPath: null,
+    vaultRootTxt: "",
+    fallback: resolveBusVaultRoot,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Store root resolution
 // ---------------------------------------------------------------------------
 
 const MIN_FREE_SPACE_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB
@@ -384,18 +326,23 @@ function detectBestDrive() {
   return { drive: best.letter + ":", path: path.join(best.letter + ":", ".ai-memory"), freeBytes: best.freeBytes };
 }
 
-const DEFAULT_STORE_ROOT = path.join(USER_HOME || ".", ".ai-memory");
+const DEFAULT_STORE_ROOT = path.join(os.homedir(), ".ai-memory");
 let cachedStoreRoot = null;
+
+import { resolveStoreRoot as resolveBusStoreRoot } from "../store-root.js";
 
 function resolveStoreRoot(options = {}) {
   if (cachedStoreRoot && !options.refresh) return cachedStoreRoot;
 
-  for (const envKey of ["AI_MEMORY_STORE", "AI_MEMORY_STORE_ROOT"]) {
-    const candidate = (process.env[envKey] || "").trim();
-    if (candidate) {
-      cachedStoreRoot = path.resolve(candidate);
-      return cachedStoreRoot;
-    }
+  // Delegate to the unified bus/store-root.js so the adapter matches the
+  // canonical resolution (explicit env > vault bridge > AI_MEMORY_ROOT >
+  // default). Mirror Python's retrieval/runtime_support.py:resolve_store_root.
+  // Windows-only extra: when no env / vault resolves, prefer the drive with
+  // the most free space for the default store location.
+  const resolved = resolveBusStoreRoot();
+  if (resolved && resolved !== DEFAULT_STORE_ROOT) {
+    cachedStoreRoot = path.resolve(resolved);
+    return cachedStoreRoot;
   }
 
   const best = detectBestDrive();
@@ -404,13 +351,8 @@ function resolveStoreRoot(options = {}) {
     return cachedStoreRoot;
   }
 
-  const aiMemoryRoot = process.env.AI_MEMORY_ROOT || "";
-  const fallback = aiMemoryRoot
-    ? path.join(aiMemoryRoot, ".ai-memory")
-    : DEFAULT_STORE_ROOT;
-
-  cachedStoreRoot = fallback;
-  return fallback;
+  cachedStoreRoot = DEFAULT_STORE_ROOT;
+  return cachedStoreRoot;
 }
 
 function getInboxRoot(storeRoot) {
@@ -452,6 +394,7 @@ function getWindowsAdapter() {
     spawnPython,
     resolveVaultRoot,
     resolveStoreRoot,
+    getDefaultStoreCandidates,
     getInboxRoot,
     getGeneratedRoot,
     getKgRoot,

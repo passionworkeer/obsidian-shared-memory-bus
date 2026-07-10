@@ -7,8 +7,10 @@ retrieval/REFACTOR-NOTES.md for the full refactoring plan.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
+import logging
 import time as time_module
 from typing import Dict, Optional
 
@@ -39,6 +41,8 @@ from search_index import (
 _SQLITE_CACHE = None  # type: Optional["SqliteSearchCache"]
 _SQLITE_CACHE_INIT = False
 
+logger = logging.getLogger(__name__)
+
 
 def _get_sqlite_cache():
     """
@@ -51,12 +55,18 @@ def _get_sqlite_cache():
         return _SQLITE_CACHE
     _SQLITE_CACHE_INIT = True
 
-    # Resolve cache directory: AI_MEMORY_STORE/cache
+    # Resolve cache directory from the same canonical store root as search_index.
     import os
-    store_root = os.environ.get(
-        "AI_MEMORY_STORE",
-        os.environ.get("AI_MEMORY_STORE_ROOT", os.path.join(os.path.expanduser("~"), ".ai-memory")),
-    )
+    try:
+        from runtime_support import resolve_store_root
+        store_root = str(resolve_store_root())
+    except Exception:
+        store_root = (
+            os.environ.get("AI_MEMORY_STORE")
+            or os.environ.get("AI_MEMORY_STORE_ROOT")
+            or os.environ.get("AI_MEMORY_ROOT")
+            or os.path.join(os.path.expanduser("~"), ".ai-memory")
+        )
     cache_dir = os.path.join(store_root, "cache")
 
     try:
@@ -75,17 +85,16 @@ def _get_sqlite_cache():
         if removed > 0:
             import sys
             sys.stderr.write(f"[search_cache] cleaned {removed} expired SQLite entries\n")
-        # Attempt warm — get_warm_queries reads from SQLite itself (no-op on cold DB)
-        try:
-            from retrieval.cache.warm_strategy import get_warm_queries, warm_cache
-            recent = get_warm_queries(cache_dir, max_queries=10)
-            if recent:
-                warm_cache(sqlite_cache, recent, timeout_seconds=10)
-        except Exception:
-            pass
+        # Attempt warm — 见 docs/PROJECT_AUDIT_*.md §I-LOW-7:
+        # retrieval/cache/warm_strategy.py 未实现,当前跳过 warm-up,
+        # 缓存仅在首次查询时按需填充。
         _SQLITE_CACHE = sqlite_cache
         return _SQLITE_CACHE
-    except Exception:
+    except (OSError, ImportError) as exc:
+        logger.warning("SQLite cache init failed (dir=%s): %s", cache_dir, exc, exc_info=True)
+        return None
+    except Exception:  # noqa: BLE001 - cache must degrade gracefully
+        logger.warning("SQLite cache init failed (dir=%s)", cache_dir, exc_info=True)
         return None
 
 
@@ -95,8 +104,10 @@ def close_sqlite_cache():
     if _SQLITE_CACHE is not None:
         try:
             _SQLITE_CACHE.close()
-        except Exception:
-            pass
+        except (OSError, RuntimeError) as exc:
+            logger.warning("SQLite cache close failed: %s", exc, exc_info=True)
+        except Exception:  # noqa: BLE001 - shutdown must not raise
+            logger.warning("SQLite cache close failed", exc_info=True)
     _SQLITE_CACHE = None
     _SQLITE_CACHE_INIT = False
 
@@ -135,7 +146,11 @@ def build_cache_state(
     if sqlite_cache is not None:
         try:
             sqlite_stats = sqlite_cache.stats()
-        except Exception:
+        except (OSError, RuntimeError) as exc:
+            logger.warning("SQLite stats() failed: %s", exc, exc_info=True)
+            sqlite_stats = {"available": False}
+        except Exception:  # noqa: BLE001 - stats must not break cache state
+            logger.warning("SQLite stats() failed", exc_info=True)
             sqlite_stats = {"available": False}
 
     return {
@@ -186,7 +201,10 @@ def clear_search_runtime_caches(include_data_caches: bool = False) -> Dict[str, 
 # ---------------------------------------------------------------------------
 
 def clone_json_payload(payload: Dict[str, object]) -> Dict[str, object]:
-    return json.loads(json.dumps(payload, ensure_ascii=False))
+    # copy.deepcopy is materially faster than json.loads(json.dumps(...)) for
+    # JSON-native data (dicts/lists/strings/numbers) and also handles non-JSON
+    # types that the json roundtrip would silently drop or fail on.
+    return copy.deepcopy(payload)
 
 
 def build_search_result_cache_key(
@@ -270,5 +288,7 @@ def store_search_result(cache_key: str, payload: Dict[str, object], route: str =
                 score=score,
                 ttl_seconds=604800,  # 7 days for SQLite
             )
-        except Exception:
-            pass
+        except (OSError, RuntimeError) as exc:
+            logger.warning("SQLite cache write failed (key=%s): %s", cache_key, exc, exc_info=True)
+        except Exception:  # noqa: BLE001 - write failure must not break the read path
+            logger.warning("SQLite cache write failed (key=%s)", cache_key, exc_info=True)

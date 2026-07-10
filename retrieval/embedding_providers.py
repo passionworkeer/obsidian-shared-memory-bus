@@ -24,6 +24,26 @@ GEMINI_DEFAULT_MODEL = "gemini-embedding-2"
 _TRANSFORMER_MODEL_CACHE: Dict[str, object] = {"name": "", "model": None}
 
 
+def _redact_secrets(text: object) -> str:
+    """Strip API keys / bearer tokens from a string before logging or returning as error.
+
+    Gemini puts the API key in the URL query (?key=...); urllib exceptions and
+    response bodies can therefore leak it. This keeps secrets out of error
+    strings and logs (project rule: secrets never enter memory files).
+    """
+    if not text:
+        return ""
+    cleaned = str(text)
+    cleaned = re.sub(
+        r"([?&](?:api[_-]?key|key|access_token|sig)=)[^&\s\"']+",
+        r"\1REDACTED",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"(Bearer\s+)[A-Za-z0-9_\-\.]{8,}", r"\1REDACTED", cleaned, flags=re.IGNORECASE)
+    return cleaned
+
+
 def build_embedding_config_hash(adapter: str, model_name: str, base_url: str = "") -> str:
     normalized_adapter = normalize_embedding_adapter(adapter, model_name)
     normalized_base_url = base_url.strip().rstrip("/") if normalized_adapter == "openai-compatible" else ""
@@ -55,6 +75,7 @@ def embed_query_openai_compatible(query: str, runtime: Dict[str, object], model_
     base_url = str(runtime.get("baseUrl", "")).rstrip("/")
     api_key = str(runtime.get("apiKey", ""))
     timeout_seconds = int(runtime.get("timeoutSeconds", 120) or 120)
+    max_attempts = int(runtime.get("maxRetries", 3) or 3)
 
     if not base_url:
         return None, "missing-openai-base-url"
@@ -68,24 +89,36 @@ def embed_query_openai_compatible(query: str, runtime: Dict[str, object], model_
             "encoding_format": "float",
         }
     ).encode("utf-8")
-    request = urllib.request.Request(
-        f"{base_url}/embeddings",
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        },
-        method="POST",
-    )
 
-    try:
-        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
-            body = response.read().decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
-        return None, f"openai-compatible-http-{exc.code}: {detail[:500]}"
-    except Exception as exc:
-        return None, f"openai-compatible-query-embedding-failed: {exc}"
+    last_error: Optional[str] = "unknown"
+    body: Optional[str] = None
+    for attempt in range(max_attempts + 1):
+        request = urllib.request.Request(
+            f"{base_url}/embeddings",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+                body = response.read().decode("utf-8", errors="replace")
+            break
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
+            last_error = _redact_secrets(f"openai-compatible-http-{exc.code}: {detail[:500]}")
+            # Only retry on rate-limit and server errors; fail fast on 4xx (except 429).
+            if exc.code not in (429,) and not (500 <= exc.code < 600):
+                return None, last_error
+        except Exception as exc:
+            last_error = _redact_secrets(f"openai-compatible-query-embedding-failed: {exc}")
+        if attempt < max_attempts:
+            time.sleep(min(0.5 * (2 ** attempt), 16.0))
+
+    if body is None:
+        return None, last_error
 
     try:
         parsed = json.loads(body)
@@ -97,7 +130,7 @@ def embed_query_openai_compatible(query: str, runtime: Dict[str, object], model_
             return None, "openai-compatible-empty-vector"
         return [float(value) for value in vector], None
     except Exception as exc:
-        return None, f"openai-compatible-invalid-json: {exc}"
+        return None, _redact_secrets(f"openai-compatible-invalid-json: {exc}")
 
 
 def embed_query_transformer(query: str, model_name: str) -> Tuple[Optional[List[float]], Optional[str]]:
@@ -122,49 +155,17 @@ def embed_query_transformer(query: str, model_name: str) -> Tuple[Optional[List[
 
 def embed_query_gemini(query: str, runtime: Dict[str, object], model_name: str) -> Tuple[Optional[List[float]], Optional[str]]:
     api_key = str(runtime.get("apiKey", "")).strip()
+    if not api_key:
+        return None, "missing-gemini-api-key"
     resolved_model = str(model_name or runtime.get("model", GEMINI_DEFAULT_MODEL) or GEMINI_DEFAULT_MODEL).strip()
     timeout_seconds = int(runtime.get("timeoutSeconds", 120) or 120)
+    max_attempts = int(runtime.get("maxRetries", 3) or 3)
 
     # Resolve model string: "gemini-embedding-2" → "models/gemini-embedding-2"
     model_id = resolved_model if resolved_model.startswith("models/") else f"models/{resolved_model}"
-    url = f"{GEMINI_EMBED_BASE_URL}/{model_id}:embedContent?key={api_key}"
+    base_url = f"{GEMINI_EMBED_BASE_URL}/{model_id}:embedContent?key={api_key}"
 
-    payload = json.dumps(
-        {
-            "model": resolved_model,
-            "content": {"parts": [{"text": query}]},
-        }
-    ).encode("utf-8")
-    request = urllib.request.Request(
-        url,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-
-    try:
-        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
-            body = response.read().decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
-        return None, f"gemini-http-{exc.code}: {detail[:500]}"
-    except Exception as exc:
-        return None, f"gemini-query-embedding-failed: {exc}"
-
-    try:
-        parsed = json.loads(body)
-        # Support new format {"embeddings":[{"values":[]}]} and legacy {"embedding":{"values":[]}}
-        embeddings = parsed.get("embeddings") or []
-        if embeddings:
-            values = embeddings[0].get("values")
-        else:
-            emb_obj = parsed.get("embedding") or {}
-            values = emb_obj.get("values") if isinstance(emb_obj, dict) else None
-        if not isinstance(values, list) or not values:
-            return None, "gemini-empty-vector"
-        return [float(v) for v in values], None
-    except Exception as exc:
-        return None, f"gemini-invalid-json: {exc}"
+    return _gemini_single_with_retries(query, base_url, model_id, resolved_model, timeout_seconds, max_attempts)
 
 
 def embed_query_with_runtime(
@@ -231,7 +232,7 @@ def batch_embed_gemini(
 
     results: List[Tuple[Optional[List[float]], Optional[str]]] = []
     for query in queries:
-        result = _gemini_single_with_retries(query, base_url, model_id, timeout_seconds, max_attempts)
+        result = _gemini_single_with_retries(query, base_url, model_id, resolved_model, timeout_seconds, max_attempts)
         results.append(result)
 
     return results
@@ -241,12 +242,13 @@ def _gemini_single_with_retries(
     query: str,
     base_url: str,
     model_id: str,
+    model_name: str,
     timeout_seconds: int,
     max_attempts: int,
 ) -> Tuple[Optional[List[float]], Optional[str]]:
     """Make a single Gemini embedding request with retry logic."""
     payload = json.dumps(
-        {"model": resolved_model, "content": {"parts": [{"text": query}]}}
+        {"model": model_name, "content": {"parts": [{"text": query}]}}
     ).encode("utf-8")
     last_error = "unknown"
 
@@ -269,11 +271,11 @@ def _gemini_single_with_retries(
             return [float(v) for v in values], None
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
-            last_error = f"gemini-http-{exc.code}: {detail[:200]}"
+            last_error = _redact_secrets(f"gemini-http-{exc.code}: {detail[:200]}")
             if exc.code not in (429,) and not (500 <= exc.code < 600):
                 return None, last_error
         except Exception as exc:
-            last_error = f"gemini-request-failed: {exc}"
+            last_error = _redact_secrets(f"gemini-request-failed: {exc}")
 
         if attempt < max_attempts:
             sleep_s = min(0.5 * (2 ** attempt), 16.0)
@@ -474,6 +476,16 @@ def _batch_dispatch_openai_compatible(
     results: List[Tuple[Optional[List[float]], Optional[str], str, str]] = []
     for chunk in _chunked(queries, BATCH_MAX_SIZE):
         batch_results = batch_embed_openai_compatible(chunk, runtime, resolved_model)
+        # Guard against partial responses: a provider may return fewer items
+        # than requested. Pad/truncate so results stay 1:1 with the chunk,
+        # otherwise downstream vector indexing would misalign with the texts.
+        if len(batch_results) < len(chunk):
+            batch_results = batch_results + [
+                (None, "batch-openai-compatible-partial-missing")
+                for _ in range(len(chunk) - len(batch_results))
+            ]
+        elif len(batch_results) > len(chunk):
+            batch_results = batch_results[: len(chunk)]
         for vector, error in batch_results:
             results.append((vector, error, "openai-compatible", resolved_model))
     return results

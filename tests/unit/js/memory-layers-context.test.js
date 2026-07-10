@@ -3,14 +3,12 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { fileURLToPath } from "url";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// ESM Note: Module.prototype._compile patching is not available in ESM
+// The module will need to be imported and its exports used directly
 
-// bus/vault-root.js honours AI_MEMORY_OBSIDIAN_VAULT env var, so we set the
-// env here instead of writing a stub to the production source tree.
-process.env.AI_MEMORY_OBSIDIAN_VAULT = process.env.AI_MEMORY_OBSIDIAN_VAULT
-  || path.join(os.tmpdir(), `vault-context-${Date.now()}`);
+// ESM approach: import the module directly without patching
+// The constants we need should be exported by the module itself
 
 const {
   CONTEXT_LIMITS, TIER_BUDGET_LIMITS, NON_PROMOTABLE_PROMOTION_TYPES, MIN_PROMOTION_CONFIDENCE,

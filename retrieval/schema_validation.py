@@ -146,9 +146,11 @@ def validate_promotion_metadata(promotion: dict) -> List[str]:
     if not isinstance(promotion, dict):
         return errors
 
-    # Check promotion version
+    # Check promotion version — mirrors JS: missing version is an error
+    # (previously Python only errored when version was present-and-wrong,
+    # diverging from JS which errors on missing too).
     version = promotion.get("version")
-    if version is not None and version != 1:
+    if version != 1:
         errors.append(f"unknown-promotion-version:{version}")
 
     # Check durable_type
@@ -212,17 +214,20 @@ def validate_record(record: dict) -> Tuple[bool, List[str]]:
     if missing_fields:
         errors.append(f"missing-fields:{','.join(missing_fields)}")
 
-    # Check schema version
+    # Check schema version — mirrors JS validateStructuredRecord: a missing or
+    # non-numeric schemaVersion is an error (previously Python silently allowed
+    # missing schemaVersion, causing cross-language integrity-report divergence).
     schema_version = record.get("schemaVersion")
-    if schema_version is not None:
+    if not schema_version:
+        errors.append("unexpected-schema-version:missing")
+    else:
         try:
             parsed_version = int(schema_version)
         except (TypeError, ValueError):
             parsed_version = None
 
         if parsed_version != MEMORY_RECORD_SCHEMA_VERSION:
-            version_str = str(schema_version) if schema_version is not None else "missing"
-            errors.append(f"unexpected-schema-version:{version_str}")
+            errors.append(f"unexpected-schema-version:{schema_version}")
 
     # Check scope
     scope = _normalize_lower(record.get("scope"))
@@ -243,6 +248,18 @@ def validate_record(record: dict) -> Tuple[bool, List[str]]:
     memory_level = _normalize_lower(record.get("memory_level") or record.get("memoryLevel"))
     if memory_level and memory_level not in ALLOWED_MEMORY_LEVELS:
         errors.append(f"unknown-memory-level:{_normalize_string(record.get('memory_level') or record.get('memoryLevel'))}")
+
+    # Check tier (optional field; mirrors JS validateStructuredRecord — if present,
+    # must be an integer in ALLOWED_TIERS). Previously Python had no tier check,
+    # so invalid tiers (e.g. 99) passed Python but failed JS.
+    tier = record.get("tier")
+    if tier is not None:
+        try:
+            tier_int = int(tier)
+        except (TypeError, ValueError):
+            tier_int = None
+        if tier_int not in ALLOWED_TIERS:
+            errors.append(f"invalid-tier:{tier} (must be integer 1–5)")
 
     # Check content_hash format
     content_hash = _normalize_string(record.get("content_hash"))

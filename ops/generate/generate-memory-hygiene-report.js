@@ -1,27 +1,46 @@
 "use strict";
 
-import crypto from "crypto";
-import fs from "fs";
-import path from "path";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { MS_PER_DAY, MS_PER_WEEK } from "../../bus/time-constants.js";
 
-function loadVaultRootHelper() {
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+function fallbackStoreRootHelper() {
+  return {
+    resolveStoreRoot() {
+      return (
+        process.env.AI_MEMORY_STORE ||
+        process.env.AI_MEMORY_STORE_ROOT ||
+        process.env.AI_MEMORY_ROOT ||
+        path.join(os.homedir(), ".ai-memory")
+      );
+    },
+  };
+}
+
+function loadStoreRootHelper() {
   const candidates = [
-    path.join(__dirname, "vault-root.js"),
-    path.join(__dirname, "..", "bus", "vault-root.js"),
-    path.join(__dirname, "bus", "vault-root.js"),
+    path.join(__dirname, "store-root.js"),
+    path.join(__dirname, "..", "..", "bus", "store-root.js"),
+    path.join(__dirname, "..", "bus", "store-root.js"),
+    path.join(__dirname, "bus", "store-root.js"),
   ];
 
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
-      return import(candidate);
+      return import(pathToFileURL(candidate).href);
     }
   }
 
-  throw new Error(`vault-root-helper-missing: tried ${candidates.join(", ")}`);
+  return fallbackStoreRootHelper();
 }
 
-const vaultRootModule = await loadVaultRootHelper();
-const { resolveVaultRoot } = vaultRootModule;
+const storeRootModule = await loadStoreRootHelper();
+const { resolveStoreRoot } = storeRootModule.default || storeRootModule;
 
 // Reuse the structured layer definitions from memory-contract so we stay in sync
 let STRUCTURED_LAYER_DEFINITIONS;
@@ -30,7 +49,7 @@ try {
   const memoryContractModule = await import("../memory/memory-contract.js");
   STRUCTURED_LAYER_DEFINITIONS = memoryContractModule.STRUCTURED_LAYER_DEFINITIONS;
   isExpectedDerivedDuplicate = memoryContractModule.isExpectedDerivedDuplicate;
-} catch (_err) {
+} catch {
   // Inline fallback — used only when memory-contract.js is unavailable
   STRUCTURED_LAYER_DEFINITIONS = [
     { key: "sharedInbox",        fileName: "shared-inbox.jsonl" },
@@ -106,8 +125,8 @@ function getFreshnessFromRecord(record) {
   const t = record.t || record.created_at || "";
   const ageMs = Date.now() - parseTimestampMs(t);
   if (!Number.isFinite(ageMs) || ageMs < 0) return "unknown";
-  if (ageMs <= 24 * 60 * 60 * 1000)  return "hot";
-  if (ageMs <= 7 * 24 * 60 * 60 * 1000) return "warm";
+  if (ageMs <= MS_PER_DAY)  return "hot";
+  if (ageMs <= MS_PER_WEEK) return "warm";
   return "cold";
 }
 
@@ -445,11 +464,10 @@ function computeTierBudgetStatus(allRecords) {
 }
 
 function main() {
-  const vaultRoot = resolveVaultRoot();
-  const aiMemoryRoot = path.join(vaultRoot, "00-System", "ai-memory");
-  const structuredRoot = path.join(aiMemoryRoot, "structured");
-  const generatedRoot = path.join(aiMemoryRoot, "generated");
-  const embeddingsIndexPath = path.join(aiMemoryRoot, "embeddings", "index.jsonl");
+  const storeRoot = resolveStoreRoot();
+  const structuredRoot = path.join(storeRoot, "structured");
+  const generatedRoot = path.join(storeRoot, "generated");
+  const embeddingsIndexPath = path.join(storeRoot, "embeddings", "index.jsonl");
 
   // Ensure generated directory exists
   if (!fs.existsSync(generatedRoot)) {

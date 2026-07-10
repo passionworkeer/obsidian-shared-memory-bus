@@ -1,13 +1,26 @@
 // stop-extract.mjs — Stop Hook LLM 提取入口（v2，去掉 Obsidian 依赖）
 // 调用方式：Claude Code Stop Hook stdin JSON，字段：cwd, session_id, transcript_path
 
-import { readFileSync, existsSync, mkdirSync, appendFileSync, createReadStream, realpathSync } from 'fs'
+import { readFileSync, existsSync, mkdirSync, openSync, writeSync, closeSync, createReadStream } from 'fs'
 import { createInterface } from 'readline'
 import path from 'path'
 import { createRequire } from 'module'
 
 const require = createRequire(import.meta.url)
 const { resolveStoreRoot, getProjectsRoot } = require('../../bus/store-root.js')
+
+// Atomic append via O_APPEND — safe under concurrent stop-hook invocations
+// (multiple Claude sessions ending at once). appendFileSync can interleave/
+// truncate on Windows FILE_APPEND_DATA; flag 'a' seeks to EOF atomically.
+function appendAtomic(filePath, line) {
+  mkdirSync(path.dirname(filePath), { recursive: true })
+  const fd = openSync(filePath, 'a')
+  try {
+    writeSync(fd, line.endsWith('\n') ? line : `${line}\n`)
+  } finally {
+    closeSync(fd)
+  }
+}
 
 // === 配置 ===
 const API_BASE   = process.env.ANTHROPIC_BASE_URL ?? 'http://127.0.0.1:15721'
@@ -136,18 +149,18 @@ function writeToProjectJsonl(jsonlPath, sessionId, cwd, result, failed = false) 
     extraction_failed: failed,
     t:            new Date().toISOString()
   }
-  appendFileSync(jsonlPath, JSON.stringify(record) + '\n', 'utf-8')
+  appendAtomic(jsonlPath, JSON.stringify(record))
 }
 
 // === 写入 pending-extractions.jsonl（超时时）===
 function writePending(sessionId, cwd, transcriptPath, reason) {
-  appendFileSync(getPendingPath(), JSON.stringify({
+  appendAtomic(getPendingPath(), JSON.stringify({
     session_id:      sessionId,
     cwd,
     transcript_path: transcriptPath,
     failed_at:       new Date().toISOString(),
     reason
-  }) + '\n', 'utf-8')
+  }))
 }
 
 // === 主流程 ===
@@ -157,21 +170,10 @@ async function main() {
   const sessionId= process.argv[3] || input.session_id || `unknown_${Date.now()}`
   const transcriptPath = process.argv[4] || input.transcript_path || ''
 
-  // Security: only allow transcripts inside Claude session directory.
-  // Normalize both sides with path.resolve and fs.realpathSync to prevent
-  // `..` traversal and symlink-based bypasses; reject anything outside.
+  // Security: only allow transcripts inside Claude session directory
   const sessionDir = process.env.CLAUDE_SESSION_DIR
     || path.join(process.env.APPDATA || process.env.HOME || '', '.claude', 'sessions')
-  const normalizedSession = path.resolve(sessionDir);
-  let realTranscript = transcriptPath;
-  try {
-    realTranscript = realpathSync(transcriptPath);
-  } catch {
-    // non-existent — let the existsSync check below handle it
-  }
-  const insideSession = realTranscript.startsWith(normalizedSession + path.sep)
-    || realTranscript === normalizedSession;
-  if (!insideSession) {
+  if (!transcriptPath.startsWith(sessionDir) && !transcriptPath.includes(path.join('.claude', 'sessions'))) {
     process.exit(0)
   }
 

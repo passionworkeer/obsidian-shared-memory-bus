@@ -9,7 +9,7 @@
  *   4. --dry-run never acquires a lock and is always safe to re-run.
  *
  * Usage:
- *   node ops/memory-archival.js [--vault-root <path>] [--dry-run] [--verbose]
+ *   node ops/memory-archival.js [--store-root <path>] [--dry-run] [--verbose]
  *        [--trigger watchdog|dream|manual]
  *
  * Triggers:
@@ -19,10 +19,35 @@
  *   (default) — detect caller from lock file trigger field
  */
 
-import fs from "fs";
-import path from "path";
-import crypto from "crypto";
-import readline from "readline";
+import fs from "node:fs";
+import path from "node:path";
+import crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
+import { safeRealpathWithin } from "../util/safe-realpath.js";
+
+// ── Structured-file manifest (single source of truth) ──────────────────────────
+// Loaded from shared/structured-files.json so the Python mirror in
+// retrieval/search_ranking.py cannot drift. If the file is missing or
+// malformed we fall back to an empty list (callers degrade gracefully).
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname  = path.dirname(__filename);
+
+let STRUCTURED_FILES = [];
+try {
+  const STRUCTURED_FILES_DATA = JSON.parse(
+    fs.readFileSync(path.join(__dirname, "..", "..", "shared", "structured-files.json"), "utf8")
+  );
+  if (Array.isArray(STRUCTURED_FILES_DATA.files)) {
+    STRUCTURED_FILES = STRUCTURED_FILES_DATA.files;
+  } else {
+    console.error("[archival] structured-files.json missing 'files' array — using []");
+  }
+} catch (e) {
+  console.error("[archival] Failed to load shared/structured-files.json:", e.message, "— using []");
+}
+
+export { STRUCTURED_FILES };
 
 // ── CLI args ──────────────────────────────────────────────────────────────────
 
@@ -32,23 +57,22 @@ const opt = (flag, def) => {
   return idx >= 0 ? args[idx + 1] || true : def;
 };
 
-const VAULT_ROOT = opt("--vault-root", process.env.AI_MEMORY_OBSIDIAN_VAULT || process.env.OBSIDIAN_VAULT_ROOT || null);
+const STORE_ROOT = opt("--store-root", process.env.AI_MEMORY_STORE || null);
 const DRY_RUN = opt("--dry-run", false);
 const VERBOSE = opt("--verbose", false) || opt("-v", false);
 const TRIGGER = opt("--trigger", null); // watchdog | dream | manual | null
 
-if (!VAULT_ROOT) {
-  console.error("Error: --vault-root or AI_MEMORY_OBSIDIAN_VAULT is required.");
+if (!STORE_ROOT) {
+  console.error("Error: --store-root or AI_MEMORY_STORE is required.");
   process.exit(1);
 }
 
 // ── Paths ─────────────────────────────────────────────────────────────────────
 
-const LOCK_DIR        = path.join(VAULT_ROOT, "00-System/ai-memory/.lock");
+const LOCK_DIR        = path.join(STORE_ROOT, ".lock");
 const LOCK_FILE       = path.join(LOCK_DIR, "archival.lock");
-const MANIFEST_FILE   = path.join(VAULT_ROOT, "00-System/ai-memory/structured/archive-manifest.jsonl");
-const STRUCT_DIR      = path.join(VAULT_ROOT, "00-System/ai-memory/structured");
-const TIER_BUDGET_FILE = path.join(VAULT_ROOT, "00-System/ai-memory/.config/tier-budget.json");
+const MANIFEST_FILE   = path.join(STORE_ROOT, "structured", "archive-manifest.jsonl");
+const STRUCT_DIR      = path.join(STORE_ROOT, "structured");
 
 const LOCK_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
@@ -104,9 +128,9 @@ async function getAppendLineAtomic() {
  * @param {string} filePath
  * @param {object} obj
  */
-async function appendJsonl(filePath, obj) {
+async function appendJsonl(filePath, obj, opts = {}) {
   const appendLineAtomic = await getAppendLineAtomic();
-  appendLineAtomic(filePath, obj, { createDir: true });
+  appendLineAtomic(filePath, obj, { createDir: true, ...opts });
 }
 
 function ensureDir(dir) {
@@ -124,33 +148,46 @@ function acquireLock() {
   ensureDir(LOCK_DIR);
 
   if (!fs.existsSync(LOCK_FILE)) {
-    // No lock — write ours
-    return writeLock("manual");
+    // No lock — try to create ours atomically (flag 'wx' = O_EXCL).
+    // This closes the TOCTOU window: two processes that both see "no
+    // lock" race to create it, and 'wx' guarantees exactly one winner.
+    const result = writeLock("manual", false);
+    if (result.ok) return result;
+    // Lost the race — another process created the lock between our
+    // existsSync and writeLock. Fall through to re-read it below.
   }
 
   try {
     const lock = JSON.parse(fs.readFileSync(LOCK_FILE, "utf8"));
     const age  = nowMs() - (lock.start_time || 0);
 
-    if (age < LOCK_TTL) {
+    if (age < LOCK_TTL_MS) {
       // Another run is active — but only abort if it's a DIFFERENT trigger
       if (lock.trigger && lock.trigger !== "manual" && TRIGGER && lock.trigger !== TRIGGER) {
         return { ok: false, reason: "lock-held-by-other", pid: lock.pid, trigger: lock.trigger, age_ms: age };
       }
-      if (age < LOCK_TTL) {
-        return { ok: false, reason: "lock-held", pid: lock.pid, trigger: lock.trigger, age_ms: age };
-      }
+      return { ok: false, reason: "lock-held", pid: lock.pid, trigger: lock.trigger, age_ms: age };
     }
 
-    // Lock expired (> 30 min) — take over
+    // Lock expired (> 30 min) — take over (force removes stale lock first)
     log(`Lock expired (age=${Math.round(age/60000)}min), taking over.`);
-    return writeLock(TRIGGER || "manual");
+    return writeLock(TRIGGER || "manual", true);
   } catch {
-    return writeLock(TRIGGER || "manual");
+    return writeLock(TRIGGER || "manual", true);
   }
 }
 
-function writeLock(trigger) {
+/**
+ * Write the lock file.
+ *
+ * @param {string} trigger
+ * @param {boolean} [force=false] — when false, uses flag 'wx' (O_EXCL) for
+ *   atomic create-or-fail, closing the TOCTOU window in acquireLock. When
+ *   true (stale-lock takeover), unlinks the existing lock first then uses
+ *   'wx' so two processes racing to take over a stale lock still have
+ *   exactly one winner.
+ */
+function writeLock(trigger, force = false) {
   if (DRY_RUN) {
     log("[dry-run] Would write lock:", { trigger, dry_run: true });
     return { ok: true, dry_run: true };
@@ -161,7 +198,24 @@ function writeLock(trigger) {
     trigger: trigger || "manual",
     version: 1,
   };
-  fs.writeFileSync(LOCK_FILE, JSON.stringify(lock, null, 2), "utf8");
+  const payload = JSON.stringify(lock, null, 2);
+
+  if (force) {
+    // Remove stale/corrupt lock, then atomic-create. If another process
+    // wins the race between unlink and create, 'wx' fails with EEXIST.
+    try { fs.unlinkSync(LOCK_FILE); } catch { /* best-effort */ }
+  }
+
+  try {
+    fs.writeFileSync(LOCK_FILE, payload, { flag: "wx", encoding: "utf8" });
+  } catch (err) {
+    if (err.code === "EEXIST") {
+      // Another process won the race — report lock-held so the caller
+      // can re-read and apply TTL/trigger logic.
+      return { ok: false, reason: "lock-held", pid: null };
+    }
+    throw err;
+  }
   info(`Lock acquired: pid=${lock.pid} trigger=${lock.trigger}`);
   return { ok: true };
 }
@@ -194,25 +248,14 @@ async function writeManifestEntry(record, reason, trigger) {
     content_hash: record.content_hash || sha256(JSON.stringify(record.content || "")),
     line_in_source: findRecordLine(record),
   };
-  await appendJsonl(MANIFEST_FILE, entry);
+  await appendJsonl(MANIFEST_FILE, entry, { fsync: true });
   return entry;
 }
 
 function findRecordLine(record) {
   // Scans structured JSONL files for this record's ID, returns "filename:line"
   if (!record.id) return "unknown";
-  const structuredFiles = [
-    "shared-inbox.jsonl",
-    "session-memory.jsonl",
-    "shared-events.jsonl",
-    "task-memory.jsonl",
-    "claude-code.jsonl",
-    "openclaw.jsonl",
-    "openclaw-blackboard.jsonl",
-    "openclaw-runs.jsonl",
-    "openclaw-jobs.jsonl",
-    "openclaw-journal.jsonl",
-  ];
+  const structuredFiles = STRUCTURED_FILES;
   for (const fname of structuredFiles) {
     const fpath = path.join(STRUCT_DIR, fname);
     if (!fs.existsSync(fpath)) continue;
@@ -263,8 +306,9 @@ async function archiveRecordsFromFile(filePath, toArchiveIds) {
       info(`[dry-run] Would archive ${archived} records from ${path.basename(filePath)}`);
     } else {
       ensureDir(path.dirname(filePath));
-      fs.writeFileSync(filePath + ".tmp", kept.join("\n") + "\n", "utf8");
-      fs.renameSync(filePath + ".tmp", filePath);
+      const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
+      fs.writeFileSync(tmpPath, kept.join("\n") + "\n", "utf8");
+      fs.renameSync(tmpPath, filePath);
       info(`Archived ${archived} records from ${path.basename(filePath)}`);
     }
   }
@@ -283,9 +327,34 @@ function scanForArchiveEligible() {
   const sixtyDaysMs = 60 * 24 * 60 * 60 * 1000;
   const toArchive = new Map(); // filename → [recordId, ...]
 
+  // SECURITY: reject if the directory itself is a symlink escaping STRUCT_DIR.
+  // A vault synced via OneDrive/Obsidian Sync may contain a directory symlink
+  // planted by another app; realpath-ing the parent prevents enumeration of
+  // the attacker's chosen target before readdirSync runs.
+  let realStructDir = STRUCT_DIR;
+  try {
+    realStructDir = fs.realpathSync(STRUCT_DIR);
+  } catch {
+    return toArchive;
+  }
+  if (realStructDir !== STRUCT_DIR) {
+    process.stderr.write(`[archival-scan] STRUCT_DIR is a symlink, skipping: ${STRUCT_DIR} -> ${realStructDir}\n`);
+    return toArchive;
+  }
+
   const structuredFiles = fs.readdirSync(STRUCT_DIR)
     .filter(f => f.endsWith(".jsonl") && !f.startsWith("archive-"))
-    .map(f => path.join(STRUCT_DIR, f));
+    .map(f => path.join(STRUCT_DIR, f))
+    .filter(fpath => {
+      // SECURITY: skip files whose realpath escapes STRUCT_DIR (e.g. symlink
+      // planted in vault by another app on a synced filesystem). Same guard
+      // as ops/memory/entry-parsers.js parseLayerEntries.
+      if (!safeRealpathWithin(fpath, STRUCT_DIR)) {
+        process.stderr.write(`[archival-scan] skipping path that escapes STRUCT_DIR: ${fpath}\n`);
+        return false;
+      }
+      return true;
+    });
 
   for (const fpath of structuredFiles) {
     const fname = path.basename(fpath);
@@ -370,9 +439,32 @@ function checkTierBudgets() {
   const byType   = {}; // tier 4
   const records  = {}; // id → record for eviction decisions
 
+  // SECURITY: reject if the directory itself is a symlink escaping STRUCT_DIR.
+  // See scanForArchiveEligible for the rationale.
+  let realStructDir = STRUCT_DIR;
+  try {
+    realStructDir = fs.realpathSync(STRUCT_DIR);
+  } catch {
+    return { overBudget: new Map(), report: { counts, archiveReviewNeeded: false } };
+  }
+  if (realStructDir !== STRUCT_DIR) {
+    process.stderr.write(`[tier-budget] STRUCT_DIR is a symlink, skipping: ${STRUCT_DIR} -> ${realStructDir}\n`);
+    return { overBudget: new Map(), report: { counts, archiveReviewNeeded: false } };
+  }
+
   const structuredFiles = fs.readdirSync(STRUCT_DIR)
     .filter(f => f.endsWith(".jsonl") && !f.startsWith("archive-"))
-    .map(f => path.join(STRUCT_DIR, f));
+    .map(f => path.join(STRUCT_DIR, f))
+    .filter(fpath => {
+      // SECURITY: skip files whose realpath escapes STRUCT_DIR (e.g. symlink
+      // planted in vault by another app on a synced filesystem). Same guard
+      // as ops/memory/entry-parsers.js parseLayerEntries.
+      if (!safeRealpathWithin(fpath, STRUCT_DIR)) {
+        process.stderr.write(`[archival-scan] skipping path that escapes STRUCT_DIR: ${fpath}\n`);
+        return false;
+      }
+      return true;
+    });
 
   for (const fpath of structuredFiles) {
     for (const rec of parseJsonl(fpath)) {
@@ -495,8 +587,9 @@ function simplifyMemory(filePath) {
     if (DRY_RUN) {
       info(`[dry-run] Would simplify ${simplified} records in ${path.basename(filePath)}`);
     } else {
-      fs.writeFileSync(filePath + ".tmp", kept.map(r => JSON.stringify(r)).join("\n") + "\n", "utf8");
-      fs.renameSync(filePath + ".tmp", filePath);
+      const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
+      fs.writeFileSync(tmpPath, kept.map(r => JSON.stringify(r)).join("\n") + "\n", "utf8");
+      fs.renameSync(tmpPath, filePath);
       info(`Simplified ${simplified} records in ${path.basename(filePath)}`);
     }
   }
@@ -508,6 +601,7 @@ function simplifyMemory(filePath) {
 
 async function main() {
   info(`Starting memory-archival.js (trigger=${TRIGGER || "auto"}, dry_run=${DRY_RUN})`);
+  info(`Store root: ${STORE_ROOT}`);
 
   if (!fs.existsSync(STRUCT_DIR)) {
     info("Structured directory not found — nothing to archive. Exiting.");
@@ -532,7 +626,7 @@ async function main() {
     ensureDir(STRUCT_DIR);
     if (!fs.existsSync(MANIFEST_FILE)) {
       if (!DRY_RUN) fs.writeFileSync(MANIFEST_FILE, "", "utf8");
-      info(`Created: ${path.relative(VAULT_ROOT, MANIFEST_FILE)}`);
+      info(`Created: ${path.relative(STORE_ROOT, MANIFEST_FILE)}`);
     }
 
     // Step 2: TTL / cold-access archive scan
@@ -550,11 +644,35 @@ async function main() {
     // Step 3: Tier budget enforcement
     info("--- Phase 2: Tier budget enforcement ---");
     const { overBudget, report } = checkTierBudgets();
-    for (const [key, ids] of overBudget.entries()) {
+    for (const [, ids] of overBudget.entries()) {
       // Try to find which file(s) contain these IDs
+
+      // SECURITY: reject if STRUCT_DIR itself is a symlink escaping its root.
+      // See scanForArchiveEligible for the rationale.
+      let realStructDir = STRUCT_DIR;
+      try {
+        realStructDir = fs.realpathSync(STRUCT_DIR);
+      } catch {
+        break;
+      }
+      if (realStructDir !== STRUCT_DIR) {
+        process.stderr.write(`[tier-budget-run] STRUCT_DIR is a symlink, skipping: ${STRUCT_DIR} -> ${realStructDir}\n`);
+        break;
+      }
+
       const structuredFiles = fs.readdirSync(STRUCT_DIR)
         .filter(f => f.endsWith(".jsonl") && !f.startsWith("archive-"))
-        .map(f => path.join(STRUCT_DIR, f));
+        .map(f => path.join(STRUCT_DIR, f))
+        .filter(fpath => {
+          // SECURITY: skip files whose realpath escapes STRUCT_DIR (e.g. symlink
+          // planted in vault by another app on a synced filesystem). Same guard
+          // as ops/memory/entry-parsers.js parseLayerEntries.
+          if (!safeRealpathWithin(fpath, STRUCT_DIR)) {
+            process.stderr.write(`[tier-budget-run] skipping path that escapes STRUCT_DIR: ${fpath}\n`);
+            return false;
+          }
+          return true;
+        });
       for (const fpath of structuredFiles) {
         await archiveRecordsFromFile(fpath, ids);
       }
@@ -563,14 +681,37 @@ async function main() {
 
     // Step 4: Memory simplification (Tier-4, high-access, long-content)
     info("--- Phase 3: Memory simplification ---");
-    const structuredFiles = fs.readdirSync(STRUCT_DIR)
-      .filter(f => f.endsWith(".jsonl") && !f.startsWith("archive-"))
-      .map(f => path.join(STRUCT_DIR, f));
-    let totalSimplified = 0;
-    for (const fpath of structuredFiles) {
-      totalSimplified += simplifyMemory(fpath);
+
+    // SECURITY: reject if STRUCT_DIR itself is a symlink escaping its root.
+    // See scanForArchiveEligible for the rationale.
+    let realStructDirSimplify = STRUCT_DIR;
+    try {
+      realStructDirSimplify = fs.realpathSync(STRUCT_DIR);
+    } catch {
+      realStructDirSimplify = null;
     }
-    if (totalSimplified === 0) log("No records eligible for simplification.");
+    if (realStructDirSimplify === null || realStructDirSimplify !== STRUCT_DIR) {
+      process.stderr.write(`[simplify] STRUCT_DIR is a symlink or unresolvable, skipping: ${STRUCT_DIR} -> ${realStructDirSimplify}\n`);
+    } else {
+      const structuredFiles = fs.readdirSync(STRUCT_DIR)
+        .filter(f => f.endsWith(".jsonl") && !f.startsWith("archive-"))
+        .map(f => path.join(STRUCT_DIR, f))
+        .filter(fpath => {
+          // SECURITY: skip files whose realpath escapes STRUCT_DIR (e.g. symlink
+          // planted in vault by another app on a synced filesystem). Same guard
+          // as ops/memory/entry-parsers.js parseLayerEntries.
+          if (!safeRealpathWithin(fpath, STRUCT_DIR)) {
+            process.stderr.write(`[simplify] skipping path that escapes STRUCT_DIR: ${fpath}\n`);
+            return false;
+          }
+          return true;
+        });
+      let totalSimplified = 0;
+      for (const fpath of structuredFiles) {
+        totalSimplified += simplifyMemory(fpath);
+      }
+      if (totalSimplified === 0) log("No records eligible for simplification.");
+    }
 
     // Summary
     info("--- Summary ---");

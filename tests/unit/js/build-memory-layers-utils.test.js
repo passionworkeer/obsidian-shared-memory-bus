@@ -3,18 +3,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { fileURLToPath } from "url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-// bus/store-root.js and bus/vault-root.js honour AI_MEMORY_STORE and
-// AI_MEMORY_OBSIDIAN_VAULT env vars, so we just set them here and avoid
-// polluting the production source tree with stub files.
-process.env.AI_MEMORY_STORE = process.env.AI_MEMORY_STORE || path.join(os.tmpdir(), "bmlutils-store");
-process.env.AI_MEMORY_OBSIDIAN_VAULT = process.env.AI_MEMORY_OBSIDIAN_VAULT || path.join(os.tmpdir(), "bmlutils-vault");
-
-// ESM Note: Module.prototype._compile patching is not available in ESM
-// The module will be imported directly without patching
 
 // ---------------------------------------------------------------------------
 // jsonl-stream.js tests (no dependencies on build-memory-layers.js)

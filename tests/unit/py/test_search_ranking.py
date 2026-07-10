@@ -534,3 +534,235 @@ class TestMMRRerank:
         ids = [eid for eid, _ in result]
         # Should respect top_k and return entries
         assert len(result) <= 2
+
+
+# ---------------------------------------------------------------------------
+# RRF (Reciprocal Rank Fusion) tests
+# ---------------------------------------------------------------------------
+
+class TestRRFFusion:
+    def test_compute_rank_map_descending(self):
+        scores = {"a": 0.9, "b": 0.5, "c": 0.7}
+        ranks = _search_ranking.compute_rank_map(scores)
+        assert ranks == {"a": 1, "c": 2, "b": 3}
+
+    def test_compute_rank_map_drops_non_positive(self):
+        scores = {"a": 0.9, "b": 0.0, "c": -1.0, "d": 0.5}
+        ranks = _search_ranking.compute_rank_map(scores)
+        # b/c 排除，只保留正向 score
+        assert ranks == {"a": 1, "d": 2}
+
+    def test_compute_rank_map_empty(self):
+        assert _search_ranking.compute_rank_map({}) == {}
+
+    def test_compute_rank_map_does_not_mutate_input(self):
+        scores = {"a": 0.9, "b": 0.5}
+        original = dict(scores)
+        _search_ranking.compute_rank_map(scores)
+        assert scores == original
+
+    def test_rrf_fusion_score_both_present(self):
+        # 1/(60+1) + 1/(60+3) = 1/61 + 1/63
+        expected = 1 / 61 + 1 / 63
+        assert _search_ranking.rrf_fusion_score(1, 3, k=60) == pytest.approx(expected)
+
+    def test_rrf_fusion_score_bm25_missing(self):
+        # bm25 未召回 -> 仅 dense 贡献
+        expected = 1 / (60 + 2)
+        assert _search_ranking.rrf_fusion_score(None, 2, k=60) == pytest.approx(expected)
+
+    def test_rrf_fusion_score_dense_missing(self):
+        expected = 1 / (60 + 1)
+        assert _search_ranking.rrf_fusion_score(1, None, k=60) == pytest.approx(expected)
+
+    def test_rrf_fusion_score_both_missing(self):
+        assert _search_ranking.rrf_fusion_score(None, None, k=60) == 0.0
+
+    def test_rrf_fusion_score_custom_k(self):
+        expected = 1 / (10 + 1) + 1 / (10 + 2)
+        assert _search_ranking.rrf_fusion_score(1, 2, k=10) == pytest.approx(expected)
+
+    def test_rrf_fusion_score_invalid_k_falls_back(self):
+        # k<=0 回退到默认 60
+        expected = 1 / (60 + 1)
+        assert _search_ranking.rrf_fusion_score(1, None, k=0) == pytest.approx(expected)
+
+    def test_resolve_fusion_mode_default_weighted(self):
+        assert _search_ranking.resolve_fusion_mode({}) == "weighted"
+        assert _search_ranking.resolve_fusion_mode(None) == "weighted"
+
+    def test_resolve_fusion_mode_from_route(self):
+        assert _search_ranking.resolve_fusion_mode({"fusion": "rrf"}) == "rrf"
+        assert _search_ranking.resolve_fusion_mode({"fusion": "weighted"}) == "weighted"
+
+    def test_resolve_fusion_mode_ignores_invalid_route_value(self):
+        assert _search_ranking.resolve_fusion_mode({"fusion": "garbage"}) == "weighted"
+
+    def test_resolve_fusion_mode_env_var_overrides_route(self, monkeypatch):
+        monkeypatch.setenv("AI_MEMORY_FUSION", "rrf")
+        # 即使 route 指定 weighted，env 也优先
+        assert _search_ranking.resolve_fusion_mode({"fusion": "weighted"}) == "rrf"
+
+    def test_resolve_fusion_mode_env_var_weighted(self, monkeypatch):
+        monkeypatch.setenv("AI_MEMORY_FUSION", "weighted")
+        assert _search_ranking.resolve_fusion_mode({"fusion": "rrf"}) == "weighted"
+
+    def test_resolve_fusion_mode_empty_env_falls_back_to_route(self, monkeypatch):
+        monkeypatch.setenv("AI_MEMORY_FUSION", "")
+        assert _search_ranking.resolve_fusion_mode({"fusion": "rrf"}) == "rrf"
+
+
+class TestScoreEntryRRF:
+    def test_rrf_mode_uses_rank_not_score(self):
+        """RRF 模式下 retrievalScore 应等于 rrf_fusion_score(rank_bm25, rank_dense)。"""
+        entry = make_entry("a")
+        route = {"fusion": "rrf"}
+        bm25_norm = {"a": 1.0}
+        dense_norm = {"a": 1.0}
+        bm25_rank = {"a": 1}
+        dense_rank = {"a": 3}
+        result = _search_ranking.score_entry(
+            entry, "hybrid", route, bm25_norm, dense_norm, None,
+            bm25_rank_map=bm25_rank, dense_rank_map=dense_rank,
+        )
+        assert result is not None
+        _, meta = result
+        expected = 1 / 61 + 1 / 63
+        assert meta["retrievalScore"] == pytest.approx(expected)
+
+    def test_rrf_mode_one_source_missing(self):
+        """dense 未召回时仅 bm25 贡献。"""
+        entry = make_entry("a")
+        route = {"fusion": "rrf"}
+        bm25_rank = {"a": 2}  # dense 没有 a
+        result = _search_ranking.score_entry(
+            entry, "hybrid", route, {"a": 1.0}, {}, None,
+            bm25_rank_map=bm25_rank, dense_rank_map={},
+        )
+        assert result is not None
+        _, meta = result
+        expected = 1 / (60 + 2)
+        assert meta["retrievalScore"] == pytest.approx(expected)
+
+    def test_rrf_mode_both_unrecalled_returns_none(self):
+        """两路都未召回 -> retrieval_score=0 -> 返回 None。"""
+        entry = make_entry("a")
+        route = {"fusion": "rrf"}
+        result = _search_ranking.score_entry(
+            entry, "hybrid", route, {"a": 1.0}, {"a": 1.0}, None,
+            bm25_rank_map={}, dense_rank_map={},
+        )
+        assert result is None
+
+    def test_rrf_mode_custom_k_from_route(self):
+        entry = make_entry("a")
+        route = {"fusion": "rrf", "adaptiveBlend": {"rrfK": 10}}
+        result = _search_ranking.score_entry(
+            entry, "hybrid", route, {"a": 1.0}, {"a": 1.0}, None,
+            bm25_rank_map={"a": 1}, dense_rank_map={"a": 2},
+        )
+        assert result is not None
+        _, meta = result
+        expected = 1 / 11 + 1 / 12
+        assert meta["retrievalScore"] == pytest.approx(expected)
+
+    def test_rrf_mode_still_applies_downstream_weights(self):
+        """RRF 替换 retrieval_score 计算后，layer/scope/coverage 等下游权重仍生效。"""
+        entry = make_entry("a", layer="durable", scope="user")
+        route = {"fusion": "rrf", "intent": "durable"}
+        # 沿用 make_route 的权重表，需要补全
+        full_route = {**make_route("durable"), "fusion": "rrf"}
+        result = _search_ranking.score_entry(
+            entry, "hybrid", full_route, {"a": 1.0}, {"a": 1.0}, None,
+            bm25_rank_map={"a": 1}, dense_rank_map={"a": 1},
+        )
+        assert result is not None
+        final_score, meta = result
+        # coverage bonus 因两路都召回 = 1.04
+        assert meta["coverageWeight"] == 1.04
+        # layer=durable + intent=durable -> 1.35
+        assert meta["layerWeight"] == 1.35
+        # 最终分数 = retrieval * layer * scope * sourceKind * freshness * state * coverage * decay
+        rrf = 1 / 61 + 1 / 61
+        expected = rrf * meta["layerWeight"] * meta["scopeWeight"] * meta["sourceKindWeight"] * meta["freshnessWeight"] * meta["taskStateWeight"] * meta["coverageWeight"] * meta["decayFactor"]
+        assert final_score == pytest.approx(expected, rel=1e-6)
+
+    def test_weighted_mode_still_default_when_no_route_fusion(self):
+        """无 fusion 字段时回退到加权求和（安全）。"""
+        entry = make_entry("a")
+        result = _search_ranking.score_entry(
+            entry, "hybrid", make_route(), {"a": 1.0}, {"a": 1.0}, None,
+            bm25_rank_map={"a": 1}, dense_rank_map={"a": 1},
+        )
+        assert result is not None
+        _, meta = result
+        # 加权求和：0.55*1 + 0.45*1 = 1.0
+        assert meta["retrievalScore"] == pytest.approx(1.0)
+
+    def test_weighted_mode_unchanged_without_rank_maps(self):
+        """向后兼容：不传 rank map 时加权求和路径不受影响。"""
+        entry = make_entry("a")
+        result = _search_ranking.score_entry(
+            entry, "hybrid", make_route(), {"a": 1.0}, {"a": 1.0}, None,
+        )
+        assert result is not None
+        _, meta = result
+        assert meta["retrievalScore"] == pytest.approx(1.0)
+
+
+class TestRerankEntriesRRF:
+    def test_rerank_uses_rrf_when_route_fusion_rrf(self):
+        """端到端：rerank_entries 在 fusion=rrf 下应按 RRF 排序。"""
+        entries = {
+            "a": make_entry("a"),
+            "b": make_entry("b"),
+            "c": make_entry("c"),
+        }
+        # bm25: a > b > c ；dense: c > a > b
+        # RRF: a=1/61+1/62, b=1/62+1/63, c=1/63+1/61
+        bm25_map = {"a": 0.9, "b": 0.5, "c": 0.1}
+        dense_map = {"c": 0.9, "a": 0.5, "b": 0.1}
+        route = {**make_route(), "fusion": "rrf"}
+        ranked, meta, count = _search_ranking.rerank_entries(
+            entries, "hybrid", 3, route, bm25_map, dense_map, "", None,
+        )
+        assert count == 3
+        # a 的 rrf 应最高（bm25#1 + dense#2）
+        assert ranked[0][0] == "a"
+
+    def test_rerank_weighted_mode_unaffected(self, monkeypatch):
+        """默认 weighted 模式：rerank 行为与改动前一致。"""
+        monkeypatch.delenv("AI_MEMORY_FUSION", raising=False)
+        entries = {"a": make_entry("a"), "b": make_entry("b")}
+        bm25_map = {"a": 0.9, "b": 0.1}
+        dense_map = {"a": 0.1, "b": 0.9}
+        ranked, _, count = _search_ranking.rerank_entries(
+            entries, "hybrid", 2, make_route(), bm25_map, dense_map, "", None,
+        )
+        assert count == 2
+        # weighted: 两路归一化后都为 1.0，0.55+0.45=1.0 相同，靠稳定性即可
+        assert {eid for eid, _ in ranked} == {"a", "b"}
+
+
+class TestCrossEncoderRerank:
+    """bge-reranker cross-encoder rerank (env-gated AI_MEMORY_RERANK=local, default off)."""
+
+    def test_off_by_default_returns_input_unchanged(self):
+        scored = [("a", 1.0, {}), ("b", 0.5, {})]
+        # AI_MEMORY_RERANK unset → off → identity (no model touched)
+        result = _search_ranking._cross_encoder_rerank(scored, {}, "query")
+        assert result == scored
+
+    def test_local_without_sentence_transformers_degrades_gracefully(self, monkeypatch):
+        monkeypatch.setenv("AI_MEMORY_RERANK", "local")
+        scored = [("a", 1.0, {}), ("b", 0.5, {})]
+        entries = {"a": {"content": "alpha"}, "b": {"content": "beta"}}
+        # sentence_transformers absent in test env → graceful degradation, order kept
+        result = _search_ranking._cross_encoder_rerank(scored, entries, "query")
+        assert [eid for eid, _, _ in result] == ["a", "b"]
+
+    def test_local_with_empty_query_returns_input(self, monkeypatch):
+        monkeypatch.setenv("AI_MEMORY_RERANK", "local")
+        scored = [("a", 1.0, {})]
+        assert _search_ranking._cross_encoder_rerank(scored, {}, "") == scored
+

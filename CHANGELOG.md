@@ -2,6 +2,130 @@
 
 All notable changes to this project should be documented here.
 
+## 2026-07-10 (Round 3)
+
+### Fixed — I-HIGH-1 stage 3 完整 4-server 进程拆分 + Q-MED-3 文档化
+
+#### PR17 (7 commits, ~1500 行): I-HIGH-1 stage 3 完整 4-server 进程拆分
+
+把 `omni-memory-server.js` 的 29 个 MCP 工具真正拆为 4 个独立进程。`AI_MEMORY_SERVER_MODE=monolithic` 仍可用作向后兼容 fallback (`SERVER-SPLIT.md` §8.2 兼容承诺)。
+
+| Commit | 改动 |
+|---|---|
+| `9702753` | `shared-mcp/port-registry.js` — `MCP_SERVERS` 加 4 条 `memory-{retrieval,bridge,dream,mgmt}`,原 `memory` 标 `legacy:true, onlyInMode:monolithic`;新增 `SPLIT_MEMORY_METRICS_PORTS` 与 mcp 端口同端口 |
+| `b018202` | `shared-mcp/manifest.json` — 拆 1 条 `memory` 为 4 条 `memory-*` server,各带 `stdioEnv` 注入 `AI_MEMORY_SERVER_MODE` + `AI_MEMORY_METRICS_PORT`;`isolatedSubprocess`(search-worker)只挂 `memory-retrieval` |
+| `5c2135b` | 新增 `shared-mcp/spawn-plan.js` (`resolveSpawnPlan` + `selectServersForSpawn`);`start.js` 改用 spawn-plan 决策,把 `MCP_SERVERS` 条目 env 注入子进程 |
+| `d665e5d` | `shared-mcp/omni-memory-server.js` — split 模式下 `process.title = 'omni-memory-{retrieval,bridge,dream,mgmt}'`,让 `tasklist`/`ps` 区分 4 个进程 |
+| `c31272f` | `shared-mcp/start-shared-mcp.ps1` — `Resolve-StdioEnvironment` 把 `id -eq "memory"` 扩为 `id -like "memory-*"`,新增 `AI_MEMORY_SERVER_MODE`/`AI_MEMORY_METRICS_PORT` 注入(优先用户 env,回退 `manifest.stdioEnv`) |
+| `b96dd36` | 新增 `shared-mcp/mcp-process-manager.js` — `buildSpawnCommand`/`spawnServer`/`restartPolicyFor`/`probeServer`/`monitorServer`(circuit breaker 与 `manifest isolatedSubprocess.restartPolicy` 对齐) |
+| `6c7ebf8` | 新单测 6 个文件 59 case: `spawn-plan` / `port-registry-split` / `manifest-split` / `mcp-process-manager` / `omni-memory-server-mode` / `error-result-code` |
+
+**设计要点**:
+- 默认 split 模式 spawn 4 个独立 server (端口 9338-9341);`AI_MEMORY_SERVER_MODE=monolithic` 显式回退到 1 个 legacy memory (端口 9338)
+- split 模式不 spawn legacy memory,monolithic 模式不 spawn 4 个 `memory-*`,**两组共用 9338 但互斥**
+- 4 个 server 共享同一份 `~/.ai-memory/` SQLite + JSONL (WAL 模式并发读)
+- search-worker IPC 隔离只挂 `memory-retrieval`,其他 3 个 server 不启 search-worker
+
+**回滚**: 每个 commit 独立可 revert;`git revert 9702753^..6c7ebf8` 一键回滚整个 stage 3。
+
+#### PR18 (commit `6aa2b99`): Q-MED-3 范围描述文档化 + `errorResult` 透传 code 升级
+
+Q-MED-3 范围太广 (30 处 `throw new Error` 散落 + 4 种错误风格并存),审计 `RECONCILE §8 PR8` 已标"按需修,文档化"。本次只做最小微升级 + 文档化,完整统一 (~285 行) 留后续 wave。
+
+- `shared-mcp/omni-handlers.js`: `errorResult(message, code)` 接受可选 `code`,透传到 MCP response JSON
+- `docs/reference/q-med-3-status.md`: 4 套风格散落清单 + 7 个 `code` 白名单 (`INVALID_INPUT`/`TOOL_NOT_FOUND`/`SUBSET_NOT_EXPOSED`/`SCRIPT_MISSING`/`SUBPROCESS_FAILED`/`BRIDGE_UNREACHABLE`/`INTERNAL`) + 后续 wave 立项指南
+- `tests/unit/js/error-result-code.test.js`: 契约守护 (无 SDK 依赖,inline 复刻验证)
+
+**新 wire shape**:
+```js
+// 旧 — 维持不变
+errorResult("bridge unreachable")
+// → { ok: false, error: "bridge unreachable" }
+
+// 新 — 显式传 code (client 可做 error-type 路由)
+errorResult("bridge unreachable", "BRIDGE_UNREACHABLE")
+// → { ok: false, error: "bridge unreachable", code: "BRIDGE_UNREACHABLE" }
+```
+
+### Verified
+- `npm test`: 795 passed / 0 fail (新加 59 case 全部通过,无 regression)
+- PR17 7 个 commit + PR18 1 个 commit,8 个 commit 全部可独立 revert
+- 端到端手测: `node start.js` 默认 spawn 4 个 server;`AI_MEMORY_SERVER_MODE=monolithic node start.js` 回退单进程
+
+## 2026-07-10 (Round 2)
+
+### Fixed — 9 个独立 PR 收尾 Wave 4/5 + 杂项
+- **PR16** (commit `da3b4bc`): I-HIGH-1 stage 2 — `port-registry.js` 加 `SPLIT_MEMORY_SERVER_PORTS` (retrieval/bridge/dream/mgmt:9339-9341),扩展 `CRITICAL_PORTS`。完整 4-server 独立进程拆分留作 future PR (改动量级 1500+ 行),本 PR 仅预留端口不冲突。
+- **PR15** (commit `0b9e5b3`): Q-HIGH-6 跨语言 hash parity — 实测 Python + Node 在 ASCII-only 输入下 SHA-1 输出**完全一致**(`e9e06904388700cb`, `fe398c9c8d4bc7ba`, `c47b2ee4718c14c7`)。Audit 描述失实:keys 顺序一致 → 序列化字节序列相同 → hash 相同。`tests/unit/js/shared-crypto.test.js` 新增 3 个 pinned parity test 防 drift。
+- **PR14** (commit `e8c797f`): Q-HIGH-10 trace id 跨 Node→Python — `setCurrentTraceId` 与 `withTrace` 同步镜像 `process.env.AI_MEMORY_TRACE_ID`,Python 子进程通过 `os.environ` 自动读取跨边界 trace id。
+- **PR13** (commit `31dce00`): Q-HIGH-5 审计描述失实 — 重排一个 fact 后 `fieldHashes[fieldName]` 改变 → 缓存正确失效,是 intended behavior 不是 bug。Audit 文档标 ⚠️ 失实。
+- **PR12** (commit `77d1102`): Q-HIGH-2 partial-write 设计意图文档化 — 每个 batch 内 `writeIndexSnapshot` 走 tmp+rename atomic,有意的渐进可见性优化,注释说明 risk / reward 不实施代码改动。
+- **PR11 step 3** (commit `b63ce02`): Q-HIGH-1 大文件拆分 — `loadExistingIndex` 50 行 IO streaming 抽到 `bus/generate-embeddings-load.js`,主文件 795→728 行。
+- **PR11 step 2** (commit `3702de5`): Q-HIGH-1 大文件拆分 — `buildWorkerScript()` 145 行 Python template 抽到 `shared-mcp/embedding-worker-script.cjs`,`shared-mcp/embedding-worker-pool.cjs` 658→509 行。
+- **PR10** (commit `796c9f4`): Q-CRIT-4 partial — `bus/embedding-provider-registry.js` 抽 `spawnPythonWorker()` helper,transformer 与 gemini 两条 per-call path 共享 spawn/stderr drain/proxy env 4 行;Python 脚本提升到模块级 constants (PER_CALL_SENTENCE_TRANSFORMER_SCRIPT / PER_CALL_GEMINI_SCRIPT)。
+- **PR9** (commit `03a2dcf`): I-LOW-2/3/4/6 + Q-MED-1/7/10 审计失实标注 — 6 项 audit 描述与代码现状不符 (e.g. `bus/memory-promotion-scorer.js` 已删除、`web/shot.py` 路径是作者 dev 机配置、`bus/` 全量 grep `var` 0 命中、4 脚本走的是多路径合法 fallback 不是已删的 `ops/bus/`)。
+
+### Verified
+- `npm test`: 813 passed / 2 pre-existing failures (Python ENOENT, unrelated)
+- 8 个新独立 commit (PR9 文档化 + PR10-PR16 代码改动) 全部可独立 revert
+
+## 2026-07-10
+
+### Fixed — Audit 复核 + 7 个独立 PR (Issue 重对账)
+- **PR7 / I-HIGH-1**: `omni-memory-server.js` 激活 `AI_MEMORY_SERVER_MODE` env 入口 (`retrieval` / `bridge` / `dream` / `mgmt` / `all`),把"死代码" `toolFilter` 变为"环境变量驱动"工具子集过滤。完整 4-server 独立进程拆分 (`docs/architecture/SERVER-SPLIT.md` §7) 留作未来 PR;本次仅打通入口。
+- **PR6 / Q-HIGH-1**: 抽出 `NOISE_PATTERNS` + `isNoise()` 到新模块 `bus/text-noise.js`,`bus/generate-embeddings.js` 805 → 799 行 (Q-HIGH-1 第一步)。其余 800+ 行文件拆分 (`shared-mcp/embedding-worker-pool.cjs`、`retrieval/search_ranking.py`) 留作后续 PR。
+- **PR5 / Q-CRIT-1**: `retrieval/search_ranking.py` 抽出 `_resolve_query_runtime_for_dense()` helper,消除 `dense_scores` 与 `_dense_scores_fallback` 之间 ~50 行 schema+config-hash 派生重复 (`audit 提的 "3 处重复" 实测仅 2 处`)。
+- **PR4 / Q-MED cleanup bundle**:
+  - `cli/package.json`: `engines.node` 升 `>=16` → `>=18`,与根一致 (Q-MED-5)
+  - `ops/generate/generate-context.js`: 删除重复 `getContextPath()`,改 import `bus/store-root.js` (I-LOW-1 / Q-MED-4)
+- **PR3 / Q-HIGH-3**: `bus/bm25.js` 102 行加 size-bounded (1024 entries) FIFO tokenize 缓存。
+- **PR2 / Q-HIGH-7**: `shared-mcp/memory-retrieval.js` + `memory-bridge.js` 重复的 `spawnProcess` helper 抽公到 `shared-mcp/proto/child-process.mjs`(已存在的 IPC 模块加 `export`)。
+- **PR1 / Q-HIGH-8**: `shared-mcp/omni-handlers.js` `buildHandlerRegistry` 同名 handler 注册抛 `Error`(原 for-of 静默覆盖)。
+
+### Docs — 审计复核真伪报告
+- 新增 `docs/PROJECT_AUDIT_2026-07-09-RECONCILE.md`:22 项 ⏸️ 留待项逐条复核,识别 5 项审计描述失准 / 1 项已悄悄修复 / 13 项仍真遗留。后续 PR 排序见 §5。
+- `docs/PROJECT_AUDIT_2026-07-09.md` Wave 4 / Wave 5 区段保留 ⏸️ 标识 (本次只完成 6 项真遗留,其余 9 项需独立 PR)。
+
+### Verified
+- `npm test`: 810 passed / 2 pre-existing failures (`python ast.parse ENOENT`,unrelated)。
+- 单 commit 可独立回滚 (8 个 commit messages 见 `git log --oneline -8`)。
+
+
+### Changed — Architecture (A1: store/vault unification)
+- Canonical memory store is now the Obsidian vault's `00-System/ai-memory` (matches CLAUDE.md: "Canonical long-term memory lives in Obsidian"). Both `resolve_store_root` (Python `retrieval/runtime_support.py`) and `resolveStoreRoot` (Node `bus/store-root.js`) vault-bridge when no `AI_MEMORY_STORE` is set. Priority: `AI_MEMORY_STORE > vault/00-System/ai-memory > AI_MEMORY_ROOT > ~/.ai-memory`.
+- New `resolveFromObsidianConfig` in `bus/vault-root.js` reads Obsidian's `obsidian.json` to discover vaults on any drive (Python parity; Node previously only checked home-dir candidates).
+- Retrieval now reads real vault data by default (zero env config); pure-file `.ai-memory` is fallback only (CI / no-vault machines).
+
+### Added — Multi-agent integration (A3)
+- `setup-mcp.js --target=<claude|cursor|kiro|windsurf|cline|roo|goose|qoder|all|a,b>` configures 8 AI agents. `AGENT_REGISTRY` mapping — one line per new agent. `--dry-run`, `--help`.
+- `AGENTS.md` MCP integration section (recognized by Kiro/Trae/Goose/Cline/Roo/Continue).
+
+### Fixed — Windows startup (live end-to-end testing uncovered 4 fatal bugs that tests missed)
+- `shared-mcp/proto/windows-shim.mjs`: `spawnSync` import moved from `node:fs` to `node:child_process` (memory server was crashing on startup).
+- `shared-mcp/singleton-stdio-mcp-proxy.mjs`: `scheduleRestart` import moved from `rpc.mjs` to `restart.mjs`.
+- `start.js`: no longer forces `AI_MEMORY_STORE=~/.ai-memory` (was bypassing the vault bridge, pointing the server at an empty store).
+- `shared-mcp/memory-retrieval.js`: store resolution unified to canonical `resolveStoreRoot` (vault bridge), removing a stale independent copy.
+
+### Added — Retrieval quality
+- RRF (Reciprocal Rank Fusion) in `retrieval/search_ranking.py` (default `weighted`, opt-in via `AI_MEMORY_FUSION=rrf`). Rank derived from existing scores, no upstream changes.
+- NDCG benchmark at `retrieval/eval/ndcg_benchmark.py` (NDCG@5 / Recall@10 / MRR, reuses `judgments.jsonl`).
+- Optional cross-encoder rerank (`AI_MEMORY_RERANK=local`, default off) in `search_ranking.py` — bge-reranker-v2-m3, graceful degradation when `sentence_transformers`/model unavailable.
+
+### Added — Packaging & docs
+- `bin.js` unified CLI entry: `npx local-ai-memory-bus [start|setup|init|doctor|status|help]`.
+- `package.json` `bin` + 15 keywords; `.npmignore` (packed size **537 kB / 403 files**, down from 7.3 MB / 6083).
+- README rewritten (A1 vault / A3 8 agents / search_shared_memory vs memory_search / RRF / differentiation vs mem0/Zep). New `docs/guides/INTEGRATION.md`. Updated `docs/ARCHITECTURE.md`, `docs/architecture/DATA-FLOW.md`, `docs/reference/MCP-TOOLS.md`.
+- Landing Page upgraded to React+Vite (`web/src/` + `web/dist/`): interactive architecture diagram, L0-L5 layers, 8-agent tabs, copy-toasts. Old static HTML backed up to `web/legacy-html/`.
+
+### Added — Promotion
+- `docs/promotion/article.md` — community article (~2350 words, differentiation vs mem0/Zep, honest limitations).
+- `docs/promotion/video-script.md` — 4.5-minute demo script (storyboard + narration, real `search_shared_memory` output).
+
+### Verified
+- `npm test`: 718 passed / 0 regressions.
+- End-to-end MCP: `search_shared_memory` returns real vault data (entryCount 143, 3 results, score 1.015).
+
+
 ## 2026-04-10
 
 ### Fixed

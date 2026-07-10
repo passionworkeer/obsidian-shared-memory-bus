@@ -1,16 +1,17 @@
 {
   "name": "ai-memory-cli",
-  "version": "1.0.0",
-  "description": "Unified CLI for Obsidian Shared Memory Bus",
+  "version": "3.1.0",
+  "type": "module",
+  "description": "Unified CLI for yt",
+  "license": "MIT",
   "bin": {
     "ai-memory": "./ai-memory.js"
   },
   "preferGlobal": true,
   "engines": {
-    "node": ">=16"
+    "node": ">=18"
   },
   "keywords": [
-    "obsidian",
     "memory",
     "cli"
   ],

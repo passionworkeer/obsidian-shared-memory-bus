@@ -1,13 +1,17 @@
 {
-  "name": "obsidian-shared-memory-bus",
+  "name": "yt-memory-bus",
   "version": "3.1.0",
-  "description": "Portable local-first shared memory bus for multi-agent AI setups backed by Obsidian",
+  "description": "yt — local-first shared memory bus for multi-agent AI (Obsidian-backed)",
   "type": "module",
+  "bin": {
+    "yt": "./bin.js"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/passionworkeer/obsidian-shared-memory-bus"
   },
+  "homepage": "https://github.com/passionworkeer/obsidian-shared-memory-bus#readme",
   "workspaces": [
     "shared-mcp"
   ],
@@ -15,10 +19,11 @@
     "start": "node start.js",
     "lint": "npm run lint --prefix shared-mcp",
     "lint:fix": "npm run lint:fix --prefix shared-mcp",
+    "lint:root": "eslint --config eslint.config.js \"bus/**/*.js\" \"cli/**/*.js\" \"ops/**/*.js\" \"retrieval/**/*.js\" \"shared-mcp/**/*.js\" \"shared-mcp/**/*.mjs\" \"shared-mcp/**/*.cjs\"",
     "validate": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/validate-layout.ps1",
-    "check-integrity": "node ops/check-memory-integrity.js --strict",
-    "generate-context": "node ops/generate-context.js",
-    "watchdog": "node scripts/watchdog.js 'node scripts/vault-detect.js'",
+    "check-integrity": "node ops/check/check-memory-integrity.js --strict",
+    "generate-context": "node ops/generate/generate-context.js",
+    "watchdog": "bash scripts/watchdog.sh /tmp/memory-bus.pid node scripts/vault-detect.js",
     "vault:detect": "node scripts/vault-detect.js",
     "setup-mcp": "node setup-mcp.js",
     "env:check": "node scripts/env-check.js",
@@ -27,18 +32,30 @@
     "test": "node --test --test-concurrency=1 --experimental-test-isolation=none tests/unit/js/*.test.js tests/unit/js/*.test.mjs",
     "test:py": "pytest tests/ -v",
     "test:cross": "node --test tests/cross-language/*.test.js",
-    "test:integration": "node --test --test-concurrency=1 --experimental-test-isolation=none tests/integration/js/*.test.js tests/integration/js/*.test.mjs",
-    "test:all": "node --test --test-concurrency=1 --experimental-test-isolation=none tests/unit/js/*.test.js tests/unit/js/*.test.mjs tests/integration/js/*.test.js tests/integration/js/*.test.mjs tests/e2e/*.test.mjs && pytest tests/unit/py/ tests/cross-language/ -v"
+    "test:integration": "node --test --test-concurrency=1 --experimental-test-isolation=none tests/integration/js/*.{test.js,test.mjs}",
+    "test:e2e": "node --test --test-concurrency=1 --test-timeout=60000 tests/e2e/*.test.mjs",
+    "test:concurrent": "node --test --test-concurrency=4 tests/unit/js/inbox-atomic-write.test.js",
+    "test:all": "node --test --test-concurrency=1 --experimental-test-isolation=none tests/unit/js/*.test.js tests/unit/js/*.test.mjs && npm run test:concurrent && node --test --test-concurrency=1 --experimental-test-isolation=none tests/integration/js/*.test.mjs && npm run test:e2e && pytest tests/unit/py/ tests/cross-language/ -v",
+    "test:full": "node scripts/test-all.js"
   },
   "keywords": [
-    "obsidian",
-    "memory",
     "mcp",
+    "model-context-protocol",
+    "agent",
+    "memory",
+    "ai-memory",
+    "obsidian",
+    "local-first",
+    "rag",
+    "retrieval",
+    "hybrid-search",
     "multi-agent",
     "shared-memory",
-    "ai-memory"
+    "context",
+    "claude",
+    "codex"
   ],
-  "author": " passionworkeer",
+  "author": "passionworkeer",
   "bugs": {
     "url": "https://github.com/passionworkeer/obsidian-shared-memory-bus/issues"
   },
@@ -46,7 +63,8 @@
     "node": ">=18",
     "powershell": ">=7"
   },
-  "dependencies": {
+  "dependencies": {},
+  "devDependencies": {
     "eslint": "^10.2.0"
   }
 }

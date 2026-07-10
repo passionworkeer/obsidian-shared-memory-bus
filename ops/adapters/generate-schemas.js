@@ -7,10 +7,18 @@
  *   - ops/adapters/generated/memory-contract-schema.js   (Node.js)
  *   - ops/adapters/generated/schema-validation-py.py     (Python)
  *
+ * Debt-item #3 enhancements (memory contract type generation):
+ *   - --output types    → shared-mcp/types/memory-record.d.ts       (TypeScript .d.ts)
+ *   - --output zod      → shared-mcp/validators/memory-record.js    (hand-written JS validator, no zod lib)
+ *   - --output pydantic → retrieval/types/memory_record.py          (Pydantic v2 BaseModel)
+ *
  * Usage:
- *   node ops/adapters/generate-schemas.js --output node    Generate JS schema
- *   node ops/adapters/generate-schemas.js --output python  Generate Python schema
- *   node ops/adapters/generate-schemas.js --check          Verify consistency (CI gate)
+ *   node ops/adapters/generate-schemas.js --output node     Generate JS schema
+ *   node ops/adapters/generate-schemas.js --output python   Generate Python schema
+ *   node ops/adapters/generate-schemas.js --output types    Generate TypeScript .d.ts
+ *   node ops/adapters/generate-schemas.js --output zod      Generate JS runtime validator
+ *   node ops/adapters/generate-schemas.js --output pydantic Generate Pydantic v2 models
+ *   node ops/adapters/generate-schemas.js --check           Verify consistency (CI gate)
  *
  * The generated files are committed to git so CI can detect drift.
  * Run with --check to confirm generated output matches the registry.
@@ -18,12 +26,17 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "url";
+import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const REGISTRY_PATH = path.join(__dirname, "schema-registry.json");
 const OUTPUT_DIR = path.join(__dirname, "generated");
+// Repo root is two levels up from ops/adapters/.
+const REPO_ROOT = path.resolve(__dirname, "..", "..");
+const TS_TYPES_DIR = path.join(REPO_ROOT, "shared-mcp", "types");
+const JS_VALIDATORS_DIR = path.join(REPO_ROOT, "shared-mcp", "validators");
+const PY_TYPES_DIR = path.join(REPO_ROOT, "retrieval", "types");
 
 // ---------------------------------------------------------------------------
 // Argument parsing
@@ -33,7 +46,7 @@ const args = process.argv.slice(2);
 const outputMode = args.includes("--check") ? "check" : args.includes("--output") ? args[args.indexOf("--output") + 1] : null;
 
 if (!outputMode) {
-  console.error("Usage: node generate-schemas.js [--output node|python|--check]");
+  console.error("Usage: node generate-schemas.js [--output node|python|types|zod|pydantic|--check]");
   process.exit(1);
 }
 

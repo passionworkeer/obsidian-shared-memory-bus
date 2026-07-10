@@ -75,23 +75,23 @@ function assertNoError(promise, label) {
 // ---------------------------------------------------------------------------
 
 function detectPythonRuntime() {
+  const { execSync } = require("child_process");
   const candidates = [
-    path.join(REPO_ROOT, "python-runtime.js"),
-    path.join(REPO_ROOT, "bus", "python-runtime.js"),
-  ];
-  for (const helper of candidates) {
-    if (require("fs").existsSync(helper)) {
-      try {
-        const { resolvePythonRuntime } = require(helper);
-        const runtime = resolvePythonRuntime();
-        if (runtime && runtime.available) {
-          const cmd = runtime.command + (runtime.argsPrefix && runtime.argsPrefix.length ? " " + runtime.argsPrefix.join(" ") : "");
-          console.log(`  Found Python: ${cmd} (${(runtime.version || "").trim()}) [${runtime.source}]`);
-          return cmd;
-        }
-      } catch (err) {
-        console.warn(`  python-runtime.js load failed: ${err.message}`);
+    process.env.AI_MEMORY_PYTHON,
+    process.env.PYTHON,
+    "python",
+    "python3",
+    ...(process.platform === "win32" ? ["py -3", "py"] : []),
+  ].filter(Boolean);
+  for (const cmd of candidates) {
+    try {
+      const v = execSync(`${cmd} --version`, { encoding: "utf8", timeout: 5000 }).trim();
+      if (v.includes("Python")) {
+        console.log(`  Found Python: ${cmd} (${v.trim()})`);
+        return cmd;
       }
+    } catch {
+      // try next
     }
   }
   return null;

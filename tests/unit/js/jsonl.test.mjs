@@ -10,7 +10,7 @@ import { test, describe, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import fs from "node:fs";
-import { fileURLToPath, pathToFileURL } from "url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const helpersPath = path.resolve(__dirname, "../../helpers/setup");
@@ -290,17 +290,17 @@ describe("jsonl operations", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // File locking / concurrent access tests
+  // Sequential batch append tests
   // ---------------------------------------------------------------------------
 
-  test("concurrent appends maintain data integrity", async () => {
-    const filePath = path.join(tempDir, "concurrent.jsonl");
+  test("sequential batch append preserves all records and order", async () => {
+    const filePath = path.join(tempDir, "batch-append.jsonl");
     const numRecords = 10;
 
     // Create empty file
     fs.writeFileSync(filePath, "", "utf8");
 
-    // Append records sequentially (simulating what would happen in concurrent scenario)
+    // Append records one at a time
     for (let i = 1; i <= numRecords; i++) {
       fs.appendFileSync(filePath, JSON.stringify({ id: `rec-${i}`, index: i }) + "\n", "utf8");
     }

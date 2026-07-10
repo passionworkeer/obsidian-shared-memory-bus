@@ -9,10 +9,14 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "url";
-import { pathToFileURL } from "url";
+import { fileURLToPath } from "node:url";
+import { pathToFileURL } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Resolve retrieval module path relative to test file (portable)
+const PROJECT_ROOT = path.resolve(__dirname, "../..");
+const PYTHON_MODULE_PATH = path.join(PROJECT_ROOT, "retrieval").replace(/\\/g, "/");
 
 // Load the JS implementation directly
 const {
@@ -21,9 +25,6 @@ const {
   buildHashFeatures,
   buildHashEmbedding,
 } = await import(pathToFileURL(path.join(PROJECT_ROOT, "bus/lsh-hash.js")));
-
-// Python retrieval module path (forward slashes for cross-platform compatibility)
-const PYTHON_MODULE_PATH = "E:/desktop/obsidian-shared-memory-bus/retrieval";
 
 /**
  * Run a Python function via subprocess and return the parsed JSON result.
@@ -36,34 +37,18 @@ import sys, json
 sys.path.insert(0, '${PYTHON_MODULE_PATH}')
 ${pythonCode}
 `;
-  // Python executable: honour $PYTHON first, then try platform-common names.
-  const PYTHON_EXE = (() => {
-    if (process.env.PYTHON) return process.env.PYTHON;
-    if (process.platform === "win32") {
-      const candidates = [
-        "py",
-        "python",
-        "python3",
-      ];
-      for (const cand of candidates) {
-        const r = spawnSync(cand, ["--version"], { encoding: "utf8" });
-        if (r && r.status === 0) return cand;
-      }
-      return "python3";
-    }
-    const r3 = spawnSync("python3", ["--version"], { encoding: "utf8" });
-    return r3.status === 0 ? "python3" : "python";
-  })();
-  const result = spawnSync(PYTHON_EXE, ["-c", fullCode], {
+  const pythonRuntime = resolvePythonRuntime();
+  const result = spawnSync(pythonRuntime.command, [...pythonRuntime.argsPrefix, "-c", fullCode], {
     encoding: "utf8",
     timeout: 10000,
+    windowsHide: true,
   });
 
-  if (result.status !== 0) {
+  if (result.error || result.status !== 0) {
     const stderr = result.stderr || "";
     const errorMsg = stderr ? `\nPython stderr: ${stderr}` : "";
     throw new Error(
-      `Python subprocess failed with exit code ${result.status}.${errorMsg}`
+      `Python subprocess failed with exit code ${result.status}.${errorMsg || result.error?.message || ""}`
     );
   }
 
@@ -74,6 +59,34 @@ ${pythonCode}
       `Failed to parse Python output as JSON: ${result.stdout}\nError: ${e.message}`
     );
   }
+}
+
+function resolvePythonRuntime() {
+  const candidates = [
+    { command: process.env.AI_MEMORY_PYTHON, argsPrefix: [] },
+    { command: process.env.PYTHON_EXE, argsPrefix: [] },
+    { command: process.env.PYTHON, argsPrefix: [] },
+    { command: "python", argsPrefix: [] },
+    { command: "python3", argsPrefix: [] },
+    ...(process.platform === "win32"
+      ? [
+          { command: "py", argsPrefix: ["-3"] },
+          { command: "py", argsPrefix: [] },
+        ]
+      : []),
+  ].filter((candidate) => candidate.command);
+
+  for (const candidate of candidates) {
+    const result = spawnSync(candidate.command, [...candidate.argsPrefix, "--version"], {
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    if (!result.error && result.status === 0) {
+      return candidate;
+    }
+  }
+
+  return { command: "python", argsPrefix: [] };
 }
 
 /**
@@ -177,7 +190,7 @@ print(json.dumps(build_hash_features("${input}")))
     const pyResult = runPython(`
 # -*- coding: utf-8 -*-
 import sys, json
-sys.path.insert(0, 'E:/desktop/obsidian-shared-memory-bus/retrieval')
+sys.path.insert(0, '${PYTHON_MODULE_PATH}')
 from lsh_utils import build_hash_features
 print(json.dumps(build_hash_features("中文测试")))
     `);

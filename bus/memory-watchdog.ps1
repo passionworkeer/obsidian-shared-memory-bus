@@ -37,14 +37,11 @@ $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [Console]::OutputEncoding = $Utf8NoBom
 
 # --- Register engine event so Release-WatchdogLock fires on ANY exit path ---
-# Use $global: so the action scriptblock can see the variable when the
-# engine event fires from a child scope (the original $script: scope
-# silently fails to release the lock on process exit).
-$global:WatchdogLockStream = $null
+$script:WatchdogLockStream = $null
 try {
     $null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
-        if ($global:WatchdogLockStream) {
-            try { $global:WatchdogLockStream.Dispose() } catch { }
+        if ($script:WatchdogLockStream) {
+            try { $script:WatchdogLockStream.Dispose() } catch { }
         }
         try {
             if ((Test-Path -LiteralPath $LockPath -PathType Leaf)) {
@@ -102,23 +99,23 @@ $UserHome = Get-SharedUserHome
 $AiMemoryRoot = if (-not [string]::IsNullOrWhiteSpace($env:AI_MEMORY_ROOT)) { $env:AI_MEMORY_ROOT } else { $PSScriptRoot }
 $BusScript = Resolve-BusPath -Candidates @("memory-bus.ps1", "bus/memory-bus.ps1")
 $LockPath = Join-Path $AiMemoryRoot "watchdog.lock"
-$WatchdogPidPath = Join-Path $AiMemoryRoot "watchdog.pid"
 $StatePath = Join-Path $AiMemoryRoot "watchdog-state.json"
 $ErrorLogPath = Join-Path $AiMemoryRoot "watchdog-error.log"
 $TraceLogPath = Join-Path $AiMemoryRoot "watchdog-trace.log"
 $SharedMcpRoot = Join-Path $AiMemoryRoot "shared-mcp"
 $SharedMcpStartScript = Join-Path $SharedMcpRoot "start-default-shared-mcp.ps1"
 $SharedMcpStatusScript = Join-Path $SharedMcpRoot "status-shared-mcp.ps1"
-$VaultRoot = Resolve-SharedObsidianVaultRoot -FallbackPath (Join-SharedPath @($UserHome, "Documents", "Obsidian Vault"))
-$GeneratedRoot = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "generated")
-$GlobalContextPath = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "generated", "GLOBAL-CONTEXT.md")
-$MemoryLayersJsonPath = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "generated", "MEMORY-LAYERS.json")
-$HandoffPackJsonPath = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "generated", "HANDOFF.json")
-$AutoDreamJsonPath = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "generated", "AUTO-DREAM.json")
-$StructuredRoot = Join-SharedPath @($VaultRoot, "00-System", "ai-memory", "structured")
+$VaultRoot = Resolve-SharedStoreRoot -FallbackPath (Join-SharedPath @($UserHome, "Documents", "Obsidian Vault"))
+$GeneratedRoot = Join-SharedPath @($VaultRoot, "generated")
+$GlobalContextPath = Join-SharedPath @($GeneratedRoot, "GLOBAL-CONTEXT.md")
+$MemoryLayersJsonPath = Join-SharedPath @($GeneratedRoot, "MEMORY-LAYERS.json")
+$HandoffPackJsonPath = Join-SharedPath @($GeneratedRoot, "HANDOFF.json")
+$AutoDreamJsonPath = Join-SharedPath @($GeneratedRoot, "AUTO-DREAM.json")
+$StructuredRoot = Join-SharedPath @($VaultRoot, "structured")
 $BlackboardDaemonScript = Resolve-BusPath -Candidates @("obsidian-blackboard-daemon.js", "ops/daemon/obsidian-blackboard-daemon.js")
 $MD_PATH = Join-Path $VaultRoot "02-KB\WORKING.md"
 $OpenClawSyncScript = Resolve-BusPath -Candidates @("sync-openclaw-to-obsidian.js", "ops/sync/sync-openclaw-to-obsidian.js")
+# 上方脚本当前未实现 — Resolve-BusPath 会返回 $null,Invoke-OpenClawStructuredSync 会记录 openclaw.skipped 等待脚本落地 (见 docs/PROJECT_AUDIT_*.md §I-HIGH-2)
 $BuildHandoffPackScript = Resolve-BusPath -Candidates @("build-handoff-pack.js", "ops/build/build-handoff-pack.js")
 
 # ============================================================================

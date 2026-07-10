@@ -1,30 +1,5 @@
-import fs from "node:fs";
 import path from "node:path";
-
-function loadVaultRootHelper() {
-  const candidates = [
-    // Script-local (installed flat layout: ~/.ai-memory/vault-root.js)
-    path.join(__dirname, "vault-root.js"),
-    // Sibling bus/ (project layout: ops/ and bus/ are siblings under project root)
-    path.join(__dirname, "..", "bus", "vault-root.js"),
-    path.join(__dirname, "bus", "vault-root.js"),
-    // Bus sibling (installed flat: ~/.ai-memory/bus/vault-root.js)
-    path.join(__dirname, "..", "..", "bus", "vault-root.js"),
-    // AI_MEMORY_ROOT direct (when AI_MEMORY_ROOT is project root)
-    path.join(__dirname, "..", "..", "..", "bus", "vault-root.js"),
-  ];
-
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
-      return import(candidate);
-    }
-  }
-
-  throw new Error(`vault-root-helper-missing: tried ${candidates.join(", ")}`);
-}
-
-const vaultRootModule = await loadVaultRootHelper();
-const { resolveVaultRoot } = vaultRootModule;
+import { resolveStoreRoot } from "../../bus/store-root.js";
 const memoryContractModule = await import("../memory/memory-contract.js");
 const { buildMemoryIntegrityReport } = memoryContractModule;
 
@@ -59,11 +34,10 @@ function renderHumanSummary(report) {
 
 function main() {
   const parsed = parseArgs(process.argv.slice(2));
-  const vaultRoot = resolveVaultRoot();
-  const aiMemoryRoot = path.join(vaultRoot, "00-System", "ai-memory");
+  const storeRoot = resolveStoreRoot();
   const report = buildMemoryIntegrityReport({
-    structuredRoot: path.join(aiMemoryRoot, "structured"),
-    generatedRoot: path.join(aiMemoryRoot, "generated"),
+    structuredRoot: path.join(storeRoot, "structured"),
+    generatedRoot: path.join(storeRoot, "generated"),
   });
 
   if (parsed.json) {

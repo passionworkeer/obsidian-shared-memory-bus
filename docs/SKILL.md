@@ -1,5 +1,5 @@
 ---
-name: obsidian-shared-memory-bus
+name: yt-memory-bus
 description: Unified shared memory bus for all AI agents
 version: 2.0.0
 ---
