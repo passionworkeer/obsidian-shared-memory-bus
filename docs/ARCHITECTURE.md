@@ -285,7 +285,7 @@ See [`docs/DEPLOYMENT-MATRIX.md`](DEPLOYMENT-MATRIX.md) for recommended operatin
 | `shared-mcp/omni-memory-server.js` | Shared `memory` MCP server: HTTP transport, tool dispatch, retrieval worker management |
 | `bus/generate-embeddings.js` | Embeddings generation: reads structured JSONL, calls embedding provider, writes index |
 | `ops/build-memory-layers.js` | Reads structured/*.jsonl, builds layered MEMORY-LAYERS snapshot, stamps promotion metadata |
-| `ops/sync-openclaw.js` | (planned) Ingests OpenClaw sessions/runs/jobs/blackboard → structured JSONL — script not yet implemented; watchdog currently no-ops |
+| `ops/sync/sync-openclaw-to-obsidian.js` | Ingests OpenClaw sessions/runs/jobs/blackboard → structured JSONL. Referenced by `bus/memory-watchdog.ps1` and `bus/watchdog/Watchdog-Sync.ps1` as `OpenClawSyncScript`. |
 
 ### Python Files
 | File | Responsibility |

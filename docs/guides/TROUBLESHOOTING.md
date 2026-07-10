@@ -410,9 +410,9 @@ Check:
 If needed, run:
 
 ```powershell
-# 注意: ops/sync-openclaw-to-obsidian.js 当前尚未实现; 此命令不会工作
-# 参见 docs/PROJECT_AUDIT_2026-07-09.md §I-HIGH-2
-node .\ops\sync-openclaw-to-obsidian.js
+# Sync OpenClaw blackboard / sessions / runs / jobs → structured JSONL.
+# Note: 实际路径为 ops/sync/sync-openclaw-to-obsidian.js (旧路径 ops/sync-openclaw.js 在 I-HIGH-2 修复时已迁移)
+node .\ops\sync\sync-openclaw-to-obsidian.js
 ```
 
 ## Obsidian MCP Does Not Start
