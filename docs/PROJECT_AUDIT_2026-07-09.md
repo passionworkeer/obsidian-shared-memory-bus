@@ -260,10 +260,10 @@ process.stderr.write("[cache-warm] skipped: warm_strategy.py not implemented yet
 - **位置**: `bus/embedding-provider-registry.js`
 - **修复**: 抽 `getEnvConfig()` helper
 
-#### Q-HIGH-5 — `generate-embeddings.js` 用位置键 `fact_0` / `fact_1` 命名 embedding
-- **位置**: `bus/generate-embeddings.js`
-- **风险**: 数组中重排一个 fact → embedding 缓存静默失效
-- **修复**: 用内容 hash 作为键
+#### Q-HIGH-5 — `generate-embeddings.js` 用位置键 `fact_0` / `fact_1` 命名 embedding ⚠️ 审计描述失实 — 缓存已用 content hash 键 (commit b63ce02 复核后标注)
+- **位置**: `bus/generate-embeddings.js:417 (\`fact_\${i}\`)` + line 569 (entryId \`recordId__fact_\${i}\`)
+- **复核 (2026-07-10)**: `fieldHashes[fieldName] = hashFieldText(text)` 用于 cache key (line 419/429/410)。`stored.fieldTexts[fieldName] === doc.fieldHashes[fieldName]` (line 579) 作为缓存复用判据 —— 即事实重排后,**hash 改变 → 缓存失效**,这是 **intended behavior**。
+- **当前判定**: ⚠️ **审计描述失实** —— 重排一个 fact 实际上使缓存正确失效(rebuild 该 fact 的 embedding),不会"静默失效"。修法 = 文档化 "fact_N 是 field name 占位,缓存 key 用 hash 链",不改代码。
 
 #### Q-HIGH-6 — `build_embedding_config_hash` Python/JS 输出不一致
 - **位置**: `retrieval/search_ranking.py` ↔ `bus/`
