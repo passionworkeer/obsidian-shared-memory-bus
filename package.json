@@ -17,8 +17,8 @@
   ],
   "scripts": {
     "start": "node start.js",
-    "lint": "npm run lint --prefix shared-mcp",
-    "lint:fix": "npm run lint:fix --prefix shared-mcp",
+    "lint": "npm run lint:root",
+    "lint:fix": "eslint --fix --config eslint.config.js \"bus/**/*.js\" \"cli/**/*.js\" \"ops/**/*.js\" \"retrieval/**/*.js\" \"shared-mcp/**/*.js\" \"shared-mcp/**/*.mjs\" \"shared-mcp/**/*.cjs\"",
     "lint:root": "eslint --config eslint.config.js \"bus/**/*.js\" \"cli/**/*.js\" \"ops/**/*.js\" \"retrieval/**/*.js\" \"shared-mcp/**/*.js\" \"shared-mcp/**/*.mjs\" \"shared-mcp/**/*.cjs\"",
     "validate": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/validate-layout.ps1",
     "check-integrity": "node ops/check/check-memory-integrity.js --strict",
@@ -60,7 +60,7 @@
     "url": "https://github.com/passionworkeer/obsidian-shared-memory-bus/issues"
   },
   "engines": {
-    "node": ">=18",
+    "node": ">=20.19",
     "powershell": ">=7"
   },
   "dependencies": {},
