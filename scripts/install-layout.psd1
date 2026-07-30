@@ -2,6 +2,7 @@
     FlatRuntimeFiles = @{
         bus = @(
             "embedding-provider-registry.js"
+            "embedding-provider-registry-core.mjs"
             "generate-embeddings.js"
             "lsh-hash.js"
             "memory-bus.ps1"
@@ -13,6 +14,12 @@
             "python-runtime.js"
             "register-agent.ps1"
             "runtime-platform.ps1"
+            "runtime-platform-paths.ps1"
+            "runtime-platform-env.ps1"
+            "runtime-platform-runtimes.ps1"
+            "runtime-platform-store.ps1"
+            "runtime-platform-ai-roots.ps1"
+            "runtime-platform-shell.ps1"
             "runtime-config.js"
             "vault-root.js"
         )
@@ -53,6 +60,10 @@
             "memory-layers-context.js"
             "memory-layers-dedup.js"
             "memory-layers-parse.js"
+            "memory-promotion-scorer.js"
+            "memory-promotion-scorer-core.mjs"
+            "memory-promotion-resolver.js"
+            "memory-promotion-resolver-core.mjs"
         )
         "ops/redact" = @(
             "redaction.py"
@@ -113,6 +124,8 @@
         "package-lock.json"
         "package.json"
         "playwright-stdio-proxy.js"
+        "port-registry.js"
+        "spawn-plan.js"
         "singleton-stdio-mcp-proxy.mjs"
         "start-default-shared-mcp.ps1"
         "start-default-shared-mcp.sh"

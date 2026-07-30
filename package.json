@@ -17,8 +17,8 @@
   ],
   "scripts": {
     "start": "node start.js",
-    "lint": "npm run lint --prefix shared-mcp",
-    "lint:fix": "npm run lint:fix --prefix shared-mcp",
+    "lint": "npm run lint:root",
+    "lint:fix": "eslint --fix --config eslint.config.js \"bus/**/*.js\" \"cli/**/*.js\" \"ops/**/*.js\" \"retrieval/**/*.js\" \"shared-mcp/**/*.js\" \"shared-mcp/**/*.mjs\" \"shared-mcp/**/*.cjs\"",
     "lint:root": "eslint --config eslint.config.js \"bus/**/*.js\" \"cli/**/*.js\" \"ops/**/*.js\" \"retrieval/**/*.js\" \"shared-mcp/**/*.js\" \"shared-mcp/**/*.mjs\" \"shared-mcp/**/*.cjs\"",
     "validate": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/validate-layout.ps1",
     "check-integrity": "node ops/check/check-memory-integrity.js --strict",
@@ -29,13 +29,13 @@
     "env:check": "node scripts/env-check.js",
     "test:cross-platform": "node scripts/cross-platform-test.js",
     "test:smoke": "node scripts/cross-platform-test.js",
-    "test": "node --test --test-concurrency=1 --experimental-test-isolation=none tests/unit/js/*.test.js tests/unit/js/*.test.mjs",
+    "test": "node --test --test-concurrency=1 tests/unit/js/*.test.js tests/unit/js/*.test.mjs",
     "test:py": "pytest tests/ -v",
-    "test:cross": "node --test tests/cross-language/*.test.js",
-    "test:integration": "node --test --test-concurrency=1 --experimental-test-isolation=none tests/integration/js/*.{test.js,test.mjs}",
+    "test:cross": "node --test tests/cross-language/schema-consistency.test.mjs tests/cross-language/lsh_equivalence.test.js",
+    "test:integration": "node --test --test-concurrency=1 tests/integration/js/*.{test.js,test.mjs}",
     "test:e2e": "node --test --test-concurrency=1 --test-timeout=60000 tests/e2e/*.test.mjs",
     "test:concurrent": "node --test --test-concurrency=4 tests/unit/js/inbox-atomic-write.test.js",
-    "test:all": "node --test --test-concurrency=1 --experimental-test-isolation=none tests/unit/js/*.test.js tests/unit/js/*.test.mjs && npm run test:concurrent && node --test --test-concurrency=1 --experimental-test-isolation=none tests/integration/js/*.test.mjs && npm run test:e2e && pytest tests/unit/py/ tests/cross-language/ -v",
+    "test:all": "node --test --test-concurrency=1 tests/unit/js/*.test.js tests/unit/js/*.test.mjs && npm run test:concurrent && node --test --test-concurrency=1 tests/integration/js/*.test.mjs && npm run test:e2e && pytest tests/unit/py/ tests/cross-language/ -v",
     "test:full": "node scripts/test-all.js"
   },
   "keywords": [
@@ -60,7 +60,7 @@
     "url": "https://github.com/passionworkeer/obsidian-shared-memory-bus/issues"
   },
   "engines": {
-    "node": ">=18",
+    "node": ">=22",
     "powershell": ">=7"
   },
   "dependencies": {},

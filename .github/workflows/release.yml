@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
   release:
@@ -21,27 +20,54 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: '22'
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Verify tag matches package version
+        shell: bash
+        run: |
+          package_version="$(node -p "require('./package.json').version")"
+          test "${GITHUB_REF_NAME}" = "v${package_version}" || {
+            echo "Tag ${GITHUB_REF_NAME} does not match package version v${package_version}" >&2
+            exit 1
+          }
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Run tests
-        run: npm run test
+      - name: Install Python test dependencies
+        run: python -m pip install "pytest>=8.0.0"
 
       - name: Run lint
         run: npm run lint
 
+      - name: Run JavaScript unit tests
+        run: npm test
+
+      - name: Run concurrent write tests
+        run: npm run test:concurrent
+
+      - name: Run integration tests
+        run: npm run test:integration
+
+      - name: Run cross-language tests
+        run: npm run test:cross
+
+      - name: Run Python unit tests
+        run: pytest tests/unit/py/ -v --tb=short
+
+      - name: Build npm package artifact
+        run: npm pack
+
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          body_path: CHANGELOG.md
+          generate_release_notes: true
+          files: yt-memory-bus-*.tgz
           draft: false
           prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Generate release notes
-        run: |
-          npx changelogen@latest --yes ${{ github.ref_name }} || true

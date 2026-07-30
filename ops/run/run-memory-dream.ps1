@@ -352,8 +352,13 @@ function Get-RecordSourceLayer {
 function Get-RecordPromotionMetadata {
     param([Parameter(Mandatory = $true)][object]$Record)
 
-    if ($null -ne $Record.metadata -and $Record.metadata.PSObject.Properties.Name -contains "promotion") {
-        return $Record.metadata.promotion
+    if ($null -eq $Record.metadata) {
+        return $null
+    }
+
+    $promotionProperty = $Record.metadata.PSObject.Properties["promotion"]
+    if ($null -ne $promotionProperty) {
+        return $promotionProperty.Value
     }
 
     return $null

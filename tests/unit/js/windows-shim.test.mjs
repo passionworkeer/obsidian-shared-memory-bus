@@ -26,6 +26,12 @@ const {
   setStdioCommand,
 } = await import(SHIM_URL);
 
+// Linux runners do not guarantee TEMP/TMP; always create fixtures under the
+// platform temp directory and set TEMP only for the code path being tested.
+function createFixtureDirectory() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), "win-shim-test-"));
+}
+
 test("module exports the expected resolver surface", () => {
   assert.equal(typeof splitCommandLine, "function");
   assert.equal(typeof resolveWindowsCommandPath, "function");
@@ -53,23 +59,19 @@ test("splitCommandLine returns [] for empty input", () => {
 });
 
 test("resolveWindowsCommandPath returns '' on non-Windows or empty token (no spawn)", () => {
-  // On non-Windows, this short-circuits without spawning — safe contract check.
   if (process.platform !== "win32") {
     assert.equal(resolveWindowsCommandPath("npx"), "");
   }
-  // Empty token always short-circuits regardless of platform.
   assert.equal(resolveWindowsCommandPath(""), "");
 });
 
 test("resolveWindowsCmdShimLaunchSpec returns null when the command cannot be resolved", () => {
-  // Non-existent token — resolveWindowsCommandPath returns '' so the shim
-  // resolver returns null before any filesystem read.
   const spec = resolveWindowsCmdShimLaunchSpec("definitely-not-a-real-cmd-xyz", ["--arg"], "node");
   assert.equal(spec, null);
 });
 
 test("cmdFallbackViaBat produces a .bat launch spec with the executable and args", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "win-shim-test-"));
+  const tmpDir = createFixtureDirectory();
   const prevTemp = process.env.TEMP;
   const prevTmp = process.env.TMP;
   process.env.TEMP = tmpDir;
@@ -91,14 +93,16 @@ test("cmdFallbackViaBat produces a .bat launch spec with the executable and args
 
     fs.unlinkSync(batPath);
   } finally {
-    process.env.TEMP = prevTemp;
-    process.env.TMP = prevTmp;
+    if (prevTemp === undefined) delete process.env.TEMP;
+    else process.env.TEMP = prevTemp;
+    if (prevTmp === undefined) delete process.env.TMP;
+    else process.env.TMP = prevTmp;
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
   }
 });
 
 test("cmdFallbackViaBat injects -WindowStyle Hidden for powershell.exe", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "win-shim-test-"));
+  const tmpDir = createFixtureDirectory();
   const prevTemp = process.env.TEMP;
   const prevTmp = process.env.TMP;
   process.env.TEMP = tmpDir;
@@ -106,20 +110,20 @@ test("cmdFallbackViaBat injects -WindowStyle Hidden for powershell.exe", () => {
     const spec = cmdFallbackViaBat("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", ["-Command", "echo hi"]);
     const batPath = spec.args[2];
     const bat = fs.readFileSync(batPath, "utf8");
-    // The batch wrapper runs the exe with the args; -WindowStyle Hidden must
-    // be prepended to the args BEFORE the user-provided args.
     assert.ok(bat.includes("-WindowStyle"), "hidden window flag injected");
     assert.ok(bat.includes('"Hidden"'), "Hidden value present");
     fs.unlinkSync(batPath);
   } finally {
-    process.env.TEMP = prevTemp;
-    process.env.TMP = prevTmp;
+    if (prevTemp === undefined) delete process.env.TEMP;
+    else process.env.TEMP = prevTemp;
+    if (prevTmp === undefined) delete process.env.TMP;
+    else process.env.TMP = prevTmp;
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
   }
 });
 
 test("cmdFallbackViaBat injects -WindowStyle Hidden for pwsh.exe", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "win-shim-test-"));
+  const tmpDir = createFixtureDirectory();
   const prevTemp = process.env.TEMP;
   const prevTmp = process.env.TMP;
   process.env.TEMP = tmpDir;
@@ -130,8 +134,10 @@ test("cmdFallbackViaBat injects -WindowStyle Hidden for pwsh.exe", () => {
     assert.ok(bat.includes("-WindowStyle"), "hidden window flag injected for pwsh");
     fs.unlinkSync(batPath);
   } finally {
-    process.env.TEMP = prevTemp;
-    process.env.TMP = prevTmp;
+    if (prevTemp === undefined) delete process.env.TEMP;
+    else process.env.TEMP = prevTemp;
+    if (prevTmp === undefined) delete process.env.TMP;
+    else process.env.TMP = prevTmp;
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
   }
 });

@@ -19,17 +19,17 @@
     "ai"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "scripts": {
-    "lint": "eslint --ignore-path ../.eslintignore --max-warnings=-1 .",
-    "lint:fix": "eslint --fix --ignore-path ../.eslintignore --max-warnings=-1 ."
+    "lint": "eslint --config ../eslint.config.js .",
+    "lint:fix": "eslint --fix --config ../eslint.config.js ."
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.18.0"
+    "@modelcontextprotocol/sdk": "^1.30.0"
   },
   "devDependencies": {
     "c8": "^10.0.0",
-    "eslint": "^10.2.0"
+    "eslint": "^8.57.1"
   }
 }
