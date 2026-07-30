@@ -19,11 +19,11 @@
     "ai"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=20.19"
   },
   "scripts": {
-    "lint": "eslint --ignore-path ../.eslintignore --max-warnings=-1 .",
-    "lint:fix": "eslint --fix --ignore-path ../.eslintignore --max-warnings=-1 ."
+    "lint": "eslint --config ../eslint.config.js .",
+    "lint:fix": "eslint --fix --config ../eslint.config.js ."
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.18.0"
