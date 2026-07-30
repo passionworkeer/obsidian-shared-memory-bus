@@ -58,6 +58,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       AI_MEMORY_STORE: ${{ github.workspace }}/.tmp/memory-store
+      AI_MEMORY_PY_METRICS_PORT: '0'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -75,6 +76,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       AI_MEMORY_STORE: ${{ github.workspace }}/.tmp/memory-store
+      PYTHONPATH: ${{ github.workspace }}/retrieval
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
