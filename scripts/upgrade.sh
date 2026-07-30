@@ -1,3 +1,3 @@
 #!/usr/bin/env sh
-# Thin wrapper — delegates to bootstrap.sh
-exec "$(dirname -- "$0")/bootstrap.sh" upgrade.ps1 "$@"
+# Thin wrapper — delegates to bootstrap.sh without requiring executable bits.
+exec sh "$(dirname -- "$0")/bootstrap.sh" upgrade.ps1 "$@"
