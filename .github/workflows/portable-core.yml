@@ -87,7 +87,7 @@ jobs:
           '@ | Set-Content -LiteralPath (Join-Path $memRoot 'structured/openclaw-runs.jsonl') -Encoding UTF8
 
           @'
-          {"schemaVersion":2,"id":"job-1","t":"2026-04-02T03:20:00.000Z","tool":"openclaw","type":"task-note","project":"portable-smoke","title":"OpenClaw cron portable job","content":"OpenClaw cron portable job","source":"openclaw-jobs","scope":"task","visibility":"shared","source_kind":"job","memory_level":"task","workspace":"portable-smoke","task_state":"ok","freshness":"hot","confidence":0.8,"metadata":{}}
+          {"schemaVersion":2,"id":"job-1","t":"2026-04-02T03:20:00.000Z","tool":"openclaw","type":"task-note","project":"portable-smoke","title":"OpenClaw cron portable job","content":"OpenClaw cron portable job","source":"openclaw-jobs","scope":"task","visibility":"shared","source_kind":"cron","memory_level":"task","workspace":"portable-smoke","task_state":"ok","freshness":"hot","confidence":0.8,"metadata":{}}
           '@ | Set-Content -LiteralPath (Join-Path $memRoot 'structured/openclaw-jobs.jsonl') -Encoding UTF8
 
       - name: Build memory layers
