@@ -31,8 +31,15 @@ jobs:
       - name: ESLint
         run: npm run lint
       - name: Shell syntax
+        shell: bash
         run: |
-          find shared-mcp scripts -type f -name '*.sh' -print0 | xargs -0 -r -n1 sh -n
+          while IFS= read -r -d '' file; do
+            if head -n 1 "$file" | grep -q 'bash'; then
+              bash -n "$file"
+            else
+              sh -n "$file"
+            fi
+          done < <(find shared-mcp scripts -type f -name '*.sh' -print0)
       - name: Production dependency audit
         run: npm audit --omit=dev --audit-level=high
 
@@ -58,7 +65,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       AI_MEMORY_STORE: ${{ github.workspace }}/.tmp/memory-store
-      AI_MEMORY_PY_METRICS_PORT: '0'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -68,15 +74,16 @@ jobs:
         run: mkdir -p "$AI_MEMORY_STORE"
       - name: Install test dependencies
         run: python -m pip install "pytest>=8.0.0"
-      - name: Run Python tests
-        run: pytest tests/unit/py/ -v --tb=short
+      - name: Run isolated Python tests
+        run: AI_MEMORY_PY_METRICS_PORT=0 pytest tests/unit/py/ -v --tb=short --ignore=tests/unit/py/test_metrics_exporter.py
+      - name: Run metrics exporter tests on the documented default port
+        run: pytest tests/unit/py/test_metrics_exporter.py -v --tb=short
 
   cross-language:
     name: Cross-language equivalence
     runs-on: ubuntu-latest
     env:
       AI_MEMORY_STORE: ${{ github.workspace }}/.tmp/memory-store
-      PYTHONPATH: ${{ github.workspace }}/retrieval
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -89,7 +96,8 @@ jobs:
       - run: mkdir -p "$AI_MEMORY_STORE"
       - run: npm ci
       - run: python -m pip install "pytest>=8.0.0"
-      - run: npm run test:cross
+      - name: Run cross-language tests
+        run: PYTHONPATH="$GITHUB_WORKSPACE/retrieval" npm run test:cross
 
   integration:
     name: Integration
