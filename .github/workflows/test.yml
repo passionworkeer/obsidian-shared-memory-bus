@@ -2,7 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main, agent/**, codex/**]
+    branches:
+      - main
+      - 'agent/**'
+      - 'codex/**'
   pull_request:
   workflow_dispatch:
 
@@ -60,7 +63,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: pip
       - name: Create memory store
         run: mkdir -p "$AI_MEMORY_STORE"
       - name: Install test dependencies
