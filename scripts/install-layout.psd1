@@ -2,6 +2,7 @@
     FlatRuntimeFiles = @{
         bus = @(
             "embedding-provider-registry.js"
+            "embedding-provider-registry-core.mjs"
             "generate-embeddings.js"
             "lsh-hash.js"
             "memory-bus.ps1"
@@ -59,6 +60,10 @@
             "memory-layers-context.js"
             "memory-layers-dedup.js"
             "memory-layers-parse.js"
+            "memory-promotion-scorer.js"
+            "memory-promotion-scorer-core.mjs"
+            "memory-promotion-resolver.js"
+            "memory-promotion-resolver-core.mjs"
         )
         "ops/redact" = @(
             "redaction.py"
