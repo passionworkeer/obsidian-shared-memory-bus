@@ -25,9 +25,6 @@ import { generateTraceId, withTrace } from "./metrics/structured-logger.js";
 
 import { resolveRuntimePath } from "./omni-platform-helpers.js";
 
-// ---------------------------------------------------------------------------
-// Dynamic helper loaders
-// ---------------------------------------------------------------------------
 async function loadStoreRootHelper() {
   const helperPath = resolveRuntimePath("store-root.js", path.join("bus", "store-root.js"));
   return import(pathToFileURL(helperPath).href);
@@ -53,8 +50,6 @@ async function loadMemoryContractHelper() {
   return import(pathToFileURL(helperPath).href);
 }
 
-// Use dynamic import() instead of require() to support ESM modules with top-level await.
-// Must be async and called from top-level (file is ESM via --experimental-default-type or .mjs).
 async function loadMcpMemoryHandler(resolveProjectPath) {
   const { handlers: mcpMemoryHandlers } = await import(
     pathToFileURL(resolveProjectPath(path.join("ops", "mcp", "mcp-memory-tools-handler.js"))).href
@@ -62,9 +57,6 @@ async function loadMcpMemoryHandler(resolveProjectPath) {
   return mcpMemoryHandlers;
 }
 
-// ---------------------------------------------------------------------------
-// MCP tool handler registry + dispatch
-// ---------------------------------------------------------------------------
 function buildHandlerRegistry(sharedParams, mcpMemoryHandlers) {
   const retrieval = createMemoryRetrieval(sharedParams);
   const generation = createMemoryGeneration(sharedParams);
@@ -82,8 +74,6 @@ function buildHandlerRegistry(sharedParams, mcpMemoryHandlers) {
     mcpMemoryHandlers,
   ]) {
     for (const [name, handler] of Object.entries(source)) {
-      // Q-HIGH-8: 同名 handler 必须显式抛错,避免后注册 source 静默覆盖前者。
-      // 调用方依赖同名 handler 的"latest wins"语义时,这里会把冲突暴露给启动期。
       if (Object.prototype.hasOwnProperty.call(ALL_HANDLERS, name)) {
         throw new Error(`duplicate MCP handler registration: ${name}`);
       }
@@ -93,24 +83,8 @@ function buildHandlerRegistry(sharedParams, mcpMemoryHandlers) {
   return ALL_HANDLERS;
 }
 
-/**
- * Build a MCP error result envelope.
- *
- * Q-MED-3 (PR18) 微升级: 接受可选 code 参数,透传到 JSON payload。
- * 不传 code 时维持旧 wire 形状 `{ ok: false, error: string }`,向后兼容。
- * 传 code 时新增 `code` 字段,供 client 做 error-type 路由。
- *
- * 当前范围: 仅为 error envelope 留出 code 字段;真正把 30 处 throw 替换为
- * McpDomainError 类(继承本 envelope)留后续 wave(范围 ~285 行,审计
- * RECONCILE §8 PR8 已标 "按需修,文档化")。详见 docs/internal/q-med-3-status.md。
- *
- * @param {string|Error} message - 错误描述
- * @param {string} [code]        - 可选 machine-readable 错误码 (UPPER_SNAKE_CASE)
- * @returns {{ content: Array, isError: true }}
- */
 function errorResult(message, code) {
   const payload = { ok: false, error: String(message) };
-  // 仅在 code 是非空字符串时写入,避免空字符串/undefined 污染 payload
   if (typeof code === "string" && code.length > 0) {
     payload.code = code;
   }
@@ -118,7 +92,6 @@ function errorResult(message, code) {
     content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
     isError: true,
   };
-}
 }
 
 function createMcpServer() {
@@ -128,20 +101,10 @@ function createMcpServer() {
   );
 }
 
-/**
- * 注册 MCP 请求 handler。
- *
- * 新增 toolFilter 参数 (债项 #1 server-split):
- *   - undefined / null / [] → 全部 29 个工具 (向后兼容,monolithic 模式)
- *   - readonly string[]     → 只暴露该子集 (4 个独立 server 各自的子集)
- *
- * 同时过滤 ListTools 的返回和 CallTool 的可调用范围 ——
- * 子集之外的工具调用直接返回 tool-not-found,避免误路由。
- */
 function registerMcpRequestHandlers(server, { ALL_HANDLERS, METRICS, log, toolFilter }) {
   const exposedTools = pickTools(toolFilter);
   const exposedHandlers = pickHandlers(ALL_HANDLERS, toolFilter);
-  const allowedNames = new Set(exposedTools.map((t) => t.name));
+  const allowedNames = new Set(exposedTools.map((tool) => tool.name));
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: exposedTools }));
 
@@ -150,12 +113,9 @@ function registerMcpRequestHandlers(server, { ALL_HANDLERS, METRICS, log, toolFi
     const args = request.params.arguments || {};
     const traceId = generateTraceId();
 
-    // Wrap handler execution inside a trace context so all nested async calls
-    // have the same traceId visible to structured logging and metrics.
-    return await withTrace(traceId, async () => {
+    return withTrace(traceId, async () => {
       METRICS.mcp_requests_total[name] = (METRICS.mcp_requests_total[name] || 0) + 1;
 
-      // 子集外的工具直接拒绝 —— 避免 monolithic handler 表泄漏。
       if (!allowedNames.has(name)) {
         log.warn("mcp-tool-not-exposed", { tool: name, traceId });
         return errorResult(`tool-not-found: ${name}`);
@@ -172,8 +132,9 @@ function registerMcpRequestHandlers(server, { ALL_HANDLERS, METRICS, log, toolFi
         log.debug("mcp-request-completed", { tool: name, traceId });
         return result;
       } catch (error) {
-        log.error("mcp-request-error", { tool: name, traceId, error: error instanceof Error ? error.message : String(error) });
-        return errorResult(error instanceof Error ? error.message : String(error));
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        log.error("mcp-request-error", { tool: name, traceId, error: errorMessage });
+        return errorResult(errorMessage);
       }
     });
   });
