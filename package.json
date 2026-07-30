@@ -31,7 +31,7 @@
     "test:smoke": "node scripts/cross-platform-test.js",
     "test": "node --test --test-concurrency=1 tests/unit/js/*.test.js tests/unit/js/*.test.mjs",
     "test:py": "pytest tests/ -v",
-    "test:cross": "node --test tests/cross-language/consistency-wrapper.test.mjs tests/cross-language/lsh_equivalence.test.js",
+    "test:cross": "node --test tests/cross-language/schema-consistency.test.mjs tests/cross-language/lsh_equivalence.test.js",
     "test:integration": "node --test --test-concurrency=1 tests/integration/js/*.{test.js,test.mjs}",
     "test:e2e": "node --test --test-concurrency=1 --test-timeout=60000 tests/e2e/*.test.mjs",
     "test:concurrent": "node --test --test-concurrency=4 tests/unit/js/inbox-atomic-write.test.js",
