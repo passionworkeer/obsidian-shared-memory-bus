@@ -1,0 +1,48 @@
+name: Refresh dependency locks
+
+on:
+  push:
+    branches:
+      - agent/fix-ci-baseline
+    paths:
+      - .github/workflows/refresh-lock.yml
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repair branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/fix-ci-baseline
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: https://registry.npmjs.org
+
+      - name: Refresh workspace and standalone locks
+        env:
+          npm_config_registry: https://registry.npmjs.org
+        run: |
+          npm install --workspace shared-mcp '@modelcontextprotocol/sdk@^1.30.0' --package-lock-only --ignore-scripts
+          npm install --prefix shared-mcp '@modelcontextprotocol/sdk@^1.30.0' --package-lock-only --ignore-scripts
+          npm audit fix --omit=dev --package-lock-only --ignore-scripts
+          npm audit --omit=dev --audit-level=high
+
+      - name: Commit generated lockfiles
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add package-lock.json shared-mcp/package.json shared-mcp/package-lock.json
+          if git diff --cached --quiet; then
+            echo 'No lockfile changes were required.'
+            exit 0
+          fi
+          git commit -m 'fix dependency security advisories [lock-refresh]'
+          git push origin HEAD:agent/fix-ci-baseline
