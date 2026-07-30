@@ -60,7 +60,7 @@
     "url": "https://github.com/passionworkeer/obsidian-shared-memory-bus/issues"
   },
   "engines": {
-    "node": ">=20.19",
+    "node": ">=22",
     "powershell": ">=7"
   },
   "dependencies": {},
