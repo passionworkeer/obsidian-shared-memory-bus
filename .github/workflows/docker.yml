@@ -1,0 +1,71 @@
+name: Docker
+
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - docker-compose.yml
+      - .dockerignore
+      - retrieval/requirements.txt
+      - start.js
+      - shared-mcp/**
+      - .github/workflows/docker.yml
+  push:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - docker-compose.yml
+      - .dockerignore
+      - retrieval/requirements.txt
+      - start.js
+      - shared-mcp/**
+      - .github/workflows/docker.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Compose configuration
+        run: docker compose config
+
+      - name: Build image
+        run: docker build --pull --tag yt-memory-bus:test .
+
+      - name: Start container
+        run: |
+          docker run --detach --name yt-memory-bus-test \
+            --publish 127.0.0.1:19338:9338 \
+            yt-memory-bus:test
+
+      - name: Wait for memory health endpoint
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:19338/healthz; then
+              exit 0
+            fi
+            if ! docker inspect --format='{{.State.Running}}' yt-memory-bus-test | grep -q true; then
+              docker logs yt-memory-bus-test
+              exit 1
+            fi
+            sleep 2
+          done
+          docker logs yt-memory-bus-test
+          exit 1
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker logs yt-memory-bus-test || true
+
+      - name: Stop container
+        if: always()
+        run: docker rm --force yt-memory-bus-test || true

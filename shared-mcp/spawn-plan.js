@@ -6,22 +6,36 @@
  *   - monolithic/all: the legacy all-in-one memory process
  */
 
-import { SPLIT_MEMORY_SERVER_PORTS, SPLIT_MEMORY_METRICS_PORTS } from './port-registry.js';
+import {
+  DEFAULT_BASE_PORT,
+  SPLIT_MEMORY_SERVER_PORTS,
+  SPLIT_MEMORY_METRICS_PORTS,
+  resolveBasePort,
+} from './port-registry.js';
 
 const SUBSETS = Object.freeze(['retrieval', 'bridge', 'dream', 'mgmt']);
+
+function shiftedPort(defaultPort, basePort) {
+  return basePort + (defaultPort - DEFAULT_BASE_PORT);
+}
 
 export function resolveSpawnPlan(env = process.env) {
   const raw = String(env.AI_MEMORY_SERVER_MODE || 'split').trim().toLowerCase();
   const mode = raw === 'monolithic' || raw === 'all' ? 'monolithic' : 'split';
+  const basePort = resolveBasePort(env);
 
   if (mode === 'monolithic') {
     return {
       mode,
       entries: [{
         id: 'memory',
-        port: 9338,
+        port: shiftedPort(9338, basePort),
+        metricsPort: shiftedPort(9438, basePort),
         args: ['--experimental-default-type=module', 'omni-memory-server.js'],
-        env: { AI_MEMORY_SERVER_MODE: 'all', AI_MEMORY_METRICS_PORT: '9338' },
+        env: {
+          AI_MEMORY_SERVER_MODE: 'all',
+          AI_MEMORY_METRICS_PORT: String(shiftedPort(9438, basePort)),
+        },
       }],
     };
   }
@@ -30,11 +44,14 @@ export function resolveSpawnPlan(env = process.env) {
     mode,
     entries: SUBSETS.map((subset) => ({
       id: `memory-${subset}`,
-      port: SPLIT_MEMORY_SERVER_PORTS[subset],
+      port: shiftedPort(SPLIT_MEMORY_SERVER_PORTS[subset], basePort),
+      metricsPort: shiftedPort(SPLIT_MEMORY_METRICS_PORTS[subset], basePort),
       args: ['--experimental-default-type=module', 'omni-memory-server.js'],
       env: {
         AI_MEMORY_SERVER_MODE: subset,
-        AI_MEMORY_METRICS_PORT: String(SPLIT_MEMORY_METRICS_PORTS[subset]),
+        AI_MEMORY_METRICS_PORT: String(
+          shiftedPort(SPLIT_MEMORY_METRICS_PORTS[subset], basePort),
+        ),
       },
     })),
   };
