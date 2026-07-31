@@ -1,0 +1,18 @@
+# Core local retrieval/runtime dependencies
+numpy>=1.24,<3
+scipy>=1.11,<2
+scikit-learn>=1.3,<2
+pandas>=2,<3
+httpx>=0.25,<1
+openai>=1,<3
+
+# The official utility servers have not migrated to the breaking MCP Python
+# SDK 2.x API yet. Keep the supported v1 line until their metadata or source
+# explicitly adopts v2.
+mcp>=1.23,<2
+
+# Official Python MCP utility servers used by shared-mcp/port-registry.js.
+# Pin these runtime entry points so a container rebuild does not silently pull
+# a behavior-changing release.
+mcp-server-fetch==2026.7.10
+mcp-server-time==2026.7.10

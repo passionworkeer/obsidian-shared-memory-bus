@@ -2,7 +2,11 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { resolveSpawnPlan, selectServersForSpawn } from '../../../shared-mcp/spawn-plan.js';
-import { MCP_SERVERS } from '../../../shared-mcp/port-registry.js';
+import {
+  MCP_SERVERS,
+  getServerMetricsPort,
+  getServerPort,
+} from '../../../shared-mcp/port-registry.js';
 
 describe('resolveSpawnPlan', () => {
   test('defaults to split mode', () => {
@@ -26,6 +30,28 @@ describe('resolveSpawnPlan', () => {
     assert.equal(
       resolveSpawnPlan({ AI_MEMORY_SERVER_MODE: 'retrieval-only' }).mode,
       'split',
+    );
+  });
+
+  test('keeps child metrics separate from HTTP MCP proxy ports', () => {
+    const plan = resolveSpawnPlan({});
+    for (const entry of plan.entries) {
+      assert.notEqual(entry.metricsPort, entry.port);
+      assert.equal(entry.metricsPort - entry.port, 100);
+      assert.equal(entry.env.AI_MEMORY_METRICS_PORT, String(entry.metricsPort));
+    }
+  });
+
+  test('shifts MCP and metrics ports together with AI_MEMORY_BASE_PORT', () => {
+    const plan = resolveSpawnPlan({ AI_MEMORY_BASE_PORT: '10000' });
+    assert.deepEqual(
+      plan.entries.map(({ port, metricsPort }) => [port, metricsPort]),
+      [
+        [10008, 10108],
+        [10009, 10109],
+        [10010, 10110],
+        [10011, 10111],
+      ],
     );
   });
 });
@@ -60,5 +86,11 @@ describe('selectServersForSpawn', () => {
       const hasSplit = memoryIds.some((id) => id.startsWith('memory-'));
       assert.equal(hasLegacy && hasSplit, false);
     }
+  });
+
+  test('registry helpers return distinct shifted ports', () => {
+    const server = MCP_SERVERS.find((candidate) => candidate.id === 'memory-retrieval');
+    assert.equal(getServerPort(server, 10000), 10008);
+    assert.equal(getServerMetricsPort(server, 10000), 10108);
   });
 });
