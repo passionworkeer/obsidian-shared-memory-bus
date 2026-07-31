@@ -40,7 +40,6 @@ export function killTree(pid) {
   const isWindows = process.platform === 'win32';
   try {
     if (isWindows) {
-      // /F = force kill, /T = kill process tree (children + grandchildren)
       spawn('taskkill', ['/F', '/T', '/PID', String(pid)], { windowsHide: true });
     } else {
       try {
@@ -52,49 +51,81 @@ export function killTree(pid) {
   }
 }
 
-// Kill any zombie npx/npm processes from previous child instances that survived
-// a prior taskkill (e.g. grandchild processes reparented to Session Manager).
-// Scans for node processes whose command line mentions "@upstash/context7-mcp",
-// "@modelcontextprotocol/server-sequential-thinking", or "@playwright/mcp" and
-// kills them directly with taskkill /F.
-export function killZombieNpxProcesses() {
-  if (process.platform !== 'win32') {
-    return;
+/**
+ * Global command-line based process cleanup is inherently unsafe because a
+ * matching npx package may belong to another repository or another user
+ * session. It is therefore disabled unless the operator explicitly opts in.
+ */
+export function shouldRunGlobalZombieCleanup(
+  env = process.env,
+  platform = process.platform,
+) {
+  if (platform !== 'win32') return false;
+  const raw = String(env.AI_MEMORY_FORCE_GLOBAL_NPX_CLEANUP || '')
+    .trim()
+    .toLowerCase();
+  return ['1', 'true', 'yes', 'on'].includes(raw);
+}
+
+/**
+ * Best-effort emergency cleanup for operators who explicitly accept the risk
+ * of command-line based matching. Normal lifecycle cleanup must use killTree
+ * with the PID owned by this proxy.
+ *
+ * @returns {number} number of matching process trees successfully terminated
+ */
+export function killZombieNpxProcesses({
+  env = process.env,
+  platform = process.platform,
+} = {}) {
+  if (!shouldRunGlobalZombieCleanup(env, platform)) {
+    return 0;
   }
+
   const zombiePatterns = [
     '@upstash/context7-mcp',
     '@modelcontextprotocol/server-sequential-thinking',
-    '@playwright/mcp',         // matches npx wrapper commands
-    '@playwright/mcp/cli.js',   // matches reparented playwright CLI child processes
+    '@playwright/mcp',
+    '@playwright/mcp/cli.js',
   ];
+
+  logError(
+    'AI_MEMORY_FORCE_GLOBAL_NPX_CLEANUP is enabled; scanning system-wide Node processes. This may terminate unrelated projects.',
+  );
+
+  let killed = 0;
   try {
-    // WMIC is available on all Windows and supports wide command-line matching
     const output = execSync(
       'wmic process where "name=\'node.exe\'" get ProcessId,CommandLine /format:csv',
-      { windowsHide: true, encoding: 'utf8', timeout: 5000 }
+      { windowsHide: true, encoding: 'utf8', timeout: 5000 },
     );
-    const lines = output.split('\n').filter((l) => l.trim());
+    const lines = output.split('\n').filter((line) => line.trim());
     for (const line of lines) {
       const fields = line.split(',');
       if (fields.length < 3) continue;
-      const pidField = fields[1]?.trim();
-      const cmdField = fields.slice(2).join(',').replace(/^"(.*)"$/, '$1');
-      if (!pidField || !cmdField) continue;
-      const pid = parseInt(pidField, 10);
-      if (isNaN(pid) || pid === process.pid) continue;
-      for (const pattern of zombiePatterns) {
-        if (cmdField.includes(pattern)) {
-          try {
-            execSync(`taskkill /F /T /PID ${pid}`, { windowsHide: true, timeout: 3000 });
-            log(`killed zombie npx process ${pid} (${pattern})`);
-          } catch {
-          }
-          break;
-        }
+      const pidField = fields.at(-1)?.trim();
+      const commandField = fields.slice(1, -1).join(',').replace(/^"(.*)"$/, '$1');
+      if (!pidField || !commandField) continue;
+      const pid = Number.parseInt(pidField, 10);
+      if (!Number.isFinite(pid) || pid === process.pid) continue;
+
+      const pattern = zombiePatterns.find((candidate) => commandField.includes(candidate));
+      if (!pattern) continue;
+
+      try {
+        execSync(`taskkill /F /T /PID ${pid}`, {
+          windowsHide: true,
+          timeout: 3000,
+        });
+        killed += 1;
+        log(`killed opt-in global npx process ${pid} (${pattern})`);
+      } catch {
       }
     }
-  } catch {
+  } catch (error) {
+    logError(`global npx cleanup failed: ${error.message}`);
   }
+  return killed;
 }
 
 export function teardownChild(reason) {
@@ -118,23 +149,14 @@ export function teardownChild(reason) {
   } catch {
   }
 
-  // Kill the entire process tree so no grandchild zombies survive.
   killTree(currentChild.pid);
 }
 
-// Pure decision helper: whether a child that exited with the given code/signal
-// should be considered restart-eligible. Currently all exits are retryable;
-// the per-process max-attempts cap lives in restart.mjs. Exposed as a testable
-// seam so callers/tests can reason about the policy without spawning subprocesses.
 export function shouldRestart(exitCode, _signal = null, _opts = {}) {
-  // signal is intentionally unused for now; opts reserved for future policy
-  // (e.g. treating a clean SIGTERM-based shutdown as terminal). Kept in
-  // signature so the public helper is stable if policy is added later.
   return true;
 }
 
 export function handleChildExit(code, signal) {
-  // Reject all pending requests with a clear error so callers know why
   for (const [id, pending] of pendingRequests) {
     clearTimeout(pending.timeout);
     pending.reject(new Error(`child process exited with code ${code}, signal ${signal}`));
@@ -152,14 +174,13 @@ export function handleChildExit(code, signal) {
 import { scheduleRestart } from './restart.mjs';
 
 export function spawnChildProcess() {
-  // Scavenge zombie npx processes from previous (failed) child instances
-  // before starting a new one, to prevent zombie accumulation.
+  // Only performs a system-wide scan when the operator explicitly opted in.
+  // Normal cleanup is PID-owned and handled by teardownChild/killTree.
   killZombieNpxProcesses();
   clearRestartTimer();
   const launchSpec = resolveStdioLaunchSpec();
   log(`starting singleton child via: ${launchSpec.filePath} ${launchSpec.args.join(' ')}`.trim());
 
-  // Track the temp batch path (from cmdFallbackViaBat) so we can clean it up.
   const batPath = launchSpec._batPath || null;
 
   if (process.platform === 'win32') {
@@ -167,28 +188,22 @@ export function spawnChildProcess() {
     const isPowerShell = exeNorm.endsWith('/powershell.exe') || exeNorm.endsWith('/pwsh.exe');
 
     if (!isPowerShell) {
-      // Write the child's launch command to a temp .bat so PowerShell can
-      // invoke it via cmd /c without needing its own visible window.
       const psExe = resolvePowerShellExe();
-      // S-MED-4: 临时 .bat 用 crypto random 命名 (16 hex) 避免本地用户抢占;
-      // exit 时 unlink 已存在,无需追加 unlink-on-exit 钩子
-      const childBatPath = join(process.env.TEMP || process.env.TMP || '/tmp',
-        `mcp-child-${randomBytes(16).toString('hex')}.bat`);
+      const childBatPath = join(
+        process.env.TEMP || process.env.TMP || '/tmp',
+        `mcp-child-${randomBytes(16).toString('hex')}.bat`,
+      );
 
-      // Build the literal command that the batch file will run.
-      // Arguments that contain spaces are double-quoted; double-quotes inside
-      // an argument are escaped by doubling them — the standard CMD convention.
       const childArgsLine = launchSpec.args
-        .map(a => `"${String(a).replace(/"/g, '""')}"`)
+        .map((arg) => `"${String(arg).replace(/"/g, '""')}"`)
         .join(' ');
       const childCmdLine = `"${launchSpec.filePath}" ${childArgsLine}`;
-      writeFileSync(childBatPath,
-        `@echo off\r\n${childCmdLine}\r\nexit /B !ERRORLEVEL!\r\n`,
-        { encoding: 'utf8' });
+      writeFileSync(
+        childBatPath,
+        `@echo off\r\n${childCmdLine}\r\nexit /B %ERRORLEVEL%\r\n`,
+        { encoding: 'utf8' },
+      );
 
-      // PowerShell launched with -WindowStyle Hidden has no console window.
-      // cmd.exe started by PowerShell inherits that hidden console, so no
-      // window appears at any depth of the tree (npx → npm → node → script).
       const psArgs = [
         '-NoProfile',
         '-ExecutionPolicy', 'Bypass',
@@ -206,9 +221,11 @@ export function spawnChildProcess() {
       });
       setChild(newChild);
 
-      // Clean up the temp batch file when the child (PowerShell) exits.
       newChild.on('exit', () => {
-        try { unlinkSync(childBatPath); } catch { /* best-effort */ }
+        try {
+          unlinkSync(childBatPath);
+        } catch {
+        }
       });
 
       newChild.stdout.on('data', processChildStdout);
@@ -221,10 +238,9 @@ export function spawnChildProcess() {
       return;
     }
 
-    // PowerShell direct path (obsidian / MiniMax runners): inject
-    // -WindowStyle Hidden so the window stays invisible even when node's
-    // windowsHide flag alone is insufficient.
-    const hasPs1 = launchSpec.args.some(a => a.replace(/\\/g, '/').toLowerCase().endsWith('.ps1'));
+    const hasPs1 = launchSpec.args.some((arg) =>
+      arg.replace(/\\/g, '/').toLowerCase().endsWith('.ps1'),
+    );
     if (hasPs1 && !launchSpec.args.includes('-WindowStyle')) {
       log('injecting -WindowStyle Hidden into PowerShell .ps1 launch');
       launchSpec.args = ['-WindowStyle', 'Hidden', ...launchSpec.args];
@@ -239,10 +255,12 @@ export function spawnChildProcess() {
   });
   setChild(newChild);
 
-  // Clean up the temp batch file when the child exits.
   if (batPath) {
     newChild.on('exit', () => {
-      try { unlinkSync(batPath); } catch { /* best-effort */ }
+      try {
+        unlinkSync(batPath);
+      } catch {
+      }
     });
   }
 
@@ -299,40 +317,34 @@ export async function bootstrapChild(protocolVersion = defaultProtocolVersion) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Q-HIGH-7: 通用 spawn-exec-and-collect helper,抽公供 memory-retrieval.js /
-// memory-bridge.js 复用。语义是"spawn → 收 stdout/stderr → 关闭后 resolve"。
-// 原两侧各自定义 spawnProcess 时只是复制了相同 27 行,这里提到 proto 层避免漂移。
-// ---------------------------------------------------------------------------
 export function spawnProcess(executable, args, options = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, {
-      stdio: ["pipe", "pipe", "pipe"],
+    const spawnedChild = spawn(executable, args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
       ...options,
     });
 
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
+    let stdout = '';
+    let stderr = '';
+    spawnedChild.stdout.on('data', (chunk) => {
       stdout += chunk.toString();
     });
-    child.stderr.on("data", (chunk) => {
+    spawnedChild.stderr.on('data', (chunk) => {
       stderr += chunk.toString();
     });
-    child.on("error", reject);
-    child.on("close", (code) => {
+    spawnedChild.on('error', reject);
+    spawnedChild.on('close', (code) => {
       resolve({ code: code || 0, stdout, stderr });
     });
 
     if (options.input !== undefined) {
-      child.stdin.end(options.input);
+      spawnedChild.stdin.end(options.input);
     } else {
-      child.stdin.end();
+      spawnedChild.stdin.end();
     }
   });
 }
 
-// Wire rpc.mjs's late-bound hooks to our implementations.
 setBootstrapChild(bootstrapChild);
 setTeardownChild(teardownChild);
