@@ -16,24 +16,25 @@ const STEPS = [
   },
   {
     num: 3,
-    title: "启动 MCP 服务器",
-    cmd: "node start.js",
-    note: "也可双击 start.bat(Windows)。"
+    title: "启动核心 MCP 服务",
+    cmd: "npm start",
+    note: "默认启动 fetch、time 和拆分式 memory 服务。"
   },
   {
     num: 4,
-    title: "接入你的 AI 工具",
-    cmd: "node setup-mcp.js --target=claude",
-    note: "自动检测并写入配置。--target=all 一键接入全部 8 个工具。--dry-run 预览不写入。"
+    title: "接入支持的客户端",
+    cmd: "node setup-mcp.js --target=cursor",
+    note: "可用 --help 查看目标，--dry-run 只预览。claude 目标指 Claude Desktop，不是 Claude Code。"
   }
 ];
 
 const ENDPOINTS = [
-  { k: "memory", v: "http://127.0.0.1:9338/mcp" },
-  { k: "context7", v: "http://127.0.0.1:9331/mcp" },
   { k: "fetch", v: "http://127.0.0.1:9332/mcp" },
   { k: "time", v: "http://127.0.0.1:9333/mcp" },
-  { k: "playwright", v: "http://127.0.0.1:9337/mcp" }
+  { k: "memory-retrieval", v: "http://127.0.0.1:9338/mcp" },
+  { k: "memory-bridge", v: "http://127.0.0.1:9339/mcp" },
+  { k: "memory-dream", v: "http://127.0.0.1:9340/mcp" },
+  { k: "memory-mgmt", v: "http://127.0.0.1:9341/mcp" }
 ];
 
 export default function Quickstart({ onToast }) {
@@ -45,22 +46,22 @@ export default function Quickstart({ onToast }) {
         <header className={`section-head reveal${inView ? " in-view" : ""}`} ref={ref}>
           <p className="section-eyebrow">快速开始</p>
           <h2 id="qs-title" className="section-title">4 步完成接入</h2>
-          <p className="section-desc">需要 Node.js ≥ 18。整个过程在本地完成,无需注册账号。</p>
+          <p className="section-desc">需要 Node.js ≥ 22。Obsidian 可选，Docker 当前为实验性入口。</p>
         </header>
 
         <div className="steps reveal in-view">
-          {STEPS.map((s) => (
-            <Step key={s.num} step={s} onToast={onToast} />
+          {STEPS.map((step) => (
+            <Step key={step.num} step={step} onToast={onToast} />
           ))}
         </div>
 
         <div className="mcp-endpoints reveal in-view">
-          <p className="endpoints-title">MCP 端点一览</p>
+          <p className="endpoints-title">默认 split 模式端点</p>
           <ul className="endpoint-list">
-            {ENDPOINTS.map((e) => (
-              <li key={e.k}>
-                <code>{e.k}</code>
-                <span>{e.v}</span>
+            {ENDPOINTS.map((endpoint) => (
+              <li key={endpoint.k}>
+                <code>{endpoint.k}</code>
+                <span>{endpoint.v}</span>
               </li>
             ))}
           </ul>
@@ -80,7 +81,7 @@ function Step({ step, onToast }) {
       onToast?.("命令已复制到剪贴板");
       setTimeout(() => setCopied(false), 1600);
     } else {
-      onToast?.("复制失败,请手动选择命令");
+      onToast?.("复制失败，请手动选择命令");
     }
   };
 
