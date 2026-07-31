@@ -34,6 +34,7 @@ import {
   sendJson,
   sendAccepted,
 } from './proto/rpc.mjs';
+import { resolveProxyBindHost } from './proto/bind-host.mjs';
 import { scheduleRestart } from './proto/restart.mjs';
 import { killTree } from './proto/child-process.mjs';
 
@@ -41,6 +42,8 @@ if (!stdioCommand) {
   console.error(`[shared-mcp:${serverId}] missing --stdio-command`);
   process.exit(1);
 }
+
+const bindHost = resolveProxyBindHost();
 
 const server = http.createServer(async (req, res) => {
   try {
@@ -136,8 +139,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(port, '127.0.0.1', () => {
-  log(`listening on http://127.0.0.1:${port}${mcpPath}`);
+server.listen(port, bindHost, () => {
+  log(`listening on http://${bindHost}:${port}${mcpPath}`);
   ensureInitialized().catch((error) => {
     logError(`initial bootstrap failed: ${error.message}`);
     scheduleRestart('initial-bootstrap-failed');

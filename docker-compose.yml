@@ -1,71 +1,33 @@
-# =============================================================================
-# docker-compose.yml — yt Full Stack
-# =============================================================================
-# Starts all MCP servers (fetch, time, memory) with persistent .ai-memory store.
-#
-# Usage:
-#   docker-compose up -d
-#   docker-compose logs -f memory
-#
-# Endpoints:
-#   Memory MCP:  http://localhost:9338/mcp
-#   Fetch MCP:   http://localhost:9332/mcp
-#   Time MCP:    http://localhost:9333/mcp
-#   Metrics:     http://localhost:9090/metrics
-# =============================================================================
-
 services:
   memory-bus:
     build:
       context: .
       dockerfile: Dockerfile
-    image: yt-memory-bus:latest
-    container_name: yt-memory-bus
+    image: yt-memory-bus:local
     restart: unless-stopped
+    init: true
     ports:
-      # Bind to loopback only — the MCP server is for local tooling, not public exposure.
-      - "127.0.0.1:9338:9338"  # Memory MCP server
-      - "127.0.0.1:9090:9090"  # Metrics endpoint
+      - "127.0.0.1:9332:9332"
+      - "127.0.0.1:9333:9333"
+      - "127.0.0.1:9338:9338"
+      - "127.0.0.1:9339:9339"
+      - "127.0.0.1:9340:9340"
+      - "127.0.0.1:9341:9341"
     volumes:
-      # Mount host .ai-memory store into the container (non-root writable path)
-      - ai-memory-store:/home/app/.ai-memory
+      - ai-memory-store:/data
     environment:
-      AI_MEMORY_ROOT: /home/app/.ai-memory
-      AI_MEMORY_STORE: /home/app/.ai-memory
+      AI_MEMORY_ROOT: /app
+      AI_MEMORY_STORE: /data
+      AI_MEMORY_PYTHON: /opt/yt-venv/bin/python
       AI_MEMORY_EMBED_BACKEND: hash
-      # Python runtime for semantic search
-      AI_MEMORY_PYTHON: /usr/bin/python3
+      AI_MEMORY_SERVER_MODE: split
+      AI_MEMORY_BIND_HOST: 0.0.0.0
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:9338/healthz"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9338/healthz"]
       interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
-    networks:
-      - ai-memory-net
-
-  # Optional: Python retrieval engine (for dense embeddings when AI_MEMORY_EMBED_BACKEND != hash)
-  retrieval-engine:
-    build:
-      context: .
-      dockerfile: Dockerfile.retrieval
-    image: yt-memory-bus-retrieval:latest
-    container_name: yt-memory-bus-retrieval
-    restart: unless-stopped
-    volumes:
-      - ai-memory-store:/root/.ai-memory
-    environment:
-      AI_MEMORY_ROOT: /root/.ai-memory
-      AI_MEMORY_STORE: /root/.ai-memory
-    profiles:
-      - dense-embeddings  # Only starts with: docker-compose --profile dense-embeddings up
-    networks:
-      - ai-memory-net
-
-networks:
-  ai-memory-net:
-    driver: bridge
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
 volumes:
   ai-memory-store:
-    driver: local

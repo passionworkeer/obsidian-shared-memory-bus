@@ -12,7 +12,11 @@ import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
-import { MCP_SERVERS, getServerPort } from './shared-mcp/port-registry.js';
+import {
+  MCP_SERVERS,
+  getServerMetricsPort,
+  getServerPort,
+} from './shared-mcp/port-registry.js';
 import { resolveSpawnPlan, selectServersForSpawn } from './shared-mcp/spawn-plan.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -105,6 +109,8 @@ async function main() {
       ...(server.env || {}),
       AI_MEMORY_ROOT: process.env.AI_MEMORY_ROOT || __dirname,
     };
+    const metricsPort = getServerMetricsPort(server);
+    if (metricsPort !== null) env.AI_MEMORY_METRICS_PORT = String(metricsPort);
     if (process.env.AI_MEMORY_STORE) env.AI_MEMORY_STORE = process.env.AI_MEMORY_STORE;
     if (process.env.AI_MEMORY_STORE_ROOT) env.AI_MEMORY_STORE_ROOT = process.env.AI_MEMORY_STORE_ROOT;
 
