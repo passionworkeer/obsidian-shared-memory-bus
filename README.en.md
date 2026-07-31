@@ -1,235 +1,168 @@
-# yt · One local memory, every AI tool
+# yt · One local memory shared by multiple AI tools
 
-> **One line**: Claude Code, Codex, Cursor, Copilot and other AI tools share a single local memory backend — stop re-explaining your project context.
+> `yt-memory-bus` is a local-first shared-memory runtime. MCP-capable clients connect to the same local HTTP endpoints and share structured memory, retrieval indexes, and derived Markdown documents.
 
 <p align="center">
   <a href="README.md">中文</a> ·
-  <a href="docs/promotion/QUICKSTART.en.md">English Quick Start</a> ·
-  <a href="docs/promotion/QUICKSTART.zh-CN.md">中文快速开始</a> ·
-  <a href="SKILL.md">Universal SKILL</a>
+  <a href="docs/promotion/QUICKSTART.en.md">Quick Start</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/passionworkeer/obsidian-shared-memory-bus/actions/workflows/test.yml"><img src="https://github.com/passionworkeer/obsidian-shared-memory-bus/actions/workflows/test.yml/badge.svg" alt="Test CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
-  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js-%3E%3D18-brightgreen" alt="Node 18+"></a>
-  <a href="https://python.org"><img src="https://img.shields.io/badge/Python-3.10+-orange" alt="Python 3.10+"></a>
+  <a href="https://github.com/passionworkeer/obsidian-shared-memory-bus/actions/workflows/test.yml"><img src="https://github.com/passionworkeer/obsidian-shared-memory-bus/actions/workflows/test.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
+  <img src="https://img.shields.io/badge/Node.js-%3E%3D22-brightgreen" alt="Node 22+">
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-brightgreen" alt="Platforms">
-  <img src="https://img.shields.io/badge/Docker-ready-blue" alt="Docker">
-  <img src="https://img.shields.io/badge/MCP-compatible-purple" alt="MCP">
-  <img src="https://img.shields.io/badge/local--first-%E2%9C%93-success" alt="Local-first">
-  <img src="https://img.shields.io/github/stars/passionworkeer/obsidian-shared-memory-bus?style=social" alt="Stars">
 </p>
 
----
+## What it solves
 
-## The Problem
+When Claude Desktop, Cursor, Codex, Claude Code, or other AI clients keep separate context, switching tools means repeating project background. yt provides one local persistent store and exposes retrieval, write, and management capabilities through MCP.
 
-If you use multiple AI coding tools (Claude Code, Codex, Cursor, Copilot, etc.), each tool stores its own memory. They don't share.
+Core capabilities:
 
-**Solution**: every AI tool talks to the same local memory backend.
+- Multiple MCP clients share one structured-memory store.
+- JSONL events, indexes, and derived Markdown remain on the local machine by default.
+- BM25 and local hash embeddings work without an external API; other embedding backends are optional.
+- Split memory services are the default, with a legacy monolithic compatibility mode.
+- Obsidian is an optional UI, not a runtime requirement.
 
----
+## Current stable boundary
 
-## When to Use It
+`npm start` launches the core services maintained by this repository:
 
-### Scenario A · You switch between Claude Code and Codex
+| Service | Default port | Purpose |
+|---|---:|---|
+| `fetch` | 9332 | HTTP fetch; requires the corresponding Python MCP package |
+| `time` | 9333 | Time utilities; requires the corresponding Python MCP package |
+| `memory-retrieval` | 9338 | Retrieval and status queries |
+| `memory-bridge` | 9339 | Cross-tool memory bridges |
+| `memory-dream` | 9340 | Async rebuild and dream tasks |
+| `memory-mgmt` | 9341 | Index, embedding, and knowledge-graph management |
 
-Morning: design an API contract with Claude Code. Afternoon: switch to Codex to write the OpenAPI schema. **No more copy-pasting context** — Codex sees what Claude decided.
+With `AI_MEMORY_SERVER_MODE=monolithic`, the four memory services are replaced by one `memory` service on port 9338. `AI_MEMORY_BASE_PORT` shifts the complete port range; for example, a base port of `10000` makes fetch use `10002`.
 
-### Scenario B · You keep project docs in Obsidian
+`shared-mcp/manifest.json` also documents optional or experimental MCP integrations. They are not automatically launched by `npm start`. Docker files are currently an experimental deployment path and are not recommended for first-time installation.
 
-Symlink `~/.ai-memory/derived/` into your Obsidian vault. **Edit in Obsidian = edit memory**. Graph view shows relationships for free.
+## Requirements
 
-### Scenario C · Long-term project knowledge base
+- Node.js 22 or later; the runtime uses the built-in `node:sqlite` module.
+- Python 3.10 or later for Python retrieval components and fetch/time services.
+- PowerShell 7 for some installation and operational scripts.
+- Obsidian is optional.
 
-The 5-layer memory model (L0 Working → L5 Archive) keeps temporary notes, key facts, and long-term knowledge in separate tiers — **a casual chat won't pollute your project knowledge**.
-
----
-
-## Core Features
-
-| Feature | Description |
-|---------|-------------|
-| **Shared memory** | Multiple AI tools share one persistent store |
-| **Local-first** | Data lives in `~/.ai-memory`, never uploaded |
-| **Hybrid retrieval** | BM25 + semantic vectors + Chinese tokenization |
-| **MCP protocol** | Compatible with any MCP-aware tool |
-| **Watcher pattern** | Background watchdog syncs tool memory automatically |
-| **Multi-language** | Node.js + Python collaborate with cross-language equivalence tests |
-| **ANN acceleration** | Optional hnswlib backend, 10k+ vectors at P99 < 10 ms |
-| **Markdown export** | JSONL event stream → readable .md, Obsidian-friendly |
-| **No SaaS** | 100% local, works offline |
-
----
-
-## Quick Start (4 steps)
+## Quick start
 
 ```bash
-# 1. Clone
 git clone https://github.com/passionworkeer/obsidian-shared-memory-bus.git
 cd obsidian-shared-memory-bus
-
-# 2. Install
 npm install
-
-# 3. Start MCP server (Windows: start.bat; Unix/Mac: ./start.sh)
-node start.js
-
-# 4. Configure Claude Code (auto-writes .claude/mcp_servers.json)
-node setup-mcp.js
+npm start
 ```
 
-Restart Claude Code / Codex / Cursor — your `memory_search`, `search_shared_memory`, `memory_write` tools appear.
+In another terminal, diagnose the environment:
 
-Full English guide: [docs/promotion/QUICKSTART.en.md](docs/promotion/QUICKSTART.en.md)
-
----
-
-## Architecture
-
-```
-┌────────────────────────────────────────────────────────────────┐
-│                       AI Clients                               │
-│  Claude Code │ Codex │ Cursor │ Copilot │ OpenCode │ Trae    │
-└─────────────────────────┬──────────────────────────────────────┘
-                          │ MCP (stdio / HTTP)
-                          ▼
-┌────────────────────────────────────────────────────────────────┐
-│                     Shared MCP Layer                            │
-│  memory:9338  context7:9331  fetch:9332  time:9333  pw:9337   │
-└─────────────────────────┬──────────────────────────────────────┘
-                          │
-              ┌───────────┼───────────┐
-              ▼           ▼           ▼
-   ┌──────────────┐ ┌──────────┐ ┌──────────────────┐
-   │ bus/         │ │ ops/     │ │ retrieval/        │
-   │ memory bus   │ │ export   │ │ search + ANN     │
-   │ (Node/PowerShell) │ │(Markdown) │ │(Python)        │
-   └──────┬───────┘ └────┬─────┘ └────────┬─────────┘
-          │              │                │
-          ▼              ▼                ▼
-   ┌─────────────────────────────────────────────┐
-   │         Source of truth ~/.ai-memory          │
-   │  structured/*.jsonl  │  derived/*.md         │
-   │  embeddings/         │  cascade.sqlite3      │
-   └─────────────────────────────────────────────┘
+```bash
+node bin.js doctor
 ```
 
-**Data flow**:
-1. Any AI tool → MCP `memory/*` tool → write to `structured/<source>.jsonl` (append-only)
-2. Cascade queue (`cascade.sqlite3`) records each change with LSN + content_sha256
-3. Worker drains the queue → incrementally updates embeddings / ANN index
-4. `ops/export/export-md.js` derives readable `.md` for Obsidian
+Generate configuration for a supported client:
 
----
-
-## Tool Support
-
-| Tool | Level | Integration |
-|------|-------|-------------|
-| Claude Code | ✅ Tier 1 | MCP + auto setup-mcp.js |
-| Codex | ✅ Tier 1 | MCP + agent skill |
-| OpenCode | ✅ Tier 1 | MCP + AGENTS.md |
-| Cursor | ✅ Supported | MCP config |
-| VS Code / Copilot | ✅ Supported | MCP + AGENTS.md |
-| OpenClaw | ✅ Supported | Structured memory sync |
-| Trae | ✅ Supported | AGENTS.md integration |
-
----
-
-## Performance (10k × 384-dim internal)
-
-| Metric | Full scan | ANN (hnswlib) | Cascade incremental |
-|--------|-----------|---------------|---------------------|
-| Dense scoring P99 | ~180 ms | **~6 ms** | **~10 ms / record** |
-| Memory peak | ~150 MB | ~70 MB | No rebuild |
-| Crash recovery | — | — | Resume from LSN |
-
----
-
-## Project Structure
-
-```
-obsidian-shared-memory-bus/
-├── bus/                    # Core runtime (Node + PowerShell)
-├── shared-mcp/             # MCP servers
-├── ops/                    # Ops + exports (cascade, export-md)
-├── retrieval/              # Search (Python) + ANN index
-├── tests/                  # unit / integration / cross-language / e2e
-├── scripts/                # Install + ops
-└── docs/                   # Architecture + guides + promotion
+```bash
+node setup-mcp.js --help
+node setup-mcp.js --target=cursor
+node setup-mcp.js --target=cursor --dry-run
 ```
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full picture.
+Automatic configuration currently supports Claude Desktop, Cursor, Kiro, Windsurf, Cline, Roo Code, and Goose. Qoder's on-disk path is not officially verified, so the script prints a manual configuration hint unless the file already exists. Claude Code, Codex, Copilot, OpenCode, and other MCP clients can use the HTTP endpoints manually or through the repository's Agent Skill/templates; `setup-mcp.js` does not modify those clients automatically.
 
----
+## Store-root resolution
+
+The runtime resolves the store root in this order:
+
+1. Explicit `AI_MEMORY_STORE`, or the compatibility alias `AI_MEMORY_STORE_ROOT`.
+2. `00-System/ai-memory` inside a detected Obsidian vault.
+3. The configured/source-tree `AI_MEMORY_ROOT`.
+4. A final `.ai-memory` fallback in the user's home directory.
+
+Run `node bin.js doctor` before backup or migration to confirm the active path.
+
+## Memory tiers
+
+Persistent records use five tiers:
+
+| Tier | Name | Purpose |
+|---:|---|---|
+| 1 | Event / Working | Real-time session working buffer |
+| 2 | Session Durable | Confirmed session-level learnings |
+| 3 | Project Durable | Cross-session project facts |
+| 4 | Shared Durable | Cross-project truths, preferences, and references |
+| 5 | Archive | Records excluded from vector retrieval |
+
+See [docs/MEMORY-TIERING.md](docs/MEMORY-TIERING.md) for TTL, promotion, and embedding rules. Temporary conversation context is not an additional persisted L0 tier.
 
 ## Configuration
 
-### Environment Variables
+Common environment variables:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AI_MEMORY_STORE` | `~/.ai-memory` | Shared memory store root (preferred) |
-| `AI_MEMORY_STORE_ROOT` | `~/.ai-memory` | Legacy alias |
-| `AI_MEMORY_PYTHON` | auto | Python runtime path |
-| `AI_MEMORY_EMBED_BACKEND` | `hash` | `hash` / `transformer` / `openai-compatible` / `gemini` |
-| `AI_MEMORY_EMBED_BASE_URL` | — | OpenAI-compatible API base |
-| `AI_MEMORY_EMBED_API_KEY` | — | API key (env-only, never in code) |
-| `AI_MEMORY_EMBED_MODEL` | — | Embedding model name |
+| Variable | Purpose |
+|---|---|
+| `AI_MEMORY_STORE` | Explicit shared-store root |
+| `AI_MEMORY_OBSIDIAN_VAULT` | Explicit Obsidian vault |
+| `AI_MEMORY_SERVER_MODE` | `split` (default) or `monolithic` |
+| `AI_MEMORY_BASE_PORT` | Core MCP base port; default 9330 |
+| `AI_MEMORY_PYTHON` | Python executable |
+| `AI_MEMORY_EMBED_BACKEND` | `hash`, `transformer`, `openai-compatible`, or `gemini` |
+| `AI_MEMORY_EMBED_BASE_URL` | OpenAI-compatible endpoint |
+| `AI_MEMORY_EMBED_API_KEY` | Embedding API key; environment variables are recommended |
+| `AI_MEMORY_EMBED_MODEL` | Embedding model name |
 
----
+See [.env.example](.env.example) for a fuller example.
 
 ## Tests
 
-| Type | Count | Status |
-|------|-------|--------|
-| JS unit tests | 600+ | ✅ passing |
-| Python tests | 700+ | ✅ all passing |
-| Cross-language | 59 | ✅ JS ↔ Py LSH equivalent |
-| Integration + E2E | 50+ | ✅ |
-| **Total** | **1400+** | **✅ 99%+** |
+The README intentionally does not maintain a test-count or pass-rate claim that becomes stale. GitHub Actions is the source of truth.
 
-Run: `npm test` (JS) + `npm run test:py` (Python) + `npm run test:cross` (cross-language)
+```bash
+npm run lint
+npm test
+npm run test:concurrent
+npm run test:integration
+npm run test:cross
+npm run test:py
+npm run test:e2e
+```
 
----
+`npm run test:all` runs a broader combination, but some checks require Python, PowerShell, or a local runtime environment.
 
-## Security
+## Security and privacy
 
-- ❌ Never store tokens / API keys in code
-- ✅ All secrets via environment variables
-- ✅ Local-first, no external data transmission
-- ⚠️ Scan for sensitive data before forking
+The default hash-embedding and local retrieval paths do not send memory to an external service. When an OpenAI-compatible, Gemini, or other remote backend is configured, relevant text may be transmitted to that provider. Therefore “local-first” is not the same as “no network traffic under every configuration.”
 
----
+Do not commit API keys. Prefer environment variables. See [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
-## License
+## Project structure
 
-[MIT](LICENSE) — use, modify, and distribute freely.
-
----
+```text
+bus/          Memory bus and platform abstraction
+shared-mcp/   MCP servers, ports, and process logic
+retrieval/    Python retrieval and ANN components
+ops/          Export, migration, validation, and operations
+cli/          Command-line entry points
+tests/        Unit, integration, cross-language, and E2E tests
+docs/         Architecture, specifications, and guides
+```
 
 ## Documentation
 
-| Doc | Description |
-|-----|-------------|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture |
-| [docs/MEMORY-TIERING.md](docs/MEMORY-TIERING.md) | 5-layer memory model |
-| [docs/architecture/SERVER-SPLIT.md](docs/architecture/SERVER-SPLIT.md) | MCP server split |
-| [docs/guides/LOGGING.md](docs/guides/LOGGING.md) | Centralized logging |
-| [docs/guides/API_REFERENCE.md](docs/guides/API_REFERENCE.md) | MCP tool API |
-| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | FAQ |
+- [Architecture](docs/ARCHITECTURE.md)
+- [Memory tiering](docs/MEMORY-TIERING.md)
+- [Server split](docs/architecture/SERVER-SPLIT.md)
+- [Data flow](docs/architecture/DATA-FLOW.md)
+- [API reference](docs/guides/API_REFERENCE.md)
+- [Troubleshooting](docs/guides/TROUBLESHOOTING.md)
+- [Contributing](CONTRIBUTING.md)
 
----
+## License
 
-## Contributing
-
-Issues and PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
-
----
-
-<p align="center"><strong>One local memory, every AI tool.</strong></p>
-<p align="center">
-  <sub>local-first · cross-tool · bilingual · cross-language equivalent · incremental updates</sub>
-</p>
+[MIT](LICENSE)

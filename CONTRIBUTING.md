@@ -1,191 +1,122 @@
 # Contributing to yt
 
-Thank you for helping improve this project. This guide covers everything you need to get started.
+Thank you for contributing. Keep changes reviewable, include regression tests for fixes, and avoid mixing unrelated architecture, documentation, and release changes in one pull request.
 
-## Development Setup
+## Development requirements
 
-### 1. Clone and Install
+- Node.js 22 or later; the runtime uses the built-in `node:sqlite` module.
+- Python 3.10 or later for Python tests and retrieval components.
+- PowerShell 7 for PowerShell-based validation and operations.
+
+## Setup
 
 ```bash
-git clone https://github.com/passionworkeer/obsidian-shared-memory-bus
+git clone https://github.com/passionworkeer/obsidian-shared-memory-bus.git
 cd obsidian-shared-memory-bus
 npm install
 ```
 
-**Windows:**
+Optional installer entry points:
+
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -WorkspaceRoot .
+pwsh -NoProfile -File ./scripts/install.ps1 -WorkspaceRoot .
 ```
 
-**macOS / Linux:**
 ```bash
 ./scripts/install.sh -WorkspaceRoot .
 ```
 
-### 2. Run Tests
+## Checks
+
+Run the checks relevant to your change. Before requesting final review, run as much of the following as your environment supports:
 
 ```bash
-# All tests (unit + integration)
-npm test
-
-# JS unit tests only
-npm run test
-
-# Python unit tests only
-npm run test:py
-
-# Cross-language equivalence tests
-npm run test:cross
-
-# Integration tests only
-npm run test:integration
-
-# Full test suite (JS + Python + cross-language)
-npm run test:all
-```
-
-### 3. Code Style
-
-```bash
-# Lint
 npm run lint
-
-# Auto-fix lint issues
-npm run lint:fix
+npm test
+npm run test:concurrent
+npm run test:integration
+npm run test:cross
+npm run test:py
+npm run test:e2e
 ```
 
-- **JavaScript**: ESLint + Prettier (configured in `shared-mcp/`)
-- **Python**: Black + isort (configured in `retrieval/` and `ops/`)
-- **PowerShell**: Follows the style in existing `.ps1` scripts
-- **Shell scripts**: POSIX `sh` compatible (not Bash-only)
+`npm run test:all` runs a broader combined suite. Some tests require Python, PowerShell, or local services and may not be available in every contributor environment; document anything you could not run in the PR description.
 
-### 4. Validate Layout After Changes
+For layout or installer changes:
 
-If you modified file layout, install behavior, or startup entrypoints:
-
-**Windows:**
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-layout.ps1
+pwsh -NoProfile -File ./scripts/validate-layout.ps1
 ```
 
-**macOS / Linux:**
 ```bash
 ./scripts/validate-layout.sh
+node ops/check/check-memory-integrity.js --strict
 ```
 
-Also run integrity checks:
-```bash
-node ops/check-memory-integrity.js --strict
-```
+JavaScript is checked with the root flat ESLint configuration. The repository does not currently enforce Prettier, Black, or isort as CI gates, so do not claim those checks were run unless you ran them explicitly.
 
-## Pull Request Process
+## Pull request process
 
-1. **Fork** the repository and create a branch:
-   ```bash
-   git checkout -b feat/my-feature
-   # or
-   git checkout -b fix/my-bug
-   ```
+1. Create a focused branch such as `fix/config-port-drift` or `feat/new-memory-tool`.
+2. Add or update tests for changed behavior.
+3. Run relevant checks and record the results.
+4. Use a clear Conventional Commit-style title.
+5. Complete the pull request template, including root cause and user impact for fixes.
+6. Resolve review threads before merge.
+7. Do not merge while required CI checks are failing.
 
-2. **Write tests** for new behavior (see Testing Requirements below).
+Large architecture changes should first add or update an ADR in [`docs/adr/`](docs/adr/). Prefer several small PRs over one repository-wide rewrite.
 
-3. **Run the full test suite** and lint:
-   ```bash
-   npm run test:all && npm run lint
-   ```
+## Platform rules
 
-4. **Run the validation scripts** to ensure layout integrity:
-   ```bash
-   # Linux/macOS
-   ./scripts/validate-layout.sh && node ops/check-memory-integrity.js --strict
-   ```
+Windows, macOS, and Linux are supported. New cross-platform runtime code should:
 
-5. **Commit** using [Conventional Commits](https://www.conventionalcommits.org/):
-   ```
-   feat: add memory_wake_up MCP tool
-   fix: resolve orphaned process cleanup on Windows
-   docs: clarify vault path resolution order
-   ```
+- Use the abstraction in `bus/platform/` where one exists.
+- Avoid hard-coded user, drive, vault, or workspace paths.
+- Use `pwsh` for PowerShell 7 scripts.
+- Keep `.sh` scripts POSIX-compatible unless the file explicitly declares Bash.
+- Add a Windows or macOS smoke test when changing platform-sensitive behavior.
 
-6. **Open a Pull Request** with the [PR template](.github/pull_request_template.md) filled in.
+## Testing expectations
 
-7. A maintainer will review. Address feedback by pushing new commits to your branch.
+- Unit tests belong in `tests/unit/`.
+- Integration flows belong in `tests/integration/`.
+- JavaScript/Python behavior equivalence belongs in `tests/cross-language/`.
+- End-to-end launcher or client flows belong in `tests/e2e/`.
+- A bug fix should include a regression test whenever practical.
 
-## Architecture Decisions
+Do not maintain hard-coded test totals in documentation. GitHub Actions results are the source of truth.
 
-Major architectural decisions are documented as ADRs in [`docs/adr/`](docs/adr/):
+## Adding or changing MCP services
 
-- [ADR-002: Unified Memory Architecture v2](docs/adr/ADR-002-unified-memory-architecture-v2.md) — current active ADR covering SQLite chunk schema, FTS5+BM25, typed promotion, and MMR reranking.
+The core launcher and client configurator must consume the same service plan. Changes to core services should normally update:
 
-Before proposing significant changes, check existing ADRs to understand the rationale behind current design choices.
+- `shared-mcp/port-registry.js`
+- `shared-mcp/spawn-plan.js`
+- `start.js`
+- `setup-mcp.js`
+- doctor/status checks
+- unit tests
+- README endpoint documentation
 
-## Platform Support Policy
+Optional services documented in `shared-mcp/manifest.json` are not automatically part of the core launcher. Before promoting an optional service to core, document its version pin, startup command, health probe, session-isolation behavior, and failure mode.
 
-This project supports **Windows, macOS, and Linux** as first-class platforms. Each platform is validated at multiple layers:
+## Adding an agent integration
 
-| Layer | Windows | macOS | Linux |
-|-------|---------|-------|-------|
-| Minimum PowerShell | 5.1 (Windows PowerShell) | 7+ (`pwsh`) | 7+ (`pwsh`) |
-| Minimum Node.js | 18+ | 18+ | 18+ |
-| Script runner | `powershell.exe` | `bash` / `pwsh` | `bash` / `pwsh` |
-| Watchdog | `.ps1` | `.sh` | `.sh` |
-| Startup registration | Startup folder | LaunchAgents | systemd `--user` / XDG autostart |
+Only add an automatic client writer when its configuration path and schema are documented or reliably verified. Otherwise provide a manual hint and mark the path unverified. Never overwrite malformed client configuration.
 
-**Cross-platform rules:**
-- All shell scripts must be POSIX `sh` compatible (no Bash-only features like `[[ ]]` or `==` string comparison without quotes).
-- PowerShell scripts must support both `powershell.exe` (Windows PowerShell 5.1) and `pwsh` (PowerShell 7+).
-- Use the platform abstraction in `bus/platform/` for platform-specific logic.
-- Never hardcode machine-specific paths (e.g., `C:\Users\name\`). Use environment variables.
+## Secret and path hygiene
 
-## Testing Requirements
+- Never commit API keys, tokens, cookies, session state, or real private memory data.
+- Prefer environment-variable references over plaintext secrets in JSON files.
+- Remote embedding backends may transmit memory text to their provider; document that behavior.
+- Do not hard-code a contributor's machine path.
+- Inspect the staged diff before committing.
 
-- **Unit tests**: Cover individual functions and utilities in `tests/unit/`
-- **Integration tests**: Cover end-to-end flows in `tests/integration/`
-- **Cross-language tests**: Verify JS/Python equivalence in `tests/cross-language/`
+## Documentation standards
 
-All new features should include tests. Bug fixes should include a regression test.
-
-## Good First Contributions
-
-- Improve docs and onboarding clarity
-- Add support for a new agent integration
-- Improve validation or troubleshooting coverage
-- Strengthen secret hygiene or portability
-- Add unit or integration tests
-
-## Adding A New Shared MCP
-
-Use shared HTTP only if the service is actually safe to centralize.
-
-Before proposing a new shared MCP, document:
-- whether it is stateless or session-isolated
-- whether it touches desktop UI or global mutable state
-- how it should be health-checked
-- what the failure mode looks like under many concurrent clients
-
-Update at minimum:
-- `shared-mcp/manifest.json`
-- `shared-mcp/start-shared-mcp.ps1` / `shared-mcp/start-shared-mcp.sh`
-- `shared-mcp/status-shared-mcp.ps1` / `shared-mcp/status-shared-mcp.sh`
-- `shared-mcp/stop-shared-mcp.ps1` / `shared-mcp/stop-shared-mcp.sh`
-- `docs/ARCHITECTURE.md`
-- `docs/OPERATIONS.md`
-
-## Adding A New Agent Integration
-
-See [`templates/agents/`](./templates/agents/README.md) for per-agent integration templates.
-
-## Secret And Path Hygiene
-
-- Never commit real keys, tokens, cookies, or session state
-- Never hardcode one specific user profile path or vault path into public runtime files
-- Use environment variables for secrets
-- Use runtime discovery or installer-written paths for machine-specific locations
-- Before opening a PR: run `git log` to verify no accidental credential commits
-
-## Documentation Standards
-
-- Prefer direct operational language
-- Be explicit about what is shared, what is isolated, and why
-- Avoid overclaiming: process sharing is not the same as shared agent context
-- When describing platform-specific behavior, note the platform explicitly
+- Describe current verified behavior, not intended future behavior.
+- Distinguish core, optional, and experimental features.
+- Do not call a workflow “automatic” when manual setup remains necessary.
+- Include the exact supported client name; Claude Desktop and Claude Code are different products.
+- Link to existing paths and keep examples executable.

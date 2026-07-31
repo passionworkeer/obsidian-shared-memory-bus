@@ -6,60 +6,59 @@ const LAYERS = [
     num: "01",
     title: "AI Clients",
     tag: "接入层",
-    body: "任何支持 MCP 协议的 AI 编程工具都可作为客户端。每个工具保留各自原生的记忆格式,由 bus 统一翻译。",
+    body: "支持 MCP HTTP 端点的客户端都可以接入。自动配置脚本只修改已验证配置路径的客户端。",
     details: [
-      { k: "工具", v: "Claude / Cursor / Kiro / Windsurf / Cline / Roo / Goose / Qoder" },
-      { k: "接入", v: "node setup-mcp.js --target=<agent>" },
-      { k: "全接", v: "node setup-mcp.js --target=all" }
+      { k: "自动配置", v: "Claude Desktop / Cursor / Kiro / Windsurf / Cline / Roo / Goose" },
+      { k: "人工接入", v: "Claude Code / Codex / Copilot / OpenCode 等" },
+      { k: "预览", v: "node setup-mcp.js --target=<agent> --dry-run" }
     ]
   },
   {
     num: "02",
-    title: "Shared MCP Layer",
+    title: "Core MCP Layer",
     tag: "协议层",
-    body: "本地 MCP 服务器集群对外提供统一接口。memory:9338 是核心,context7 / fetch / time / playwright 是配套工具。",
+    body: "npm start 启动 fetch、time 和 memory 核心服务。默认 memory 拆分为 retrieval / bridge / dream / mgmt 四个进程。",
     details: [
-      { k: "Memory", v: "http://127.0.0.1:9338/mcp" },
-      { k: "Fetch", v: "http://127.0.0.1:9332/mcp" },
-      { k: "Context7", v: "http://127.0.0.1:9331/mcp" },
-      { k: "Playwright", v: "http://127.0.0.1:9337/mcp" }
+      { k: "Utility", v: "fetch:9332 · time:9333" },
+      { k: "Split memory", v: "9338 · 9339 · 9340 · 9341" },
+      { k: "Compatibility", v: "AI_MEMORY_SERVER_MODE=monolithic → memory:9338" }
     ]
   },
   {
     num: "03",
     title: "Local Runtime",
     tag: "检索层",
-    body: "bus / watchdog 进程编排写入与同步。BM25 + Dense + Hybrid 三路并行召回,本地 LSH 哈希或可选 OpenAI / HF / Gemini 向量。",
+    body: "bus、retrieval 和 ops 负责写入、检索、索引更新与 Markdown 派生。默认 hash embedding 可离线运行，远程后端为可选配置。",
     details: [
-      { k: "检索", v: "search_shared_memory (语义) vs memory_search (BM25)" },
-      { k: "融合", v: "weighted 安全回退 / RRF 高质量融合" },
-      { k: "评测", v: "retrieval/eval NDCG@5 / Recall@10 / MRR" }
+      { k: "检索", v: "BM25 / semantic / hybrid" },
+      { k: "索引", v: "本地 hash 或可选 provider embedding" },
+      { k: "运维", v: "export / migration / validation / doctor" }
     ]
   },
   {
     num: "04",
-    title: "Canonical Store",
+    title: "Resolved Store",
     tag: "存储层",
-    body: "Obsidian vault 的 00-System/ai-memory/ 是唯一可信来源。structured / inbox / generated 三种用途,所有工具最终都收敛到这里。",
+    body: "存储根由 resolver 决定，不固定等于某一个目录。可以显式指定本地 store，也可以桥接到 Obsidian vault。",
     details: [
-      { k: "发现", v: "自动读取 obsidian.json 发现任意盘符 vault" },
-      { k: "结构", v: "structured/ · inbox/ · generated/" },
-      { k: "覆盖", v: "AI_MEMORY_STORE 显式设置可覆盖" }
+      { k: "优先", v: "AI_MEMORY_STORE / AI_MEMORY_STORE_ROOT" },
+      { k: "Vault", v: "检测到时使用 00-System/ai-memory" },
+      { k: "回退", v: "AI_MEMORY_ROOT 或 ~/.ai-memory" }
     ]
   }
 ];
 
 export default function Architecture() {
   const { ref, inView } = useReveal();
-  const [active, setActive] = useState(null); // index or null
+  const [active, setActive] = useState(null);
 
   return (
     <section id="architecture" className="section section-alt" aria-labelledby="arch-title">
       <div className="container">
         <header className={`section-head reveal${inView ? " in-view" : ""}`} ref={ref}>
           <p className="section-eyebrow">系统架构</p>
-          <h2 id="arch-title" className="section-title">四层结构,职责清晰</h2>
-          <p className="section-desc">从客户端到存储,每一层都可独立替换或扩展。点击或悬停层级查看详情。</p>
+          <h2 id="arch-title" className="section-title">四层结构，边界明确</h2>
+          <p className="section-desc">区分核心服务、可选集成和实际解析出的存储根，避免配置与运行状态漂移。</p>
         </header>
 
         <div className="arch-diagram reveal in-view">
@@ -69,14 +68,14 @@ export default function Architecture() {
                 className={`arch-layer${active === i ? " is-active" : ""}`}
                 onMouseEnter={() => setActive(i)}
                 onMouseLeave={() => setActive(null)}
-                onClick={() => setActive((cur) => (cur === i ? null : i))}
+                onClick={() => setActive((current) => (current === i ? null : i))}
                 role="button"
                 tabIndex={0}
                 aria-expanded={active === i}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    setActive((cur) => (cur === i ? null : i));
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setActive((current) => (current === i ? null : i));
                   }
                 }}
               >
@@ -88,10 +87,10 @@ export default function Architecture() {
                 <p className="arch-layer-body">{layer.body}</p>
                 {active === i && (
                   <dl className="arch-detail">
-                    {layer.details.map((d) => (
-                      <div key={d.k}>
-                        <dt>{d.k}</dt>
-                        <dd>{d.v}</dd>
+                    {layer.details.map((detail) => (
+                      <div key={detail.k}>
+                        <dt>{detail.k}</dt>
+                        <dd>{detail.v}</dd>
                       </div>
                     ))}
                   </dl>
