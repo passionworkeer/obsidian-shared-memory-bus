@@ -1,10 +1,13 @@
-# Code Owners
-# 每行格式: pattern owner1 owner2
+# Default owner
+* @passionworkeer
 
-# 所有代码默认所有者
-* @Hermes
-
-# 特定目录
-# bus/ @owner-bus
-# ops/ @owner-ops
-# cli/ @owner-cli
+# High-risk runtime and release surfaces
+/.github/workflows/ @passionworkeer
+/shared-mcp/ @passionworkeer
+/start.js @passionworkeer
+/setup-mcp.js @passionworkeer
+/cli/commands/doctor.js @passionworkeer
+/scripts/install* @passionworkeer
+/Dockerfile* @passionworkeer
+/docker-compose.yml @passionworkeer
+/SECURITY.md @passionworkeer
