@@ -130,8 +130,18 @@ export function activeServers(env = process.env) {
   return selectServersForSpawn(MCP_SERVERS, env);
 }
 
+export function normalizeLoopbackHost(value) {
+  const raw = String(value || '127.0.0.1').trim().toLowerCase();
+  if (!raw || /[\s\r\n/?#@]/.test(raw)) {
+    throw new Error(`Invalid AI_MEMORY_HOST: ${value}`);
+  }
+  if (raw === '127.0.0.1' || raw === 'localhost') return raw;
+  if (raw === '::1' || raw === '[::1]') return '[::1]';
+  throw new Error(`AI_MEMORY_HOST must be loopback: ${value}`);
+}
+
 export function makeUrl(server, env = process.env) {
-  const host = env.AI_MEMORY_HOST || '127.0.0.1';
+  const host = normalizeLoopbackHost(env.AI_MEMORY_HOST || '127.0.0.1');
   const basePort = resolveBasePort(env);
   return `http://${host}:${getServerPort(server, basePort)}/mcp`;
 }
@@ -195,7 +205,7 @@ export function gooseBlock(env = process.env) {
   for (const server of activeServers(env)) {
     lines.push(`  ${server.id}:`);
     lines.push('    type: remote');
-    lines.push(`    url: ${makeUrl(server, env)}`);
+    lines.push(`    url: ${JSON.stringify(makeUrl(server, env))}`);
     lines.push('    enabled: true');
   }
   lines.push(GOOSE_END);
