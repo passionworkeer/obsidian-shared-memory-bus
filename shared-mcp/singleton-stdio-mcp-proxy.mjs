@@ -29,12 +29,12 @@ import {
   clearRestartTimer,
   ensureInitialized,
   handleSingleRpc,
-  isAllowedMcpHost,
   readJsonBody,
   sendJson,
   sendAccepted,
 } from './proto/rpc.mjs';
 import { resolveProxyBindHost } from './proto/bind-host.mjs';
+import { isAllowedLocalHttpRequest } from './proto/http-guard.mjs';
 import { scheduleRestart } from './proto/restart.mjs';
 import { killTree } from './proto/child-process.mjs';
 
@@ -47,6 +47,18 @@ const bindHost = resolveProxyBindHost();
 
 const server = http.createServer(async (req, res) => {
   try {
+    if (!isAllowedLocalHttpRequest(req.headers)) {
+      sendJson(res, 403, {
+        jsonrpc: '2.0',
+        id: null,
+        error: {
+          code: -32000,
+          message: 'Forbidden: request is not same-origin loopback',
+        },
+      });
+      return;
+    }
+
     if (req.method === 'GET' && req.url === healthPath) {
       const healthy =
         initialized && child && !child.killed && child.exitCode === null;
@@ -89,18 +101,6 @@ const server = http.createServer(async (req, res) => {
     if (req.method !== 'POST') {
       sendJson(res, 405, {
         error: 'Method not allowed',
-      });
-      return;
-    }
-
-    if (!isAllowedMcpHost(req.headers.host)) {
-      sendJson(res, 403, {
-        jsonrpc: '2.0',
-        id: null,
-        error: {
-          code: -32000,
-          message: 'Forbidden: host header is not loopback',
-        },
       });
       return;
     }
