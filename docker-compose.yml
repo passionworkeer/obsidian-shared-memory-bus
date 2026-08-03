@@ -23,9 +23,9 @@ services:
       AI_MEMORY_SERVER_MODE: split
       AI_MEMORY_BIND_HOST: 0.0.0.0
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9338/healthz"]
+      test: ["CMD", "node", "scripts/health-check-core.mjs"]
       interval: 30s
-      timeout: 5s
+      timeout: 10s
       retries: 5
       start_period: 30s
 
