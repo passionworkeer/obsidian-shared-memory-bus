@@ -17,8 +17,6 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# Install Node dependencies before copying the complete source tree so this
-# layer remains cacheable. The root lockfile includes the shared-mcp workspace.
 COPY package.json package-lock.json ./
 COPY shared-mcp/package.json ./shared-mcp/package.json
 RUN npm ci --omit=dev
@@ -49,8 +47,8 @@ EXPOSE 9332 9333 9338 9339 9340 9341
 
 USER app
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=5 \
-  CMD curl -fsS http://127.0.0.1:9338/healthz || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=5 \
+  CMD node scripts/health-check-core.mjs
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["npm", "start"]

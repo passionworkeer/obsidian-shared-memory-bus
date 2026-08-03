@@ -16,9 +16,9 @@
       "probeType": "mcp-initialize",
       "stdioCommandCandidatesWindows": [
         "context7-mcp.cmd",
-        "npx -y @upstash/context7-mcp@latest"
+        "npx -y @upstash/context7-mcp@3.2.0"
       ],
-      "stdioCommandPosix": "npx -y @upstash/context7-mcp@latest",
+      "stdioCommandPosix": "npx -y @upstash/context7-mcp@3.2.0",
       "notes": "Stateless documentation/code search MCP. Strong candidate for one shared instance."
     },
     {
@@ -49,9 +49,9 @@
       "probeType": "mcp-initialize",
       "stdioCommandCandidatesWindows": [
         "mcp-server-sequential-thinking.cmd",
-        "npx -y @modelcontextprotocol/server-sequential-thinking@latest"
+        "npx -y @modelcontextprotocol/server-sequential-thinking@2026.7.4"
       ],
-      "stdioCommandPosix": "npx -y @modelcontextprotocol/server-sequential-thinking@latest",
+      "stdioCommandPosix": "npx -y @modelcontextprotocol/server-sequential-thinking@2026.7.4",
       "notes": "Mostly stateless reasoning helper. Safe to centralize."
     },
     {
@@ -84,7 +84,7 @@
       "stdioCommandPosix": "{{node}} --experimental-default-type=module {{omniMemoryServer}}",
       "stdioEnv": {
         "AI_MEMORY_SERVER_MODE": "retrieval",
-        "AI_MEMORY_METRICS_PORT": "9338"
+        "AI_MEMORY_METRICS_PORT": "9438"
       },
       "isolatedSubprocess": {
         "id": "search-worker",
@@ -96,7 +96,7 @@
         "maxRestarts": 5,
         "circuitWindowMs": 300000
       },
-      "notes": "I-HIGH-1 stage 3: read-only retrieval + status queries (14 tools). Hosts the search-worker isolated subprocess."
+      "notes": "Read-only retrieval + status service. Hosts the isolated search worker."
     },
     {
       "id": "memory-bridge",
@@ -108,9 +108,9 @@
       "stdioCommandPosix": "{{node}} --experimental-default-type=module {{omniMemoryServer}}",
       "stdioEnv": {
         "AI_MEMORY_SERVER_MODE": "bridge",
-        "AI_MEMORY_METRICS_PORT": "9339"
+        "AI_MEMORY_METRICS_PORT": "9439"
       },
-      "notes": "I-HIGH-1 stage 3: claude-mem / blackboard cross-tool bridge (6 tools)."
+      "notes": "claude-mem / blackboard cross-tool bridge."
     },
     {
       "id": "memory-dream",
@@ -122,9 +122,9 @@
       "stdioCommandPosix": "{{node}} --experimental-default-type=module {{omniMemoryServer}}",
       "stdioEnv": {
         "AI_MEMORY_SERVER_MODE": "dream",
-        "AI_MEMORY_METRICS_PORT": "9340"
+        "AI_MEMORY_METRICS_PORT": "9440"
       },
-      "notes": "I-HIGH-1 stage 3: async rebuild + nightly dream (3 tools)."
+      "notes": "Async rebuild + nightly dream service."
     },
     {
       "id": "memory-mgmt",
@@ -136,9 +136,9 @@
       "stdioCommandPosix": "{{node}} --experimental-default-type=module {{omniMemoryServer}}",
       "stdioEnv": {
         "AI_MEMORY_SERVER_MODE": "mgmt",
-        "AI_MEMORY_METRICS_PORT": "9341"
+        "AI_MEMORY_METRICS_PORT": "9441"
       },
-      "notes": "I-HIGH-1 stage 3: index / embedding runtime management + KG queries (6 tools)."
+      "notes": "Index / embedding runtime management + KG queries."
     },
     {
       "id": "memory",
@@ -152,10 +152,10 @@
       "stdioCommandPosix": "{{node}} --experimental-default-type=module {{omniMemoryServer}}",
       "stdioEnv": {
         "AI_MEMORY_SERVER_MODE": "all",
-        "AI_MEMORY_METRICS_PORT": "9338"
+        "AI_MEMORY_METRICS_PORT": "9438"
       },
       "legacy": true,
-      "notes": "Legacy monolithic memory server. Only spawned when AI_MEMORY_SERVER_MODE=monolithic/all (SERVER-SPLIT.md §8.2 compatibility guarantee). Port 9338 is shared with memory-retrieval but the two are mutually exclusive — see spawn-plan.js."
+      "notes": "Legacy monolithic memory server. Only spawned when AI_MEMORY_SERVER_MODE=monolithic/all."
     },
     {
       "id": "playwright",
@@ -165,9 +165,9 @@
       "healthPath": "/mcp",
       "launchCommandCandidatesWindows": [
         "playwright-mcp.cmd --host {{host}} --port {{port}} --headless --isolated --allowed-hosts=*",
-        "npx @playwright/mcp@latest --host {{host}} --port {{port}} --headless --isolated --allowed-hosts=*"
+        "npx @playwright/mcp@0.0.78 --host {{host}} --port {{port}} --headless --isolated --allowed-hosts=*"
       ],
-      "launchCommandPosix": "npx @playwright/mcp@latest --host {{host}} --port {{port}} --headless --isolated --allowed-hosts=*",
+      "launchCommandPosix": "npx @playwright/mcp@0.0.78 --host {{host}} --port {{port}} --headless --isolated --allowed-hosts=*",
       "probeType": "mcp-initialize",
       "notes": "Standalone Playwright MCP HTTP server on 9337. Multiple clients can share one backend while keeping isolated MCP sessions and browser profiles."
     },

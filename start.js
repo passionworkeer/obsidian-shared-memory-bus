@@ -12,6 +12,7 @@ import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
+import { resolveStoreRoot } from './bus/store-root.js';
 import {
   MCP_SERVERS,
   getServerMetricsPort,
@@ -34,6 +35,22 @@ async function isPortInUse(port) {
     });
     server.listen(port, '127.0.0.1');
   });
+}
+
+async function probeExistingService(serverId, port) {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/healthz`, {
+      signal: AbortSignal.timeout(3000),
+    });
+    const payload = await response.json();
+    return {
+      ok: response.ok && payload?.ok === true && payload?.serverId === serverId,
+      payload,
+      status: response.status,
+    };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 function trackChild(child, serverId) {
@@ -82,13 +99,23 @@ function stopChildren(signal) {
 async function main() {
   const plan = resolveSpawnPlan(process.env);
   const serversToSpawn = selectServersForSpawn(MCP_SERVERS, process.env);
+  const activeServers = [];
+  const runtimeConfigPath = process.env.AI_MEMORY_RUNTIME_CONFIG_PATH ||
+    join(resolveStoreRoot(), 'config', 'runtime.json');
 
   console.log(`Starting core MCP services (memory mode=${plan.mode})...\n`);
 
   for (const server of serversToSpawn) {
     const port = getServerPort(server);
     if (await isPortInUse(port)) {
-      console.warn(`[${server.id}] port ${port} is already in use; skipping`);
+      const probe = await probeExistingService(server.id, port);
+      if (!probe.ok) {
+        throw new Error(
+          `[${server.id}] port ${port} is occupied by an unknown or unhealthy service: ${JSON.stringify(probe)}`,
+        );
+      }
+      console.warn(`[${server.id}] healthy matching service already owns port ${port}; adopting`);
+      activeServers.push(server);
       continue;
     }
 
@@ -97,10 +124,10 @@ async function main() {
     if (server.script) {
       const scriptPath = join(__dirname, server.script);
       if (!existsSync(scriptPath)) {
-        console.error(`[${server.id}] script not found: ${scriptPath}`);
-        continue;
+        throw new Error(`[${server.id}] script not found: ${scriptPath}`);
       }
       startPowerShellScript(scriptPath, server.id);
+      activeServers.push(server);
       continue;
     }
 
@@ -108,6 +135,7 @@ async function main() {
       ...process.env,
       ...(server.env || {}),
       AI_MEMORY_ROOT: process.env.AI_MEMORY_ROOT || __dirname,
+      AI_MEMORY_RUNTIME_CONFIG_PATH: runtimeConfigPath,
     };
     const metricsPort = getServerMetricsPort(server);
     if (metricsPort !== null) env.AI_MEMORY_METRICS_PORT = String(metricsPort);
@@ -116,10 +144,11 @@ async function main() {
 
     const stdioCommand = [server.command, ...server.args].join(' ');
     startSingletonProxy(server.id, port, stdioCommand, env);
+    activeServers.push(server);
   }
 
   console.log('\nCore MCP endpoints:');
-  for (const server of serversToSpawn) {
+  for (const server of activeServers) {
     console.log(`- ${server.id}: http://127.0.0.1:${getServerPort(server)}/mcp`);
   }
 }

@@ -1,6 +1,27 @@
 {
-  "embedding": {
-    "backend": "test",
-    "modelName": "test-model"
+  "embeddings": {
+    "activeProfile": "local-hash",
+    "activeProvider": "local-hash",
+    "defaults": {
+      "adapter": "hash",
+      "model": "hashing-v1",
+      "timeoutMs": 120000,
+      "requestDelayMs": 0,
+      "batchSize": 0,
+      "allowBatchFallback": false
+    },
+    "providers": {
+      "local-hash": {
+        "adapter": "hash",
+        "model": "hashing-v1",
+        "description": "Local deterministic hashing embeddings; no API key required."
+      }
+    },
+    "profiles": {
+      "local-hash": {
+        "provider": "local-hash",
+        "description": "Safe local default for first-run and offline use."
+      }
+    }
   }
 }
