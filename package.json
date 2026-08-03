@@ -27,6 +27,7 @@
     "vault:detect": "node scripts/vault-detect.js",
     "setup-mcp": "node setup-mcp.js",
     "env:check": "node scripts/env-check.js",
+    "migrate:runtime-secrets": "node scripts/migrate-runtime-secrets.mjs",
     "test:cross-platform": "node scripts/cross-platform-test.js",
     "test:smoke": "node scripts/cross-platform-test.js",
     "test": "node --test --test-concurrency=1 tests/unit/js/*.test.js tests/unit/js/*.test.mjs",

@@ -149,7 +149,22 @@ macOS/Linux:
 export AI_MEMORY_EMBED_API_KEY="<your-key>"
 ```
 
-Do not add `apiKey` to `runtime.json`. Plaintext values are ignored at runtime and removed by the next persisted configuration update. The config file is written through a temporary file and atomic rename; POSIX permissions are restricted to the owner.
+Do not add `apiKey` to `runtime.json`. Plaintext values are ignored at runtime and removed by the next persisted configuration update. The config file is written through a temporary file and atomic rename. POSIX permissions are restricted to the owner; on Windows, keep the store in a per-user directory with ACLs limited to the current user and trusted administrators.
+
+Migrate an existing plaintext configuration without printing the old value:
+
+```bash
+npm run migrate:runtime-secrets -- --dry-run
+npm run migrate:runtime-secrets -- --api-key-env AI_MEMORY_EMBED_API_KEY
+```
+
+For a non-default store:
+
+```bash
+npm run migrate:runtime-secrets -- --root /absolute/path/to/.ai-memory --api-key-env AI_MEMORY_EMBED_API_KEY
+```
+
+The command preserves existing `apiKeyEnv` fields. Otherwise, each removed plaintext key is replaced with the supplied environment-variable name. Its output contains only the config path, migration count and environment-variable name.
 
 Use management tools on port 9341:
 
