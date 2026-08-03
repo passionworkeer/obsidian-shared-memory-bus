@@ -3,6 +3,7 @@
 
 import { spawn } from "node:child_process";
 import { DomainError, COMMON_CODES } from "../domain-error.js";
+import { redactRemoteEmbeddingTexts } from "../redaction.js";
 import { normalizeString } from "./utils.js";
 
 export function createGeminiProvider({ pythonRuntime, withPythonArgs, getPool }) {
@@ -16,6 +17,7 @@ export function createGeminiProvider({ pythonRuntime, withPythonArgs, getPool })
 
     const apiKey = normalizeString(runtime.apiKey);
     const model = normalizeString(runtime.model || "gemini-embedding-2");
+    const safeTexts = redactRemoteEmbeddingTexts(texts);
     if (!apiKey) {
       throw new DomainError(COMMON_CODES.INVALID_INPUT, "missing-gemini-api-key");
     }
@@ -35,7 +37,7 @@ export function createGeminiProvider({ pythonRuntime, withPythonArgs, getPool })
           }
         );
         const vectors = await pool.embedWithPool({
-          texts,
+          texts: safeTexts,
           model,
           pythonCmd: pythonRuntime.command,
           pythonArgs: withPythonArgs(pythonRuntime, ["-c", pool.buildWorkerScript()]),
@@ -104,7 +106,7 @@ for text in texts:
     except Exception as exc:
         print(json.dumps({"ok": False, "err": str(exc)}))
 `;
-    const inputPayload = JSON.stringify({ model, api_key: apiKey, texts }) + "\n";
+    const inputPayload = JSON.stringify({ model, api_key: apiKey, texts: safeTexts }) + "\n";
     return new Promise((resolve, reject) => {
       const child = spawn(pythonRuntime.command, withPythonArgs(pythonRuntime, ["-c", script]), {
         stdio: ["pipe", "pipe", "pipe"],
