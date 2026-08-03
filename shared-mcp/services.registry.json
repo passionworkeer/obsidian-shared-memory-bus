@@ -1,0 +1,206 @@
+{
+  "$schema": "./services.registry.schema.json",
+  "version": 1,
+  "protocolVersion": "2024-11-05",
+  "defaults": {
+    "host": "127.0.0.1",
+    "basePort": 9330,
+    "path": "/mcp",
+    "healthPath": "/healthz"
+  },
+  "servers": [
+    {
+      "id": "context7",
+      "displayName": "Context7",
+      "mode": "shared",
+      "portOffset": 1,
+      "probeType": "mcp-initialize",
+      "stdioCommandCandidatesWindows": [
+        "context7-mcp.cmd",
+        "npx -y @upstash/context7-mcp@3.2.0"
+      ],
+      "stdioCommandPosix": "npx -y @upstash/context7-mcp@3.2.0",
+      "notes": "Stateless documentation/code search MCP. Strong candidate for one shared instance."
+    },
+    {
+      "id": "fetch",
+      "displayName": "Fetch",
+      "mode": "shared",
+      "portOffset": 2,
+      "core": true,
+      "critical": true,
+      "runtimeCommand": "python",
+      "runtimeArgs": ["-m", "mcp_server_fetch"],
+      "probeType": "mcp-initialize",
+      "stdioCommandWindows": "{{python}} -m mcp_server_fetch",
+      "stdioCommandPosix": "{{python}} -m mcp_server_fetch",
+      "notes": "Stateless fetch MCP. Safe to centralize."
+    },
+    {
+      "id": "time",
+      "displayName": "Time",
+      "mode": "shared",
+      "portOffset": 3,
+      "core": true,
+      "critical": true,
+      "runtimeCommand": "python",
+      "runtimeArgs": ["-m", "mcp_server_time"],
+      "probeType": "mcp-initialize",
+      "stdioCommandWindows": "{{python}} -m mcp_server_time",
+      "stdioCommandPosix": "{{python}} -m mcp_server_time",
+      "notes": "Stateless utility MCP. Safe to centralize."
+    },
+    {
+      "id": "sequential-thinking",
+      "displayName": "Sequential Thinking",
+      "mode": "shared",
+      "portOffset": 4,
+      "critical": true,
+      "probeType": "mcp-initialize",
+      "stdioCommandCandidatesWindows": [
+        "mcp-server-sequential-thinking.cmd",
+        "npx -y @modelcontextprotocol/server-sequential-thinking@2026.7.4"
+      ],
+      "stdioCommandPosix": "npx -y @modelcontextprotocol/server-sequential-thinking@2026.7.4",
+      "notes": "Mostly stateless reasoning helper. Safe to centralize."
+    },
+    {
+      "id": "obsidian",
+      "displayName": "Obsidian",
+      "mode": "shared",
+      "portOffset": 5,
+      "critical": true,
+      "stdioCommandWindows": "{{powershell}} -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File {{obsidianRunner}}",
+      "stdioCommandPosix": "{{powershell}} -NoProfile -File {{obsidianRunner}}",
+      "notes": "Already points at one canonical vault. Shared mode avoids duplicated launch cost."
+    },
+    {
+      "id": "MiniMax",
+      "displayName": "MiniMax Coding Plan",
+      "mode": "optional",
+      "portOffset": 6,
+      "stdioCommandWindows": "{{powershell}} -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File {{minimaxRunner}}",
+      "stdioCommandPosix": "{{powershell}} -NoProfile -File {{minimaxRunner}}",
+      "notes": "Optional shared MiniMax MCP. Requires MINIMAX_API_KEY and an installed minimax-coding-plan-mcp executable, or set MINIMAX_MCP_COMMAND explicitly."
+    },
+    {
+      "id": "playwright",
+      "displayName": "Playwright",
+      "mode": "optional",
+      "portOffset": 7,
+      "healthPath": "/mcp",
+      "launchCommandCandidatesWindows": [
+        "playwright-mcp.cmd --host {{host}} --port {{port}} --headless --isolated --allowed-hosts=*",
+        "npx @playwright/mcp@0.0.78 --host {{host}} --port {{port}} --headless --isolated --allowed-hosts=*"
+      ],
+      "launchCommandPosix": "npx @playwright/mcp@0.0.78 --host {{host}} --port {{port}} --headless --isolated --allowed-hosts=*",
+      "probeType": "mcp-initialize",
+      "notes": "Standalone Playwright MCP HTTP server. Multiple clients can share one backend while keeping isolated MCP sessions and browser profiles."
+    },
+    {
+      "id": "memory-retrieval",
+      "displayName": "Memory · Retrieval",
+      "mode": "shared",
+      "portOffset": 8,
+      "metricsOffset": 108,
+      "core": true,
+      "critical": true,
+      "topology": "split",
+      "runtimeCommand": "node",
+      "runtimeArgs": ["--experimental-default-type=module", "omni-memory-server.js"],
+      "runtimeEnv": { "AI_MEMORY_SERVER_MODE": "retrieval" },
+      "probeType": "mcp-initialize",
+      "startupProbeTimeoutSeconds": 10,
+      "startupProbeAttempts": 45,
+      "stdioCommandWindows": "{{node}} --experimental-default-type=module \"{{omniMemoryServer}}\"",
+      "stdioCommandPosix": "{{node}} --experimental-default-type=module {{omniMemoryServer}}",
+      "isolatedSubprocess": {
+        "id": "search-worker",
+        "description": "Python search worker process managed by the memory MCP server",
+        "managedBy": "memory-retrieval",
+        "script": "{{searchWorkerService}}",
+        "isolation": "isolated-subprocess",
+        "restartPolicy": "always",
+        "maxRestarts": 5,
+        "circuitWindowMs": 300000
+      },
+      "notes": "Read-only retrieval + status service. Hosts the isolated search worker."
+    },
+    {
+      "id": "memory-bridge",
+      "displayName": "Memory · Bridge",
+      "mode": "shared",
+      "portOffset": 9,
+      "metricsOffset": 109,
+      "core": true,
+      "critical": true,
+      "topology": "split",
+      "runtimeCommand": "node",
+      "runtimeArgs": ["--experimental-default-type=module", "omni-memory-server.js"],
+      "runtimeEnv": { "AI_MEMORY_SERVER_MODE": "bridge" },
+      "probeType": "mcp-initialize",
+      "stdioCommandWindows": "{{node}} --experimental-default-type=module \"{{omniMemoryServer}}\"",
+      "stdioCommandPosix": "{{node}} --experimental-default-type=module {{omniMemoryServer}}",
+      "notes": "claude-mem / blackboard cross-tool bridge."
+    },
+    {
+      "id": "memory-dream",
+      "displayName": "Memory · Dream",
+      "mode": "shared",
+      "portOffset": 10,
+      "metricsOffset": 110,
+      "core": true,
+      "critical": true,
+      "topology": "split",
+      "runtimeCommand": "node",
+      "runtimeArgs": ["--experimental-default-type=module", "omni-memory-server.js"],
+      "runtimeEnv": { "AI_MEMORY_SERVER_MODE": "dream" },
+      "probeType": "mcp-initialize",
+      "stdioCommandWindows": "{{node}} --experimental-default-type=module \"{{omniMemoryServer}}\"",
+      "stdioCommandPosix": "{{node}} --experimental-default-type=module {{omniMemoryServer}}",
+      "notes": "Async rebuild + nightly dream service."
+    },
+    {
+      "id": "memory-mgmt",
+      "displayName": "Memory · Mgmt",
+      "mode": "shared",
+      "portOffset": 11,
+      "metricsOffset": 111,
+      "core": true,
+      "critical": true,
+      "topology": "split",
+      "runtimeCommand": "node",
+      "runtimeArgs": ["--experimental-default-type=module", "omni-memory-server.js"],
+      "runtimeEnv": { "AI_MEMORY_SERVER_MODE": "mgmt" },
+      "probeType": "mcp-initialize",
+      "stdioCommandWindows": "{{node}} --experimental-default-type=module \"{{omniMemoryServer}}\"",
+      "stdioCommandPosix": "{{node}} --experimental-default-type=module {{omniMemoryServer}}",
+      "notes": "Canonical writes, index / embedding runtime management + KG queries."
+    },
+    {
+      "id": "memory",
+      "displayName": "Memory (monolithic, legacy)",
+      "mode": "shared",
+      "portOffset": 8,
+      "metricsOffset": 108,
+      "core": true,
+      "topology": "monolithic",
+      "runtimeCommand": "node",
+      "runtimeArgs": ["--experimental-default-type=module", "omni-memory-server.js"],
+      "runtimeEnv": { "AI_MEMORY_SERVER_MODE": "all" },
+      "probeType": "mcp-initialize",
+      "startupProbeTimeoutSeconds": 10,
+      "startupProbeAttempts": 45,
+      "stdioCommandWindows": "{{node}} --experimental-default-type=module \"{{omniMemoryServer}}\"",
+      "stdioCommandPosix": "{{node}} --experimental-default-type=module {{omniMemoryServer}}",
+      "legacy": true,
+      "notes": "Legacy monolithic memory server. Only spawned when AI_MEMORY_SERVER_MODE=monolithic/all."
+    },
+    {
+      "id": "pencil",
+      "displayName": "Pencil",
+      "mode": "isolated",
+      "notes": "Desktop design app state is UI-bound and should stay isolated per client."
+    }
+  ]
+}

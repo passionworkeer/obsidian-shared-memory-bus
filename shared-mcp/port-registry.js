@@ -1,76 +1,55 @@
 /**
- * shared-mcp/port-registry.js — single source of truth for MCP and metrics ports.
+ * Runtime port helpers derived from services.registry.json.
  */
 
-export const DEFAULT_BASE_PORT = 9330;
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+const registry = JSON.parse(
+  fs.readFileSync(fileURLToPath(new URL('./services.registry.json', import.meta.url)), 'utf8'),
+);
+
+export const SERVICE_REGISTRY = Object.freeze(registry);
+export const DEFAULT_BASE_PORT = registry.defaults.basePort;
 export const DEFAULT_METRICS_PORT_OFFSET = 100;
 
-export const MCP_SERVERS = [
-  { id: 'fetch', port: 9332, command: 'python', args: ['-m', 'mcp_server_fetch'] },
-  { id: 'time', port: 9333, command: 'python', args: ['-m', 'mcp_server_time'] },
-  {
-    id: 'memory-retrieval',
-    port: 9338,
-    metricsPort: 9438,
-    command: 'node',
-    args: ['--experimental-default-type=module', 'omni-memory-server.js'],
-    env: { AI_MEMORY_SERVER_MODE: 'retrieval' },
-  },
-  {
-    id: 'memory-bridge',
-    port: 9339,
-    metricsPort: 9439,
-    command: 'node',
-    args: ['--experimental-default-type=module', 'omni-memory-server.js'],
-    env: { AI_MEMORY_SERVER_MODE: 'bridge' },
-  },
-  {
-    id: 'memory-dream',
-    port: 9340,
-    metricsPort: 9440,
-    command: 'node',
-    args: ['--experimental-default-type=module', 'omni-memory-server.js'],
-    env: { AI_MEMORY_SERVER_MODE: 'dream' },
-  },
-  {
-    id: 'memory-mgmt',
-    port: 9341,
-    metricsPort: 9441,
-    command: 'node',
-    args: ['--experimental-default-type=module', 'omni-memory-server.js'],
-    env: { AI_MEMORY_SERVER_MODE: 'mgmt' },
-  },
-  {
-    id: 'memory',
-    port: 9338,
-    metricsPort: 9438,
-    command: 'node',
-    args: ['--experimental-default-type=module', 'omni-memory-server.js'],
-    legacy: true,
-    onlyInMode: 'monolithic',
-    env: { AI_MEMORY_SERVER_MODE: 'all' },
-  },
-];
+const runtimeServices = registry.servers.filter((service) => service.core && service.runtimeCommand);
 
-export const SPLIT_MEMORY_SERVER_PORTS = Object.freeze({
-  retrieval: 9338,
-  bridge: 9339,
-  dream: 9340,
-  mgmt: 9341,
-});
+export const MCP_SERVERS = Object.freeze(runtimeServices.map((service) => ({
+  id: service.id,
+  port: DEFAULT_BASE_PORT + service.portOffset,
+  ...(Number.isInteger(service.metricsOffset)
+    ? { metricsPort: DEFAULT_BASE_PORT + service.metricsOffset }
+    : {}),
+  command: service.runtimeCommand,
+  args: [...service.runtimeArgs],
+  ...(service.runtimeEnv ? { env: { ...service.runtimeEnv } } : {}),
+  ...(service.legacy ? { legacy: true } : {}),
+  ...(service.topology === 'monolithic' ? { onlyInMode: 'monolithic' } : {}),
+})));
 
-export const SPLIT_MEMORY_METRICS_PORTS = Object.freeze({
-  retrieval: 9438,
-  bridge: 9439,
-  dream: 9440,
-  mgmt: 9441,
-});
+function buildMemoryPortMap(field) {
+  return Object.freeze(Object.fromEntries(
+    registry.servers
+      .filter((service) => service.topology === 'split' && Number.isInteger(service[field]))
+      .map((service) => [
+        service.id.replace('memory-', ''),
+        DEFAULT_BASE_PORT + service[field],
+      ]),
+  ));
+}
 
-export const CRITICAL_PORTS = [9331, 9332, 9333, 9334, 9335, 9338, 9339, 9340, 9341];
+export const SPLIT_MEMORY_SERVER_PORTS = buildMemoryPortMap('portOffset');
+export const SPLIT_MEMORY_METRICS_PORTS = buildMemoryPortMap('metricsOffset');
+
+export const CRITICAL_PORTS = Object.freeze(registry.servers
+  .filter((service) => service.critical && Number.isInteger(service.portOffset))
+  .map((service) => DEFAULT_BASE_PORT + service.portOffset));
 
 const MAX_PORT_OFFSET = Math.max(
-  ...MCP_SERVERS.flatMap((server) => [server.port, server.metricsPort].filter(Number.isFinite)),
-) - DEFAULT_BASE_PORT;
+  ...registry.servers.flatMap((service) => [service.portOffset, service.metricsOffset]
+    .filter(Number.isInteger)),
+);
 
 function validateBasePort(value) {
   if (!Number.isInteger(value) || value <= 0) {
