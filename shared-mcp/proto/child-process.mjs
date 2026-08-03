@@ -318,31 +318,93 @@ export async function bootstrapChild(protocolVersion = defaultProtocolVersion) {
 }
 
 export function spawnProcess(executable, args, options = {}) {
+  const {
+    input,
+    timeoutMs = 10 * 60 * 1000,
+    maxOutputBytes = 8 * 1024 * 1024,
+    maxInputBytes = 2 * 1024 * 1024,
+    ...spawnOptions
+  } = options;
+
+  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) {
+    return Promise.reject(new Error('spawnProcess timeoutMs must be a positive integer'));
+  }
+  if (!Number.isInteger(maxOutputBytes) || maxOutputBytes <= 0) {
+    return Promise.reject(new Error('spawnProcess maxOutputBytes must be a positive integer'));
+  }
+  if (!Number.isInteger(maxInputBytes) || maxInputBytes <= 0) {
+    return Promise.reject(new Error('spawnProcess maxInputBytes must be a positive integer'));
+  }
+
+  const inputBuffer = input === undefined ? null : Buffer.from(String(input), 'utf8');
+  if (inputBuffer && inputBuffer.length > maxInputBytes) {
+    return Promise.reject(
+      new Error(`spawnProcess input limit exceeded (${inputBuffer.length}/${maxInputBytes} bytes)`),
+    );
+  }
+
   return new Promise((resolve, reject) => {
     const spawnedChild = spawn(executable, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
-      ...options,
+      ...spawnOptions,
     });
 
     let stdout = '';
     let stderr = '';
-    spawnedChild.stdout.on('data', (chunk) => {
-      stdout += chunk.toString();
-    });
-    spawnedChild.stderr.on('data', (chunk) => {
-      stderr += chunk.toString();
-    });
-    spawnedChild.on('error', reject);
-    spawnedChild.on('close', (code) => {
-      resolve({ code: code || 0, stdout, stderr });
+    let outputBytes = 0;
+    let settled = false;
+    let timeout = null;
+
+    const terminate = () => {
+      try {
+        if (spawnedChild.exitCode === null && !spawnedChild.killed) {
+          spawnedChild.kill('SIGKILL');
+        }
+      } catch {
+      }
+    };
+
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      terminate();
+      reject(error);
+    };
+
+    const appendOutput = (streamName, chunk) => {
+      if (settled) return;
+      outputBytes += chunk.length;
+      if (outputBytes > maxOutputBytes) {
+        fail(
+          new Error(
+            `spawnProcess output limit exceeded (${outputBytes}/${maxOutputBytes} bytes)`,
+          ),
+        );
+        return;
+      }
+      if (streamName === 'stdout') stdout += chunk.toString();
+      else stderr += chunk.toString();
+    };
+
+    spawnedChild.stdout.on('data', (chunk) => appendOutput('stdout', chunk));
+    spawnedChild.stderr.on('data', (chunk) => appendOutput('stderr', chunk));
+    spawnedChild.on('error', fail);
+    spawnedChild.on('close', (code, signal) => {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      resolve({ code: code ?? -1, signal: signal ?? null, stdout, stderr });
     });
 
-    if (options.input !== undefined) {
-      spawnedChild.stdin.end(options.input);
-    } else {
-      spawnedChild.stdin.end();
-    }
+    timeout = setTimeout(() => {
+      fail(new Error(`spawnProcess timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    if (typeof timeout.unref === 'function') timeout.unref();
+
+    if (inputBuffer) spawnedChild.stdin.end(inputBuffer);
+    else spawnedChild.stdin.end();
   });
 }
 
