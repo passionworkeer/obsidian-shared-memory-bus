@@ -16,6 +16,16 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify release commit is reachable from main
+        shell: bash
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main || {
+            echo "Refusing to release: $GITHUB_SHA is not reachable from main" >&2
+            exit 1
+          }
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
