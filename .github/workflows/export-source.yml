@@ -1,9 +1,9 @@
 name: Export Source Snapshot
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/security-hardening-batch
+      - main
 
 permissions:
   contents: read
