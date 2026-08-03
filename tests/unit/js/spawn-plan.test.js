@@ -6,6 +6,7 @@ import {
   MCP_SERVERS,
   getServerMetricsPort,
   getServerPort,
+  resolveBasePort,
 } from '../../../shared-mcp/port-registry.js';
 
 describe('resolveSpawnPlan', () => {
@@ -26,10 +27,10 @@ describe('resolveSpawnPlan', () => {
     }
   });
 
-  test('falls back to split for unknown values', () => {
-    assert.equal(
-      resolveSpawnPlan({ AI_MEMORY_SERVER_MODE: 'retrieval-only' }).mode,
-      'split',
+  test('rejects unknown modes instead of silently selecting split', () => {
+    assert.throws(
+      () => resolveSpawnPlan({ AI_MEMORY_SERVER_MODE: 'retrieval-only' }),
+      /invalid AI_MEMORY_SERVER_MODE/,
     );
   });
 
@@ -53,6 +54,15 @@ describe('resolveSpawnPlan', () => {
         [10011, 10111],
       ],
     );
+  });
+
+  test('rejects malformed or overflowing base ports', () => {
+    for (const value of ['abc', '-1', '0', '65500', '9330.5']) {
+      assert.throws(
+        () => resolveSpawnPlan({ AI_MEMORY_BASE_PORT: value }),
+        /AI_MEMORY_BASE_PORT/,
+      );
+    }
   });
 });
 
@@ -90,6 +100,7 @@ describe('selectServersForSpawn', () => {
 
   test('registry helpers return distinct shifted ports', () => {
     const server = MCP_SERVERS.find((candidate) => candidate.id === 'memory-retrieval');
+    assert.equal(resolveBasePort({}), 9330);
     assert.equal(getServerPort(server, 10000), 10008);
     assert.equal(getServerMetricsPort(server, 10000), 10108);
   });
