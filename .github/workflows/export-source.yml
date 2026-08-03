@@ -78,4 +78,5 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "security: harden installer and validate installed runtime"
+          echo "FULL_COMMIT_SHA=$(git rev-parse HEAD)"
           git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
