@@ -20,6 +20,8 @@
     "lint": "npm run lint:root",
     "lint:fix": "eslint --fix --config eslint.config.js \"bus/**/*.js\" \"cli/**/*.js\" \"ops/**/*.js\" \"retrieval/**/*.js\" \"shared-mcp/**/*.js\" \"shared-mcp/**/*.mjs\" \"shared-mcp/**/*.cjs\"",
     "lint:root": "eslint --config eslint.config.js \"bus/**/*.js\" \"cli/**/*.js\" \"ops/**/*.js\" \"retrieval/**/*.js\" \"shared-mcp/**/*.js\" \"shared-mcp/**/*.mjs\" \"shared-mcp/**/*.cjs\"",
+    "generate:services": "node scripts/generate-service-artifacts.mjs",
+    "check:services": "node scripts/generate-service-artifacts.mjs --check",
     "validate": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/validate-layout.ps1",
     "check-integrity": "node ops/check/check-memory-integrity.js --strict",
     "generate-context": "node ops/generate/generate-context.js",
