@@ -1,59 +1,66 @@
 # Landing Page（React + Vite）
 
-项目展示网站，基于 React + Vite。深蓝灰底 + 青绿强调色工程主题，7 大区 + 交互演示。
+`web/src` 是项目展示站点的唯一内容源。仓库不再提交 `dist/`、`docs/landing/` 或独立的 legacy HTML 副本，避免源码更新后静态副本继续展示旧端口和旧安装命令。
 
-## 开发
+## 本地开发
 
 ```bash
 cd web
-npm install
-npm run dev      # 开发服务器 http://localhost:5173
+npm ci
+npm run dev
 ```
 
-## 构建
+开发服务器默认使用 `http://localhost:5173`。
+
+## 可复现构建
 
 ```bash
-npm run build    # 产物 → dist/
-npm run preview  # 本地预览构建产物
+cd web
+npm ci
+npm run build
+npm run preview
 ```
 
-`dist/` 是纯静态产物，可部署到任何静态托管（GitHub Pages / Vercel / Netlify / Cloudflare Pages）。
+依赖由 `web/package-lock.json` 锁定。构建产物写入 `web/dist/`，它是唯一部署目标，可上传到 GitHub Pages、Vercel、Netlify、Cloudflare Pages 或其他静态托管。
 
-## 预览构建产物
+`dist/` 是生成物并被 `.gitignore` 排除，不应提交到仓库。CI 会在干净环境中执行 `npm ci && npm run build`，检查输出中不存在已知的过时启动命令和端口文案，并上传构建产物供检查。
+
+## 本地预览静态产物
 
 ```bash
 python -m http.server 8080 --directory web/dist
-# 或
+```
+
+也可以使用：
+
+```bash
 npx http-server web/dist -p 8080
 ```
 
 ## 结构
 
-```
+```text
 web/
-├── src/                # React 源码（main.jsx + App.jsx + 9 组件 + styles.css + hooks.js）
-├── dist/               # 构建产物（静态可部署）
-├── legacy-html/        # 旧纯 HTML 版（备份，纯静态无构建）
-├── screenshots-react/  # React 版桌面/移动截图
-├── index.html          # Vite 入口
-├── vite.config.js
-└── package.json
+├── src/                React 源码与样式
+├── screenshots-react/  桌面/移动截图
+├── index.html          Vite HTML 入口
+├── package.json
+├── package-lock.json
+└── vite.config.js
 ```
+
+## 发布约束
+
+1. 修改内容只能改 `web/src`、`web/index.html` 或相关构建配置。
+2. 使用 `npm ci`，不要用未锁定的临时依赖生成正式产物。
+3. 部署 `web/dist/`，不要重新创建手工维护的 HTML 副本。
+4. 合并前必须通过 `Landing Build` 工作流。
+5. 端口、安装方式或支持矩阵变化时，同步修改 React 源码中的展示内容。
 
 ## 交互特性
 
-- 架构图：层级 hover/点击展开详情 + 连线流动动画
-- 记忆分层 L0-L5：阶梯 hover/点击显示持久化与生命周期
-- 8 agent：三视图 Tab 切换（按支持等级 / 按接入方式 / 全部）
-- 快速开始：复制按钮 + Toast 反馈
-- 滚动渐入（IntersectionObserver）+ 响应式（桌面/移动）
-
-## 设计
-
-- **配色**：深蓝灰底 `#0a0e14` + 单一青绿强调色 `#00d4aa`。工程感，避免彩虹。
-- **字体**：系统字体栈 + monospace（代码/端口/技术标签）。
-- **内容来源**：根目录 `README.md`（A1 vault / A3 8 agent / 检索 / 差异化定位）。
-
-## 旧 HTML 版
-
-`legacy-html/` 保留了升级前的纯 HTML 版（无构建步骤，双击 index.html 即可）。如需最简预览可用它；正式展示用 React 版 `dist/`。
+- 架构图层级 hover 与点击详情
+- 记忆分层展示
+- Agent 支持矩阵视图切换
+- 快速开始复制与 Toast 反馈
+- 滚动渐入和响应式布局
