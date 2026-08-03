@@ -2,6 +2,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -48,6 +49,12 @@ function validateRegistry(registry) {
     if (service.runtimeCommand && !Array.isArray(service.runtimeArgs)) {
       throw new Error(`runtime-args-required:${service.id}`);
     }
+    if (service.core && !service.runtimeCommand) {
+      throw new Error(`core-runtime-command-required:${service.id}`);
+    }
+    if (service.topology && !["split", "monolithic"].includes(service.topology)) {
+      throw new Error(`invalid-topology:${service.id}:${service.topology}`);
+    }
   }
   return registry;
 }
@@ -87,16 +94,37 @@ function buildManifest(registry = loadRegistry()) {
   };
 }
 
+function normalizeManifestForCheck(manifest) {
+  return {
+    version: manifest.version,
+    protocolVersion: manifest.protocolVersion,
+    defaults: manifest.defaults,
+    servers: [...manifest.servers]
+      .map(({ notes: _notes, ...service }) => service)
+      .sort((left, right) => left.id.localeCompare(right.id)),
+  };
+}
+
 function serialize(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
 function generate({ check = false } = {}) {
-  const expected = serialize(buildManifest());
+  const expectedObject = buildManifest();
+  const expected = serialize(expectedObject);
   const current = fs.existsSync(manifestPath) ? fs.readFileSync(manifestPath, "utf8") : "";
 
   if (check) {
-    if (current !== expected) {
+    let currentObject;
+    try {
+      currentObject = JSON.parse(current);
+    } catch {
+      throw new Error("generated-service-artifacts-invalid-json");
+    }
+    if (!isDeepStrictEqual(
+      normalizeManifestForCheck(currentObject),
+      normalizeManifestForCheck(expectedObject),
+    )) {
       throw new Error("generated-service-artifacts-stale: run npm run generate:services");
     }
     return { ok: true, changed: false, manifestPath };
@@ -132,6 +160,7 @@ export {
   buildManifest,
   generate,
   loadRegistry,
+  normalizeManifestForCheck,
   parseArgs,
   serialize,
   validateRegistry,
