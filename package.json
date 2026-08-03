@@ -39,7 +39,9 @@
     "test:e2e": "node --test --test-concurrency=1 --test-timeout=60000 tests/e2e/*.test.mjs",
     "test:concurrent": "node --test --test-concurrency=4 tests/unit/js/inbox-atomic-write.test.js",
     "test:all": "node --test --test-concurrency=1 tests/unit/js/*.test.js tests/unit/js/*.test.mjs && npm run test:concurrent && node --test --test-concurrency=1 tests/integration/js/*.test.js tests/integration/js/*.test.mjs && npm run test:e2e && pytest tests/unit/py/ tests/cross-language/ -v",
-    "test:full": "node scripts/test-all.js"
+    "test:full": "node scripts/test-all.js",
+    "generate:install": "node scripts/generate-install-file-graph.mjs",
+    "check:install": "node scripts/generate-install-file-graph.mjs --check"
   },
   "keywords": [
     "mcp",

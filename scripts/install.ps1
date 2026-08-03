@@ -19,6 +19,17 @@ $layout = Import-PowerShellDataFile -Path $layoutPath
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $platformHelperPath = Join-Path $sourceRoot (Join-Path "bus" "runtime-platform.ps1")
 . $platformHelperPath
+$installSafetyPath = Join-Path $PSScriptRoot "install-path-safety.ps1"
+. $installSafetyPath
+$installFileGraphPath = Join-Path $PSScriptRoot ([string]$layout.InstallFileGraph)
+if (-not (Test-Path -LiteralPath $installFileGraphPath -PathType Leaf)) {
+    throw "Install file graph is missing: $installFileGraphPath"
+}
+$installFileGraph = Get-Content -Raw -LiteralPath $installFileGraphPath -Encoding utf8 | ConvertFrom-Json
+if ([int]$installFileGraph.formatVersion -ne 1) {
+    throw "Unsupported install file graph version: $($installFileGraph.formatVersion)"
+}
+$installEntries = @($installFileGraph.entries)
 
 if ([string]::IsNullOrWhiteSpace($TargetRoot)) {
     $TargetRoot = Get-SharedDefaultAiMemoryRoot
@@ -72,66 +83,20 @@ function Ensure-Directory {
     }
 }
 
-function Normalize-RelativeInstallPath {
-    param([Parameter(Mandatory = $true)][string]$Path)
-
-    $separator = [System.IO.Path]::DirectorySeparatorChar
-    return (($Path -replace '[/\\]+', [string]$separator).TrimStart('\', '/'))
-}
-
 function Get-ManagedInstallFiles {
-    param([Parameter(Mandatory = $true)]$Layout)
+    param([Parameter(Mandatory = $true)][object[]]$InstallEntries)
 
     $managedFiles = New-Object System.Collections.Generic.List[string]
-    $cliFiles = if ($Layout.ContainsKey("CliFiles")) { @($Layout.CliFiles) } else { @() }
-
-    foreach ($sourceDir in @($Layout.FlatRuntimeFiles.Keys | Sort-Object)) {
-        foreach ($name in @($Layout.FlatRuntimeFiles[$sourceDir])) {
-            [void]$managedFiles.Add((Normalize-RelativeInstallPath -Path $name))
-        }
+    foreach ($entry in @($InstallEntries)) {
+        [void]$managedFiles.Add((ConvertTo-SafeRelativeInstallPath -Path ([string]$entry.destination)))
     }
-
-    foreach ($name in @($Layout.SharedMcpFiles)) {
-        [void]$managedFiles.Add((Normalize-RelativeInstallPath -Path (Join-Path "shared-mcp" $name)))
+    foreach ($name in @(Get-GeneratedShellWrapperFiles -InstallEntries $InstallEntries)) {
+        [void]$managedFiles.Add((ConvertTo-SafeRelativeInstallPath -Path $name))
     }
-
-    foreach ($name in @(Get-GeneratedShellWrapperFiles -Layout $Layout)) {
-        [void]$managedFiles.Add((Normalize-RelativeInstallPath -Path $name))
-    }
-
     foreach ($name in @("activate-ai-memory.sh", "activate-ai-memory.ps1")) {
-        [void]$managedFiles.Add((Normalize-RelativeInstallPath -Path $name))
+        [void]$managedFiles.Add((ConvertTo-SafeRelativeInstallPath -Path $name))
     }
-
-    foreach ($name in @($cliFiles)) {
-        [void]$managedFiles.Add((Normalize-RelativeInstallPath -Path $name))
-    }
-
     return @($managedFiles | Sort-Object -Unique)
-}
-
-function Remove-ManagedFileIfPresent {
-    param(
-        [Parameter(Mandatory = $true)][string]$TargetRoot,
-        [Parameter(Mandatory = $true)][string]$RelativePath
-    )
-
-    $targetPath = Join-Path $TargetRoot (Normalize-RelativeInstallPath -Path $RelativePath)
-    if (Test-Path -LiteralPath $targetPath -PathType Leaf) {
-        Remove-Item -LiteralPath $targetPath -Force
-    }
-}
-
-function Remove-ManagedDirectoryIfPresent {
-    param(
-        [Parameter(Mandatory = $true)][string]$TargetRoot,
-        [Parameter(Mandatory = $true)][string]$RelativePath
-    )
-
-    $targetPath = Join-Path $TargetRoot (Normalize-RelativeInstallPath -Path $RelativePath)
-    if (Test-Path -LiteralPath $targetPath -PathType Container) {
-        Remove-Item -LiteralPath $targetPath -Force -Recurse
-    }
 }
 
 function Remove-StaleManagedFiles {
@@ -140,20 +105,20 @@ function Remove-StaleManagedFiles {
         [Parameter(Mandatory = $true)][string]$ManifestPath,
         [Parameter(Mandatory = $true)][string[]]$CurrentManagedFiles,
         [string[]]$LegacyCleanupFiles = @(),
-        [string[]]$LegacyCleanupDirectories = @()
+        [string[]]$LegacyCleanupDirectories = @(),
+        [switch]$DryRun
     )
 
     $desiredLookup = @{}
     foreach ($path in @($CurrentManagedFiles)) {
-        $desiredLookup[(Normalize-RelativeInstallPath -Path $path)] = $true
+        $desiredLookup[(ConvertTo-SafeRelativeInstallPath -Path $path)] = $true
     }
 
     foreach ($path in @($LegacyCleanupFiles)) {
-        Remove-ManagedFileIfPresent -TargetRoot $TargetRoot -RelativePath $path
+        Remove-SafeManagedFileIfPresent -TargetRoot $TargetRoot -RelativePath $path -DryRun:$DryRun
     }
-
     foreach ($path in @($LegacyCleanupDirectories)) {
-        Remove-ManagedDirectoryIfPresent -TargetRoot $TargetRoot -RelativePath $path
+        Remove-SafeManagedDirectoryIfPresent -TargetRoot $TargetRoot -RelativePath $path -DryRun:$DryRun
     }
 
     if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
@@ -168,9 +133,13 @@ function Remove-StaleManagedFiles {
     }
 
     foreach ($path in @($previousManifest.managedFiles)) {
-        $normalized = Normalize-RelativeInstallPath -Path $path
+        try {
+            $normalized = ConvertTo-SafeRelativeInstallPath -Path ([string]$path)
+        } catch {
+            throw ("Previous install manifest contains an unsafe managed path '{0}': {1}" -f [string]$path, $_.Exception.Message)
+        }
         if (-not $desiredLookup.ContainsKey($normalized)) {
-            Remove-ManagedFileIfPresent -TargetRoot $TargetRoot -RelativePath $normalized
+            Remove-SafeManagedFileIfPresent -TargetRoot $TargetRoot -RelativePath $normalized -DryRun:$DryRun
         }
     }
 }
@@ -198,19 +167,15 @@ function Set-PosixExecutableIfNeeded {
 }
 
 function Get-GeneratedShellWrapperFiles {
-    param([Parameter(Mandatory = $true)]$Layout)
+    param([Parameter(Mandatory = $true)][object[]]$InstallEntries)
 
     $wrapperFiles = New-Object System.Collections.Generic.List[string]
-    foreach ($sourceDir in @($Layout.FlatRuntimeFiles.Keys | Sort-Object)) {
-        foreach ($name in @($Layout.FlatRuntimeFiles[$sourceDir])) {
-            if ([System.IO.Path]::GetExtension($name) -ne ".ps1") {
-                continue
-            }
-
-            $wrapperFiles.Add(([System.IO.Path]::ChangeExtension($name, ".sh"))) | Out-Null
-        }
+    foreach ($entry in @($InstallEntries)) {
+        if ([string]$entry.kind -ne "root-compat") { continue }
+        $destination = ConvertTo-SafeRelativeInstallPath -Path ([string]$entry.destination)
+        if ([System.IO.Path]::GetExtension($destination) -ne ".ps1") { continue }
+        $wrapperFiles.Add(([System.IO.Path]::ChangeExtension($destination, ".sh"))) | Out-Null
     }
-
     return @($wrapperFiles | Sort-Object -Unique)
 }
 
@@ -270,28 +235,12 @@ function Write-EnvironmentActivationFiles {
         [string]$ResolvedSharedMcpPython = ""
     )
 
-    $activateShPath = Join-Path $TargetRoot "activate-ai-memory.sh"
-    $activatePs1Path = Join-Path $TargetRoot "activate-ai-memory.ps1"
-
-    $shContent = @"
-#!/usr/bin/env sh
-export AI_MEMORY_ROOT="$ResolvedTargetRoot"
-export AI_MEMORY_PYTHON="$ResolvedPython"
-"@.Trim() + "`n"
-    if (-not [string]::IsNullOrWhiteSpace($ResolvedSharedMcpPython)) {
-        $shContent = $shContent.TrimEnd() + "`n" + ('export AI_MEMORY_MCP_PYTHON="{0}"' -f $ResolvedSharedMcpPython) + "`n"
-    }
-    [System.IO.File]::WriteAllText($activateShPath, $shContent, $utf8NoBom)
-    Set-PosixExecutableIfNeeded -Path $activateShPath
-
-    $ps1Content = @"
-\$env:AI_MEMORY_ROOT = "$ResolvedTargetRoot"
-\$env:AI_MEMORY_PYTHON = "$ResolvedPython"
-"@.Trim() + "`n"
-    if (-not [string]::IsNullOrWhiteSpace($ResolvedSharedMcpPython)) {
-        $ps1Content = $ps1Content.TrimEnd() + "`n" + ('$env:AI_MEMORY_MCP_PYTHON = "{0}"' -f $ResolvedSharedMcpPython) + "`n"
-    }
-    [System.IO.File]::WriteAllText($activatePs1Path, $ps1Content, $utf8NoBom)
+    $activateShPath = Resolve-SafeInstallTarget -TargetRoot $TargetRoot -RelativePath "activate-ai-memory.sh"
+    $activatePs1Path = Resolve-SafeInstallTarget -TargetRoot $TargetRoot -RelativePath "activate-ai-memory.ps1"
+    $shContent = New-PosixActivationContent -ResolvedTargetRoot $ResolvedTargetRoot -ResolvedPython $ResolvedPython -ResolvedSharedMcpPython $ResolvedSharedMcpPython
+    $ps1Content = New-PowerShellActivationContent -ResolvedTargetRoot $ResolvedTargetRoot -ResolvedPython $ResolvedPython -ResolvedSharedMcpPython $ResolvedSharedMcpPython
+    Write-AtomicRestrictedTextFile -Path $activateShPath -Content $shContent -PosixMode "700" -Encoding $utf8NoBom
+    Write-AtomicRestrictedTextFile -Path $activatePs1Path -Content $ps1Content -PosixMode "600" -Encoding $utf8NoBom
 }
 
 function Write-InstallManifest {
@@ -311,7 +260,7 @@ function Write-InstallManifest {
     }
 
     $json = $payload | ConvertTo-Json -Depth 4
-    [System.IO.File]::WriteAllText($ManifestPath, $json, $utf8NoBom)
+    Write-AtomicRestrictedTextFile -Path $ManifestPath -Content ($json + "`n") -PosixMode "600" -Encoding $utf8NoBom
 }
 
 function Start-BackgroundRuntime {
@@ -1521,18 +1470,22 @@ Ensure-Directory -Path (Join-SharedPath @($TargetRoot, "shared-mcp"))
 
 $resolvedTargetRoot = (Get-Item -LiteralPath $TargetRoot).FullName
 $env:AI_MEMORY_ROOT = $resolvedTargetRoot
-$resolvedPython = Resolve-PythonRuntime -InstallIfMissing
+$resolvedPython = Resolve-PythonRuntime -InstallIfMissing:(-not $DryRun)
 if (-not $resolvedPython) {
-    throw "Could not resolve a usable Python runtime. Set AI_MEMORY_PYTHON or install Python (uv-managed Python is supported)."
+    if ($DryRun) {
+        $resolvedPython = "python"
+    } else {
+        throw "Could not resolve a usable Python runtime. Set AI_MEMORY_PYTHON or install Python (uv-managed Python is supported)."
+    }
 }
 $env:AI_MEMORY_PYTHON = $resolvedPython
-if ($InstallPythonDeps) {
+if ($InstallPythonDeps -and -not $DryRun) {
     Ensure-PythonRetrievalDependencies -PythonPath $resolvedPython
 }
 $resolvedSharedMcpPython = Resolve-SharedMcpPythonRuntime -PrimaryPythonPath $resolvedPython
 if ($resolvedSharedMcpPython) {
     $env:AI_MEMORY_MCP_PYTHON = $resolvedSharedMcpPython
-    if ($InstallPythonDeps) {
+    if ($InstallPythonDeps -and -not $DryRun) {
         Ensure-SharedMcpPythonDependencies -PythonPath $resolvedSharedMcpPython
     }
 } else {
@@ -1549,40 +1502,25 @@ $legacyCleanupDirectories = if ($layout.ContainsKey("LegacyCleanupDirectories"))
 } else {
     @()
 }
-$managedInstallFiles = Get-ManagedInstallFiles -Layout $layout
-$cliFiles = if ($layout.ContainsKey("CliFiles")) { @($layout.CliFiles) } else { @() }
+$managedInstallFiles = Get-ManagedInstallFiles -InstallEntries $installEntries
 $installManifestPath = Join-Path $TargetRoot "install-manifest.json"
 Remove-StaleManagedFiles `
     -TargetRoot $TargetRoot `
     -ManifestPath $installManifestPath `
     -CurrentManagedFiles $managedInstallFiles `
     -LegacyCleanupFiles $legacyCleanupFiles `
-    -LegacyCleanupDirectories $legacyCleanupDirectories
+    -LegacyCleanupDirectories $legacyCleanupDirectories `
+    -DryRun:$DryRun
 
-foreach ($sourceDir in @($layout.FlatRuntimeFiles.Keys | Sort-Object)) {
-    foreach ($name in @($layout.FlatRuntimeFiles[$sourceDir])) {
-        $srcPath = Join-Path $sourceRoot (Join-Path $sourceDir $name)
-        if (-not (Test-Path -LiteralPath $srcPath -PathType Leaf)) {
-            throw "Install layout manifest references missing runtime file: $srcPath"
-        }
-
-        $destinationPath = Join-Path $TargetRoot $name
-        if ($DryRun) {
-            Write-Output "[dry-run] would copy: $srcPath -> $destinationPath"
-        } else {
-            Copy-Item -LiteralPath $srcPath -Destination $destinationPath -Force
-            Set-PosixExecutableIfNeeded -Path $destinationPath
-        }
-    }
-}
-
-foreach ($name in @($layout.SharedMcpFiles)) {
-    $srcPath = Join-Path $sourceRoot (Join-Path "shared-mcp" $name)
+foreach ($entry in @($installEntries)) {
+    $relativeSource = ConvertTo-SafeRelativeInstallPath -Path ([string]$entry.source)
+    $relativeDestination = ConvertTo-SafeRelativeInstallPath -Path ([string]$entry.destination)
+    $srcPath = Resolve-SafeInstallTarget -TargetRoot $sourceRoot -RelativePath $relativeSource -RejectReparsePoints
     if (-not (Test-Path -LiteralPath $srcPath -PathType Leaf)) {
-        throw "Install layout manifest references missing shared-mcp file: $srcPath"
+        throw "Install file graph references missing source: $relativeSource"
     }
-
-    $destinationPath = Join-SharedPath @($TargetRoot, "shared-mcp", $name)
+    $destinationPath = Resolve-SafeInstallTarget -TargetRoot $TargetRoot -RelativePath $relativeDestination -RejectReparsePoints
+    Ensure-Directory -Path (Split-Path -Parent $destinationPath)
     if ($DryRun) {
         Write-Output "[dry-run] would copy: $srcPath -> $destinationPath"
     } else {
@@ -1593,7 +1531,7 @@ foreach ($name in @($layout.SharedMcpFiles)) {
 
 foreach ($name in @($layout.TemplateFiles)) {
     $srcPath = Join-Path $sourceRoot (Join-Path "templates" $name)
-    $dstPath = Join-Path $TargetRoot $name
+    $dstPath = Resolve-SafeInstallTarget -TargetRoot $TargetRoot -RelativePath $name -RejectReparsePoints
     if (-not (Test-Path -LiteralPath $srcPath -PathType Leaf)) {
         throw "Install layout manifest references missing template file: $srcPath"
     }
@@ -1605,22 +1543,6 @@ foreach ($name in @($layout.TemplateFiles)) {
         } else {
             Copy-Item -LiteralPath $srcPath -Destination $dstPath -Force
         }
-    }
-}
-
-foreach ($name in @($cliFiles)) {
-    $srcPath = Join-Path $sourceRoot $name
-    if (-not (Test-Path -LiteralPath $srcPath -PathType Leaf)) {
-        throw "Install layout manifest references missing CLI file: $srcPath"
-    }
-
-    $destinationPath = Join-Path $TargetRoot $name
-    Ensure-Directory -Path (Split-Path -Parent $destinationPath)
-    if ($DryRun) {
-        Write-Output "[dry-run] would copy CLI: $srcPath -> $destinationPath"
-    } else {
-        Copy-Item -LiteralPath $srcPath -Destination $destinationPath -Force
-        Set-PosixExecutableIfNeeded -Path $destinationPath
     }
 }
 
@@ -1674,7 +1596,9 @@ if (-not $DryRun) {
 
 # ADR-002 Phase 0.3: Initialize SQLite schema (sqlite-vec 0.1.9)
 $initSchemaScript = Join-Path (Join-Path $TargetRoot "ops") "init-sqlite-schema.js"
-if (Test-Path -LiteralPath $initSchemaScript -PathType Leaf) {
+if ($DryRun) {
+    Write-Output "[dry-run] would initialize SQLite schema when bundled"
+} elseif (Test-Path -LiteralPath $initSchemaScript -PathType Leaf) {
     Write-Host "[init] Running SQLite schema init..."
     $schemaResult = & node $initSchemaScript 2>&1
     if ($LASTEXITCODE -eq 0) {
@@ -1686,9 +1610,13 @@ if (Test-Path -LiteralPath $initSchemaScript -PathType Leaf) {
     Write-Host "[init] SQLite schema bootstrap script not bundled; skipping explicit SQLite init"
 }
 
-$generatedShellWrappers = Get-GeneratedShellWrapperFiles -Layout $layout
-Write-GeneratedShellWrappers -TargetRoot $TargetRoot -WrapperFiles $generatedShellWrappers
-Write-EnvironmentActivationFiles -TargetRoot $TargetRoot -ResolvedTargetRoot $resolvedTargetRoot -ResolvedPython $resolvedPython -ResolvedSharedMcpPython $resolvedSharedMcpPython
+$generatedShellWrappers = Get-GeneratedShellWrapperFiles -InstallEntries $installEntries
+if ($DryRun) {
+    Write-Output "[dry-run] would generate shell wrappers and activation files"
+} else {
+    Write-GeneratedShellWrappers -TargetRoot $TargetRoot -WrapperFiles $generatedShellWrappers
+    Write-EnvironmentActivationFiles -TargetRoot $TargetRoot -ResolvedTargetRoot $resolvedTargetRoot -ResolvedPython $resolvedPython -ResolvedSharedMcpPython $resolvedSharedMcpPython
+}
 
 $npmCommand = Get-Command npm.cmd,npm -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $npmCommand) {
