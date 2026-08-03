@@ -1,48 +1,52 @@
 // ops/util/safe-realpath.js
-// Path containment check for file-read operations. Stateless, side-effect-free
-// (does not import anything that resolves store roots), so it can be imported
-// from both barrel modules (paths-and-io.js) and CLI tools that take an
-// explicit --store-root argument without triggering module-init side effects.
+// Path containment checks shared by memory readers and writers.
 
 import fs from "node:fs";
 import path from "node:path";
 
+function normalizeForComparison(value) {
+  const resolved = path.resolve(value);
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+function isWithin(candidate, root) {
+  const normalizedCandidate = normalizeForComparison(candidate);
+  const normalizedRoot = normalizeForComparison(root);
+  const rootWithSep = normalizedRoot.endsWith(path.sep)
+    ? normalizedRoot
+    : `${normalizedRoot}${path.sep}`;
+  return normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(rootWithSep);
+}
+
 /**
- * Verify that `filePath` (after realpath resolution) lies within `safeRoot`.
- * Returns the realpath on success, null on failure (path escapes root, missing,
- * or realpath error). Designed to be cheap and safe to call inside loops.
+ * Verify that filePath resolves within safeRoot.
  *
- * SECURITY: defends against symlink-based file-read amplification. A vault
- * synced via OneDrive / Obsidian Sync / iCloud Drive may contain symlinks
- * planted by other apps; resolving them and checking containment prevents
- * arbitrary host files (e.g. ~/.ssh/id_rsa) from being read into agent
- * context.
+ * Existing targets are realpath-resolved all the way through the final path
+ * component, so a file symlink cannot hide an external target. For a path that
+ * does not exist yet, its real parent is checked and the basename is appended;
+ * callers that create the file should still use O_NOFOLLOW/lstat protections
+ * while opening it to close the final-component race.
  */
 export function safeRealpathWithin(filePath, safeRoot) {
-  // Resolve the parent directory (which must exist) so we can validate
-  // containment even for files that don't exist yet — the write path
-  // is what this guard protects, and realpath on a non-existent file
-  // throws ENOENT.
-  const parentDir = path.dirname(filePath);
-  const filename = path.basename(filePath);
-
-  let realParent;
-  try {
-    realParent = fs.realpathSync(parentDir);
-  } catch {
-    return null;
-  }
-  const realPath = path.join(realParent, filename);
-
   let realRoot;
   try {
     realRoot = fs.realpathSync(safeRoot);
   } catch {
     return null;
   }
-  const rootWithSep = realRoot.endsWith(path.sep) ? realRoot : realRoot + path.sep;
-  if (realPath !== realRoot && !realPath.startsWith(rootWithSep)) {
+
+  let candidate;
+  try {
+    candidate = fs.existsSync(filePath)
+      ? fs.realpathSync(filePath)
+      : path.join(fs.realpathSync(path.dirname(filePath)), path.basename(filePath));
+  } catch {
     return null;
   }
-  return realPath;
+
+  return isWithin(candidate, realRoot) ? candidate : null;
+}
+
+export function isPathWithin(candidate, root) {
+  return isWithin(candidate, root);
 }
