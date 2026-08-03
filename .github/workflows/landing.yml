@@ -1,0 +1,48 @@
+name: Landing Build
+
+on:
+  push:
+    branches:
+      - main
+      - 'agent/**'
+      - 'codex/**'
+    paths:
+      - 'web/**'
+      - '.github/workflows/landing.yml'
+  pull_request:
+    paths:
+      - 'web/**'
+      - '.github/workflows/landing.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: landing-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Build and validate landing
+        run: npm run build:check
+      - name: Upload deployable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: landing-dist
+          path: web/dist
+          if-no-files-found: error
+          retention-days: 7
