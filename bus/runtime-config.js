@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveStoreRoot } from "./store-root.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -120,6 +121,41 @@ function cloneJsonValue(value, fallback = {}) {
   }
 }
 
+function containsPlaintextApiKey(value) {
+  if (Array.isArray(value)) {
+    return value.some((item) => containsPlaintextApiKey(item));
+  }
+  if (!isPlainObject(value)) {
+    return false;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    if (key === "apiKey" && normalizeString(child)) {
+      return true;
+    }
+    if (containsPlaintextApiKey(child)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function stripPlaintextApiKeys(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripPlaintextApiKeys(item));
+  }
+  if (!isPlainObject(value)) {
+    return value;
+  }
+  const cleaned = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (key === "apiKey") {
+      continue;
+    }
+    cleaned[key] = stripPlaintextApiKeys(child);
+  }
+  return cleaned;
+}
+
 function resolveRootCandidates(rootPath = "") {
   const candidates = [];
   for (const candidate of [rootPath, process.env.AI_MEMORY_ROOT || "", __dirname, path.resolve(__dirname, "..")]) {
@@ -141,25 +177,33 @@ function resolveRuntimeConfigPath(rootPath = "") {
     return path.resolve(explicitPath);
   }
 
+  const writableRoot = normalizeString(rootPath) || resolveStoreRoot();
+  return path.join(path.resolve(writableRoot), "config", "runtime.json");
+}
+
+function resolveRuntimeConfigTemplatePath(rootPath = "") {
   for (const candidateRoot of resolveRootCandidates(rootPath)) {
-    for (const relativePath of [path.join("config", "runtime.json"), path.join("templates", "config", "runtime.json")]) {
-      const configPath = path.join(candidateRoot, relativePath);
-      if (fs.existsSync(configPath)) {
-        return configPath;
-      }
+    const templatePath = path.join(candidateRoot, "templates", "config", "runtime.json");
+    if (fs.existsSync(templatePath)) {
+      return templatePath;
     }
   }
-
-  const fallbackRoot = resolveRootCandidates(rootPath)[0] || path.resolve(__dirname);
-  return path.join(fallbackRoot, "config", "runtime.json");
+  return "";
 }
 
 function loadRuntimeConfig(rootPath = "") {
   const configPath = resolveRuntimeConfigPath(rootPath);
-  if (!fs.existsSync(configPath)) {
+  const configExists = fs.existsSync(configPath);
+  const templatePath = configExists ? "" : resolveRuntimeConfigTemplatePath(rootPath);
+  const sourcePath = configExists ? configPath : templatePath;
+
+  if (!sourcePath) {
     return {
       configPath,
+      sourcePath: "",
+      templatePath: "",
       exists: false,
+      inheritedFromTemplate: false,
       data: {},
       error: "",
     };
@@ -168,14 +212,20 @@ function loadRuntimeConfig(rootPath = "") {
   try {
     return {
       configPath,
-      exists: true,
-      data: JSON.parse(fs.readFileSync(configPath, "utf8")),
+      sourcePath,
+      templatePath,
+      exists: configExists,
+      inheritedFromTemplate: !configExists && Boolean(templatePath),
+      data: JSON.parse(fs.readFileSync(sourcePath, "utf8")),
       error: "",
     };
   } catch (error) {
     return {
       configPath,
-      exists: true,
+      sourcePath,
+      templatePath,
+      exists: configExists,
+      inheritedFromTemplate: !configExists && Boolean(templatePath),
       data: {},
       error: String(error && error.message ? error.message : error),
     };
@@ -234,9 +284,32 @@ function resolveNamedRegistryEntry(registry, candidates = [], defaultName = "def
 
 function writeRuntimeConfig(rootPath = "", data = {}) {
   const configPath = resolveRuntimeConfigPath(rootPath);
-  const normalized = isPlainObject(data) ? data : {};
-  fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(configPath, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
+  const normalized = stripPlaintextApiKeys(isPlainObject(data) ? data : {});
+  const directory = path.dirname(configPath);
+  const tempPath = `${configPath}.${process.pid}.${Date.now()}.tmp`;
+  fs.mkdirSync(directory, { recursive: true });
+
+  try {
+    fs.writeFileSync(tempPath, `${JSON.stringify(normalized, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    const fd = fs.openSync(tempPath, "r");
+    try {
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(tempPath, configPath);
+    if (process.platform !== "win32") {
+      fs.chmodSync(configPath, 0o600);
+    }
+  } finally {
+    if (fs.existsSync(tempPath)) {
+      fs.rmSync(tempPath, { force: true });
+    }
+  }
+
   return configPath;
 }
 
@@ -298,9 +371,6 @@ function resolveEmbeddingRuntime(options = {}) {
     normalizeString(getProcessEnvValue("AI_MEMORY_EMBED_API_KEY_ENV")) ||
     normalizeString(mergedConfig.apiKeyEnv) ||
     normalizeString(defaults.apiKeyEnv);
-  // When AI_MEMORY_EMBED_API_KEY_ENV is explicitly set (via process env), respect the user's
-  // intent to use apiKeyEnv — do not let a stale AI_MEMORY_EMBED_API_KEY from the Windows
-  // registry override the named env var that the user configured.
   const apiKeyEnvExplicitlySet = Boolean(
     normalizeString(getProcessEnvValue("AI_MEMORY_EMBED_API_KEY_ENV"))
   );
@@ -308,7 +378,10 @@ function resolveEmbeddingRuntime(options = {}) {
     ? normalizeString(getEnvValue("AI_MEMORY_EMBED_API_KEY"))
     : "";
   const indirectApiKey = usesApiKey && apiKeyEnv ? normalizeString(getEnvValue(apiKeyEnv)) : "";
-  const configuredApiKey = usesApiKey ? normalizeString(mergedConfig.apiKey) || normalizeString(defaults.apiKey) : "";
+  const plaintextApiKeyIgnored = usesApiKey && (
+    Boolean(normalizeString(mergedConfig.apiKey)) ||
+    Boolean(normalizeString(defaults.apiKey))
+  );
 
   let resolutionMode = "legacy-base";
   if (resolvedProfile.name && resolvedProvider.name) {
@@ -321,7 +394,9 @@ function resolveEmbeddingRuntime(options = {}) {
 
   return {
     configPath: loaded.configPath,
+    configSourcePath: loaded.sourcePath || "",
     configExists: loaded.exists,
+    configInheritedFromTemplate: Boolean(loaded.inheritedFromTemplate),
     configError: loaded.error,
     resolutionMode,
     profileName: resolvedProfile.name,
@@ -339,7 +414,8 @@ function resolveEmbeddingRuntime(options = {}) {
       normalizeString(mergedConfig.baseUrl) ||
       normalizeString(defaults.baseUrl),
     apiKeyEnv,
-    apiKey: directApiKey || indirectApiKey || configuredApiKey,
+    apiKey: directApiKey || indirectApiKey,
+    plaintextApiKeyIgnored,
     timeoutMs: normalizeInteger(
       getSelectionOverrideValue("AI_MEMORY_EMBED_TIMEOUT_MS") || mergedConfig.timeoutMs,
       normalizeInteger(defaults.timeoutMs, 120000, 1000),
@@ -382,7 +458,9 @@ function describeConfigEntry(config) {
 function sanitizeRuntimeSummary(runtime) {
   return {
     configPath: runtime.configPath,
+    configSourcePath: runtime.configSourcePath || "",
     configExists: Boolean(runtime.configExists),
+    configInheritedFromTemplate: Boolean(runtime.configInheritedFromTemplate),
     configError: runtime.configError || "",
     resolutionMode: runtime.resolutionMode || "",
     profileName: runtime.profileName || "",
@@ -395,6 +473,7 @@ function sanitizeRuntimeSummary(runtime) {
     baseUrl: runtime.baseUrl || "",
     apiKeyEnv: runtime.apiKeyEnv || "",
     apiKeyConfigured: Boolean(runtime.apiKey),
+    plaintextApiKeyIgnored: Boolean(runtime.plaintextApiKeyIgnored),
     processEmbeddingOverridesAllowed: Boolean(runtime.processEmbeddingOverridesAllowed),
     timeoutMs: runtime.timeoutMs || 0,
     requestDelayMs: runtime.requestDelayMs || 0,
@@ -418,6 +497,13 @@ function buildEmbeddingRuntimeCatalog(options = {}) {
   const defaultsBlock = mergeConfigBlocks(defaults, extractEmbeddingDefaults(embeddings));
   const runtime = resolveEmbeddingRuntime({ rootPath, defaults, getEnvValue });
   const warnings = [];
+
+  if (runtime.plaintextApiKeyIgnored || containsPlaintextApiKey(data)) {
+    warnings.push("plaintext-api-key-ignored:use-apiKeyEnv-or-environment-variable");
+  }
+  if (loaded.inheritedFromTemplate) {
+    warnings.push("runtime-config-inherited-from-read-only-template");
+  }
 
   const providerList = Object.entries(providers).map(([name, config]) => {
     const providerConfig = isPlainObject(config) ? config : {};
@@ -478,7 +564,9 @@ function buildEmbeddingRuntimeCatalog(options = {}) {
 
   return {
     configPath: loaded.configPath,
+    configSourcePath: loaded.sourcePath || "",
     configExists: Boolean(loaded.exists),
+    configInheritedFromTemplate: Boolean(loaded.inheritedFromTemplate),
     configError: loaded.error || "",
     activeProfile: normalizeString(embeddings.activeProfile),
     activeProvider: normalizeString(embeddings.activeProvider),
@@ -578,10 +666,13 @@ function updateEmbeddingRuntimeSelection(options = {}) {
 
 export {
   buildEmbeddingRuntimeCatalog,
+  containsPlaintextApiKey,
   loadRuntimeConfig,
   normalizeEmbeddingAdapter,
   resolveEmbeddingRuntime,
   resolveRuntimeConfigPath,
+  resolveRuntimeConfigTemplatePath,
+  stripPlaintextApiKeys,
   updateEmbeddingRuntimeSelection,
   writeRuntimeConfig,
 };
