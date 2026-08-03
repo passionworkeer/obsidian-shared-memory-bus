@@ -14,13 +14,19 @@ import {
 } from './port-registry.js';
 
 const SUBSETS = Object.freeze(['retrieval', 'bridge', 'dream', 'mgmt']);
+const VALID_MODES = new Set(['split', 'monolithic', 'all']);
 
 function shiftedPort(defaultPort, basePort) {
   return basePort + (defaultPort - DEFAULT_BASE_PORT);
 }
 
 export function resolveSpawnPlan(env = process.env) {
-  const raw = String(env.AI_MEMORY_SERVER_MODE || 'split').trim().toLowerCase();
+  const raw = String(env.AI_MEMORY_SERVER_MODE || 'split').trim().toLowerCase() || 'split';
+  if (!VALID_MODES.has(raw)) {
+    throw new Error(
+      `invalid AI_MEMORY_SERVER_MODE: ${raw}; expected split, monolithic, or all`,
+    );
+  }
   const mode = raw === 'monolithic' || raw === 'all' ? 'monolithic' : 'split';
   const basePort = resolveBasePort(env);
 
