@@ -142,7 +142,10 @@ function Remove-SafeManagedDirectoryIfPresent {
 function ConvertTo-PosixSingleQuotedLiteral {
     param([AllowEmptyString()][string]$Value)
     if ($null -eq $Value) { $Value = '' }
-    return "'" + $Value.Replace("'", "'\"'\"'") + "'"
+    $singleQuote = [string][char]39
+    $doubleQuote = [string][char]34
+    $embeddedQuote = $singleQuote + $doubleQuote + $singleQuote + $doubleQuote + $singleQuote
+    return $singleQuote + $Value.Replace($singleQuote, $embeddedQuote) + $singleQuote
 }
 
 function ConvertTo-PowerShellSingleQuotedLiteral {
