@@ -20,7 +20,8 @@ const installGuide = fs.readFileSync(
 describe("runtime documentation contract", () => {
   test("API reference contains every registered MCP tool", () => {
     for (const tool of ALL_TOOLS) {
-      assert.match(apiReference, new RegExp(`\\\`${tool}\\\``), `${tool} must be documented`);
+      const marker = `\`${tool}\``;
+      assert.ok(apiReference.includes(marker), `${tool} must be documented`);
     }
   });
 
@@ -44,7 +45,7 @@ describe("runtime documentation contract", () => {
 
   test("documents the correct wake-up parameter and write endpoint", () => {
     assert.ok(apiReference.includes('memory_wake_up` accepts `workspace_root`'));
-    assert.ok(apiReference.includes("management service — 9341"));
+    assert.ok(apiReference.includes("Management service — 9341"));
     assert.ok(installGuide.includes('memory_wake_up(workspace_root='));
   });
 });
