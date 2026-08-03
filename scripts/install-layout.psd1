@@ -12,6 +12,7 @@
             "memory-watchdog.ps1"
             "memory-watchdog-supervisor.ps1"
             "python-runtime.js"
+            "redaction.js"
             "register-agent.ps1"
             "runtime-platform.ps1"
             "runtime-platform-paths.ps1"
