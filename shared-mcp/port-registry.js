@@ -59,9 +59,6 @@ export const SPLIT_MEMORY_SERVER_PORTS = Object.freeze({
   mgmt: 9341,
 });
 
-// Metrics are separate from the HTTP MCP proxy. The proxy owns 9338–9341;
-// the stdio child owns 9438–9441. Reusing one port causes EADDRINUSE and
-// makes /healthz reset the connection even though child initialization succeeds.
 export const SPLIT_MEMORY_METRICS_PORTS = Object.freeze({
   retrieval: 9438,
   bridge: 9439,
@@ -71,18 +68,53 @@ export const SPLIT_MEMORY_METRICS_PORTS = Object.freeze({
 
 export const CRITICAL_PORTS = [9331, 9332, 9333, 9334, 9335, 9338, 9339, 9340, 9341];
 
+const MAX_PORT_OFFSET = Math.max(
+  ...MCP_SERVERS.flatMap((server) => [server.port, server.metricsPort].filter(Number.isFinite)),
+) - DEFAULT_BASE_PORT;
+
+function validateBasePort(value) {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`invalid AI_MEMORY_BASE_PORT: ${value}`);
+  }
+  if (value + MAX_PORT_OFFSET > 65535) {
+    throw new Error(
+      `AI_MEMORY_BASE_PORT ${value} is too high; derived ports extend to ${value + MAX_PORT_OFFSET}`,
+    );
+  }
+  return value;
+}
+
+function validateDerivedPort(value, label) {
+  if (!Number.isInteger(value) || value <= 0 || value > 65535) {
+    throw new Error(`invalid ${label} port: ${value}`);
+  }
+  return value;
+}
+
 export function resolveBasePort(env = process.env) {
-  const configured = Number.parseInt(env.AI_MEMORY_BASE_PORT || '', 10);
-  return Number.isFinite(configured) && configured > 0
-    ? configured
-    : DEFAULT_BASE_PORT;
+  const raw = String(env.AI_MEMORY_BASE_PORT || '').trim();
+  if (!raw) {
+    return DEFAULT_BASE_PORT;
+  }
+  if (!/^\d+$/.test(raw)) {
+    throw new Error(`invalid AI_MEMORY_BASE_PORT: ${raw}`);
+  }
+  return validateBasePort(Number(raw));
 }
 
 export function getServerPort(server, basePort = resolveBasePort()) {
-  return basePort + (server.port - DEFAULT_BASE_PORT);
+  validateBasePort(basePort);
+  return validateDerivedPort(
+    basePort + (server.port - DEFAULT_BASE_PORT),
+    `${server?.id || 'server'} MCP`,
+  );
 }
 
 export function getServerMetricsPort(server, basePort = resolveBasePort()) {
   if (!Number.isFinite(server?.metricsPort)) return null;
-  return basePort + (server.metricsPort - DEFAULT_BASE_PORT);
+  validateBasePort(basePort);
+  return validateDerivedPort(
+    basePort + (server.metricsPort - DEFAULT_BASE_PORT),
+    `${server?.id || 'server'} metrics`,
+  );
 }

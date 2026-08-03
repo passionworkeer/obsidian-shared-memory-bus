@@ -1,11 +1,5 @@
 /**
- * port-registry-split.test.js
- *
- * Guards the split memory registry contract:
- *   - four split memory entries plus one mutually-exclusive legacy entry
- *   - HTTP MCP proxy ports and child metrics ports are distinct
- *   - both port sets remain aligned by subset
- *   - legacy memory shares the retrieval MCP port only because the modes are exclusive
+ * Guards the split memory registry contract and derived port validation.
  */
 
 import { test, describe } from 'node:test';
@@ -16,6 +10,9 @@ import {
   SPLIT_MEMORY_SERVER_PORTS,
   SPLIT_MEMORY_METRICS_PORTS,
   CRITICAL_PORTS,
+  getServerMetricsPort,
+  getServerPort,
+  resolveBasePort,
 } from '../../../shared-mcp/port-registry.js';
 
 describe('MCP_SERVERS — four-server split integrity', () => {
@@ -87,6 +84,22 @@ describe('split MCP and metrics port registries', () => {
       const subset = server.id.replace('memory-', '');
       assert.equal(server.port, SPLIT_MEMORY_SERVER_PORTS[subset]);
       assert.equal(server.metricsPort, SPLIT_MEMORY_METRICS_PORTS[subset]);
+    }
+  });
+
+  test('derives valid shifted ports from an explicit base', () => {
+    const retrieval = MCP_SERVERS.find((server) => server.id === 'memory-retrieval');
+    assert.equal(resolveBasePort({ AI_MEMORY_BASE_PORT: '12000' }), 12000);
+    assert.equal(getServerPort(retrieval, 12000), 12008);
+    assert.equal(getServerMetricsPort(retrieval, 12000), 12108);
+  });
+
+  test('rejects invalid and overflowing bases before binding', () => {
+    for (const value of ['-1', '0', 'abc', '100.5', '65500']) {
+      assert.throws(
+        () => resolveBasePort({ AI_MEMORY_BASE_PORT: value }),
+        /AI_MEMORY_BASE_PORT/,
+      );
     }
   });
 });
