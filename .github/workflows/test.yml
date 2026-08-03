@@ -30,6 +30,8 @@ jobs:
         run: npm ci
       - name: Generated service artifacts
         run: npm run check:services
+      - name: Generated install file graph
+        run: npm run check:install
       - name: ESLint
         run: npm run lint
       - name: Shell syntax

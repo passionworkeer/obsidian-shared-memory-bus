@@ -1,0 +1,1206 @@
+{
+  "formatVersion": 1,
+  "generatedBy": "scripts/generate-install-file-graph.mjs",
+  "entries": [
+    {
+      "source": "bus/bm25.js",
+      "destination": "bus/bm25.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/domain-error.js",
+      "destination": "bus/domain-error.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/embedding-provider-registry-core.mjs",
+      "destination": "bus/embedding-provider-registry-core.mjs",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/embedding-provider-registry.js",
+      "destination": "bus/embedding-provider-registry.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/embedding-providers/gemini-provider.js",
+      "destination": "bus/embedding-providers/gemini-provider.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/embedding-providers/openai-compatible-provider.js",
+      "destination": "bus/embedding-providers/openai-compatible-provider.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/embedding-providers/transformer-provider.js",
+      "destination": "bus/embedding-providers/transformer-provider.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/embedding-providers/utils.js",
+      "destination": "bus/embedding-providers/utils.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/generate-embeddings-load.js",
+      "destination": "bus/generate-embeddings-load.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/generate-embeddings.js",
+      "destination": "bus/generate-embeddings.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/lsh-hash.js",
+      "destination": "bus/lsh-hash.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/memory-bus-agents.ps1",
+      "destination": "bus/memory-bus-agents.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/memory-bus-artifacts.ps1",
+      "destination": "bus/memory-bus-artifacts.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/memory-bus-cache.ps1",
+      "destination": "bus/memory-bus-cache.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/memory-bus-helpers.ps1",
+      "destination": "bus/memory-bus-helpers.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/memory-bus-optimize.ps1",
+      "destination": "bus/memory-bus-optimize.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/memory-bus-signals.ps1",
+      "destination": "bus/memory-bus-signals.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/memory-bus-sync-importers.ps1",
+      "destination": "bus/memory-bus-sync-importers.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/memory-bus-sync-points.ps1",
+      "destination": "bus/memory-bus-sync-points.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/memory-bus-sync-time.ps1",
+      "destination": "bus/memory-bus-sync-time.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/memory-bus-sync.ps1",
+      "destination": "bus/memory-bus-sync.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/memory-bus-text.ps1",
+      "destination": "bus/memory-bus-text.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/memory-bus.ps1",
+      "destination": "bus/memory-bus.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/memory-watchdog-supervisor.ps1",
+      "destination": "bus/memory-watchdog-supervisor.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/memory-watchdog.ps1",
+      "destination": "bus/memory-watchdog.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/platform/darwin.js",
+      "destination": "bus/platform/darwin.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/platform/index.js",
+      "destination": "bus/platform/index.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/platform/linux.js",
+      "destination": "bus/platform/linux.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/platform/windows.js",
+      "destination": "bus/platform/windows.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/python-runtime.js",
+      "destination": "bus/python-runtime.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/redaction.js",
+      "destination": "bus/redaction.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/register-agent.ps1",
+      "destination": "bus/register-agent.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/runtime-config.js",
+      "destination": "bus/runtime-config.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/runtime-platform-ai-roots.ps1",
+      "destination": "bus/runtime-platform-ai-roots.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/runtime-platform-env.ps1",
+      "destination": "bus/runtime-platform-env.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/runtime-platform-paths.ps1",
+      "destination": "bus/runtime-platform-paths.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/runtime-platform-runtimes.ps1",
+      "destination": "bus/runtime-platform-runtimes.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/runtime-platform-shell.ps1",
+      "destination": "bus/runtime-platform-shell.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/runtime-platform-store.ps1",
+      "destination": "bus/runtime-platform-store.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/runtime-platform.ps1",
+      "destination": "bus/runtime-platform.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/shared-crypto.js",
+      "destination": "bus/shared-crypto.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/store-root.js",
+      "destination": "bus/store-root.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/text-noise.js",
+      "destination": "bus/text-noise.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/time-constants.js",
+      "destination": "bus/time-constants.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/vault-root.js",
+      "destination": "bus/vault-root.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/watchdog/Watchdog-Core.ps1",
+      "destination": "bus/watchdog/Watchdog-Core.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/watchdog/Watchdog-FileWatch.ps1",
+      "destination": "bus/watchdog/Watchdog-FileWatch.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/watchdog/Watchdog-Health.ps1",
+      "destination": "bus/watchdog/Watchdog-Health.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/watchdog/Watchdog-Process.ps1",
+      "destination": "bus/watchdog/Watchdog-Process.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/watchdog/Watchdog-Sync.ps1",
+      "destination": "bus/watchdog/Watchdog-Sync.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/watchdog/Watchdog-Tasks.ps1",
+      "destination": "bus/watchdog/Watchdog-Tasks.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/cleanup/cleanup-inbox.ps1",
+      "destination": "cleanup-inbox.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "cli/ai-memory.js",
+      "destination": "cli/ai-memory.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "cli/commands/doctor.js",
+      "destination": "cli/commands/doctor.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "cli/commands/index.js",
+      "destination": "cli/commands/index.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "cli/commands/init.js",
+      "destination": "cli/commands/init.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "cli/commands/status.js",
+      "destination": "cli/commands/status.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "cli/commands/sync.js",
+      "destination": "cli/commands/sync.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "cli/commands/watch.js",
+      "destination": "cli/commands/watch.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "cli/lib/check.js",
+      "destination": "cli/lib/check.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "cli/lib/exit.js",
+      "destination": "cli/lib/exit.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "cli/lib/parse-args.js",
+      "destination": "cli/lib/parse-args.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "cli/lib/registry.js",
+      "destination": "cli/lib/registry.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "cli/lib/resolve-vault-root.js",
+      "destination": "cli/lib/resolve-vault-root.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "cli/lib/spawn-powershell.js",
+      "destination": "cli/lib/spawn-powershell.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "cli/package.json",
+      "destination": "cli/package.json",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/setup/install-client-integrations.ps1",
+      "destination": "install-client-integrations.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "bus/memory-bus-agents.ps1",
+      "destination": "memory-bus-agents.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "bus/memory-bus-artifacts.ps1",
+      "destination": "memory-bus-artifacts.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "bus/memory-bus-cache.ps1",
+      "destination": "memory-bus-cache.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "bus/memory-bus-helpers.ps1",
+      "destination": "memory-bus-helpers.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "bus/memory-bus-optimize.ps1",
+      "destination": "memory-bus-optimize.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "bus/memory-bus-signals.ps1",
+      "destination": "memory-bus-signals.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "bus/memory-bus-sync-importers.ps1",
+      "destination": "memory-bus-sync-importers.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "bus/memory-bus-sync-points.ps1",
+      "destination": "memory-bus-sync-points.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "bus/memory-bus-sync-time.ps1",
+      "destination": "memory-bus-sync-time.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "bus/memory-bus-sync.ps1",
+      "destination": "memory-bus-sync.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "bus/memory-bus-text.ps1",
+      "destination": "memory-bus-text.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "bus/memory-bus.ps1",
+      "destination": "memory-bus.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "bus/memory-watchdog-supervisor.ps1",
+      "destination": "memory-watchdog-supervisor.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "bus/memory-watchdog.ps1",
+      "destination": "memory-watchdog.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "ops/adapters/generate-schemas.js",
+      "destination": "ops/adapters/generate-schemas.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/adapters/generated/memory-contract-schema.cjs",
+      "destination": "ops/adapters/generated/memory-contract-schema.cjs",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/adapters/generated/memory-contract-schema.js",
+      "destination": "ops/adapters/generated/memory-contract-schema.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/adapters/generated/schema-validation-py.py",
+      "destination": "ops/adapters/generated/schema-validation-py.py",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/adapters/migrate-schema.js",
+      "destination": "ops/adapters/migrate-schema.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/adapters/schema-registry.json",
+      "destination": "ops/adapters/schema-registry.json",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/build/build-handoff-pack.js",
+      "destination": "ops/build/build-handoff-pack.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/build/build-l0-l1-bootstrap.js",
+      "destination": "ops/build/build-l0-l1-bootstrap.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/build/build-memory-layers.js",
+      "destination": "ops/build/build-memory-layers.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/cascade/cascade-queue.js",
+      "destination": "ops/cascade/cascade-queue.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/cascade/cascade-worker.js",
+      "destination": "ops/cascade/cascade-worker.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/check/check-memory-integrity.js",
+      "destination": "ops/check/check-memory-integrity.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/check/check-vbs.js",
+      "destination": "ops/check/check-vbs.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/cleanup/cleanup-inbox.ps1",
+      "destination": "ops/cleanup/cleanup-inbox.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/daemon/obsidian-blackboard-daemon.js",
+      "destination": "ops/daemon/obsidian-blackboard-daemon.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/entity/entity-backfill.js",
+      "destination": "ops/entity/entity-backfill.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/entity/entity-extractor.js",
+      "destination": "ops/entity/entity-extractor.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/entity/entity-extractor/extractors.js",
+      "destination": "ops/entity/entity-extractor/extractors.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/entity/entity-extractor/patterns.js",
+      "destination": "ops/entity/entity-extractor/patterns.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/entity/entity-extractor/pipeline.js",
+      "destination": "ops/entity/entity-extractor/pipeline.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/entity/stopwords/chinese.js",
+      "destination": "ops/entity/stopwords/chinese.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/entity/stopwords/english.js",
+      "destination": "ops/entity/stopwords/english.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/entity/stopwords/index.js",
+      "destination": "ops/entity/stopwords/index.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/entity/stopwords/programming.js",
+      "destination": "ops/entity/stopwords/programming.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/entity/stopwords/prose.js",
+      "destination": "ops/entity/stopwords/prose.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/export/export-md.js",
+      "destination": "ops/export/export-md.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/generate/generate-context.js",
+      "destination": "ops/generate/generate-context.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/generate/generate-memory-hygiene-report.js",
+      "destination": "ops/generate/generate-memory-hygiene-report.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/generate/refresh-generated-artifacts.cjs",
+      "destination": "ops/generate/refresh-generated-artifacts.cjs",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/generate/refresh-generated-artifacts.js",
+      "destination": "ops/generate/refresh-generated-artifacts.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/inbox/inbox-atomic-write.js",
+      "destination": "ops/inbox/inbox-atomic-write.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/knowledge/knowledge-graph.js",
+      "destination": "ops/knowledge/knowledge-graph.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/knowledge/knowledge-graph/class-core.js",
+      "destination": "ops/knowledge/knowledge-graph/class-core.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/knowledge/knowledge-graph/cli.js",
+      "destination": "ops/knowledge/knowledge-graph/cli.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/knowledge/knowledge-graph/db.js",
+      "destination": "ops/knowledge/knowledge-graph/db.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/knowledge/knowledge-graph/methods.js",
+      "destination": "ops/knowledge/knowledge-graph/methods.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/mcp/canonical-memory-write.js",
+      "destination": "ops/mcp/canonical-memory-write.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/mcp/mcp-memory-tools-handler.js",
+      "destination": "ops/mcp/mcp-memory-tools-handler.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/mcp/mcp-memory-tools.js",
+      "destination": "ops/mcp/mcp-memory-tools.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/memory/entry-parsers.js",
+      "destination": "ops/memory/entry-parsers.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/memory/lazy-loaders.js",
+      "destination": "ops/memory/lazy-loaders.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/memory/memory-archival.js",
+      "destination": "ops/memory/memory-archival.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/memory/memory-contract.js",
+      "destination": "ops/memory/memory-contract.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/memory/memory-contract/schema.js",
+      "destination": "ops/memory/memory-contract/schema.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/memory/memory-contract/scoring.js",
+      "destination": "ops/memory/memory-contract/scoring.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/memory/memory-contract/validation.js",
+      "destination": "ops/memory/memory-contract/validation.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/memory/memory-layers-context.js",
+      "destination": "ops/memory/memory-layers-context.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/memory/memory-layers-dedup.js",
+      "destination": "ops/memory/memory-layers-dedup.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/memory/memory-layers-parse.js",
+      "destination": "ops/memory/memory-layers-parse.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/memory/memory-promotion-resolver-core.mjs",
+      "destination": "ops/memory/memory-promotion-resolver-core.mjs",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/memory/memory-promotion-resolver.js",
+      "destination": "ops/memory/memory-promotion-resolver.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/memory/memory-promotion-scorer-core.mjs",
+      "destination": "ops/memory/memory-promotion-scorer-core.mjs",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/memory/memory-promotion-scorer.js",
+      "destination": "ops/memory/memory-promotion-scorer.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/memory/paths-and-io.js",
+      "destination": "ops/memory/paths-and-io.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/memory/record-coercion.js",
+      "destination": "ops/memory/record-coercion.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/migrations/kg-v1-to-v2.js",
+      "destination": "ops/migrations/kg-v1-to-v2.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/redact/redaction.py",
+      "destination": "ops/redact/redaction.py",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/run/run-memory-dream.ps1",
+      "destination": "ops/run/run-memory-dream.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/run/run-minimax-mcp.ps1",
+      "destination": "ops/run/run-minimax-mcp.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/run/run-obsidian-mcp.ps1",
+      "destination": "ops/run/run-obsidian-mcp.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/run/run-pressure-test.ps1",
+      "destination": "ops/run/run-pressure-test.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/setup/install-client-integrations.ps1",
+      "destination": "ops/setup/install-client-integrations.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/setup/migrate-to-store.js",
+      "destination": "ops/setup/migrate-to-store.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/setup/setup-wizard.ps1",
+      "destination": "ops/setup/setup-wizard.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/stress/stress-test-concurrent.js",
+      "destination": "ops/stress/stress-test-concurrent.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/sync/sync-claudemem-to-obsidian.ps1",
+      "destination": "ops/sync/sync-claudemem-to-obsidian.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/sync/sync-openclaw-to-obsidian.js",
+      "destination": "ops/sync/sync-openclaw-to-obsidian.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/sync/sync-shared-skills.ps1",
+      "destination": "ops/sync/sync-shared-skills.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/util/cjk-tokenize.js",
+      "destination": "ops/util/cjk-tokenize.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/util/jsonl-stream.js",
+      "destination": "ops/util/jsonl-stream.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/util/safe-realpath.js",
+      "destination": "ops/util/safe-realpath.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/verify/verify-atomic-write.js",
+      "destination": "ops/verify/verify-atomic-write.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/verify/verify-client-integrations.ps1",
+      "destination": "ops/verify/verify-client-integrations.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/verify/verify-integrations.ps1",
+      "destination": "ops/verify/verify-integrations.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "bus/register-agent.ps1",
+      "destination": "register-agent.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "retrieval/__init__.py",
+      "destination": "retrieval/__init__.py",
+      "kind": "runtime"
+    },
+    {
+      "source": "retrieval/ann_index.py",
+      "destination": "retrieval/ann_index.py",
+      "kind": "runtime"
+    },
+    {
+      "source": "retrieval/backpressure.py",
+      "destination": "retrieval/backpressure.py",
+      "kind": "runtime"
+    },
+    {
+      "source": "retrieval/circuit_breaker.py",
+      "destination": "retrieval/circuit_breaker.py",
+      "kind": "runtime"
+    },
+    {
+      "source": "retrieval/embedding_providers.py",
+      "destination": "retrieval/embedding_providers.py",
+      "kind": "runtime"
+    },
+    {
+      "source": "retrieval/lsh_utils.py",
+      "destination": "retrieval/lsh_utils.py",
+      "kind": "runtime"
+    },
+    {
+      "source": "retrieval/metrics_exporter.py",
+      "destination": "retrieval/metrics_exporter.py",
+      "kind": "runtime"
+    },
+    {
+      "source": "retrieval/platform.py",
+      "destination": "retrieval/platform.py",
+      "kind": "runtime"
+    },
+    {
+      "source": "retrieval/probe-models.py",
+      "destination": "retrieval/probe-models.py",
+      "kind": "runtime"
+    },
+    {
+      "source": "retrieval/requirements.txt",
+      "destination": "retrieval/requirements.txt",
+      "kind": "runtime"
+    },
+    {
+      "source": "retrieval/runtime_support.py",
+      "destination": "retrieval/runtime_support.py",
+      "kind": "runtime"
+    },
+    {
+      "source": "retrieval/schema_validation.py",
+      "destination": "retrieval/schema_validation.py",
+      "kind": "runtime"
+    },
+    {
+      "source": "retrieval/search_cache.py",
+      "destination": "retrieval/search_cache.py",
+      "kind": "runtime"
+    },
+    {
+      "source": "retrieval/search_index.py",
+      "destination": "retrieval/search_index.py",
+      "kind": "runtime"
+    },
+    {
+      "source": "retrieval/search_ranking.py",
+      "destination": "retrieval/search_ranking.py",
+      "kind": "runtime"
+    },
+    {
+      "source": "retrieval/search_server.py",
+      "destination": "retrieval/search_server.py",
+      "kind": "runtime"
+    },
+    {
+      "source": "retrieval/semantic_search.py",
+      "destination": "retrieval/semantic_search.py",
+      "kind": "runtime"
+    },
+    {
+      "source": "retrieval/semantic-search-cli.js",
+      "destination": "retrieval/semantic-search-cli.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "retrieval/semantic-search.js",
+      "destination": "retrieval/semantic-search.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "retrieval/streaming_index.py",
+      "destination": "retrieval/streaming_index.py",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/run/run-memory-dream.ps1",
+      "destination": "run-memory-dream.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "ops/run/run-minimax-mcp.ps1",
+      "destination": "run-minimax-mcp.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "ops/run/run-obsidian-mcp.ps1",
+      "destination": "run-obsidian-mcp.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "ops/run/run-pressure-test.ps1",
+      "destination": "run-pressure-test.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "bus/runtime-platform-ai-roots.ps1",
+      "destination": "runtime-platform-ai-roots.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "bus/runtime-platform-env.ps1",
+      "destination": "runtime-platform-env.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "bus/runtime-platform-paths.ps1",
+      "destination": "runtime-platform-paths.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "bus/runtime-platform-runtimes.ps1",
+      "destination": "runtime-platform-runtimes.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "bus/runtime-platform-shell.ps1",
+      "destination": "runtime-platform-shell.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "bus/runtime-platform-store.ps1",
+      "destination": "runtime-platform-store.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "bus/runtime-platform.ps1",
+      "destination": "runtime-platform.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "ops/setup/setup-wizard.ps1",
+      "destination": "setup-wizard.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "shared-mcp/embedding-worker-pool.cjs",
+      "destination": "shared-mcp/embedding-worker-pool.cjs",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/embedding-worker-script.cjs",
+      "destination": "shared-mcp/embedding-worker-script.cjs",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/health-check.js",
+      "destination": "shared-mcp/health-check.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/ipc-protocol.js",
+      "destination": "shared-mcp/ipc-protocol.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/manifest.json",
+      "destination": "shared-mcp/manifest.json",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/memory-bridge.js",
+      "destination": "shared-mcp/memory-bridge.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/memory-embeddings.js",
+      "destination": "shared-mcp/memory-embeddings.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/memory-generation.js",
+      "destination": "shared-mcp/memory-generation.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/memory-retrieval.js",
+      "destination": "shared-mcp/memory-retrieval.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/memory-status.js",
+      "destination": "shared-mcp/memory-status.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/memory-tools.js",
+      "destination": "shared-mcp/memory-tools.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/metrics/compute.js",
+      "destination": "shared-mcp/metrics/compute.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/metrics/index.js",
+      "destination": "shared-mcp/metrics/index.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/metrics/server.js",
+      "destination": "shared-mcp/metrics/server.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/metrics/source.js",
+      "destination": "shared-mcp/metrics/source.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/metrics/structured-logger.js",
+      "destination": "shared-mcp/metrics/structured-logger.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/metrics/trace-manager.js",
+      "destination": "shared-mcp/metrics/trace-manager.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/omni-handlers.js",
+      "destination": "shared-mcp/omni-handlers.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/omni-memory-server.js",
+      "destination": "shared-mcp/omni-memory-server.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/omni-metrics.js",
+      "destination": "shared-mcp/omni-metrics.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/omni-platform-helpers.js",
+      "destination": "shared-mcp/omni-platform-helpers.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/omni-store.js",
+      "destination": "shared-mcp/omni-store.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/package-lock.json",
+      "destination": "shared-mcp/package-lock.json",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/package.json",
+      "destination": "shared-mcp/package.json",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/playwright-stdio-proxy.js",
+      "destination": "shared-mcp/playwright-stdio-proxy.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/port-registry.js",
+      "destination": "shared-mcp/port-registry.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/proto/bind-host.mjs",
+      "destination": "shared-mcp/proto/bind-host.mjs",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/proto/child-process.mjs",
+      "destination": "shared-mcp/proto/child-process.mjs",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/proto/http-guard.mjs",
+      "destination": "shared-mcp/proto/http-guard.mjs",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/proto/restart.mjs",
+      "destination": "shared-mcp/proto/restart.mjs",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/proto/rpc.mjs",
+      "destination": "shared-mcp/proto/rpc.mjs",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/proto/windows-shim.mjs",
+      "destination": "shared-mcp/proto/windows-shim.mjs",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/scripts/blackboard_query.py",
+      "destination": "shared-mcp/scripts/blackboard_query.py",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/services.registry.json",
+      "destination": "shared-mcp/services.registry.json",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/services.registry.schema.json",
+      "destination": "shared-mcp/services.registry.schema.json",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/singleton-stdio-mcp-proxy.mjs",
+      "destination": "shared-mcp/singleton-stdio-mcp-proxy.mjs",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/spawn-plan.js",
+      "destination": "shared-mcp/spawn-plan.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/start-default-shared-mcp.ps1",
+      "destination": "shared-mcp/start-default-shared-mcp.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/start-default-shared-mcp.sh",
+      "destination": "shared-mcp/start-default-shared-mcp.sh",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/start-shared-mcp.ps1",
+      "destination": "shared-mcp/start-shared-mcp.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/start-shared-mcp.sh",
+      "destination": "shared-mcp/start-shared-mcp.sh",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/status-shared-mcp.ps1",
+      "destination": "shared-mcp/status-shared-mcp.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/status-shared-mcp.sh",
+      "destination": "shared-mcp/status-shared-mcp.sh",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/stop-shared-mcp.ps1",
+      "destination": "shared-mcp/stop-shared-mcp.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/stop-shared-mcp.sh",
+      "destination": "shared-mcp/stop-shared-mcp.sh",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/tool-registry.js",
+      "destination": "shared-mcp/tool-registry.js",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared-mcp/write-config-snippets.ps1",
+      "destination": "shared-mcp/write-config-snippets.ps1",
+      "kind": "runtime"
+    },
+    {
+      "source": "shared/structured-files.json",
+      "destination": "shared/structured-files.json",
+      "kind": "runtime"
+    },
+    {
+      "source": "ops/sync/sync-claudemem-to-obsidian.ps1",
+      "destination": "sync-claudemem-to-obsidian.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "ops/sync/sync-shared-skills.ps1",
+      "destination": "sync-shared-skills.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "ops/verify/verify-client-integrations.ps1",
+      "destination": "verify-client-integrations.ps1",
+      "kind": "root-compat"
+    },
+    {
+      "source": "ops/verify/verify-integrations.ps1",
+      "destination": "verify-integrations.ps1",
+      "kind": "root-compat"
+    }
+  ]
+}
