@@ -1,13 +1,5 @@
 /**
- * Unit tests for shared-mcp/tool-registry.js
- *
- * 守护拆分契约:
- *   - 4 个子集名集合的并集 = TOOLS 全集 (29 个)
- *   - 子集之间无重复 (一个工具只能归属一个 server)
- *   - pickTools / pickHandlers 按名过滤正确
- *   - SERVER_DEFINITIONS 4 个 server 的端口唯一
- *
- * Run: node --test tests/unit/js/tool-registry.test.js
+ * Unit tests for shared-mcp/tool-registry.js.
  */
 
 import { test, describe } from "node:test";
@@ -26,8 +18,9 @@ import {
 } from "../../../shared-mcp/tool-registry.js";
 
 describe("tool-registry subset coverage", () => {
-  test("RETRIEVAL_TOOLS has 14 entries", () => {
-    assert.equal(RETRIEVAL_TOOLS.length, 14);
+  test("RETRIEVAL_TOOLS has 13 read-only entries", () => {
+    assert.equal(RETRIEVAL_TOOLS.length, 13);
+    assert.equal(RETRIEVAL_TOOLS.includes("memory_write"), false);
   });
 
   test("BRIDGE_TOOLS has 6 entries", () => {
@@ -38,26 +31,26 @@ describe("tool-registry subset coverage", () => {
     assert.equal(DREAM_TOOLS.length, 3);
   });
 
-  test("MGMT_TOOLS has 6 entries", () => {
-    assert.equal(MGMT_TOOLS.length, 6);
+  test("MGMT_TOOLS has 7 entries including memory_write", () => {
+    assert.equal(MGMT_TOOLS.length, 7);
+    assert.equal(MGMT_TOOLS.includes("memory_write"), true);
   });
 
-  test("4 subsets sum to 29 tools (no missing, no extra)", () => {
+  test("4 subsets cover the complete tool registry", () => {
     const total = RETRIEVAL_TOOLS.length + BRIDGE_TOOLS.length + DREAM_TOOLS.length + MGMT_TOOLS.length;
-    assert.equal(total, 29);
-    assert.equal(total, TOOLS.length, "TOOLS 全集应有 29 个工具");
+    assert.equal(total, TOOLS.length);
   });
 
-  test("ALL_TOOLS = TOOLS (按工具名顺序对齐)", () => {
+  test("ALL_TOOLS contains every registered tool", () => {
     const allNames = new Set(ALL_TOOLS);
-    const toolNames = new Set(TOOLS.map((t) => t.name));
+    const toolNames = new Set(TOOLS.map((tool) => tool.name));
     assert.equal(allNames.size, toolNames.size);
     for (const name of toolNames) {
-      assert.ok(allNames.has(name), `TOOLS 中的 ${name} 应在 ALL_TOOLS 中`);
+      assert.ok(allNames.has(name), `${name} must be present in ALL_TOOLS`);
     }
   });
 
-  test("subsets are mutually exclusive (no tool in 2 servers)", () => {
+  test("subsets are mutually exclusive", () => {
     const seen = new Map();
     for (const [subsetName, tools] of [
       ["RETRIEVAL", RETRIEVAL_TOOLS],
@@ -67,91 +60,86 @@ describe("tool-registry subset coverage", () => {
     ]) {
       for (const tool of tools) {
         if (seen.has(tool)) {
-          assert.fail(`工具 ${tool} 同时出现在 ${seen.get(tool)} 和 ${subsetName}`);
+          assert.fail(`${tool} appears in both ${seen.get(tool)} and ${subsetName}`);
         }
         seen.set(tool, subsetName);
       }
     }
   });
 
-  test("每个 tool 名都在 TOOLS 中实际存在", () => {
-    const validNames = new Set(TOOLS.map((t) => t.name));
+  test("every subset name exists in TOOLS", () => {
+    const validNames = new Set(TOOLS.map((tool) => tool.name));
     for (const name of ALL_TOOLS) {
-      assert.ok(validNames.has(name), `子集中的 ${name} 在 TOOLS 中不存在`);
+      assert.ok(validNames.has(name), `${name} is missing from TOOLS`);
     }
   });
 });
 
-describe("pickTools / pickHandlers 过滤逻辑", () => {
-  test("pickTools(undefined) 返回完整 TOOLS", () => {
-    const result = pickTools(undefined);
-    assert.equal(result.length, TOOLS.length);
+describe("pickTools / pickHandlers", () => {
+  test("pickTools(undefined) returns all tools", () => {
+    assert.equal(pickTools(undefined).length, TOOLS.length);
   });
 
-  test("pickTools([]) 返回完整 TOOLS (与 undefined 等价)", () => {
-    const result = pickTools([]);
-    assert.equal(result.length, TOOLS.length);
+  test("pickTools([]) returns all tools", () => {
+    assert.equal(pickTools([]).length, TOOLS.length);
   });
 
-  test("pickTools(RETRIEVAL_TOOLS) 只返回 14 个", () => {
+  test("pickTools(RETRIEVAL_TOOLS) returns only retrieval tools", () => {
     const result = pickTools(RETRIEVAL_TOOLS);
-    assert.equal(result.length, 14);
+    assert.equal(result.length, RETRIEVAL_TOOLS.length);
     for (const tool of result) {
       assert.ok(RETRIEVAL_TOOLS.includes(tool.name));
     }
   });
 
-  test("pickTools(['memory_status']) 返回 1 个", () => {
+  test("pickTools filters exact names", () => {
     const result = pickTools(["memory_status"]);
     assert.equal(result.length, 1);
     assert.equal(result[0].name, "memory_status");
   });
 
-  test("pickTools(['不存在']) 返回 0 个", () => {
-    const result = pickTools(["不存在的工具名"]);
-    assert.equal(result.length, 0);
+  test("pickTools returns empty for unknown names", () => {
+    assert.equal(pickTools(["missing-tool"]).length, 0);
   });
 
-  test("pickHandlers 按 names 过滤", () => {
+  test("pickHandlers filters by subset", () => {
     const fakeHandlers = {
       memory_status: () => "a",
       search_shared_memory: () => "b",
-      run_memory_dream: () => "c",
+      memory_write: () => "c",
     };
     const result = pickHandlers(fakeHandlers, RETRIEVAL_TOOLS);
     assert.ok(result.memory_status);
     assert.ok(result.search_shared_memory);
-    assert.equal(result.run_memory_dream, undefined, "DREAM 工具不应漏到 RETRIEVAL");
+    assert.equal(result.memory_write, undefined);
   });
 
-  test("pickHandlers(undefined) 返回完整 handler 表", () => {
+  test("pickHandlers(undefined) returns all handlers", () => {
     const fakeHandlers = { a: () => 1, b: () => 2 };
-    const result = pickHandlers(fakeHandlers, undefined);
-    assert.equal(Object.keys(result).length, 2);
+    assert.equal(Object.keys(pickHandlers(fakeHandlers, undefined)).length, 2);
   });
 });
 
-describe("SERVER_DEFINITIONS 元信息", () => {
-  test("4 个 server 端口唯一且为 9338-9341", () => {
-    const ports = Object.values(SERVER_DEFINITIONS).map((d) => d.port);
-    assert.equal(ports.length, 4);
-    assert.equal(new Set(ports).size, 4, "端口应全部唯一");
+describe("SERVER_DEFINITIONS", () => {
+  test("ports are unique and cover 9338-9341", () => {
+    const ports = Object.values(SERVER_DEFINITIONS).map((definition) => definition.port);
+    assert.equal(new Set(ports).size, 4);
     assert.deepEqual([...ports].sort(), [9338, 9339, 9340, 9341]);
   });
 
-  test("4 个 serverName 唯一", () => {
-    const names = Object.values(SERVER_DEFINITIONS).map((d) => d.serverName);
+  test("server names are unique", () => {
+    const names = Object.values(SERVER_DEFINITIONS).map((definition) => definition.serverName);
     assert.equal(new Set(names).size, 4);
   });
 
-  test("每个 SERVER_DEFINITION 的 tools 与对应子集一致", () => {
+  test("definitions reference the expected subsets", () => {
     assert.deepEqual([...SERVER_DEFINITIONS.retrieval.tools], [...RETRIEVAL_TOOLS]);
     assert.deepEqual([...SERVER_DEFINITIONS.bridge.tools], [...BRIDGE_TOOLS]);
     assert.deepEqual([...SERVER_DEFINITIONS.dream.tools], [...DREAM_TOOLS]);
     assert.deepEqual([...SERVER_DEFINITIONS.mgmt.tools], [...MGMT_TOOLS]);
   });
 
-  test("SERVER_DEFINITIONS 是冻结的 (防止运行时篡改)", () => {
+  test("definitions are frozen", () => {
     assert.ok(Object.isFrozen(SERVER_DEFINITIONS));
     assert.ok(Object.isFrozen(SERVER_DEFINITIONS.retrieval));
   });
