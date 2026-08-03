@@ -1,0 +1,26 @@
+name: Export Source Snapshot
+
+on:
+  push:
+    branches:
+      - agent/security-hardening-batch
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Archive source
+        run: tar --exclude=.git -czf source-snapshot.tgz .
+      - name: Upload source
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-snapshot
+          path: source-snapshot.tgz
+          if-no-files-found: error
