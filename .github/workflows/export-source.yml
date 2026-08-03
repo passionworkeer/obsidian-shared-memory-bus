@@ -64,8 +64,8 @@ jobs:
           base64 --decode "$encoded" > "$compressed"
           gzip -dc "$compressed" > "$patch"
           echo "1d2b003d801759bedb04fd14ac9f17ee05536430f6f2b5a2199154571deb1c0d  $patch" | sha256sum -c -
-          git apply --check --ignore-space-change --ignore-whitespace "$patch"
-          git apply --ignore-space-change --ignore-whitespace "$patch"
+          git apply --check --ignore-space-change --ignore-whitespace --exclude=.github/workflows/export-source.yml "$patch"
+          git apply --ignore-space-change --ignore-whitespace --exclude=.github/workflows/export-source.yml "$patch"
           rm -rf .github/security-patch
           rm -f .github/workflows/export-source.yml
           git diff --check
