@@ -1,7 +1,13 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { activeServers, gooseBlock, makeUrl, parseArgs } from '../../../setup-mcp.js';
+import {
+  activeServers,
+  gooseBlock,
+  makeUrl,
+  normalizeLoopbackHost,
+  parseArgs,
+} from '../../../setup-mcp.js';
 
 describe('setup-mcp argument parsing', () => {
   test('supports target, mode, and dry-run arguments', () => {
@@ -41,6 +47,36 @@ describe('setup-mcp endpoint selection', () => {
   });
 });
 
+describe('setup-mcp host validation', () => {
+  test('accepts only loopback host spellings', () => {
+    assert.equal(normalizeLoopbackHost('127.0.0.1'), '127.0.0.1');
+    assert.equal(normalizeLoopbackHost('LOCALHOST'), 'localhost');
+    assert.equal(normalizeLoopbackHost('::1'), '[::1]');
+    assert.equal(normalizeLoopbackHost('[::1]'), '[::1]');
+  });
+
+  test('rejects remote, credentialed, and control-character hosts', () => {
+    for (const host of [
+      'evil.example',
+      '192.168.1.50',
+      '127.0.0.1.evil.example',
+      'user@127.0.0.1',
+      '127.0.0.1/path',
+      '127.0.0.1\nmalicious: true',
+    ]) {
+      assert.throws(() => normalizeLoopbackHost(host), /AI_MEMORY_HOST/);
+    }
+  });
+
+  test('cannot redirect generated agent endpoints to a remote host', () => {
+    const fetchServer = activeServers({}).find((server) => server.id === 'fetch');
+    assert.throws(
+      () => makeUrl(fetchServer, { AI_MEMORY_HOST: 'attacker.example' }),
+      /must be loopback/,
+    );
+  });
+});
+
 describe('Goose YAML generation', () => {
   test('generates one extensions key for all endpoints', () => {
     const yaml = gooseBlock({});
@@ -48,5 +84,10 @@ describe('Goose YAML generation', () => {
     for (const id of ['fetch', 'time', 'memory-retrieval', 'memory-bridge', 'memory-dream', 'memory-mgmt']) {
       assert.match(yaml, new RegExp(`^  ${id}:$`, 'm'));
     }
+  });
+
+  test('quotes generated URLs as YAML scalars', () => {
+    const yaml = gooseBlock({ AI_MEMORY_HOST: 'localhost' });
+    assert.match(yaml, /^    url: "http:\/\/localhost:\d+\/mcp"$/m);
   });
 });
