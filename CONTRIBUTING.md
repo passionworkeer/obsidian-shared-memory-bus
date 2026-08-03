@@ -13,7 +13,7 @@ Thank you for contributing. Keep changes reviewable, include regression tests fo
 ```bash
 git clone https://github.com/passionworkeer/obsidian-shared-memory-bus.git
 cd obsidian-shared-memory-bus
-npm install
+npm ci
 ```
 
 Optional installer entry points:
@@ -31,6 +31,7 @@ pwsh -NoProfile -File ./scripts/install.ps1 -WorkspaceRoot .
 Run the checks relevant to your change. Before requesting final review, run as much of the following as your environment supports:
 
 ```bash
+npm run check:services
 npm run lint
 npm test
 npm run test:concurrent
@@ -53,6 +54,14 @@ pwsh -NoProfile -File ./scripts/validate-layout.ps1
 node ops/check/check-memory-integrity.js --strict
 ```
 
+For landing-page changes:
+
+```bash
+cd web
+npm ci
+npm run build:check
+```
+
 JavaScript is checked with the root flat ESLint configuration. The repository does not currently enforce Prettier, Black, or isort as CI gates, so do not claim those checks were run unless you ran them explicitly.
 
 ## Pull request process
@@ -64,8 +73,54 @@ JavaScript is checked with the root flat ESLint configuration. The repository do
 5. Complete the pull request template, including root cause and user impact for fixes.
 6. Resolve review threads before merge.
 7. Do not merge while required CI checks are failing.
+8. Prefer squash merge for normal pull requests.
 
 Large architecture changes should first add or update an ADR in [`docs/adr/`](docs/adr/). Prefer several small PRs over one repository-wide rewrite.
+
+## Main branch protection
+
+Branch protection is a repository setting and cannot be established by a source-code pull request. A repository administrator must configure `main` in **Settings → Branches** or an equivalent repository ruleset.
+
+Recommended rules:
+
+- Require a pull request before merging.
+- Require at least one approval for non-trivial changes.
+- Dismiss stale approvals after new commits.
+- Require all review conversations to be resolved.
+- Require the branch to be up to date before merge.
+- Block force pushes and branch deletion.
+- Do not permit routine bypass; keep emergency administrator bypass explicit and auditable.
+- Require signed commits only when every supported contribution path can satisfy that rule.
+
+The always-running required status checks are:
+
+- `Lint and static checks`
+- `JS unit (Node 22)`
+- `JS unit (Node 24)`
+- `Python unit`
+- `Cross-language equivalence`
+- `Integration`
+- `Platform smoke (ubuntu-latest)`
+- `Platform smoke (macos-latest)`
+- `Platform smoke (windows-latest)`
+- `Package smoke`
+- `validate`
+- `portable-core (ubuntu-latest)`
+- `portable-core (macos-latest)`
+- `portable-core (windows-latest)`
+
+Do not globally require path-filtered workflows such as `Docker` or `Landing Build`: GitHub may leave them absent on unrelated changes, which can block merging. Their checks must pass whenever they are triggered by affected paths.
+
+After enabling protection, verify it with a disposable pull request:
+
+1. Add a deliberately failing test and confirm merge is blocked.
+2. Restore the test and confirm required checks become green.
+3. Leave an unresolved review thread and confirm merge remains blocked.
+4. Resolve the thread and confirm the PR becomes eligible.
+5. Attempt a direct push and confirm it is rejected.
+6. Close the disposable PR without merging.
+
+Release tags must point to commits reachable from protected `main`.
 
 ## Platform rules
 
@@ -89,17 +144,17 @@ Do not maintain hard-coded test totals in documentation. GitHub Actions results 
 
 ## Adding or changing MCP services
 
-The core launcher and client configurator must consume the same service plan. Changes to core services should normally update:
+`shared-mcp/services.registry.json` is the canonical service identity, topology, command and port source.
 
-- `shared-mcp/port-registry.js`
-- `shared-mcp/spawn-plan.js`
-- `start.js`
-- `setup-mcp.js`
-- doctor/status checks
-- unit tests
-- README endpoint documentation
+For service changes:
 
-Optional services documented in `shared-mcp/manifest.json` are not automatically part of the core launcher. Before promoting an optional service to core, document its version pin, startup command, health probe, session-isolation behavior, and failure mode.
+1. Edit `shared-mcp/services.registry.json`.
+2. Run `npm run generate:services`.
+3. Include the generated `shared-mcp/manifest.json` change in the same PR.
+4. Update behavior-specific code only when the service implementation itself changed.
+5. Run `npm run check:services`, unit tests and relevant platform/Docker checks.
+
+Do not hand-edit runtime ports in `port-registry.js`. Optional services must document a pinned version, startup command, health probe, session-isolation behavior and failure mode. Production fallback commands must not use `@latest`.
 
 ## Adding an agent integration
 
