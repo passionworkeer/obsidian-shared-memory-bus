@@ -1,6 +1,7 @@
 // OpenAI-compatible embedding provider (fetch + retry + backoff).
 
 import { DomainError, COMMON_CODES } from "../domain-error.js";
+import { redactRemoteEmbeddingTexts } from "../redaction.js";
 import { getProviderHost, normalizeString } from "./utils.js";
 
 export function createOpenAICompatibleProvider({ fetchImpl, sleep }) {
@@ -10,6 +11,7 @@ export function createOpenAICompatibleProvider({ fetchImpl, sleep }) {
     const timeoutMs = Math.max(1000, Number(runtime.timeoutMs || 120000) || 120000);
     const requestDelayMs = Math.max(0, Number(runtime.requestDelayMs || 0) || 0);
     const maxRetries = Math.max(0, Number(runtime.maxRetries || 3) || 3);
+    const safeTexts = redactRemoteEmbeddingTexts(texts);
 
     if (!baseUrl) {
       throw new DomainError(COMMON_CODES.INVALID_INPUT, "missing-openai-base-url");
@@ -44,7 +46,7 @@ export function createOpenAICompatibleProvider({ fetchImpl, sleep }) {
           },
           body: JSON.stringify({
             model: normalizeString(runtime.model),
-            input: texts,
+            input: safeTexts,
             encoding_format: "float",
           }),
           signal: controller.signal,
@@ -71,10 +73,10 @@ export function createOpenAICompatibleProvider({ fetchImpl, sleep }) {
               .map((item) => item.embedding)
           : [];
 
-        if (vectors.length !== texts.length) {
+        if (vectors.length !== safeTexts.length) {
           throw new DomainError(
             COMMON_CODES.EXTERNAL_SERVICE,
-            `openai-compatible-count-mismatch:${vectors.length}/${texts.length}`,
+            `openai-compatible-count-mismatch:${vectors.length}/${safeTexts.length}`,
           );
         }
 
