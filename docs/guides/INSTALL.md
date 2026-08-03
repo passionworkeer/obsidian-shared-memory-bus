@@ -1,347 +1,233 @@
 # Install
 
 ## Requirements
-- Windows PowerShell for the Windows install/startup flow
-- PowerShell 7 (`pwsh`) for macOS/Linux install and shared-MCP control scripts
-- Node.js on `PATH`
-- A usable Python runtime for shared semantic search; `scripts/install.ps1` auto-detects one and can fall back to uv-managed Python
-- `uv` if you want the shared `fetch` and `time` MCP services
-- `npx` if you want the shared `context7` and `sequential-thinking` MCP services
 
-> **Note:** Obsidian is no longer required. The shared memory store is a pure local filesystem at `AI_MEMORY_STORE` (default `E:\.ai-memory\`). Obsidian can still be used as a human-readable browsing layer, but it is not a dependency.
+- Node.js 22 or newer
+- Python 3.10 or newer for retrieval and the `fetch` / `time` utility servers
+- PowerShell 7 (`pwsh`) for the cross-platform installer and PowerShell operations
+- `npm`; `uv` is recommended for Python runtime management
+- `npx` only for optional JavaScript MCP services such as Context7
 
-## Support Levels
-- Windows:
-  - full install, shared MCP startup, watchdog startup registration, and client wiring are live-validated here
-- macOS/Linux:
-  - install, shared-MCP start/status/stop wrappers, and startup registration are implemented through `pwsh`
-  - installed runtime commands now also get generated root `.sh` wrappers so day-to-day operations do not require manually typing `pwsh -File ...`
-  - the shipped `.sh` wrappers are POSIX `sh`, not Bash-only
-  - current live acceptance is still deepest on Windows, but the portable entrypoints and layout are now shipped in the public bundle
+Obsidian is optional. The canonical data store is a local filesystem directory resolved from `AI_MEMORY_STORE`, `AI_MEMORY_STORE_ROOT`, an existing Obsidian `00-System/ai-memory` bridge, or the platform fallback.
 
-## Default Install Target
-The bundle installs into:
+## Source checkout
 
-`~/.ai-memory` on every platform.
-
-## One-Line Install
 From the repository root:
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -WorkspaceRoot <your-project-root>
+```bash
+npm ci
+npm start
 ```
+
+The default topology is `split`. It starts:
+
+| Service | Port | Role |
+| --- | ---: | --- |
+| `fetch` | 9332 | Web fetch utility |
+| `time` | 9333 | Time utility |
+| `memory-retrieval` | 9338 | Read-only status and retrieval |
+| `memory-bridge` | 9339 | Claude Mem and OpenClaw bridge |
+| `memory-dream` | 9340 | Embedding rebuild and consolidation |
+| `memory-mgmt` | 9341 | Canonical writes, runtime and KG management |
+
+Child metrics use 9438–9441 and must not share the HTTP MCP proxy ports.
+
+Use legacy monolithic memory only when compatibility requires it:
 
 ```bash
-./scripts/install.sh -WorkspaceRoot <your-project-root>
+AI_MEMORY_SERVER_MODE=monolithic npm start
 ```
 
-`-WorkspaceRoot` is optional. When provided, it must point at an existing repo/workspace root where overlays should be written.
+Accepted values are `split`, `monolithic`, and `all`. Unknown values fail during startup rather than silently selecting another topology.
 
-If you are changing the runtime layout itself, validate the contract first:
+## Installed local runtime
+
+Windows:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-layout.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -WorkspaceRoot .
 ```
+
+macOS/Linux:
 
 ```bash
-./scripts/validate-layout.sh
+./scripts/install.sh -WorkspaceRoot "$(pwd)"
 ```
 
-## What The Installer Does
-1. Copies the runtime into `~/.ai-memory`
-2. Flattens the grouped source tree according to `scripts/install-layout.psd1` so runtime entrypoints remain stable
-3. Copies the shared MCP runtime, proxy scripts, and `package.json`
-4. Removes stale managed runtime files left behind by older installs or renamed entrypoints
-5. Runs `npm ci --omit=dev` inside `~/.ai-memory/shared-mcp` when a lockfile is present, falling back to `npm install --omit=dev` only if the lockfile is absent
-6. Writes `~/.ai-memory/install-manifest.json` so later upgrades know which files are installer-managed
-7. Preserves any existing `agents.json`
-8. Resolves a usable Python runtime
-9. Best-effort installs the lightweight retrieval dependencies used by shared search today: `rank-bm25` and `jieba`
-10. On Windows, writes `AI_MEMORY_PYTHON` and `AI_MEMORY_ROOT` into the user environment
-11. On macOS/Linux, generates `activate-ai-memory.sh` and `activate-ai-memory.ps1` instead of trying to mutate shell startup files automatically
-12. Registers watchdog startup through the native per-user startup mechanism for the current OS:
-    - Windows Startup folder
-    - macOS LaunchAgents
-    - Linux `systemd --user`, or XDG autostart when `systemctl --user` is unavailable
-13. Registers the safe default shared MCP bootstrap through the same OS-specific mechanism
-14. Generates initial shared-memory artifacts, runtime shell wrappers, and MCP config snippets
-15. Applies supported client integrations through `install-client-integrations.ps1` when `-ApplyClientIntegrations` stays enabled
-16. Starts the watchdog and shared MCP stack immediately for the current interactive session unless the installer is running under CI
+`-WorkspaceRoot` is optional. It identifies the project where client overlays should be installed; it is not the memory data directory.
 
-## After Install
-If you want the environment variables in your current macOS/Linux shell session, run:
+The installer places the managed runtime under the local memory root, preserves user-owned state, resolves Python, installs runtime dependencies, generates initial memory artifacts and applies supported client integrations unless disabled.
 
-```bash
-source ~/.ai-memory/activate-ai-memory.sh
-```
+Start or inspect an installed runtime with the wrappers generated by the installer:
 
-If `pwsh` is installed in a non-standard location for your shell environment, set `AI_MEMORY_PWSH` before using the `.sh` wrappers.
-Startup hooks and some internal helpers now launch hidden in the background on Windows, but manual `install`, `start`, `status`, `verify`, and `pressure` commands are still foreground terminal commands by design.
-
-Start the shared MCP stack:
+Windows:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\start-default-shared-mcp.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\start-default-shared-mcp.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\status-shared-mcp.ps1 -Json
 ```
+
+macOS/Linux:
 
 ```bash
 ~/.ai-memory/shared-mcp/start-default-shared-mcp.sh
+~/.ai-memory/shared-mcp/status-shared-mcp.sh -Json
 ```
 
-That default starter brings up:
-- `context7`
-- `fetch`
-- `time`
-- `sequential-thinking`
-- `memory` (with `memory_boot`, `memory_query`, `search_shared_memory`, etc.)
-- `playwright`
-- `MiniMax` only when its environment variables are configured or the starter is told to include it explicitly
-
-### Search Capabilities
-
-The `memory` MCP server exposes `memory_wake_up` as a compact session bootstrap tool available at port 9338. It returns a structured pack combining durable anchors, handoff data, and recent activity without requiring individual file reads.
-
-The server also supports verbatim snippet extraction on `search_shared_memory`:
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `includeVerbatim` | `boolean` | `false` | Return query-aware exact snippet windows around matched text |
-| `snippetWindow` | `integer` | `220` | Character window kept around each exact match |
-| `maxVerbatimPerResult` | `integer` | `1` | Maximum verbatim snippet windows per result |
-
-### Standalone Operations
-
-The watchdog supervisor can be started independently of the shared MCP stack:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\bus\memory-watchdog-supervisor.ps1 -Daemon
-```
+## Docker
 
 ```bash
-pwsh "$HOME/.ai-memory/bus/memory-watchdog-supervisor.ps1" -Daemon
+docker compose up --build -d
 ```
 
-Inbox hygiene removes entries older than 7 days:
+Compose publishes all HTTP MCP ports on host loopback only. The container health check verifies `fetch`, `time`, retrieval, bridge, dream and management rather than checking only port 9338.
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\ops\cleanup-inbox.ps1
-```
+Inspect health manually inside a source checkout or container:
 
 ```bash
-pwsh "$HOME/.ai-memory/ops/cleanup-inbox.ps1"
+node scripts/health-check-core.mjs
 ```
 
-### Memory Generation Pipeline
+## Store and runtime configuration
 
-After install, run the full memory generation pipeline for complete bootstrap data:
+Recommended environment variables:
+
+```text
+AI_MEMORY_STORE=/absolute/path/to/.ai-memory
+AI_MEMORY_ROOT=/absolute/path/to/installed-runtime
+AI_MEMORY_SERVER_MODE=split
+AI_MEMORY_BASE_PORT=9330
+AI_MEMORY_BIND_HOST=127.0.0.1
+AI_MEMORY_PYTHON=/path/to/python
+```
+
+`AI_MEMORY_BASE_PORT` shifts all registered ports together. It must be a positive integer low enough that every derived MCP and metrics port remains at or below 65535.
+
+The writable embedding runtime registry is:
+
+```text
+<store>/config/runtime.json
+```
+
+Set `AI_MEMORY_RUNTIME_CONFIG_PATH` only when a different explicit write path is required. `templates/config/runtime.json` is read-only seed data. When no user config exists, it can be loaded as a starting configuration, but selection updates are written to the user config path and never mutate the template.
+
+## Embedding providers and secrets
+
+The default `local-hash` profile is offline and needs no key. Remote providers should use an environment-variable reference:
+
+```json
+{
+  "embeddings": {
+    "providers": {
+      "remote": {
+        "adapter": "openai-compatible",
+        "baseUrl": "https://example.invalid/v1",
+        "model": "embedding-model",
+        "apiKeyEnv": "AI_MEMORY_EMBED_API_KEY"
+      }
+    },
+    "profiles": {
+      "remote": {
+        "provider": "remote"
+      }
+    }
+  }
+}
+```
+
+Then set the secret outside the JSON file:
+
+Windows:
 
 ```powershell
-node $env:AI_MEMORY_ROOT\ops\build-memory-layers.js
-node $env:AI_MEMORY_ROOT\ops\build-handoff-pack.js
-```
-
-```bash
-node ~/.ai-memory/ops/build-memory-layers.js
-node ~/.ai-memory/ops/build-handoff-pack.js
-```
-
-These are also run automatically by `install.ps1`, but you can re-run them to refresh generated artifacts at any time.
-
-If you want a narrower shared set and prefer to leave Playwright out, start an explicit subset instead:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\shared-mcp\start-shared-mcp.ps1 -Only context7,fetch,time,sequential-thinking,memory
-```
-
-```bash
-~/.ai-memory/shared-mcp/start-shared-mcp.sh -Only context7,fetch,time,sequential-thinking,memory
-```
-
-Register a client pack explicitly if you need a generated onboarding preset:
-
-The installer already auto-applies supported client integrations when you pass `-WorkspaceRoot`. Re-apply them manually later without reinstalling:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\install-client-integrations.ps1 -WorkspaceRoot <your-project-root>
-```
-
-```bash
-~/.ai-memory/install-client-integrations.sh -WorkspaceRoot <your-project-root>
-```
-
-By default, that apply step wires every shared-mode server in `shared-mcp/manifest.json`, plus `playwright`. Add `-IncludeOptionalServers` if you also want `MiniMax`. Use `-SkipPlaywright` if you want a narrower footprint.
-
-`verify-integrations.ps1` and `verify-integrations.sh` remain as compatibility aliases, but they now forward into `install-client-integrations` and should be treated as side-effecting apply helpers rather than validators.
-
-Verify the setup with the hard validation gate:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\verify-client-integrations.ps1 -WorkspaceRoot <your-project-root> -RunCliChecks -RunRuntimeChecks
-```
-
-```bash
-~/.ai-memory/verify-client-integrations.sh -WorkspaceRoot <your-project-root> -RunCliChecks -RunRuntimeChecks
-```
-
-`verify-client-integrations` is a self-healing validation gate, not a read-only status probe. It may restart unhealthy shared MCP services and always refreshes its report file. If you only want to inspect state, use `shared-mcp/status-shared-mcp.ps1 -Json` or `shared-mcp/status-shared-mcp.sh -Json`.
-
-Pressure test before trusting a heavy multi-agent workflow:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\run-pressure-test.ps1 -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks -RunToolCalls -RunClientTaskChecks
-```
-
-```bash
-~/.ai-memory/run-pressure-test.sh -WorkspaceRoot <your-project-root> -Waves 5 -RunCliChecks -RunToolCalls -RunClientTaskChecks
-```
-
-`<your-project-root>` means the existing repository or workspace root where overlays such as `.cursor/mcp.json`, `.vscode/mcp.json`, `.claude/rules/shared-memory.md`, and `opencode.json` should be written. It is not the user-home config directory itself.
-
-If you need the installer to skip client rewiring entirely, pass `-ApplyClientIntegrations false`. If you want the installer to include optional servers such as `MiniMax` during that automatic apply step, pass `-IncludeOptionalClientServers`.
-
-## Optional Secrets
-These must be environment variables, not committed files.
-
-### MiniMax Shared MCP
-```powershell
-[Environment]::SetEnvironmentVariable("MINIMAX_API_HOST", "https://api.minimax.chat", "User")
-[Environment]::SetEnvironmentVariable("MINIMAX_API_KEY", "<your-key>", "User")
-```
-
-```bash
-export MINIMAX_API_HOST="https://api.minimax.chat"
-export MINIMAX_API_KEY="<your-key>"
-```
-
-If `minimax-coding-plan-mcp` is not already on `PATH`, point the wrapper at it explicitly:
-
-```powershell
-[Environment]::SetEnvironmentVariable("MINIMAX_MCP_COMMAND", "C:\path\to\minimax-coding-plan-mcp.exe", "User")
-```
-
-```bash
-export MINIMAX_MCP_COMMAND="/path/to/minimax-coding-plan-mcp"
-```
-
-Make sure `minimax-coding-plan-mcp` is available on `PATH` before enabling the shared MiniMax service.
-
-### Optional OpenAI-Compatible Embeddings
-The installer seeds `~/.ai-memory/config/runtime.json` on first install. Prefer switching providers there through:
-- `embeddings.defaults`
-- `embeddings.providers.<name>`
-- `embeddings.profiles.<name>.provider`
-
-Use environment variables for secrets, temporary overrides, or quick live tests.
-
-```powershell
-[Environment]::SetEnvironmentVariable("AI_MEMORY_EMBED_PROVIDER", "openai-compatible-remote", "User")
-[Environment]::SetEnvironmentVariable("AI_MEMORY_EMBED_ADAPTER", "openai-compatible", "User")
-[Environment]::SetEnvironmentVariable("AI_MEMORY_EMBED_BASE_URL", "https://your-openai-compatible-endpoint/v1", "User")
 [Environment]::SetEnvironmentVariable("AI_MEMORY_EMBED_API_KEY", "<your-key>", "User")
-[Environment]::SetEnvironmentVariable("AI_MEMORY_EMBED_MODEL", "<your-model-id>", "User")
-[Environment]::SetEnvironmentVariable("AI_MEMORY_EMBED_PROFILE", "openai-compatible", "User")
 ```
 
+macOS/Linux:
+
 ```bash
-export AI_MEMORY_EMBED_PROVIDER="openai-compatible-remote"
-export AI_MEMORY_EMBED_ADAPTER="openai-compatible"
-export AI_MEMORY_EMBED_BASE_URL="https://your-openai-compatible-endpoint/v1"
 export AI_MEMORY_EMBED_API_KEY="<your-key>"
-export AI_MEMORY_EMBED_MODEL="<your-model-id>"
-export AI_MEMORY_EMBED_PROFILE="openai-compatible"
 ```
 
-If you are driving the system through the shared `memory` MCP, prefer:
-- `list_embedding_runtimes` to inspect the configured defaults/providers/profiles
-- `set_embedding_runtime` to switch the persisted active profile/provider
-- `memory_status.embeddingIndexState` to see whether the dense index is aligned, stale, mixed, or missing
+Do not add `apiKey` to `runtime.json`. Plaintext values are ignored at runtime and removed by the next persisted configuration update. The config file is written through a temporary file and atomic rename; POSIX permissions are restricted to the owner.
 
-`list_embedding_runtimes` also annotates each configured provider/profile with `configHash`, `indexedCount`, `indexCompatible`, and `rebuildRequired`, so you can tell in advance whether switching to that runtime will need a rebuild.
+Use management tools on port 9341:
 
-For the long-running shared runtime, `runtime.json` is now the canonical selector by default. If you truly want one process to honor selection/tuning env overrides such as `AI_MEMORY_EMBED_PROFILE` or `AI_MEMORY_EMBED_MODEL`, opt in explicitly:
+- `list_embedding_runtimes` to inspect profiles and warnings;
+- `set_embedding_runtime` to persist an active profile or provider.
+
+After changing adapter, model or base URL, check `memory_status.embeddingIndexState` on port 9338 and run `rebuild_memory_embeddings` on port 9340 when `rebuildRequired` is true.
+
+## Memory read and write paths
+
+Read through the retrieval service:
+
+```text
+memory_wake_up(workspace_root="<absolute-workspace-path>")
+search_shared_memory(query="<question>", route="auto")
+```
+
+Write through the management service:
+
+```text
+memory_write(project="<project>", facts=[...])
+```
+
+A successful write creates a schema-valid V2 record in `<store>/structured/shared-inbox.jsonl` and a same-ID compatibility projection in `<store>/projects/<project>.jsonl`.
+
+## Client integration
+
+Apply client overlays without reinstalling:
+
+Windows:
 
 ```powershell
-$env:AI_MEMORY_ALLOW_EMBED_RUNTIME_ENV_OVERRIDES = "1"
+pwsh -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\install-client-integrations.ps1 -WorkspaceRoot <project-root>
 ```
+
+macOS/Linux:
 
 ```bash
-export AI_MEMORY_ALLOW_EMBED_RUNTIME_ENV_OVERRIDES="1"
+~/.ai-memory/install-client-integrations.sh -WorkspaceRoot <project-root>
 ```
 
-After changing remote embedding settings, rebuild the index so the stored vectors match the active provider:
+Use the verification gate after installation:
+
+Windows:
 
 ```powershell
-node $env:AI_MEMORY_ROOT\generate-embeddings.js
+pwsh -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\verify-client-integrations.ps1 -WorkspaceRoot <project-root> -RunCliChecks -RunRuntimeChecks
 ```
+
+macOS/Linux:
 
 ```bash
-node ~/.ai-memory/generate-embeddings.js
+~/.ai-memory/verify-client-integrations.sh -WorkspaceRoot <project-root> -RunCliChecks -RunRuntimeChecks
 ```
 
-## Notes
-- The default dense retrieval backend is offline `hashing-v1`
-- `config/runtime.json` is the provider/profile runtime registry for embeddings; keep secrets out of it and use `apiKeyEnv`
-- `AI_MEMORY_EMBED_BACKEND` remains supported as a compatibility alias, but new setups should prefer `AI_MEMORY_EMBED_ADAPTER`
-- Switching providers or profiles is a config change, not a true dense hot swap. Rebuild the stored index after changing adapter, model, or base URL.
-- `set_embedding_runtime` updates the persisted runtime selection, but it does not silently mutate the dense index; check `memory_status.embeddingIndexState.rebuildRequired`
-- Shared `memory` MCP now ignores selection/tuning embedding env overrides by default so stale user-level env vars do not silently shadow `runtime.json`; set `AI_MEMORY_ALLOW_EMBED_RUNTIME_ENV_OVERRIDES=1` only for deliberate per-process overrides
-- `apiKeyConfigured` in runtime status is now meaningful only for providers that actually need an API key; local hash/transformer profiles no longer show a misleading `true` just because a remote key exists in the environment
-- Remote embeddings are optional and should be tested with the probe and benchmark scripts first
-- The embeddings index now stores a provider fingerprint (`adapter + model + base URL`) to avoid silently reusing vectors from a different remote endpoint
-- Remote rebuilds now stop on provider errors by default so one run cannot write a mixed `openai + hash` index; set `AI_MEMORY_EMBED_ALLOW_BATCH_FALLBACK=1` only if you intentionally want batch-level fallback
-- Shared `fetch` and `time` now prefer `AI_MEMORY_MCP_PYTHON` and need a Python 3.10+ runtime; the installer auto-selects a compatible uv-managed Python when available
-- If your network to PyPI is slow, set `AI_MEMORY_PIP_INDEX_URL` or `PIP_INDEX_URL` before install so auxiliary Python MCP packages can use a faster mirror
-- `pencil` stays isolated because it is tied to desktop UI state
-- `playwright` is shared by default in the starter script because it is usually the largest source of duplicated per-agent MCP processes, but you can omit it by starting an explicit subset
-- `install-manifest.json` is installer-owned state; keep it in the installed runtime so upgrades can clean up stale managed files safely
-- The shared `memory` MCP and OpenClaw blackboard daemon no longer depend on native Node `sqlite3`; they use Python's standard-library `sqlite3` through the resolved Python runtime instead
-- Before install, source-tree direct runs can resolve `templates/config/runtime.json`; after install, the canonical runtime config path should be `~/.ai-memory/config/runtime.json`
+The verification command may repair or restart unhealthy managed services. For a read-only view, use the shared-MCP status command.
 
----
+## Validation for contributors
 
-## Adding Another AI Tool
+```bash
+npm run lint
+npm test
+npm run test:integration
+npm run test:cross-platform
+```
 
-### Quick Connect (Windows)
+PowerShell layout validation:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $env:AI_MEMORY_ROOT\install-client-integrations.ps1 -WorkspaceRoot <your-project-root>
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-layout.ps1
 ```
 
-This auto-configures: Claude Code, OpenCode, Cursor, VS Code/Copilot, Trae.
+Docker validation:
 
-### Manual HTTP MCP Endpoints
+```bash
+docker compose config
+docker compose build
+docker compose up -d
+```
 
-All tools support these shared endpoints:
-
-| Service | Endpoint | What it does |
-|---------|----------|--------------|
-| memory | http://127.0.0.1:9338/mcp | Shared memory search, memory_boot, memory_query |
-| context7 | http://127.0.0.1:9331/mcp | Code search |
-| fetch | http://127.0.0.1:9332/mcp | Web fetch |
-| time | http://127.0.0.1:9333/mcp | Current time |
-| playwright | http://127.0.0.1:9337/mcp | Browser automation (optional) |
-
-### Shared Memory Read Order
-
-Preferred: use `memory_wake_up` on port 9338 for compact structured bootstrap.
-
-Fallback: read files in this order:
-1. `SKILL.md` (repository root) — universal entry point
-2. `{store}/generated/L0-bootstrap.md` — L0 + L1 facts (project-aware)
-3. `{store}/generated/GLOBAL-CONTEXT.md` — full history overlay
-4. `{store}/generated/SHARED-SKILLS.md` — shared skill context
-
-### Durable Writeback Rules
-- Cross-project facts → `{store}/inbox/{tool}.md`
-- Active task state → `{store}/structured/session-memory.jsonl`
-- Project-specific facts → relevant project note in vault or store
-- **Never write secrets into shared memory**
-
-### Canonical Read Order for Structured Bootstrap
-Use `memory_wake_up` MCP tool on port 9338 — returns durable anchors, next steps, blockers, and recent activity in a single call.
-
-### Verbatim Snippet Search
-`search_shared_memory` supports:
-- `includeVerbatim: true` — return query-aware exact text windows
-- `snippetWindow` (default 220 chars) — character window size
-- `maxVerbatimPerResult` (default 1) — snippets per result
+The CI matrix additionally covers Node 22/24, Python, cross-language equivalence, Windows/macOS/Linux smoke tests, portable installation and Docker startup.
