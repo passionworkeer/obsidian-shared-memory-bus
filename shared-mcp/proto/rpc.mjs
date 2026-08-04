@@ -29,6 +29,14 @@ export function parseArgs(argv) {
   return parsed;
 }
 
+function boundedPositiveInteger(rawValue, fallback, hardCeiling) {
+  const parsed = Number(rawValue);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return Math.min(parsed, hardCeiling);
+}
+
 export const args = parseArgs(process.argv);
 export const serverId = args.get('server-id') || 'shared-mcp';
 export const port = Number(args.get('port') || 9330);
@@ -64,6 +72,35 @@ const MANIFEST_PROTOCOL_VERSION = (() => {
 export const defaultProtocolVersion = args.get('protocol-version') || MANIFEST_PROTOCOL_VERSION;
 export const startupTimeoutMs = Number(args.get('startup-timeout-ms') || 30000);
 export const requestTimeoutMs = Number(args.get('request-timeout-ms') || 120000);
+export const MAX_CHILD_FRAME_BYTES = boundedPositiveInteger(
+  args.get('max-child-frame-bytes'),
+  1024 * 1024,
+  16 * 1024 * 1024,
+);
+export const MAX_JSONRPC_BATCH = boundedPositiveInteger(
+  args.get('max-batch-items'),
+  32,
+  256,
+);
+export const MAX_JSONRPC_DEPTH = boundedPositiveInteger(
+  args.get('max-json-depth'),
+  32,
+  64,
+);
+export const MAX_JSONRPC_NODES = boundedPositiveInteger(
+  args.get('max-json-nodes'),
+  10000,
+  50000,
+);
+
+export class ResourceLimitError extends Error {
+  constructor(message, { code = -32001, statusCode = 413 } = {}) {
+    super(message);
+    this.name = 'ResourceLimitError';
+    this.code = code;
+    this.statusCode = statusCode;
+  }
+}
 
 setStdioCommand(stdioCommand);
 
@@ -143,6 +180,72 @@ export function rejectAllPending(errorMessage) {
   activeInflight = 0;
 }
 
+function terminateProtocolViolatingChild(reason) {
+  childBuffer = '';
+  initialized = false;
+  rejectAllPending(reason);
+  logError(reason);
+
+  if (child && typeof child.kill === 'function' && !child.killed) {
+    try {
+      child.kill('SIGKILL');
+    } catch (error) {
+      logError(`failed to terminate protocol-violating child: ${error.message}`);
+    }
+  }
+}
+
+export function validateRpcPayloadComplexity(payload) {
+  if (Array.isArray(payload) && payload.length > MAX_JSONRPC_BATCH) {
+    throw new ResourceLimitError(
+      `JSON-RPC batch limit exceeded (${payload.length}/${MAX_JSONRPC_BATCH})`,
+    );
+  }
+
+  const stack = [{ value: payload, depth: 1 }];
+  const visited = new WeakSet();
+  let nodes = 0;
+
+  while (stack.length > 0) {
+    const { value, depth } = stack.pop();
+    nodes += 1;
+
+    if (nodes > MAX_JSONRPC_NODES) {
+      throw new ResourceLimitError(
+        `JSON-RPC structural node limit exceeded (${nodes}/${MAX_JSONRPC_NODES})`,
+      );
+    }
+    if (depth > MAX_JSONRPC_DEPTH) {
+      throw new ResourceLimitError(
+        `JSON-RPC structural depth limit exceeded (${depth}/${MAX_JSONRPC_DEPTH})`,
+      );
+    }
+    if (!value || typeof value !== 'object') {
+      continue;
+    }
+    if (visited.has(value)) {
+      throw new ResourceLimitError('JSON-RPC payload contains a cyclic structure');
+    }
+    visited.add(value);
+
+    const children = Array.isArray(value) ? value : Object.values(value);
+    for (const childValue of children) {
+      if (childValue && typeof childValue === 'object') {
+        stack.push({ value: childValue, depth: depth + 1 });
+      } else {
+        nodes += 1;
+        if (nodes > MAX_JSONRPC_NODES) {
+          throw new ResourceLimitError(
+            `JSON-RPC structural node limit exceeded (${nodes}/${MAX_JSONRPC_NODES})`,
+          );
+        }
+      }
+    }
+  }
+
+  return payload;
+}
+
 // ----- RPC primitives -----
 
 export function sendRawRequest(message, timeoutMs = requestTimeoutMs) {
@@ -154,7 +257,9 @@ export function sendRawRequest(message, timeoutMs = requestTimeoutMs) {
 
   if (activeInflight >= MAX_INFLIGHT) {
     return Promise.reject(
-      new Error(`RPC inflight limit exceeded (max ${MAX_INFLIGHT})`),
+      new ResourceLimitError(`RPC inflight limit exceeded (max ${MAX_INFLIGHT})`, {
+        statusCode: 429,
+      }),
     );
   }
 
@@ -207,6 +312,14 @@ export function processChildStdout(chunk) {
   childBuffer = lines.pop() ?? '';
 
   for (const line of lines) {
+    const frameBytes = Buffer.byteLength(line, 'utf8');
+    if (frameBytes > MAX_CHILD_FRAME_BYTES) {
+      terminateProtocolViolatingChild(
+        `child JSON-line frame limit exceeded (${frameBytes}/${MAX_CHILD_FRAME_BYTES} bytes)`,
+      );
+      return false;
+    }
+
     const trimmed = line.trim();
     if (!trimmed) {
       continue;
@@ -215,9 +328,20 @@ export function processChildStdout(chunk) {
     try {
       handleChildMessage(JSON.parse(trimmed));
     } catch {
-      logError(`non-JSON stdout from child: ${trimmed}`);
+      const excerpt = trimmed.length > 512 ? `${trimmed.slice(0, 512)}...` : trimmed;
+      logError(`non-JSON stdout from child (${frameBytes} bytes): ${excerpt}`);
     }
   }
+
+  const residualBytes = Buffer.byteLength(childBuffer, 'utf8');
+  if (residualBytes > MAX_CHILD_FRAME_BYTES) {
+    terminateProtocolViolatingChild(
+      `unterminated child JSON-line frame limit exceeded (${residualBytes}/${MAX_CHILD_FRAME_BYTES} bytes)`,
+    );
+    return false;
+  }
+
+  return true;
 }
 
 // Defense against DNS-rebinding and cross-origin CSRF: refuse any HTTP
@@ -229,7 +353,7 @@ export function processChildStdout(chunk) {
 // hardening layer for same-origin local-process threats.
 export function isAllowedMcpHost(hostHeader) {
   return /^(?:127\.0\.0\.1|\[::1\]|localhost)(?::\d+)?$/i.test(
-    String(hostHeader || "").trim(),
+    String(hostHeader || '').trim(),
   );
 }
 
@@ -259,11 +383,19 @@ export function readJsonBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let totalBytes = 0;
+    let settled = false;
+
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
 
     req.on('data', (chunk) => {
+      if (settled) return;
       totalBytes += chunk.length;
       if (totalBytes > 10 * 1024 * 1024) {
-        reject(new Error('request body too large'));
+        fail(new ResourceLimitError('request body too large'));
         req.destroy();
         return;
       }
@@ -271,20 +403,28 @@ export function readJsonBody(req) {
     });
 
     req.on('end', () => {
+      if (settled) return;
       const text = Buffer.concat(chunks).toString('utf8').trim();
       if (!text) {
-        reject(new Error('empty request body'));
+        fail(new Error('empty request body'));
         return;
       }
 
       try {
-        resolve(JSON.parse(text));
+        const parsed = JSON.parse(text);
+        validateRpcPayloadComplexity(parsed);
+        settled = true;
+        resolve(parsed);
       } catch (error) {
-        reject(new Error(`invalid JSON body: ${error.message}`));
+        if (error instanceof ResourceLimitError) {
+          fail(error);
+        } else {
+          fail(new Error(`invalid JSON body: ${error.message}`));
+        }
       }
     });
 
-    req.on('error', reject);
+    req.on('error', fail);
   });
 }
 
