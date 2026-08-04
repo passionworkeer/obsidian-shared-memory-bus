@@ -32,6 +32,7 @@ import {
   readJsonBody,
   sendJson,
   sendAccepted,
+  ResourceLimitError,
 } from './proto/rpc.mjs';
 import { resolveProxyBindHost } from './proto/bind-host.mjs';
 import { isAllowedLocalHttpRequest } from './proto/http-guard.mjs';
@@ -128,11 +129,12 @@ const server = http.createServer(async (req, res) => {
 
     sendJson(res, 200, await response);
   } catch (error) {
-    sendJson(res, 500, {
+    const isResourceLimit = error instanceof ResourceLimitError;
+    sendJson(res, isResourceLimit ? error.statusCode : 500, {
       jsonrpc: '2.0',
       id: null,
       error: {
-        code: -32603,
+        code: isResourceLimit ? error.code : -32603,
         message: error.message || 'Internal server error',
       },
     });
