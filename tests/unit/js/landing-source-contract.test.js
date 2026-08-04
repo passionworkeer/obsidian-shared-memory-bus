@@ -23,7 +23,7 @@ describe("landing source contract", () => {
     assert.equal(webPackage.scripts["build:check"], "npm run build && npm run check:build");
     assert.match(workflow, /npm ci/);
     assert.match(workflow, /npm run build:check/);
-    assert.match(workflow, /actions\/upload-artifact@v4/);
+    assert.match(workflow, /actions\/upload-artifact@[0-9a-f]{40}\s+# v4\.6\.2/i);
   });
 
   test("documents dist as generated, uncommitted deployment output", () => {
