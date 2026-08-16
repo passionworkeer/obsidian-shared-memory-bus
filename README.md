@@ -70,6 +70,7 @@
 | **混合检索** | BM25 + 语义向量混合搜索，支持中文分词 |
 | **MCP 协议** | 支持 Model Context Protocol，多工具兼容 |
 | **观察者模式** | 后台 watchdog 自动同步工具记忆（cascade 队列增量更新） |
+| **用户画像 Skill** | `skills/user-portrait/`：采集全机 AI 工具的用户消息 + 微信/QQ 导出记录，生成个人画像（PROFILE.md / 可视化 dashboard），写回共享记忆供所有 agent 读取 |
 | **多语言** | Node.js + Python 协同，跨语言 hash 等价性测试 |
 | **ANN 加速** | 可选 hnswlib 后端，10k+ 条向量查询 P99 < 10ms |
 | **导出 Markdown** | JSONL 事件流 → 可读 .md，Obsidian 直接消费 |
