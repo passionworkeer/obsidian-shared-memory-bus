@@ -63,14 +63,18 @@ export async function* streamJsonl(file) {
   } catch {
     return;
   }
-  for await (const line of rl) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      yield JSON.parse(trimmed);
-    } catch {
-      /* skip malformed line */
+  try {
+    for await (const line of rl) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        yield JSON.parse(trimmed);
+      } catch {
+        /* skip malformed line */
+      }
     }
+  } catch {
+    /* stream error (e.g. ENOENT on a missing file) — degrade to empty */
   }
 }
 
