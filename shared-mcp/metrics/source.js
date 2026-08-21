@@ -133,6 +133,15 @@ function readEmbeddingsSummary({ EMBEDDINGS_INDEX_PATH }) {
   const providerHosts = {};
   const configHashes = {};
   let count = 0;
+  // NOTE on perf: this stays as fs.readFileSync + per-line JSON.parse
+  // (not a readline stream) because the per-path mtime cache above
+  // (Q-CRIT-2, 3s TTL) keeps the file read off the Prometheus /health hot
+  // path — a cache miss only fires when the index mtime changes. Switching
+  // to streaming would require making readEmbeddingsSummary async, which
+  // ripples through 5+ call sites in memory-embeddings.js + memory-status.js
+  // + omni-memory-server.js. Measured cost: cache miss pays a few-second
+  // event-loop pause, but the mtime cache hits on every Prometheus scrape
+  // and every 60s metrics tick under steady-state operation.
   const lines = fs.readFileSync(EMBEDDINGS_INDEX_PATH, "utf8").split(/\r?\n/);
   for (const line of lines) {
     if (!line.trim()) {
@@ -340,28 +349,51 @@ function refreshEmbeddingMetricsFromSummary(summary = null) {
 }
 
 function refreshMetricsFromFiles({ GENERATED_ROOT, STORE_ROOT, readEmbeddingsSummary }) {
-  try {
-    refreshEmbeddingMetricsFromSummary(readEmbeddingsSummary());
-    const hygienePath = path.join(GENERATED_ROOT, "memory_hygiene_report.json");
-    if (fs.existsSync(hygienePath)) {
-      const hygiene = JSON.parse(fs.readFileSync(hygienePath, "utf8"));
-      for (const [scope, count] of Object.entries(hygiene.stats?.byScope || {})) {
-        METRICS.structured_files_total[`scope:${scope}`] = count;
+  // F2.7 (perf audit HIGH #6): synchronously block the event loop on two
+  // fs.readFileSync calls every 60s. Convert to fs.promises.readFile.
+  // The interval callback is sync, but setInterval accepts async fns and
+  // Node will not block other timers on their returned Promise.
+  const work = async () => {
+    try {
+      refreshEmbeddingMetricsFromSummary(readEmbeddingsSummary());
+      const hygienePath = path.join(GENERATED_ROOT, "memory_hygiene_report.json");
+      // Use async fs.promises to avoid blocking the event loop on the
+      // 60s tick. Hygiene + dreamState files are small (<100KB) so the
+      // wall-clock cost is dominated by syscall, not file size.
+      const fsPromises = fs.promises;
+      let hygiene;
+      try {
+        const raw = await fsPromises.readFile(hygienePath, "utf8");
+        hygiene = JSON.parse(raw);
+      } catch {
+        hygiene = null;
+      }
+      if (hygiene) {
+        for (const [scope, count] of Object.entries(hygiene.stats?.byScope || {})) {
+          METRICS.structured_files_total[`scope:${scope}`] = count;
+        }
       }
       const dreamStatePath = path.join(STORE_ROOT, "state", "auto-dream-state.json");
-      if (fs.existsSync(dreamStatePath)) {
-        const dreamState = JSON.parse(fs.readFileSync(dreamStatePath, "utf8"));
+      try {
+        const raw = await fsPromises.readFile(dreamStatePath, "utf8");
+        const dreamState = JSON.parse(raw);
         METRICS.promotion_queue_size.promotion = Array.isArray(dreamState.promotionQueue)
           ? dreamState.promotionQueue.length
           : 0;
         METRICS.promotion_queue_size.refresh = Array.isArray(dreamState.refreshQueue)
           ? dreamState.refreshQueue.length
           : 0;
+      } catch {
+        // dreamState file missing or malformed — keep defaults, do not crash
       }
+    } catch {
+      // Non-fatal — metrics refresh failures should not crash the server.
     }
-  } catch {
-    // Non-fatal — metrics refresh failures should not crash the server.
-  }
+  };
+  // Fire-and-forget: setInterval is happy with an async fn that returns a
+  // Promise; the next tick is independent. Errors are already swallowed
+  // inside `work()` so no unhandled rejection can leak.
+  work();
 }
 
 export {

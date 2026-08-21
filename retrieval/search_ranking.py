@@ -385,9 +385,14 @@ def dense_scores(
         and os.path.isfile(embeddings_index_path)
     ):
         stream_index = StreamingIndex(embeddings_index_path)
-        for payload in stream_index.scan():
-            first_record = payload
-            break
+        # F1.1 (perf audit HIGH #3): open the streaming iterator once and
+        # reuse it for peek + full scan. The old code called scan() twice,
+        # paying two full file passes + two JSON.parse passes per query.
+        stream_iter = iter(stream_index.scan())
+        try:
+            first_record = next(stream_iter)
+        except StopIteration:
+            stream_iter = iter([])  # empty file — proceed with full scan (also empty)
 
     if first_record is None:
         # Fallback: use legacy full-load path (OOM risk on large files)
@@ -411,10 +416,15 @@ def dense_scores(
         }
 
     # --- Streaming path: scan records from disk one at a time (bounded memory) ---
+    # F1.1 (perf audit HIGH #3): reuse the same iterator that produced
+    # first_record above. The old code called scan() a second time, paying
+    # a full file re-read + full JSON re-parse on every query.
     best_by_record: Dict[str, Tuple[str, float, dict]] = {}
     skipped_schema_mismatch = 0
     scanned_payloads: List[dict] = []
-    for payload in stream_index.scan():  # type: ignore[union-attr]
+    # first_record is the same JSON object we peeked above; re-yield it.
+    scanned_payloads.append(first_record)
+    for payload in stream_iter:
         entry_id = str(payload.get("id", "")).strip()
         if not entry_id:
             continue
@@ -449,7 +459,7 @@ def dense_scores(
     for record_id, (entry_id, raw_score, _payload) in best_by_record.items():
         scores[entry_id] = float(raw_score) / max_score if max_score > 0 else 0.0
 
-    return scores, None, {"queryEmbeddingCacheHit": bool(query_embedding_cache_hit)}
+    return scores, None, {"queryEmbeddingCacheHit": bool(query_embedding_cache_hit), "embeddingBackend": model_name}
 
 
 def _dense_scores_fallback(
@@ -507,13 +517,13 @@ def _dense_scores_fallback(
         )
 
     if not best_by_record:
-        return {}, None, {"queryEmbeddingCacheHit": bool(query_embedding_cache_hit)}
+        return {}, None, {"queryEmbeddingCacheHit": bool(query_embedding_cache_hit), "embeddingBackend": model_name}
     max_score = max(float(v[1]) for v in best_by_record.values())
     scores: Dict[str, float] = {}
     for record_id, (entry_id, raw_score, _payload) in best_by_record.items():
         scores[entry_id] = float(raw_score) / max_score if max_score > 0 else 0.0
 
-    return scores, None, {"queryEmbeddingCacheHit": bool(query_embedding_cache_hit)}
+    return scores, None, {"queryEmbeddingCacheHit": bool(query_embedding_cache_hit), "embeddingBackend": model_name}
 
 
 # ---------------------------------------------------------------------------
@@ -948,14 +958,14 @@ def mmr_rerank(
             sel_norms = _np.asarray(selected_norms, dtype=_np.float64)  # (k,)
             sims = cand_matrix @ sel_mat.T  # (N, k)
             denom = _np.outer(cand_norms, sel_norms)  # (N, k)
+            # F1.3 (perf audit HIGH #2): replace the per-row Python loop with
+            # a single vectorized np.max call. Division by zero is masked by
+            # np.where so unsampled rows contribute 0 (same semantics as the
+            # `else: row_max[i] = 0.0` branch). For 200 candidates × top_k=10
+            # this drops ~2000 Python ops to one BLAS call.
             safe = denom > 0
-            row_max = _np.zeros(cand_matrix.shape[0], dtype=_np.float64)
-            for i in range(cand_matrix.shape[0]):
-                row_safe = safe[i]
-                if row_safe.any():
-                    row_max[i] = float(_np.max(sims[i][row_safe] / denom[i][row_safe]))
-                else:
-                    row_max[i] = 0.0
+            masked = _np.where(safe, sims / _np.where(safe, denom, 1.0), 0.0)
+            row_max = masked.max(axis=1) if masked.size else _np.zeros(cand_matrix.shape[0], dtype=_np.float64)
             cand_index_of = {eid: idx for idx, eid in enumerate(cand_ids)}
             for entry_id in remaining:
                 rel_score = normalized_rel.get(entry_id, 0.0)

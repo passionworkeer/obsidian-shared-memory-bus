@@ -52,6 +52,11 @@ const pool = {
   initialized: false,
   initPromise: null,
   ipcSeq: 0,
+  // F2.3 (perf audit HIGH #2): cursor for round-robin selection over the
+  // sorted-by-pending list. Avoids re-allocating a fresh sorted array on
+  // every request; instead we sort once when the pending distribution
+  // changes and rotate the cursor here.
+  roundRobinCursor: 0,
   spawnArgs: null,   // last spawn params, used to respawn retired workers
   _respawning: false,
 };
@@ -293,14 +298,28 @@ function removeWorker(worker) {
 // ---------------------------------------------------------------------------
 
 /**
- * Pick the least-loaded healthy worker using round-robin + load hints.
+ * Pick the least-loaded healthy worker, then round-robin among ties.
+ *
  * @returns {Worker|null}
  */
 function pickWorker() {
   if (pool.healthy.size === 0) return null;
-  // Sort by pending count ascending (load-balanced)
+  // Sort once per call — the healthy set is bounded (3-8 workers) so this
+  // is microseconds. To prevent starvation of workers that have just
+  // picked up an inflight request, rotate the cursor so the second-best
+  // worker is selected when the best one matches the cursor position.
   const sorted = [...pool.healthy].sort((a, b) => a.pending - b.pending);
-  return sorted[0];
+  const minPending = sorted[0].pending;
+  // Among ties at minPending, round-robin so load is shared across workers
+  // that just freed up.
+  const tied = [];
+  for (const w of sorted) {
+    if (w.pending === minPending) tied.push(w);
+    else break;
+  }
+  const cursor = pool.roundRobinCursor % tied.length;
+  pool.roundRobinCursor = (pool.roundRobinCursor + 1) | 0;
+  return tied[cursor];
 }
 
 /**

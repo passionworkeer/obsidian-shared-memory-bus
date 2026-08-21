@@ -5,9 +5,11 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { createJsonlStream } from "../util/jsonl-stream.js";
 import {
   buildRecord,
   classifyScope,
+  coerceStructuredRecord,
   loadStructuredRecords,
   normalizeSpaces,
   parseTimestamp,
@@ -180,8 +182,68 @@ function parseEventEntries() {
   return records.sort((left, right) => String(left.t || "").localeCompare(String(right.t || "")));
 }
 
+ /**
+ * Async generator that yields coerced structured records for a single
+ * JSONL file, without buffering the whole file into an array.
+ *
+ * F3.3: callers used to aggregate `loadStructuredRecords(...)` results into
+ * a `Promise.all` of arrays + `Map` + sorted-array pipeline (peak memory
+ * ~2-3x record count). Streaming lets callers insert directly into a Map
+ * while the file is still being read.
+ *
+ * @param {string} filePath
+ * @param {object} defaults
+ * @yields {object}
+ */
+async function* streamStructuredRecords(filePath, defaults = {}) {
+  try {
+    for await (const payload of createJsonlStream(filePath)) {
+      const record = coerceStructuredRecord(payload, defaults);
+      if (record) {
+        yield record;
+      }
+    }
+  } catch (err) {
+    if (!err || err.code !== "ENOENT") {
+      throw err;
+    }
+    // Missing source file is not fatal — caller treats it as empty.
+  }
+}
+
+/**
+ * Consume multiple streaming sources in parallel and merge into a single
+ * deduplicated Map (keyed by record.id, last-write-wins). Returns sorted
+ * values by `t` (chronological).
+ *
+ * @param {Array<{ id: string, label: string, records: AsyncIterable<object> }>} sources
+ * @returns {Promise<object[]>}
+ */
+async function mergeStreamingSourcesIntoSorted(sources) {
+  const merged = new Map();
+  // Drain each source concurrently so a slow disk on one file does not
+  // serialize the others. Each drain inserts into `merged` directly —
+  // no temporary arrays per source.
+  await Promise.all(
+    sources.map(async (source) => {
+      for await (const record of source.records) {
+        merged.set(record.id, record);
+      }
+    })
+  );
+  return [...merged.values()].sort(
+    (left, right) => String(left.t || "").localeCompare(String(right.t || ""))
+  );
+}
+
+/**
+ * Async streaming version of parseSessionMemoryEntries.
+ * Uses createJsonlStream + coerceStructuredRecord to avoid loading large
+ * openclaw JSONL files into memory, and inserts each record into the
+ * merged Map directly (no intermediate per-source arrays).
+ */
 async function parseSessionMemoryEntries() {
-  const records = [];
+  const merged = new Map();
 
   const claudeSessionPath = path.join(CLAUDE_HOME, "session-memory", "session-memory.md");
   const claudeSessionDir = path.dirname(claudeSessionPath);
@@ -189,27 +251,26 @@ async function parseSessionMemoryEntries() {
     const content = readText(claudeSessionPath).trim();
     if (content) {
       const stat = fs.statSync(claudeSessionPath);
-      records.push(
-        buildRecord({
-          id: `session-${sha1(`claude|${stat.mtimeMs}|${content.slice(0, 256)}`)}`,
-          t: stat.mtime.toISOString(),
-          tool: "claude-code",
-          type: "session-summary",
-          project: "shared-session",
-          title: "Claude session memory snapshot",
-          content: content.slice(0, 6000),
-          source: "claude-session-memory",
-          scope: "summary",
-          visibility: "shared",
-          source_kind: "session",
-          memory_level: "session",
-          workspace: "claude-session",
-          confidence: 0.78,
-          metadata: {
-            origin_path: claudeSessionPath,
-          },
-        })
-      );
+      const record = buildRecord({
+        id: `session-${sha1(`claude|${stat.mtimeMs}|${content.slice(0, 256)}`)}`,
+        t: stat.mtime.toISOString(),
+        tool: "claude-code",
+        type: "session-summary",
+        project: "shared-session",
+        title: "Claude session memory snapshot",
+        content: content.slice(0, 6000),
+        source: "claude-session-memory",
+        scope: "summary",
+        visibility: "shared",
+        source_kind: "session",
+        memory_level: "session",
+        workspace: "claude-session",
+        confidence: 0.78,
+        metadata: {
+          origin_path: claudeSessionPath,
+        },
+      });
+      if (record) merged.set(record.id, record);
     }
   }
 
@@ -228,78 +289,80 @@ async function parseSessionMemoryEntries() {
   } else if (fs.existsSync(openclawMemoryDir)) {
     const files = fs
       .readdirSync(openclawMemoryDir)
-      .filter((fileName) => /^\d{4}-\d{2}-\d{2}\.md$/u.test(fileName))
-      .sort()
-      .slice(-7);
-    for (const fileName of files) {
-      const filePath = path.join(openclawMemoryDir, fileName);
-      if (!safeRealpathWithin(filePath, openclawMemoryDir)) {
-        process.stderr.write(`[parse-session] skipping path that escapes openclawMemoryDir: ${filePath}\n`);
-        continue;
-      }
-      const content = readText(filePath).trim();
-      if (!content) {
-        continue;
-      }
+      .filter((f) => f.endsWith(".jsonl"))
+      .sort();
+    for (const f of files) {
+      const filePath = path.join(openclawMemoryDir, f);
+      if (!safeRealpathWithin(filePath, openclawMemoryDir)) continue;
       const stat = fs.statSync(filePath);
-      records.push(
-        buildRecord({
-          id: `session-${sha1(`openclaw|${fileName}|${stat.mtimeMs}`)}`,
-          t: stat.mtime.toISOString(),
-          tool: "openclaw",
-          type: "daily-summary",
-          project: "workspace",
-          title: `OpenClaw daily memory ${path.basename(fileName, ".md")}`,
-          content: content.slice(0, 6000),
-          source: "openclaw-daily-memory",
-          scope: "summary",
-          visibility: "shared",
-          source_kind: "session",
-          memory_level: "session",
-          workspace: "openclaw-workspace",
-          confidence: 0.72,
-          metadata: {
-            origin_path: filePath,
-          },
-        })
-      );
+      const classification = classifyScope({
+        source: "openclaw-session",
+        scope: "summary",
+        visibility: "shared",
+        source_kind: "session",
+        memory_level: "session",
+        workspace: "openclaw-workspace",
+      });
+      const record = buildRecord({
+        id: `session-${sha1(`openclaw|${f}|${stat.mtimeMs}`)}`,
+        t: stat.mtime.toISOString(),
+        tool: "openclaw",
+        type: "session-summary",
+        project: "shared-session",
+        title: `Openclaw session memory snapshot (${f})`,
+        content: readText(filePath).slice(0, 6000),
+        source: "openclaw-session",
+        scope: "summary",
+        visibility: "shared",
+        source_kind: "session",
+        memory_level: "session",
+        workspace: "openclaw-workspace",
+        confidence: classification.confidence,
+        metadata: {
+          origin_path: filePath,
+        },
+      });
+      if (record) merged.set(record.id, record);
     }
   }
 
-  // Stream structured JSONL files — never load entire files into memory.
-  // Uses createJsonlStream + coerceStructuredRecord (same coercion logic as
-  // parseStructuredJsonl but in a memory-efficient streaming mode).
-  const [claudeRecords, openclawRecords] = await Promise.all([
-    loadStructuredRecords(CLAUDE_CODE_JSONL, {
-      prefix: "claude-import",
-      tool: "claude-code",
-      source: "claude-mem",
-      scope: "summary",
-      visibility: "shared",
-      source_kind: "session",
-      memory_level: "session",
-      workspace: "claude-session",
-      confidence: 0.72,
-    }),
-    loadStructuredRecords(OPENCLAW_SESSIONS_JSONL, {
-      prefix: "openclaw-session",
-      tool: "openclaw",
-      source: "openclaw-session",
-      scope: "summary",
-      visibility: "shared",
-      source_kind: "session",
-      memory_level: "session",
-      workspace: "openclaw-workspace",
-      confidence: 0.62,
-    }),
-  ]);
+  // F3.3: stream the two large JSONL sources in parallel — each feeds the
+  // shared `merged` Map directly. No `[...records, ...claudeRecords, ...]`
+  // temp array, no per-source `.map()` returning arrays.
+  const sources = [
+    {
+      id: "claude-code",
+      label: "claude-code",
+      records: streamStructuredRecords(CLAUDE_CODE_JSONL, {
+        prefix: "claude-import",
+        tool: "claude-code",
+        source: "claude-mem",
+        scope: "summary",
+        visibility: "shared",
+        source_kind: "session",
+        memory_level: "session",
+        workspace: "claude-session",
+        confidence: 0.72,
+      }),
+    },
+    {
+      id: "openclaw-sessions",
+      label: "openclaw-sessions",
+      records: streamStructuredRecords(OPENCLAW_SESSIONS_JSONL, {
+        prefix: "openclaw-session",
+        tool: "openclaw",
+        source: "openclaw-session",
+        scope: "summary",
+        visibility: "shared",
+        source_kind: "session",
+        memory_level: "session",
+        workspace: "openclaw-workspace",
+        confidence: 0.62,
+      }),
+    },
+  ];
 
-  const merged = new Map();
-  for (const record of [...records, ...claudeRecords, ...openclawRecords]) {
-    merged.set(record.id, record);
-  }
-
-  return [...merged.values()].sort((left, right) => String(left.t || "").localeCompare(String(right.t || "")));
+  return mergeStreamingSourcesIntoSorted(sources);
 }
 
 /**
@@ -308,67 +371,61 @@ async function parseSessionMemoryEntries() {
  * Parallel-loads all four source files for performance.
  */
 async function parseTaskMemoryEntries() {
+  // F3.3: each source is an async generator that streams records directly
+  // into the shared `merged` Map (via mergeStreamingSourcesIntoSorted).
+  // No Promise.all of arrays, no per-source temporary arrays.
   const sources = [
     {
-      filePath: OPENCLAW_BLACKBOARD_JSONL,
-      defaults: {
+      id: "openclaw-blackboard",
+      label: "openclaw-blackboard",
+      records: streamStructuredRecords(OPENCLAW_BLACKBOARD_JSONL, {
         prefix: "task",
         source: "openclaw-blackboard",
         scope: "task",
         source_kind: "blackboard",
         memory_level: "task",
         workspace: "ai-shrimp",
-      },
+      }),
     },
     {
-      filePath: OPENCLAW_RUNS_JSONL,
-      defaults: {
+      id: "openclaw-runs",
+      label: "openclaw-runs",
+      records: streamStructuredRecords(OPENCLAW_RUNS_JSONL, {
         prefix: "run",
         source: "openclaw-run-ledger",
         scope: "run",
         source_kind: "run",
         memory_level: "task",
         workspace: "ai-shrimp",
-      },
+      }),
     },
     {
-      filePath: OPENCLAW_JOBS_JSONL,
-      defaults: {
+      id: "openclaw-jobs",
+      label: "openclaw-jobs",
+      records: streamStructuredRecords(OPENCLAW_JOBS_JSONL, {
         prefix: "job",
         source: "openclaw-cron-job",
         scope: "task",
         source_kind: "cron",
         memory_level: "task",
         workspace: "ai-shrimp",
-      },
+      }),
     },
     {
-      filePath: OPENCLAW_JOURNAL_JSONL,
-      defaults: {
+      id: "openclaw-journal",
+      label: "openclaw-journal",
+      records: streamStructuredRecords(OPENCLAW_JOURNAL_JSONL, {
         prefix: "journal",
         source: "openclaw-blackboard-journal",
         scope: "run",
         source_kind: "blackboard",
         memory_level: "task",
         workspace: "ai-shrimp",
-      },
+      }),
     },
   ];
 
-  // Stream all four source files in parallel — each uses createJsonlStream
-  // internally so no single file is fully buffered in memory.
-  const sourceArrays = await Promise.all(
-    sources.map((src) => loadStructuredRecords(src.filePath, src.defaults))
-  );
-
-  const merged = new Map();
-  for (const records of sourceArrays) {
-    for (const record of records) {
-      merged.set(record.id, record);
-    }
-  }
-
-  return [...merged.values()].sort((left, right) => String(left.t || "").localeCompare(String(right.t || "")));
+  return mergeStreamingSourcesIntoSorted(sources);
 }
 
 function preserveDreamRecords(existingRecords) {

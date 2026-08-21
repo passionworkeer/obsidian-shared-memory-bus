@@ -7,6 +7,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { createJsonlStream } from "../../util/jsonl-stream.js";
 import {
   ALLOWED_DURABLE_TYPES,
   ALLOWED_MEMORY_LEVELS,
@@ -190,7 +191,7 @@ export function validateStructuredRecord(record, requiredFields = REQUIRED_RECOR
 // File / directory analyzers
 // ---------------------------------------------------------------------------
 
-export function analyzeStructuredLayer(filePath, layerDefinition, detailLimit = 12) {
+export async function analyzeStructuredLayer(filePath, layerDefinition, detailLimit = 12) {
   const summary = {
     key: layerDefinition.key,
     label: layerDefinition.label,
@@ -221,26 +222,21 @@ export function analyzeStructuredLayer(filePath, layerDefinition, detailLimit = 
     return summary;
   }
 
-  const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
-  lines.forEach((line, index) => {
-    if (!line.trim()) {
-      return;
-    }
-
-    let payload;
-    try {
-      payload = JSON.parse(line);
-    } catch (error) {
+  // F3.1: Stream the JSONL file line-by-line instead of buffering the whole
+  // file. createJsonlStream's onMalformed hook keeps the original line number
+  // + error message for malformedSamples reporting (was silently dropped).
+  for await (const payload of createJsonlStream(filePath, {
+    onMalformed: (lineNum, error) => {
       summary.malformedLineCount += 1;
       if (summary.malformedSamples.length < detailLimit) {
         summary.malformedSamples.push({
-          line: index + 1,
+          line: lineNum,
           error: String(error && error.message ? error.message : error),
         });
       }
-      return;
-    }
-
+    },
+  })) {
+    const lineNum = summary.recordCount + summary.malformedLineCount + 1;
     summary.recordCount += 1;
     const validation = validateStructuredRecord(payload, layerDefinition.requiredFields);
     const recordId = normalizeString(payload.id);
@@ -256,18 +252,18 @@ export function analyzeStructuredLayer(filePath, layerDefinition, detailLimit = 
 
     if (validation.ok) {
       summary.validRecordCount += 1;
-      return;
+      continue;
     }
 
     summary.invalidRecordCount += 1;
     if (summary.invalidSamples.length < detailLimit) {
       summary.invalidSamples.push({
-        id: recordId || `line-${index + 1}`,
-        line: index + 1,
+        id: recordId || `line-${lineNum}`,
+        line: lineNum,
         errors: validation.errors,
       });
     }
-  });
+  }
 
   return summary;
 }
@@ -406,7 +402,7 @@ export function isExpectedDerivedDuplicate(firstFileName, secondFileName) {
 // Integrity report (aggregates per-layer + per-generated-artifact summaries)
 // ---------------------------------------------------------------------------
 
-export function buildMemoryIntegrityReport(options = {}) {
+export async function buildMemoryIntegrityReport(options = {}) {
   const structuredRoot = normalizeString(options.structuredRoot);
   const generatedRoot = normalizeString(options.generatedRoot);
   const detailLimit = Math.max(4, Number(options.detailLimit || 12) || 12);
@@ -419,7 +415,8 @@ export function buildMemoryIntegrityReport(options = {}) {
 
   for (const definition of STRUCTURED_LAYER_DEFINITIONS) {
     const filePath = path.join(structuredRoot, definition.fileName);
-    const layerSummary = analyzeStructuredLayer(filePath, definition, detailLimit);
+    // F3.1: analyzeStructuredLayer is now async (streams JSONL); await here.
+    const layerSummary = await analyzeStructuredLayer(filePath, definition, detailLimit);
     structuredLayers[definition.key] = {
       key: layerSummary.key,
       label: layerSummary.label,
@@ -513,10 +510,12 @@ export function buildMemoryIntegrityReport(options = {}) {
   if (hasGeneratedDrift) {
     issues.push("generated-artifacts-stale-or-invalid");
   }
-  if (Object.values(generatedArtifacts).some((artifact) => artifact.missingSourceStructuredSignature)) {
+  // F3.1 (audit Finding 4): reuse `generatedStatuses` instead of recomputing
+  // Object.values(generatedArtifacts) twice below.
+  if (generatedStatuses.some((artifact) => artifact.missingSourceStructuredSignature)) {
     issues.push("generated-artifacts-missing-source-signature");
   }
-  if (Object.values(generatedArtifacts).some((artifact) => artifact.contractAligned === false || artifact.recordSchemaAligned === false)) {
+  if (generatedStatuses.some((artifact) => artifact.contractAligned === false || artifact.recordSchemaAligned === false)) {
     issues.push("generated-artifacts-contract-mismatch");
   }
 

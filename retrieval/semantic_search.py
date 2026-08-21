@@ -880,14 +880,26 @@ def execute_search(parsed: Dict[str, object], workspace_root: Optional[str] = No
     for entry_id in dense_map:
         sources.setdefault(entry_id, []).append("dense")
 
-    embeddings_index = load_embeddings_index()
-    embedding_backend = None
-    if embeddings_index:
-        first_embedding = next(iter(embeddings_index.values()))
-        embedding_backend = normalize_embedding_adapter(
-            str(first_embedding.get("backend", "")).strip(),
-            str(first_embedding.get("model", DEFAULT_MODEL)).strip() or DEFAULT_MODEL,
-        )
+    # F1.2 (perf audit HIGH #4): reuse the embeddingBackend that dense_scores()
+    # already extracted from first_record during its single file pass. The old
+    # code called load_embeddings_index() again here, paying a full second
+    # JSONL read + parse just to read one field from one record.
+    embedding_backend: Optional[str] = None
+    backend_meta = dense_meta.get("embeddingBackend") if isinstance(dense_meta, dict) else None
+    if isinstance(backend_meta, str) and backend_meta:
+        # Same normalization used in the legacy fallback path; produces a
+        # plain string identical to what the fallback would have returned.
+        embedding_backend = normalize_embedding_adapter(backend_meta, DEFAULT_MODEL)
+    if embedding_backend is None:
+        # Fallback: dense scoring was not run (bm25-only path) or meta was
+        # absent. Pay one read to discover the backend.
+        embeddings_index = load_embeddings_index()
+        if embeddings_index:
+            first_embedding = next(iter(embeddings_index.values()))
+            embedding_backend = normalize_embedding_adapter(
+                str(first_embedding.get("backend", "")).strip(),
+                str(first_embedding.get("model", DEFAULT_MODEL)).strip() or DEFAULT_MODEL,
+            )
 
     workspace_hints: Optional[Dict] = {"project_root": workspace_root} if workspace_root else None
 
@@ -918,7 +930,10 @@ def execute_search(parsed: Dict[str, object], workspace_root: Optional[str] = No
         "entryCount": len(entries),
         "candidateCount": candidate_count,
         "layerCounts": layer_counts,
-        "hasEmbeddings": bool(embeddings_index),
+        # F1.2: hasEmbeddings now reflects whether we actually scored densely
+        # (and thus have an embedding backend), instead of a re-read of the
+        # embeddings index just to check existence.
+        "hasEmbeddings": bool(dense_map) or bool(embedding_backend),
         "embeddingRuntime": build_embedding_runtime_summary(),
         "embeddingBackend": embedding_backend,
         "embeddingAdapter": str(EMBEDDING_RUNTIME.get("adapter", EMBEDDING_RUNTIME.get("backend", "hash")) or "hash"),
