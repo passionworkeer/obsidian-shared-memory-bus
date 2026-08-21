@@ -28,7 +28,8 @@ export async function* collect({ home, report }) {
     const part = readJsonSafe(file);
     if (!part || part.type !== "text" || typeof part.text !== "string") continue;
     const key = part.messageID || path.basename(path.dirname(file));
-    partText.set(key, (partText.get(key) || "") + "\n" + part.text);
+    const cur = partText.get(key);
+    partText.set(key, cur ? cur + "\n" + part.text : part.text);
   }
   if (partText.size === 0) return;
 
