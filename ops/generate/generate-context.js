@@ -16,6 +16,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { resolveStoreRoot, getContextPath } from "../../bus/store-root.js";
+import { createJsonlStream } from "../util/jsonl-stream.js";
 
 function getProjectsRoot(storeRoot) {
   return path.join(storeRoot || resolveStoreRoot(), "projects");
@@ -29,17 +30,37 @@ function truncate(str, max = MAX_CONTENT_CHARS) {
   return str.slice(0, max) + "…";
 }
 
-function loadRecentFacts(jsonlPath, topK) {
-  if (!fs.existsSync(jsonlPath)) return [];
-  const lines = fs.readFileSync(jsonlPath, "utf-8").trim().split("\n").filter(Boolean);
-  return lines
-    .map(l => { try { return JSON.parse(l); } catch { return null; } })
-    .filter(r => r && !r.extraction_failed)
-    .reverse()
-    .slice(0, topK);
+/**
+ * Read up to `topK` most-recent facts from a project JSONL file without
+ * loading the whole file into memory. F3.2 (perf audit): the previous
+ * implementation called `readFileSync` + `.split("\n")` + JSON.parse on every
+ * record, then sliced topK — O(file_size) memory even though we only keep 10.
+ *
+ * Streams the file line-by-line, pushing each valid record into a fixed-size
+ * ring buffer. When the buffer is full, the oldest entry is shifted out so
+ * peak memory stays O(topK).
+ *
+ * @param {string} jsonlPath
+ * @param {number} topK
+ * @returns {Promise<object[]>} Up to `topK` records, newest-first.
+ */
+async function loadRecentFacts(jsonlPath, topK) {
+  const ring = [];
+  try {
+    for await (const record of createJsonlStream(jsonlPath)) {
+      if (!record || record.extraction_failed) continue;
+      ring.push(record);
+      if (ring.length > topK) ring.shift();
+    }
+  } catch (err) {
+    if (err && err.code === "ENOENT") return [];
+    throw err;
+  }
+  // createJsonlStream yields in file order; reverse to give newest-first.
+  return ring.reverse();
 }
 
-function generateContext(opts = {}) {
+async function generateContext(opts = {}) {
   const storeRoot    = resolveStoreRoot();
   const projectsRoot = getProjectsRoot(storeRoot);
   const contextPath  = getContextPath(storeRoot);
@@ -73,7 +94,8 @@ function generateContext(opts = {}) {
 
     for (const f of targets) {
       const project = f.replace(".jsonl", "");
-      const facts   = loadRecentFacts(path.join(projectsRoot, f), TOP_PER_PROJECT);
+      // F3.2: loadRecentFacts is now async (streams JSONL with ring buffer).
+      const facts   = await loadRecentFacts(path.join(projectsRoot, f), TOP_PER_PROJECT);
       if (facts.length === 0) continue;
 
       sections.push(`## Project: ${project}`);
@@ -102,7 +124,7 @@ async function cliMain() {
   const project = projectIdx >= 0 ? args[projectIdx + 1] : undefined;
 
   try {
-    const outPath = generateContext({ project });
+    const outPath = await generateContext({ project });
     const size    = fs.statSync(outPath).size;
     process.stdout.write(`[generate-context] wrote ${outPath} (${size} bytes)\n`);
   } catch (err) {

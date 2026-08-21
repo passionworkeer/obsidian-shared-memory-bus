@@ -80,12 +80,20 @@ function httpPost(method, params, id) {
         process.stderr.write('[playwright-stdio-proxy] Session: ' + mcpSessionId + '\n');
       }
 
-      let data = '';
+      // F2.6 (perf audit MED #12): accumulate chunks as Buffer list, not a
+      // concatenated string. The old `data += chunk.toString()` did O(N²)
+      // string allocations + UTF-8 decode on every chunk; for long SSE
+      // streams (multi-MB Playwright responses with page snapshots) this
+      // pinned GC and inflated latency. Buffer.concat is linear; we decode
+      // once at end.
+      const chunks = [];
+      let totalBytes = 0;
       let tooLarge = false;
       res.on('data', chunk => {
         if (tooLarge) return;
-        data += chunk;
-        if (Buffer.byteLength(data) > MAX_RESPONSE_BYTES) {
+        totalBytes += chunk.length;
+        chunks.push(chunk);
+        if (totalBytes > MAX_RESPONSE_BYTES) {
           tooLarge = true;
           process.stderr.write('[playwright-stdio-proxy] Response body exceeded ' + MAX_RESPONSE_BYTES + ' bytes; aborting request ' + id + '\n');
           reject(new Error('response body too large (>' + MAX_RESPONSE_BYTES + ' bytes)'));
@@ -94,6 +102,7 @@ function httpPost(method, params, id) {
       });
       res.on('end', () => {
         if (tooLarge) return;
+        const data = Buffer.concat(chunks).toString('utf8');
         const result = parseSSE(data, id);
         if (result) {
           resolve(result);
@@ -127,12 +136,16 @@ function httpPostNotification(method, params) {
         mcpSessionId = res.headers['mcp-session-id'];
         process.stderr.write('[playwright-stdio-proxy] Session: ' + mcpSessionId + '\n');
       }
-      let data = '';
+      // F2.6 (perf audit MED #12): Buffer.concat instead of string concat
+      // (see httpPost for rationale).
+      const chunks = [];
+      let totalBytes = 0;
       let tooLarge = false;
       res.on('data', chunk => {
         if (tooLarge) return;
-        data += chunk;
-        if (Buffer.byteLength(data) > MAX_RESPONSE_BYTES) {
+        totalBytes += chunk.length;
+        chunks.push(chunk);
+        if (totalBytes > MAX_RESPONSE_BYTES) {
           tooLarge = true;
           process.stderr.write('[playwright-stdio-proxy] Notification response body exceeded ' + MAX_RESPONSE_BYTES + ' bytes; aborting\n');
           reject(new Error('response body too large (>' + MAX_RESPONSE_BYTES + ' bytes)'));
@@ -141,7 +154,7 @@ function httpPostNotification(method, params) {
       });
       res.on('end', () => {
         if (tooLarge) return;
-        resolve({ ok: true, data });
+        resolve({ ok: true, data: Buffer.concat(chunks).toString('utf8') });
       });
     });
     req.on('error', reject);

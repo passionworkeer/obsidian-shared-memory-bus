@@ -5,10 +5,17 @@ import readline from "node:readline";
  * Async generator that yields parsed JSON objects from a JSONL file,
  * one line at a time. Prevents unbounded memory growth for large files.
  *
+ * Malformed lines are skipped by default. Pass `onMalformed(lineNum, error)`
+ * to capture them (e.g. for sample-based reporting in integrity reports).
+ *
  * @param {string} filePath - Path to the .jsonl file
+ * @param {{
+ *   onMalformed?: (lineNum: number, error: Error, rawLine: string) => void
+ * }} [opts] - Optional hooks
  * @yields {object} Parsed JSON object for each line
  */
-async function* createJsonlStream(filePath) {
+async function* createJsonlStream(filePath, opts = {}) {
+  const { onMalformed } = opts;
   if (!fs.existsSync(filePath)) {
     return;
   }
@@ -18,14 +25,18 @@ async function* createJsonlStream(filePath) {
     crlfDelay: Infinity,
   });
 
+  let lineNum = 0;
   try {
     for await (const line of rl) {
+      lineNum += 1;
       const trimmed = line.trim();
       if (!trimmed) continue;
       try {
         yield JSON.parse(trimmed);
-      } catch {
-        // Skip malformed lines
+      } catch (error) {
+        if (typeof onMalformed === "function") {
+          onMalformed(lineNum, error, line);
+        }
       }
     }
   } finally {
