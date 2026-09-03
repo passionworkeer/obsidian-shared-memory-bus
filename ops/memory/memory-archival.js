@@ -431,7 +431,20 @@ function scanForArchiveEligible() {
 
 /**
  * Check per-tier record counts and collect over-budget IDs for archival.
- * Returns { overBudget: Map<file→[id,…]>, report: Object }
+ *
+ * @returns {{
+ *   overBudget: Map<string, string[]>,
+ *   report: {
+ *     counts: Record<1|2|3|4|5, number>,
+ *     byProject: Record<string, number>,
+ *     byType: Record<string, number>,
+ *     overBudgetFiles: string[],
+ *     archiveReviewNeeded?: boolean,
+ *   }
+ * }}
+ *   `overBudget` keys: project name (tier-3 `perProject`), record type
+ *   (tier-4 `perType`), or literal "global" (flat tier with no grouping).
+ *   Each value is the list of record IDs eligible for eviction.
  */
 function checkTierBudgets() {
   const counts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };

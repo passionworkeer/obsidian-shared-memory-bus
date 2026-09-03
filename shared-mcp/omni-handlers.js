@@ -120,7 +120,6 @@ function errorResult(message, code) {
     isError: true,
   };
 }
-}
 
 function createMcpServer() {
   return new Server(

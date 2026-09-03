@@ -14,6 +14,12 @@ CALLBACK_EXE="${2:?Usage: $0 <pid_file> <callback_exe> [args...]}"
 shift 2
 CALLBACK_ARGS=("$@")
 INTERVAL="${WATCHDOG_INTERVAL:-15}"
+# Guard against busy-loop: WATCHDOG_INTERVAL=0 (or non-numeric) would make
+# `sleep 0` spin, pinning a CPU core. Clamp to a sane floor.
+case "$INTERVAL" in
+  ''|*[!0-9]*) INTERVAL=15 ;;
+esac
+[ "$INTERVAL" -lt 5 ] && INTERVAL=15
 MAX_RESTARTS="${WATCHDOG_MAX_RESTARTS:-3}"
 RESTART_COUNT=0
 

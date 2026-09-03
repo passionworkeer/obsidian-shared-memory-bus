@@ -74,16 +74,29 @@ const SEARCH_SCRIPT = resolveRuntimePath(
 const EMBEDDINGS_SCRIPT = resolveRuntimePath("generate-embeddings.js", path.join("bus", "generate-embeddings.js"));
 const MEMORY_BUS_SCRIPT = resolveRuntimePath("memory-bus.ps1", path.join("bus", "memory-bus.ps1"));
 
-const { resolveStoreRoot: _resolveStoreRootHelper } = await loadStoreRootHelper();
-const { resolvePythonRuntime, withPythonArgs } = await loadPythonRuntimeHelper();
-const { buildEmbeddingConfigHash } = await loadEmbeddingProviderHelper();
-const { buildMemoryIntegrityReport } = await loadMemoryContractHelper();
-const {
-  buildEmbeddingRuntimeCatalog,
-  resolveEmbeddingRuntime,
-  updateEmbeddingRuntimeSelection,
-} = await loadRuntimeConfigHelper();
-const mcpMemoryHandlers = await loadMcpMemoryHandler(resolveProjectPath);
+// F2.1 (perf audit HIGH): load all 6 helper modules in parallel via
+// Promise.all. The previous top-level-await chain serialized 6 dynamic
+// imports + their transitive reads (some load config/runtime.json sync);
+// parallelizing trims ~200-500ms off MCP server boot on Windows.
+const [
+  { resolveStoreRoot: _resolveStoreRootHelper },
+  { resolvePythonRuntime, withPythonArgs },
+  { buildEmbeddingConfigHash },
+  { buildMemoryIntegrityReport },
+  {
+    buildEmbeddingRuntimeCatalog,
+    resolveEmbeddingRuntime,
+    updateEmbeddingRuntimeSelection,
+  },
+  mcpMemoryHandlers,
+] = await Promise.all([
+  loadStoreRootHelper(),
+  loadPythonRuntimeHelper(),
+  loadEmbeddingProviderHelper(),
+  loadMemoryContractHelper(),
+  loadRuntimeConfigHelper(),
+  loadMcpMemoryHandler(resolveProjectPath),
+]);
 
 const POWERSHELL_COMMAND = resolvePowerShellCommand();
 const WATCHDOG_STATE_PATH = path.join(AI_MEMORY_ROOT, "watchdog-state.json");

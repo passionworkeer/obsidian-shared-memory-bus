@@ -105,7 +105,14 @@ function startMetricsRefreshInterval({ GENERATED_ROOT, STORE_ROOT, readEmbedding
     () => refreshMetricsFromFiles({ GENERATED_ROOT, STORE_ROOT, readEmbeddingsSummary }),
     60_000,
   );
-  refreshMetricsFromFiles({ GENERATED_ROOT, STORE_ROOT, readEmbeddingsSummary });
+  // F2.2 (perf audit MED #7): defer the immediate refresh to setImmediate so
+  // the HTTP listener from startMetricsServer (called right before this in
+  // the boot sequence) can bind first. Without this, refreshMetricsFromFiles
+  // runs synchronously on the event loop before .listen() returns, blocking
+  // boot for ~50-200ms on slow disks.
+  setImmediate(() => {
+    refreshMetricsFromFiles({ GENERATED_ROOT, STORE_ROOT, readEmbeddingsSummary });
+  });
 }
 
 export {

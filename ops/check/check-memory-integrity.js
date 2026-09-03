@@ -32,10 +32,11 @@ function renderHumanSummary(report) {
   return `${lines.join("\n")}\n`;
 }
 
-function main() {
+async function main() {
   const parsed = parseArgs(process.argv.slice(2));
   const storeRoot = resolveStoreRoot();
-  const report = buildMemoryIntegrityReport({
+  // F3.1: buildMemoryIntegrityReport is async (streams JSONL line-by-line).
+  const report = await buildMemoryIntegrityReport({
     structuredRoot: path.join(storeRoot, "structured"),
     generatedRoot: path.join(storeRoot, "generated"),
   });
@@ -51,4 +52,7 @@ function main() {
   }
 }
 
-main();
+main().catch((err) => {
+  process.stderr.write(`check-memory-integrity failed: ${err && err.message ? err.message : err}\n`);
+  process.exitCode = 1;
+});

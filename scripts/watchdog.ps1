@@ -16,6 +16,11 @@ param(
     [int]$MaxRestarts = 3
 )
 
+# Guard against busy-loop: $Interval=0 (or non-int coerced to 0) would make
+# Start-Sleep -Seconds 0 spin, pinning a CPU core. Clamp to a sane floor.
+if ($Interval -lt 5) { $Interval = 15 }
+if ($MaxRestarts -lt 1) { $MaxRestarts = 3 }
+
 $restartCount = 0
 
 function Get-CdpRunning([string]$pid) {
