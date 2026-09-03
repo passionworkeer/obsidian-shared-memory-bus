@@ -123,3 +123,7 @@ macOS/Linux:
 ## Agent Rule
 
 When a task has two or more independent slices, prefer multi-agent or subagent decomposition if the host supports it. Keep desktop/UI-bound tools isolated and share only safe local services.
+
+## Companion Skill: user-portrait
+
+`skills/user-portrait/` builds the user's personal profile from local agent logs and imported WeChat/QQ chats, writing `<store>/portrait/PROFILE.md` (P2 privacy) plus a pointer into `<store>/inbox/user-portrait.md`. When the user asks to 生成/更新个人画像 or wants assistants to 更了解我, follow `skills/user-portrait/SKILL.md`.

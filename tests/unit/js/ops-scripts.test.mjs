@@ -123,7 +123,7 @@ test("buildMemoryIntegrityReport flags a corrupt record in a tiny fixture", asyn
     "utf8"
   );
 
-  const report = buildMemoryIntegrityReport({
+  const report = await buildMemoryIntegrityReport({
     structuredRoot: structuredDir,
     generatedRoot: generatedDir,
   });
@@ -191,7 +191,7 @@ test("buildMemoryIntegrityReport returns status 'ok' for a clean fixture", async
     );
   }
 
-  const report = buildMemoryIntegrityReport({
+  const report = await buildMemoryIntegrityReport({
     structuredRoot: structuredDir,
     generatedRoot: generatedDir,
   });
@@ -219,7 +219,7 @@ test("buildMemoryIntegrityReport flags malformed lines (non-JSON)", async () => 
     "utf8"
   );
 
-  const report = buildMemoryIntegrityReport({
+  const report = await buildMemoryIntegrityReport({
     structuredRoot: structuredDir,
     generatedRoot: generatedDir,
   });

@@ -417,6 +417,8 @@ function writeIndexSnapshot(orderedRecords) {
   } catch (err) {
     // Best-effort cleanup: close fd then unlink tmp so a failed
     // snapshot doesn't leave a stray file in the embeddings dir.
+    // Best-effort cleanup: close fd then unlink tmp so a failed
+    // snapshot doesn't leave a stray file in the embeddings dir.
     try {
       fs.closeSync(fd);
     } catch {
@@ -431,6 +433,29 @@ function writeIndexSnapshot(orderedRecords) {
   }
   fs.renameSync(tmp, INDEX_FILE);
   return orderedRecords;
+}
+
+/**
+ * Append-only counterpart to writeIndexSnapshot. Used after the first batch
+ * (F2.4): the first batch has already produced an atomic full snapshot, so
+ * subsequent batches only need to extend the file with their new entries.
+ *
+ * The caller passes a pre-filtered, pre-sorted slice of records (typically
+ * the just-completed batch's output) so we do no allocation here.
+ *
+ * @param {Array<object>} orderedRecords - already sorted; each entry is appended as one JSONL line
+ */
+function appendIndexSnapshot(orderedRecords) {
+  if (!orderedRecords || orderedRecords.length === 0) return;
+  const dir = path.dirname(INDEX_FILE);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  // appendFileSync is bounded by the OS write buffer; a single batch is
+  // typically small (batchSize=16 by default → ≤16 lines), so peak memory
+  // is one record at a time.
+  const lines = orderedRecords.map((record) => `${JSON.stringify(record)}\n`).join("");
+  fs.appendFileSync(INDEX_FILE, lines, "utf8");
 }
 
 function resolveBatchSize() {
@@ -624,8 +649,21 @@ async function main() {
     }
 
     const orderedRecords = Array.from(finalRecords.values()).sort((l, r) => l.id.localeCompare(r.id));
-    writeIndexSnapshot(orderedRecords);
-    // Q-HIGH-2 partial-write 设计意图: 每个 batch 完成后原子写一份"到目前为止
+    // F2.4 (perf audit HIGH #1): write the full snapshot only on the first
+    // batch. Subsequent batches append only the newly-added records (sorted
+    // within the batch), avoiding the O(N²) cost of re-sorting + rewriting
+    // the entire index on every batch. The atomic-rename guarantee is
+    // preserved on the first batch (tmp+rename); subsequent batches use
+    // appendFileSync which is bounded and does not corrupt the file on
+    // partial-write (Q-HIGH-2 partial-write design intent still holds:
+    // any successful batch produces a valid monotonic suffix).
+    const isFirstBatch = batchNumber === 1;
+    if (isFirstBatch) {
+      writeIndexSnapshot(orderedRecords);
+    } else {
+      appendIndexSnapshot(batch.map((b) => finalRecords.get(b.entryId)).filter(Boolean));
+    }
+    // Q-HIGH-2 partial-write 设计意图: 每个 batch 完成后写一份"到目前为止
     // 全部最终条目"快照到 index.jsonl。writeIndexSnapshot 内部走 tmp+rename
     // atomic (OS-level rename),所以失败时 reader 看到的是上一个完整 batch
     // 或空文件的二选一状态,不会读到 partial-write 中间状态。

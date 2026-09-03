@@ -40,11 +40,19 @@ export const MCP_SERVERS = [
     env: { AI_MEMORY_SERVER_MODE: 'mgmt',      AI_MEMORY_METRICS_PORT: '9341' } },
   // Legacy monolithic entry — only spawned when AI_MEMORY_SERVER_MODE=monolithic/all。
   // 保留向后兼容,SERVER-SPLIT.md §8.2 承诺 "omni-memory-server.js 作为兼容入口永不删除"。
+  // NOTE: shares port 9338 with memory-retrieval by design. The runtime
+  // exclusivity is enforced by selectServersForSpawn (filter by id after
+  // resolveSpawnPlan); assertMcpServersInvariant at boot catches accidental
+  // duplication in the static data.
   { id: 'memory', port: 9338, command: 'node',
     args: ['--experimental-default-type=module', 'omni-memory-server.js'],
     legacy: true, onlyInMode: 'monolithic',
     env: { AI_MEMORY_SERVER_MODE: 'all', AI_MEMORY_METRICS_PORT: '9338' } },
 ];
+
+// F2.5: validate the registry at module load. Will throw if a future entry
+// accidentally collides on (port, onlyInMode). Cheap; runs once.
+assertMcpServersInvariant();
 
 // 与 MCP_SERVERS 中 memory-* 条目同步的端口快照。
 // 供 manifest.json loader + spawn-plan.js 决策 + doctor 探测 共用。
@@ -79,4 +87,36 @@ export function resolveBasePort(env = process.env) {
 
 export function getServerPort(server, basePort = resolveBasePort()) {
   return basePort + (server.port - DEFAULT_BASE_PORT);
+}
+
+// ---------------------------------------------------------------------------
+// Invariant guard (F2.5)
+// ---------------------------------------------------------------------------
+//
+// `MCP_SERVERS` intentionally contains both the 4-server split entries AND
+// the legacy monolithic "memory" entry — both bind 9338 by design (the
+// monolithic entry is the backward-compat fallback per SERVER-SPLIT.md §8.2).
+// Consumers must NOT iterate MCP_SERVERS directly without going through
+// `selectServersForSpawn` (which calls resolveSpawnPlan and filters by id),
+// otherwise two servers would compete for 9338 and one would fail to bind.
+//
+// `assertMcpServersInvariant()` throws if the registry contains two entries
+// sharing the same (port, onlyInMode) key — a sanity check that protects
+// future entries from accidentally colliding. It does NOT enforce exclusivity
+// at runtime (that's selectServersForSpawn's job); it just keeps the static
+// data honest.
+export function assertMcpServersInvariant(mcpServers = MCP_SERVERS) {
+  const seen = new Map();
+  for (const entry of mcpServers) {
+    const key = `${entry.port}|${entry.onlyInMode || "<always>"}`;
+    if (seen.has(key)) {
+      const prev = seen.get(key);
+      throw new Error(
+        `port-registry invariant violated: ${prev.id} and ${entry.id} ` +
+        `both bind port=${entry.port} under onlyInMode=${entry.onlyInMode || "<always>"}. ` +
+        `Use selectServersForSpawn() instead of iterating MCP_SERVERS directly.`
+      );
+    }
+    seen.set(key, entry);
+  }
 }
